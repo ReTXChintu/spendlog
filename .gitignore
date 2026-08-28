@@ -1,0 +1,27 @@
+node_modules/
+dist/
+build/
+.env
+*.log
+
+# Prisma / SQLite
+apps/backend/prisma/dev.db
+apps/backend/prisma/dev.db-journal
+
+# Frontend
+apps/frontend/dist/
+
+# Flutter / Dart
+apps/mobile-app/.dart_tool/
+apps/mobile-app/.flutter-plugins
+apps/mobile-app/.flutter-plugins-dependencies
+apps/mobile-app/build/
+apps/mobile-app/.packages
+apps/mobile-app/android/local.properties
+apps/mobile-app/**/generated_plugin_registrant.dart
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

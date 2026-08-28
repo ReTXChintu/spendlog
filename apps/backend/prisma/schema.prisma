@@ -1,0 +1,138 @@
+// Expense Tracker data model.
+//
+// Amounts are stored as integers in "minor units" (paise/cents) to avoid
+// floating point rounding issues in totals. Enums are deliberately avoided
+// (plain String columns instead) because the default SQLite dev database
+// does not support native enum types; validity is enforced in application
+// code (see src/types.ts for the allowed string unions).
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id       String  @id @default(cuid())
+  email    String  @unique
+  name     String?
+  googleId String? @unique
+
+  createdAt DateTime @default(now())
+
+  accounts         Account[]
+  categories       Category[]
+  categoryRules    CategoryRule[]
+  transactions     Transaction[]
+  emailConnections EmailConnection[]
+}
+
+// A detected bank account / card / UPI handle, inferred from SMS and email
+// text (e.g. "HDFC Bank account ending 1234"). Used to tell a user's own
+// accounts apart for self-transfer detection.
+model Account {
+  id          String  @id @default(cuid())
+  userId      String
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bankName    String
+  last4       String?
+  accountType String // "BANK" | "CARD" | "UPI"
+  nickname    String?
+
+  createdAt DateTime @default(now())
+
+  transactions Transaction[]
+
+  @@unique([userId, bankName, last4, accountType])
+  @@index([userId])
+}
+
+model Category {
+  id       String  @id @default(cuid())
+  // null = system default category, shared by all users
+  userId   String?
+  user     User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name     String
+  icon     String?
+  color    String?
+  isSystem Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  transactions Transaction[]
+  rules        CategoryRule[]
+
+  @@index([userId])
+}
+
+// A user (or system) defined rule used to auto-assign a category to a new
+// transaction, e.g. merchant text contains "swiggy" -> Food & Dining.
+model CategoryRule {
+  id         String   @id @default(cuid())
+  // null = system default rule, shared by all users
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  matchType  String // "MERCHANT_CONTAINS" | "KEYWORD" | "EXACT"
+  pattern    String // stored lowercase
+  priority   Int      @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Transaction {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId  String?
+  account    Account?  @relation(fields: [accountId], references: [id])
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id])
+
+  amountMinor Int // always positive; sign is derived from `type`
+  currency    String @default("INR")
+  type        String // "DEBIT" | "CREDIT"
+  merchant    String?
+  note        String?
+  rawText     String? // original SMS body / email snippet used to parse this
+
+  source    String // "SMS" | "EMAIL" | "MANUAL"
+  sourceRef String? // provider message id, for dedup + audit trail
+  dedupeKey String? // amount+type+time-bucket+account fingerprint
+
+  isTransfer Boolean @default(false)
+  pending    Boolean @default(false)
+
+  occurredAt DateTime // when the transaction actually happened
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId, occurredAt])
+  @@index([userId, dedupeKey])
+  @@index([sourceRef])
+}
+
+// Stores the OAuth tokens for a connected Gmail account used to pull
+// bank/UPI transaction emails. Access tokens are short-lived; refreshToken
+// is what allows unattended background syncing.
+model EmailConnection {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email        String
+  accessToken  String
+  refreshToken String
+  expiryDate   DateTime?
+  historyId    String?
+  lastSyncedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, email])
+}
