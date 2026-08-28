@@ -13,14 +13,23 @@ for (let i = 0; i < args.length; i++) {
 }
 
 const root = path.resolve(__dirname, "..");
-const isWin = process.platform === "win32";
-const npmCmd = isWin ? "npm.cmd" : "npm";
-const flutterCmd = isWin ? "flutter.bat" : "flutter";
-
 const children = [];
 
-function run(name, command, cmdArgs, cwd) {
-  const child = spawn(command, cmdArgs, { cwd, stdio: "inherit" });
+// shell: true is required on Windows to resolve .cmd/.bat shims (npm,
+// flutter) — spawning them directly without a shell throws EINVAL on
+// recent Node versions. commandLine is passed as a single pre-built string
+// (rather than shell:true + an args array) to avoid Node's DEP0190
+// unsafe-concatenation warning; it also makes a missing command (e.g.
+// Flutter not installed yet) surface as a normal non-zero exit instead of
+// crashing this whole script.
+function run(name, commandLine, cwd) {
+  let child;
+  try {
+    child = spawn(commandLine, { cwd, stdio: "inherit", shell: true });
+  } catch (err) {
+    console.error(`[${name}] failed to start: ${err.message}`);
+    return null;
+  }
   children.push(child);
   child.on("exit", (code) => {
     console.log(`[${name}] exited with code ${code}`);
@@ -31,15 +40,15 @@ function run(name, command, cmdArgs, cwd) {
   return child;
 }
 
-run("backend", npmCmd, ["run", "dev", "--workspace", "apps/backend"], root);
-run("frontend", npmCmd, ["run", "dev", "--workspace", "apps/frontend"], root);
+run("backend", "npm run dev --workspace apps/backend", root);
+run("frontend", "npm run dev --workspace apps/frontend", root);
 
-const flutterArgs = device ? ["run", "-d", device] : ["run"];
-run("mobile", flutterCmd, flutterArgs, path.join(root, "apps", "mobile-app"));
+const deviceFlag = device ? ` -d ${JSON.stringify(device)}` : "";
+run("mobile", `flutter run${deviceFlag}`, path.join(root, "apps", "mobile-app"));
 
 function shutdown() {
   for (const child of children) {
-    if (!child.killed) child.kill();
+    if (child && !child.killed) child.kill();
   }
   process.exit(0);
 }

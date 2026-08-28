@@ -7,9 +7,12 @@ const { spawnSync } = require("child_process");
 const path = require("path");
 
 const mobileDir = path.resolve(__dirname, "..", "apps", "mobile-app");
-const flutterCmd = process.platform === "win32" ? "flutter.bat" : "flutter";
 
-const result = spawnSync(flutterCmd, ["pub", "get"], { cwd: mobileDir, stdio: "inherit" });
+// shell: true resolves the flutter.bat/flutter shim on Windows without
+// needing to guess the extension (also matches scripts/dev.js). Passed as
+// a single command-line string, not shell:true + an args array, to avoid
+// Node's DEP0190 unsafe-concatenation warning.
+const result = spawnSync("flutter pub get", { cwd: mobileDir, stdio: "inherit", shell: true });
 
 if (result.error || result.status !== 0) {
   console.warn("\n[postinstall] Skipped/failed \"flutter pub get\" in apps/mobile-app.");
