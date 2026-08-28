@@ -15,15 +15,31 @@ Nothing is installed on this machine yet. You'll need:
 - [Flutter SDK](https://docs.flutter.dev/get-started/install) (for the mobile app)
 - A Google Cloud project with an OAuth 2.0 Client ID (for Sign-In and Gmail read access)
 
-## Backend setup
+## Install everything
+
+From the repo root:
 
 ```
-cd apps/backend
 npm install
-cp .env.example .env      # then fill in JWT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
-npx prisma migrate dev --name init
-npm run seed               # populates default categories (Food, Transport, etc.)
-npm run dev                 # starts on http://localhost:4000
+```
+
+This installs `apps/backend` and `apps/frontend` (npm workspaces) and also
+runs `flutter pub get` for `apps/mobile-app` via a postinstall script. If
+the Flutter SDK isn't on your PATH yet, that step just warns and skips —
+install Flutter, then re-run `cd apps/mobile-app && flutter pub get`.
+
+Then configure each app's environment:
+
+```
+cp apps/backend/.env.example apps/backend/.env     # fill in JWT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+cp apps/frontend/.env.example apps/frontend/.env   # set VITE_GOOGLE_CLIENT_ID and VITE_API_URL
+```
+
+Run the database migration and seed the default categories (Food,
+Transport, etc.) once:
+
+```
+cd apps/backend && npx prisma migrate dev --name init && npm run seed && cd ../..
 ```
 
 ### Google OAuth setup (required for login + Gmail import)
@@ -32,26 +48,28 @@ npm run dev                 # starts on http://localhost:4000
 2. Add authorized redirect URI: `http://localhost:4000/ingestion/email/callback`
 3. Add authorized JavaScript origin: `http://localhost:5173`
 4. Enable the Gmail API for the project.
-5. Copy the Client ID/Secret into `apps/backend/.env`. The frontend also needs the Client ID (see below).
+5. Copy the Client ID/Secret into `apps/backend/.env`. The frontend also needs the Client ID (see above).
+6. For the mobile app's Google Sign-In, see `apps/mobile-app/README.md`.
 
-## Frontend setup
+## Running everything in dev
 
-```
-cd apps/frontend
-npm install
-cp .env.example .env       # set VITE_GOOGLE_CLIENT_ID and VITE_API_URL
-npm run dev                 # starts on http://localhost:5173
-```
-
-## Mobile app setup
+From the repo root:
 
 ```
-cd apps/mobile-app
-flutter pub get
-flutter run
+npm run dev
 ```
 
-See `apps/mobile-app/README.md` for Android SMS-permission setup and the Google Sign-In configuration file placement.
+Starts the backend (`:4000`), the frontend (`:5173`), and `flutter run` for
+the mobile app, all together. To target a specific device/emulator for the
+Flutter app, pass it through after `--`:
+
+```
+npm run dev -- -d emulator-5554
+```
+
+(`flutter devices` lists available device ids.) Stopping the command
+(Ctrl+C) stops all three. You can also run each app individually with
+`npm run dev:backend`, `npm run dev:frontend`, or `npm run dev:mobile`.
 
 ## How ingestion works
 
