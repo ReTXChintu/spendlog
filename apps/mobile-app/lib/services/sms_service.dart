@@ -3,6 +3,7 @@ import 'package:another_telephony/telephony.dart';
 import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../config.dart';
 import 'api_client.dart';
 
 const String _backfillDoneKey = 'expense_tracker_sms_backfill_done';
@@ -25,13 +26,12 @@ Map<String, dynamic> _toPayload(SmsMessage message) => {
 void backgroundSmsHandler(SmsMessage message) async {
   WidgetsFlutterBinding.ensureInitialized();
   final prefs = await SharedPreferences.getInstance();
-  final token = prefs.getString('expense_tracker_token');
+  final token = prefs.getString(tokenStorageKey);
   if (token == null) return;
 
-  const baseUrl = String.fromEnvironment('API_URL', defaultValue: 'http://10.0.2.2:4000');
   try {
     await http.post(
-      Uri.parse('$baseUrl/ingestion/sms'),
+      Uri.parse('$apiBaseUrl/ingestion/sms'),
       headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $token'},
       body: jsonEncode(_toPayload(message)),
     );
@@ -88,9 +88,8 @@ class SmsService {
     // The generic ApiClient.post only accepts a Map body; batch ingestion
     // needs a raw JSON array, so this hits the endpoint directly.
     final token = await ApiClient.getToken();
-    const baseUrl = String.fromEnvironment('API_URL', defaultValue: 'http://10.0.2.2:4000');
     await http.post(
-      Uri.parse('$baseUrl/ingestion/sms/batch'),
+      Uri.parse('$apiBaseUrl/ingestion/sms/batch'),
       headers: {
         'Content-Type': 'application/json',
         if (token != null) 'Authorization': 'Bearer $token',

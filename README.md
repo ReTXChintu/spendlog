@@ -28,18 +28,30 @@ runs `flutter pub get` for `apps/mobile-app` via a postinstall script. If
 the Flutter SDK isn't on your PATH yet, that step just warns and skips —
 install Flutter, then re-run `cd apps/mobile-app && flutter pub get`.
 
-Then configure each app's environment:
+Then configure the environment. There is **one `.env` for the whole
+monorepo**, at the repo root — the apps do not have their own:
 
 ```
-cp apps/backend/.env.example apps/backend/.env     # fill in JWT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
-cp apps/frontend/.env.example apps/frontend/.env   # set VITE_GOOGLE_CLIENT_ID and VITE_API_URL
+cp .env.example .env
 ```
+
+Fill in `JWT_SECRET`, `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`, and
+`VITE_GOOGLE_CLIENT_ID` (same value as `GOOGLE_CLIENT_ID`). How each app
+reads it:
+
+| App | Mechanism |
+| --- | --- |
+| backend | `dotenv` with an explicit root path (`apps/backend/src/env.ts`), loaded via `src/db.ts` so scripts and tests get it too |
+| backend (Prisma CLI) | `dotenv-cli` prefix on the `prisma:*` npm scripts |
+| frontend | Vite's `envDir` set to the repo root; only `VITE_`-prefixed vars reach browser code |
+| mobile | `scripts/dev.js` reads `MOBILE_API_URL` and passes it to `flutter run` as `--dart-define=API_URL=...` |
 
 Run the database migration and seed the default categories (Food,
 Transport, etc.) once:
 
 ```
-cd apps/backend && npx prisma migrate dev --name init && npm run seed && cd ../..
+npm run prisma:migrate --workspace apps/backend
+npm run seed --workspace apps/backend
 ```
 
 ### Google OAuth setup (required for login + Gmail import)
@@ -48,7 +60,7 @@ cd apps/backend && npx prisma migrate dev --name init && npm run seed && cd ../.
 2. Add authorized redirect URI: `http://localhost:4000/ingestion/email/callback`
 3. Add authorized JavaScript origin: `http://localhost:5173`
 4. Enable the Gmail API for the project.
-5. Copy the Client ID/Secret into `apps/backend/.env`. The frontend also needs the Client ID (see above).
+5. Copy the Client ID/Secret into the root `.env` (both `GOOGLE_CLIENT_ID` and `VITE_GOOGLE_CLIENT_ID`).
 6. For the mobile app's Google Sign-In, see `apps/mobile-app/README.md`.
 
 ## Running everything in dev

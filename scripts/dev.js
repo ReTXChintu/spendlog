@@ -2,6 +2,7 @@
 // `npm run dev` — starts the backend, frontend, and Flutter app together.
 // Pass a device through to Flutter with: npm run dev -- -d <device name>
 const { spawn } = require("child_process");
+const fs = require("fs");
 const path = require("path");
 
 const args = process.argv.slice(2);
@@ -14,6 +15,24 @@ for (let i = 0; i < args.length; i++) {
 
 const root = path.resolve(__dirname, "..");
 const children = [];
+
+// The backend and frontend read the root .env themselves (dotenv / Vite's
+// envDir). Flutter has no .env support, so the value it needs is read here
+// and handed over as a --dart-define instead.
+function readRootEnv(key) {
+  try {
+    const contents = fs.readFileSync(path.join(root, ".env"), "utf8");
+    for (const line of contents.split(/\r?\n/)) {
+      const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)$/i);
+      if (match && match[1] === key) {
+        return match[2].trim().replace(/^["']|["']$/g, "");
+      }
+    }
+  } catch {
+    // No .env yet — fall through to the app's own default.
+  }
+  return null;
+}
 
 // shell: true is required on Windows to resolve .cmd/.bat shims (npm,
 // flutter) — spawning them directly without a shell throws EINVAL on
@@ -44,7 +63,9 @@ run("backend", "npm run dev --workspace apps/backend", root);
 run("frontend", "npm run dev --workspace apps/frontend", root);
 
 const deviceFlag = device ? ` -d ${JSON.stringify(device)}` : "";
-run("mobile", `flutter run${deviceFlag}`, path.join(root, "apps", "mobile-app"));
+const mobileApiUrl = readRootEnv("MOBILE_API_URL");
+const apiDefine = mobileApiUrl ? ` --dart-define=API_URL=${JSON.stringify(mobileApiUrl)}` : "";
+run("mobile", `flutter run${deviceFlag}${apiDefine}`, path.join(root, "apps", "mobile-app"));
 
 function shutdown() {
   for (const child of children) {

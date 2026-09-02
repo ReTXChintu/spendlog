@@ -1,11 +1,10 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../config.dart';
 
-// A real device can't reach "localhost" on your dev machine — point this at
-// your machine's LAN IP, or pass --dart-define=API_URL=http://192.168.x.x:4000.
-const String _baseUrl = String.fromEnvironment('API_URL', defaultValue: 'http://10.0.2.2:4000');
-const String _tokenKey = 'expense_tracker_token';
+const String _baseUrl = apiBaseUrl;
+const String _tokenKey = tokenStorageKey;
 
 class ApiException implements Exception {
   final int statusCode;

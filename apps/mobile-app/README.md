@@ -51,9 +51,15 @@ Minimum Android `minSdkVersion` should be at least 21 (check
 
 ### Backend URL
 
-Set the API base URL in `lib/services/api_client.dart` (`_baseUrl`), or wire
-it up via `--dart-define=API_URL=http://<your-ip>:4000` — a real device
-can't reach `localhost` on your dev machine, so use your machine's LAN IP.
+Set `MOBILE_API_URL` in the **root `.env`** (the monorepo has a single env
+file). `npm run dev` reads it and passes it to `flutter run` as
+`--dart-define=API_URL=...`.
+
+The default, used when running `flutter run` directly, is
+`http://10.0.2.2:4000` — the Android emulator's alias for the host
+machine's localhost. A physical device can't reach `localhost` on your dev
+machine, so set `MOBILE_API_URL` to your machine's LAN IP (e.g.
+`http://192.168.1.5:4000`). See `lib/config.dart`.
 
 ## Platform note
 
