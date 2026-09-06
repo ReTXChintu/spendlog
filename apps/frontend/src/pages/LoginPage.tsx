@@ -46,29 +46,37 @@ export function LoginPage() {
   const { loginWithGoogleIdToken } = useAuth();
   const navigate = useNavigate();
   const buttonRef = useRef<HTMLDivElement>(null);
-  const initializedRef = useRef(false);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [error, setError] = useState<string | null>(null);
 
-  // The auth helpers are recreated on every render, so this effect
-  // deliberately takes no dependencies and guards with a ref — otherwise
-  // it would re-run and stack up duplicate Google buttons.
+  // The auth helpers are new objects on every render. Kept in refs so the
+  // setup effect below can have empty deps and run exactly once per mount
+  // — with them as deps it would re-run constantly and stack up buttons.
+  const loginRef = useRef(loginWithGoogleIdToken);
+  const navigateRef = useRef(navigate);
+  loginRef.current = loginWithGoogleIdToken;
+  navigateRef.current = navigate;
+
   useEffect(() => {
-    if (!GOOGLE_CLIENT_ID || initializedRef.current) return;
-    initializedRef.current = true;
+    if (!GOOGLE_CLIENT_ID) return;
 
     let cancelled = false;
+    let originCheckTimer: number | undefined;
 
     whenGoogleReady()
       .then(() => {
         if (cancelled || !buttonRef.current) return;
 
+        // StrictMode mounts effects twice in dev; clear any button left
+        // over from the first pass so we never render two.
+        buttonRef.current.replaceChildren();
+
         window.google!.accounts.id.initialize({
           client_id: GOOGLE_CLIENT_ID,
           callback: async (response) => {
             try {
-              await loginWithGoogleIdToken(response.credential);
-              navigate("/", { replace: true });
+              await loginRef.current(response.credential);
+              navigateRef.current("/", { replace: true });
             } catch (err) {
               setError(err instanceof Error ? err.message : "Sign-in failed");
             }
@@ -81,7 +89,7 @@ export function LoginPage() {
         // the console — when the page's origin isn't listed under
         // "Authorized JavaScript origins" for this client ID. Detect the
         // empty container and say so, rather than showing nothing.
-        window.setTimeout(() => {
+        originCheckTimer = window.setTimeout(() => {
           if (!cancelled && buttonRef.current?.childElementCount === 0) {
             setLoadState("origin-rejected");
           }
@@ -93,8 +101,9 @@ export function LoginPage() {
 
     return () => {
       cancelled = true;
+      if (originCheckTimer !== undefined) window.clearTimeout(originCheckTimer);
     };
-  }, [loginWithGoogleIdToken, navigate]);
+  }, []);
 
   return (
     <div className="login-page">
