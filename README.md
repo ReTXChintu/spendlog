@@ -35,9 +35,8 @@ monorepo**, at the repo root — the apps do not have their own:
 cp .env.example .env
 ```
 
-Fill in `JWT_SECRET`, `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`, and
-`VITE_GOOGLE_CLIENT_ID` (same value as `GOOGLE_CLIENT_ID`). How each app
-reads it:
+Fill in `JWT_SECRET` and `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
+How each app reads it:
 
 | App | Mechanism |
 | --- | --- |
@@ -68,12 +67,24 @@ npm run seed --workspace apps/backend
 
 ### Google OAuth setup (required for login + Gmail import)
 
+Sign-in and Gmail read access are granted in a **single consent screen**,
+so there is no separate "connect Gmail" step.
+
 1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create an OAuth 2.0 Client ID (type: Web application).
-2. Add authorized redirect URI: `http://localhost:4000/ingestion/email/callback`
-3. Add authorized JavaScript origin: `http://localhost:5173`
-4. Enable the Gmail API for the project.
-5. Copy the Client ID/Secret into the root `.env` (both `GOOGLE_CLIENT_ID` and `VITE_GOOGLE_CLIENT_ID`).
+2. Add authorized redirect URI: `http://localhost:4000/auth/google/callback`
+3. Enable the Gmail API for the project.
+4. Under OAuth consent screen, add the `.../auth/gmail.readonly` scope, and add yourself as a test user.
+5. Copy the Client ID/Secret into the root `.env` (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`).
 6. For the mobile app's Google Sign-In, see `apps/mobile-app/README.md`.
+
+Because `gmail.readonly` is a restricted scope, Google shows an
+"unverified app" warning until the project goes through verification. In
+testing mode that's fine for accounts listed as test users — click
+*Advanced > Go to Expense Tracker (unsafe)* to continue.
+
+The browser never loads Google's JavaScript SDK: `/auth/google/start`
+redirects to Google, and `/auth/google/callback` redirects back with the
+session token in the URL fragment.
 
 ## Running everything in dev
 

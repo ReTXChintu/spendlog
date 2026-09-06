@@ -45,9 +45,14 @@ Minimum Android `minSdkVersion` should be at least 21 (check
 
 ### Google Sign-In setup
 
-1. In the same Google Cloud OAuth client used by the backend/frontend, add an Android OAuth client (needs your app's package name + SHA-1 signing fingerprint) and, if you'll test on iOS, an iOS OAuth client.
-2. For Android: no config file needed for `google_sign_in` itself, but the SHA-1 fingerprint must be registered in Google Cloud Console for the sign-in to succeed.
-3. For iOS: add the `REVERSED_CLIENT_ID` URL scheme to `ios/Runner/Info.plist` as described in the [google_sign_in iOS setup docs](https://pub.dev/packages/google_sign_in#ios-integration).
+Sign-in requests Gmail read access in the same consent step, so there is no
+separate "connect Gmail" prompt. The app sends Google's `serverAuthCode` to
+the backend, which exchanges it for a refresh token.
+
+1. In Google Cloud Console, add an **Android** OAuth client (needs your app's package name + SHA-1 signing fingerprint) and, if you'll test on iOS, an iOS OAuth client — alongside the existing Web client the backend uses.
+2. `serverClientId` must be the **Web** client id, not the Android one — that's the client whose secret the backend holds. `npm run dev` passes it automatically from `GOOGLE_CLIENT_ID` in the root `.env` as `--dart-define=GOOGLE_WEB_CLIENT_ID=...`. Running `flutter run` directly means passing it yourself.
+3. For Android: no config file is needed for `google_sign_in` itself, but the SHA-1 fingerprint must be registered in Google Cloud Console for sign-in to succeed.
+4. For iOS: add the `REVERSED_CLIENT_ID` URL scheme to `ios/Runner/Info.plist` as described in the [google_sign_in iOS setup docs](https://pub.dev/packages/google_sign_in#ios-integration).
 
 ### Backend URL
 

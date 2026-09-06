@@ -39,10 +39,19 @@ export function SettingsPage() {
     <div className="settings-page">
       <h2>Email import</h2>
       {gmailStatus === "connected" && <p className="success-text">Gmail connected successfully.</p>}
+      {gmailStatus === "denied" && (
+        <p className="error-text">Gmail access wasn't granted. Email import stays off until you allow it.</p>
+      )}
       {gmailStatus === "error" && <p className="error-text">Couldn't connect Gmail — please try again.</p>}
 
       {connections.length === 0 ? (
-        <button onClick={handleConnect}>Connect Gmail</button>
+        <div>
+          <p>
+            Gmail access is normally granted when you sign in. It looks like it was declined or revoked —
+            connect it here to turn email import back on.
+          </p>
+          <button onClick={handleConnect}>Connect Gmail</button>
+        </div>
       ) : (
         <div>
           {connections.map((c) => (

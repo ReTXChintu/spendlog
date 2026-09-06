@@ -1,50 +1,24 @@
 import { Router } from "express";
-import jwt from "jsonwebtoken";
-import { z } from "zod";
-import { env } from "../../env";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
 import { EmailConnection } from "../../models";
-import { buildConsentUrl, completeConnection, syncEmailConnection } from "./gmail.service";
+import { googleCallbackHandler, signOAuthState } from "../auth/auth.routes";
+import { buildConsentUrl, syncEmailConnection } from "./gmail.service";
 
 export const emailRouter = Router();
 
-// GET /ingestion/email/connect — returns the Google consent URL to open in
-// a browser/webview. `state` carries the signed-in user's id through the
-// redirect so the callback (which Google calls with no auth header) knows
-// who to attach the connection to.
+// Same handler as /auth/google/callback. Mounted here too so either path
+// can be the registered redirect URI in Google Console — existing setups
+// pointing at this URL keep working without reconfiguration.
+emailRouter.get("/callback", googleCallbackHandler);
+
+// GET /ingestion/email/connect — only needed when Gmail access wasn't
+// granted at sign-in (the user unticked it on the consent screen) or was
+// later revoked. Reuses the single /auth/google/callback redirect URI,
+// distinguished by the signed `state`.
 emailRouter.get("/connect", requireAuth, (req, res) => {
-  const state = jwt.sign({ userId: req.user!.id }, env.jwtSecret, { expiresIn: "10m" });
+  const state = signOAuthState({ purpose: "reconnect", userId: req.user!.id });
   res.json({ url: buildConsentUrl(state) });
-});
-
-const callbackSchema = z.object({
-  code: z.string().min(1),
-  state: z.string().min(1),
-});
-
-// GET /ingestion/email/callback — Google redirects here after consent.
-emailRouter.get("/callback", async (req, res) => {
-  const parsed = callbackSchema.safeParse(req.query);
-  if (!parsed.success) {
-    return res.redirect(`${env.frontendUrl}/settings?gmail=error`);
-  }
-
-  let userId: string;
-  try {
-    const decoded = jwt.verify(parsed.data.state, env.jwtSecret) as { userId: string };
-    userId = decoded.userId;
-  } catch {
-    return res.redirect(`${env.frontendUrl}/settings?gmail=error`);
-  }
-
-  try {
-    await completeConnection(userId, parsed.data.code);
-    res.redirect(`${env.frontendUrl}/settings?gmail=connected`);
-  } catch (err) {
-    console.error("Gmail OAuth callback failed:", err);
-    res.redirect(`${env.frontendUrl}/settings?gmail=error`);
-  }
 });
 
 // GET /ingestion/email/status — which Gmail accounts are connected.

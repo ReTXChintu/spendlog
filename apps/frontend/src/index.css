@@ -97,6 +97,28 @@ select {
   text-align: center;
 }
 
+.google-button {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 10px 20px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.google-button:hover {
+  border-color: var(--muted);
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 16px;
+}
+
 .day-list {
   display: flex;
   flex-direction: column;

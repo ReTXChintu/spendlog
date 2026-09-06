@@ -5,45 +5,67 @@ import { env } from "../../env";
 import { EmailConnection } from "../../models";
 import { ingestRawMessage } from "../../parsing/ingest";
 
-const GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+export const GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+
+// Identity and Gmail read access are requested together, in one consent
+// screen, at sign-in. See modules/auth/auth.routes.ts.
+export const LOGIN_SCOPES = [
+  "openid",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/userinfo.profile",
+  GMAIL_READONLY_SCOPE,
+];
 
 export function createOAuthClient(): OAuth2Client {
   return new google.auth.OAuth2(env.googleClientId, env.googleClientSecret, env.googleOAuthRedirectUri);
 }
 
-export function buildConsentUrl(state: string): string {
+export function buildConsentUrl(state: string, scopes: string[] = LOGIN_SCOPES): string {
   const client = createOAuthClient();
   return client.generateAuthUrl({
     access_type: "offline",
-    prompt: "consent", // forces a refresh_token even on repeat connects
-    scope: [GMAIL_READONLY_SCOPE, "https://www.googleapis.com/auth/userinfo.email"],
+    prompt: "consent", // forces a refresh_token even on repeat consents
+    scope: scopes,
     state,
   });
 }
 
-export async function completeConnection(userId: string, code: string): Promise<void> {
+export async function exchangeCode(code: string) {
   const client = createOAuthClient();
   const { tokens } = await client.getToken(code);
-  if (!tokens.access_token || !tokens.refresh_token) {
-    throw new Error("Google did not return a refresh token — retry the consent flow with prompt=consent");
-  }
+  if (!tokens.access_token) throw new Error("Google did not return an access token");
+  return tokens;
+}
 
-  client.setCredentials(tokens);
-  const oauth2 = google.oauth2({ version: "v2", auth: client });
-  const { data } = await oauth2.userinfo.get();
-  if (!data.email) throw new Error("Could not read connected Gmail address");
-
+/**
+ * Stores the Gmail refresh token for a user. Only called when the granted
+ * scopes actually include gmail.readonly — a user can untick that box on
+ * the consent screen and still sign in, in which case they simply have no
+ * email import until they connect it from Settings.
+ */
+export async function saveConnection(params: {
+  userId: Types.ObjectId;
+  email: string;
+  accessToken: string;
+  refreshToken: string;
+  expiryDate: number | null | undefined;
+}): Promise<void> {
   await EmailConnection.findOneAndUpdate(
-    { userId: new Types.ObjectId(userId), email: data.email },
+    { userId: params.userId, email: params.email },
     {
       $set: {
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
-        expiryDate: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
+        accessToken: params.accessToken,
+        refreshToken: params.refreshToken,
+        expiryDate: params.expiryDate ? new Date(params.expiryDate) : null,
       },
     },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
+}
+
+/** True when Google actually granted Gmail read access. */
+export function grantedGmailAccess(scope: string | null | undefined): boolean {
+  return (scope ?? "").split(" ").includes(GMAIL_READONLY_SCOPE);
 }
 
 function decodeBase64Url(data: string): string {
