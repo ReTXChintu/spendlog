@@ -1,9 +1,10 @@
 import { Router } from "express";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
-import { prisma } from "../../db";
 import { env } from "../../env";
-import { requireAuth } from "../../middleware/auth";
+import { currentUserId, requireAuth } from "../../middleware/auth";
+import { validObjectIdParam } from "../../middleware/validate";
+import { EmailConnection } from "../../models";
 import { buildConsentUrl, completeConnection, syncEmailConnection } from "./gmail.service";
 
 export const emailRouter = Router();
@@ -48,30 +49,30 @@ emailRouter.get("/callback", async (req, res) => {
 
 // GET /ingestion/email/status — which Gmail accounts are connected.
 emailRouter.get("/status", requireAuth, async (req, res) => {
-  const connections = await prisma.emailConnection.findMany({
-    where: { userId: req.user!.id },
-    select: { id: true, email: true, lastSyncedAt: true, createdAt: true },
-  });
+  const connections = await EmailConnection.find({ userId: currentUserId(req) }).select(
+    "email lastSyncedAt createdAt"
+  );
   res.json(connections);
 });
 
 // POST /ingestion/email/sync — trigger an immediate sync (in addition to
 // the periodic background sync in server.ts).
 emailRouter.post("/sync", requireAuth, async (req, res) => {
-  const connections = await prisma.emailConnection.findMany({ where: { userId: req.user!.id } });
+  const connections = await EmailConnection.find({ userId: currentUserId(req) });
   if (connections.length === 0) {
     return res.status(404).json({ error: "No Gmail account connected" });
   }
 
-  const results = await Promise.all(connections.map((c) => syncEmailConnection(c.id)));
+  const results = await Promise.all(connections.map((c) => syncEmailConnection(c._id.toString())));
   res.json({ results });
 });
 
-emailRouter.delete("/:id", requireAuth, async (req, res) => {
-  const connection = await prisma.emailConnection.findUnique({ where: { id: req.params.id } });
-  if (!connection || connection.userId !== req.user!.id) {
-    return res.status(404).json({ error: "Not found" });
-  }
-  await prisma.emailConnection.delete({ where: { id: connection.id } });
+emailRouter.delete("/:id", requireAuth, validObjectIdParam("id"), async (req, res) => {
+  const deleted = await EmailConnection.findOneAndDelete({
+    _id: req.params.id,
+    userId: currentUserId(req),
+  });
+  if (!deleted) return res.status(404).json({ error: "Not found" });
+
   res.status(204).end();
 });

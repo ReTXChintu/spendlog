@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
+import { Types } from "mongoose";
 import { env } from "../env";
 import { AuthUser } from "../types";
 
@@ -14,6 +15,14 @@ declare global {
 
 export function signSessionToken(user: AuthUser): string {
   return jwt.sign(user, env.jwtSecret, { expiresIn: "30d" });
+}
+
+/**
+ * The signed-in user's id as an ObjectId, for use in queries. Only call
+ * this on routes behind `requireAuth`.
+ */
+export function currentUserId(req: Request): Types.ObjectId {
+  return new Types.ObjectId(req.user!.id);
 }
 
 export function requireAuth(req: Request, res: Response, next: NextFunction) {

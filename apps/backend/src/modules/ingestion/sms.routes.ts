@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { requireAuth } from "../../middleware/auth";
+import { currentUserId, requireAuth } from "../../middleware/auth";
 import { ingestRawMessage } from "../../parsing/ingest";
 
 export const smsRouter = Router();
@@ -22,7 +22,7 @@ smsRouter.post("/", async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
   const result = await ingestRawMessage({
-    userId: req.user!.id,
+    userId: currentUserId(req),
     rawText: parsed.data.rawText,
     source: "SMS",
     sourceRef: parsed.data.messageId ?? null,
@@ -43,7 +43,7 @@ smsRouter.post("/batch", async (req, res) => {
   const results = [];
   for (const item of parsed.data) {
     const result = await ingestRawMessage({
-      userId: req.user!.id,
+      userId: currentUserId(req),
       rawText: item.rawText,
       source: "SMS",
       sourceRef: item.messageId ?? null,

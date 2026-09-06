@@ -1,49 +1,26 @@
-import { prisma } from "./db";
+import { connectDatabase, disconnectDatabase } from "./db";
+import { Category, CategoryRule } from "./models";
 import { DEFAULT_CATEGORIES } from "./parsing/default-categories";
 
 // Populates the system default categories and their keyword rules.
 // Safe to re-run: system categories are matched by name (with userId null)
-// and rules by category + pattern, so nothing is duplicated. Lookups use
-// findFirst rather than upsert because the natural key here includes a
-// nullable userId, which Prisma won't accept in a unique `where`.
+// and rules by category + pattern, so nothing is duplicated.
 async function main() {
-  for (const seed of DEFAULT_CATEGORIES) {
-    let category = await prisma.category.findFirst({
-      where: { name: seed.name, userId: null, isSystem: true },
-    });
+  await connectDatabase();
 
-    if (category) {
-      category = await prisma.category.update({
-        where: { id: category.id },
-        data: { icon: seed.icon, color: seed.color },
-      });
-    } else {
-      category = await prisma.category.create({
-        data: {
-          name: seed.name,
-          icon: seed.icon,
-          color: seed.color,
-          isSystem: true,
-          userId: null,
-        },
-      });
-    }
+  for (const seed of DEFAULT_CATEGORIES) {
+    const category = await Category.findOneAndUpdate(
+      { name: seed.name, userId: null, isSystem: true },
+      { $set: { icon: seed.icon, color: seed.color } },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
 
     for (const keyword of seed.keywords) {
-      const existing = await prisma.categoryRule.findFirst({
-        where: { userId: null, categoryId: category.id, pattern: keyword },
-      });
-      if (!existing) {
-        await prisma.categoryRule.create({
-          data: {
-            userId: null,
-            categoryId: category.id,
-            matchType: "MERCHANT_CONTAINS",
-            pattern: keyword,
-            priority: 0,
-          },
-        });
-      }
+      await CategoryRule.updateOne(
+        { userId: null, categoryId: category._id, pattern: keyword },
+        { $setOnInsert: { matchType: "MERCHANT_CONTAINS", priority: 0 } },
+        { upsert: true, setDefaultsOnInsert: true }
+      );
     }
   }
 
@@ -53,6 +30,6 @@ async function main() {
 main()
   .catch((err) => {
     console.error(err);
-    process.exit(1);
+    process.exitCode = 1;
   })
-  .finally(() => prisma.$disconnect());
+  .finally(() => disconnectDatabase());

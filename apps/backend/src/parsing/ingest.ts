@@ -1,5 +1,5 @@
-import { Transaction } from "@prisma/client";
-import { prisma } from "../db";
+import { HydratedDocument, Types } from "mongoose";
+import { Transaction, TransactionDoc } from "../models";
 import { TransactionSource } from "../types";
 import { resolveAccount } from "./accounts";
 import { categorizeTransaction } from "./categorizer";
@@ -8,7 +8,7 @@ import { parseTransactionText } from "./parser";
 
 export interface IngestResult {
   status: "created" | "duplicate" | "ignored";
-  transaction: Transaction | null;
+  transaction: HydratedDocument<TransactionDoc> | null;
 }
 
 /**
@@ -17,7 +17,7 @@ export interface IngestResult {
  * posts messages here) and the Gmail sync job.
  */
 export async function ingestRawMessage(params: {
-  userId: string;
+  userId: Types.ObjectId;
   rawText: string;
   source: TransactionSource;
   sourceRef: string | null;
@@ -49,20 +49,18 @@ export async function ingestRawMessage(params: {
     rawText: params.rawText,
   });
 
-  const transaction = await prisma.transaction.create({
-    data: {
-      userId: params.userId,
-      accountId,
-      categoryId,
-      amountMinor: parsed.amountMinor,
-      currency: parsed.currency,
-      type: parsed.type,
-      merchant: parsed.merchant,
-      rawText: params.rawText,
-      source: params.source,
-      sourceRef: params.sourceRef,
-      occurredAt,
-    },
+  const transaction = await Transaction.create({
+    userId: params.userId,
+    accountId,
+    categoryId,
+    amountMinor: parsed.amountMinor,
+    currency: parsed.currency,
+    type: parsed.type,
+    merchant: parsed.merchant,
+    rawText: params.rawText,
+    source: params.source,
+    sourceRef: params.sourceRef,
+    occurredAt,
   });
 
   await detectSelfTransfer(transaction);

@@ -4,14 +4,14 @@ Auto-imports transactions from SMS and Gmail, groups them day-by-day, and
 auto-categorizes them so you don't have to add anything by hand.
 
 Monorepo:
-- `apps/backend` — Node.js + Express + TypeScript + Prisma (MongoDB)
+- `apps/backend` — Node.js + Express + TypeScript + Mongoose (MongoDB)
 - `apps/frontend` — React + Vite + TypeScript
 - `apps/mobile-app` — Flutter (Android: SMS + Gmail import; iOS: Gmail import only)
 
 ## Prerequisites
 
 - [Node.js 20+](https://nodejs.org) (includes npm)
-- MongoDB — [Atlas](https://www.mongodb.com/atlas) or a local install **running as a replica set** (see Database below)
+- MongoDB — [Atlas](https://www.mongodb.com/atlas) or a local install
 - [Flutter SDK](https://docs.flutter.dev/get-started/install) (for the mobile app)
 - A Google Cloud project with an OAuth 2.0 Client ID (for Sign-In and Gmail read access)
 
@@ -42,7 +42,6 @@ reads it:
 | App | Mechanism |
 | --- | --- |
 | backend | `dotenv` with an explicit root path (`apps/backend/src/env.ts`), loaded via `src/db.ts` so scripts and tests get it too |
-| backend (Prisma CLI) | `dotenv-cli` prefix on the `prisma:*` npm scripts |
 | frontend | Vite's `envDir` set to the repo root; only `VITE_`-prefixed vars reach browser code |
 | mobile | `scripts/dev.js` reads `MOBILE_API_URL` and passes it to `flutter run` as `--dart-define=API_URL=...` |
 
@@ -51,30 +50,19 @@ reads it:
 Set `DATABASE_URL` in the root `.env` to your MongoDB connection string,
 including the database name.
 
-> **Prisma's MongoDB connector requires a replica set** — it uses
-> transactions for nested writes. MongoDB Atlas is a replica set out of the
-> box. A default local `mongod` install is *standalone* and will fail with
-> "Prisma needs to perform transactions, which requires your MongoDB server
-> to be run as a replica set" until you start it as one.
-
-Options:
-
 ```
-# Atlas (easiest — already a replica set)
+# Atlas
 DATABASE_URL="mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/expense_tracker?retryWrites=true&w=majority"
 
-# Local via Docker, as a single-node replica set
-docker run -d -p 27017:27017 --name mongo mongo:7 --replSet rs0
-docker exec mongo mongosh --eval "rs.initiate()"
-DATABASE_URL="mongodb://localhost:27017/expense_tracker?replicaSet=rs0"
+# Local
+DATABASE_URL="mongodb://localhost:27017/expense_tracker"
 ```
 
-Then push the schema (MongoDB has no migration history, so it's
-`db push`, not `migrate`) and seed the default categories (Food,
-Transport, etc.):
+Mongoose creates collections and indexes on demand, so there is no
+migration or schema-push step. Seed the default categories (Food,
+Transport, etc.) once:
 
 ```
-npm run prisma:push --workspace apps/backend
 npm run seed --workspace apps/backend
 ```
 

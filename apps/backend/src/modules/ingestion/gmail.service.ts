@@ -1,7 +1,8 @@
 import { gmail_v1, google } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
-import { prisma } from "../../db";
+import { Types } from "mongoose";
 import { env } from "../../env";
+import { EmailConnection } from "../../models";
 import { ingestRawMessage } from "../../parsing/ingest";
 
 const GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
@@ -32,21 +33,17 @@ export async function completeConnection(userId: string, code: string): Promise<
   const { data } = await oauth2.userinfo.get();
   if (!data.email) throw new Error("Could not read connected Gmail address");
 
-  await prisma.emailConnection.upsert({
-    where: { userId_email: { userId, email: data.email } },
-    update: {
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      expiryDate: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
+  await EmailConnection.findOneAndUpdate(
+    { userId: new Types.ObjectId(userId), email: data.email },
+    {
+      $set: {
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        expiryDate: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
+      },
     },
-    create: {
-      userId,
-      email: data.email,
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      expiryDate: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-    },
-  });
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 }
 
 function decodeBase64Url(data: string): string {
@@ -78,7 +75,7 @@ const TRANSACTION_QUERY =
  * repeatedly — dedup happens inside ingestRawMessage.
  */
 export async function syncEmailConnection(connectionId: string): Promise<{ created: number; scanned: number }> {
-  const connection = await prisma.emailConnection.findUniqueOrThrow({ where: { id: connectionId } });
+  const connection = await EmailConnection.findById(connectionId).orFail();
 
   const client = createOAuthClient();
   client.setCredentials({
@@ -128,25 +125,29 @@ export async function syncEmailConnection(connectionId: string): Promise<{ creat
   // access_token may have been silently refreshed by the client during the
   // calls above; persist the latest credentials alongside the sync time.
   const latestCredentials = client.credentials;
-  await prisma.emailConnection.update({
-    where: { id: connection.id },
-    data: {
-      lastSyncedAt: syncStartedAt,
-      accessToken: latestCredentials.access_token ?? connection.accessToken,
-      expiryDate: latestCredentials.expiry_date ? new Date(latestCredentials.expiry_date) : connection.expiryDate,
-    },
-  });
+  await EmailConnection.updateOne(
+    { _id: connection._id },
+    {
+      $set: {
+        lastSyncedAt: syncStartedAt,
+        accessToken: latestCredentials.access_token ?? connection.accessToken,
+        expiryDate: latestCredentials.expiry_date
+          ? new Date(latestCredentials.expiry_date)
+          : connection.expiryDate,
+      },
+    }
+  );
 
   return { created, scanned };
 }
 
 export async function syncAllConnectedEmails(): Promise<void> {
-  const connections = await prisma.emailConnection.findMany();
+  const connections = await EmailConnection.find();
   for (const connection of connections) {
     try {
-      await syncEmailConnection(connection.id);
+      await syncEmailConnection(connection._id.toString());
     } catch (err) {
-      console.error(`Gmail sync failed for connection ${connection.id}:`, err);
+      console.error(`Gmail sync failed for connection ${connection._id.toString()}:`, err);
     }
   }
 }

@@ -1,9 +1,9 @@
 import { Router } from "express";
 import { OAuth2Client } from "google-auth-library";
 import { z } from "zod";
-import { prisma } from "../../db";
 import { env } from "../../env";
 import { signSessionToken } from "../../middleware/auth";
+import { User } from "../../models";
 
 export const authRouter = Router();
 
@@ -39,12 +39,12 @@ authRouter.post("/google", async (req, res) => {
     return res.status(401).json({ error: "Google token missing email" });
   }
 
-  const user = await prisma.user.upsert({
-    where: { email: payload.email },
-    update: { googleId: payload.sub, name: payload.name },
-    create: { email: payload.email, googleId: payload.sub, name: payload.name },
-  });
+  const user = await User.findOneAndUpdate(
+    { email: payload.email },
+    { $set: { googleId: payload.sub, name: payload.name ?? null } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 
-  const token = signSessionToken({ id: user.id, email: user.email });
-  res.json({ token, user: { id: user.id, email: user.email, name: user.name } });
+  const token = signSessionToken({ id: user._id.toString(), email: user.email });
+  res.json({ token, user: { id: user._id.toString(), email: user.email, name: user.name } });
 });

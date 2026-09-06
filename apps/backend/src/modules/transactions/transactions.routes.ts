@@ -1,8 +1,9 @@
-import { Prisma } from "@prisma/client";
 import { Router } from "express";
+import { FilterQuery } from "mongoose";
 import { z } from "zod";
-import { prisma } from "../../db";
-import { requireAuth } from "../../middleware/auth";
+import { currentUserId, requireAuth } from "../../middleware/auth";
+import { validObjectIdParam } from "../../middleware/validate";
+import { Transaction, TransactionDoc } from "../../models";
 import { TRANSACTION_TYPES } from "../../types";
 
 export const transactionsRouter = Router();
@@ -19,25 +20,34 @@ const listQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(200).default(50),
 });
 
-function buildWhere(userId: string, filters: z.infer<typeof listQuerySchema>): Prisma.TransactionWhereInput {
-  return {
-    userId,
-    categoryId: filters.categoryId,
-    accountId: filters.accountId,
-    type: filters.type,
-    occurredAt: {
-      gte: filters.from ? new Date(filters.from) : undefined,
-      lte: filters.to ? new Date(filters.to) : undefined,
-    },
-    ...(filters.q
-      ? {
-          OR: [
-            { merchant: { contains: filters.q } },
-            { note: { contains: filters.q } },
-          ],
-        }
-      : {}),
-  };
+/** Escapes regex metacharacters so a search term can't alter the pattern. */
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildFilter(
+  req: Parameters<typeof currentUserId>[0],
+  filters: z.infer<typeof listQuerySchema>
+): FilterQuery<TransactionDoc> {
+  const filter: FilterQuery<TransactionDoc> = { userId: currentUserId(req) };
+
+  if (filters.categoryId) filter.categoryId = filters.categoryId;
+  if (filters.accountId) filter.accountId = filters.accountId;
+  if (filters.type) filter.type = filters.type;
+
+  if (filters.from || filters.to) {
+    filter.occurredAt = {
+      ...(filters.from ? { $gte: new Date(filters.from) } : {}),
+      ...(filters.to ? { $lte: new Date(filters.to) } : {}),
+    };
+  }
+
+  if (filters.q) {
+    const term = { $regex: escapeRegex(filters.q), $options: "i" };
+    filter.$or = [{ merchant: term }, { note: term }];
+  }
+
+  return filter;
 }
 
 // GET /transactions — filterable, paginated flat list.
@@ -45,33 +55,30 @@ transactionsRouter.get("/", async (req, res) => {
   const parsed = listQuerySchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const where = buildWhere(req.user!.id, parsed.data);
+  const filter = buildFilter(req, parsed.data);
   const [items, total] = await Promise.all([
-    prisma.transaction.findMany({
-      where,
-      include: { category: true, account: true },
-      orderBy: { occurredAt: "desc" },
-      skip: (parsed.data.page - 1) * parsed.data.pageSize,
-      take: parsed.data.pageSize,
-    }),
-    prisma.transaction.count({ where }),
+    Transaction.find(filter)
+      .populate("category")
+      .populate("account")
+      .sort({ occurredAt: -1 })
+      .skip((parsed.data.page - 1) * parsed.data.pageSize)
+      .limit(parsed.data.pageSize),
+    Transaction.countDocuments(filter),
   ]);
 
   res.json({ items, total, page: parsed.data.page, pageSize: parsed.data.pageSize });
 });
 
 // GET /transactions/by-day — the "Today"/ledger view: transactions grouped
-// by calendar day (server-local date), most recent day first.
+// by calendar day, most recent day first.
 transactionsRouter.get("/by-day", async (req, res) => {
   const parsed = listQuerySchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const where = buildWhere(req.user!.id, parsed.data);
-  const transactions = await prisma.transaction.findMany({
-    where,
-    include: { category: true, account: true },
-    orderBy: { occurredAt: "desc" },
-  });
+  const transactions = await Transaction.find(buildFilter(req, parsed.data))
+    .populate("category")
+    .populate("account")
+    .sort({ occurredAt: -1 });
 
   const days = new Map<string, typeof transactions>();
   for (const tx of transactions) {
@@ -94,12 +101,12 @@ transactionsRouter.get("/by-day", async (req, res) => {
   res.json(result);
 });
 
-transactionsRouter.get("/:id", async (req, res) => {
-  const tx = await prisma.transaction.findUnique({
-    where: { id: req.params.id },
-    include: { category: true, account: true },
-  });
-  if (!tx || tx.userId !== req.user!.id) return res.status(404).json({ error: "Not found" });
+transactionsRouter.get("/:id", validObjectIdParam("id"), async (req, res) => {
+  const tx = await Transaction.findOne({ _id: req.params.id, userId: currentUserId(req) })
+    .populate("category")
+    .populate("account");
+  if (!tx) return res.status(404).json({ error: "Not found" });
+
   res.json(tx);
 });
 
@@ -119,20 +126,19 @@ transactionsRouter.post("/", async (req, res) => {
   const parsed = createTransactionSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const tx = await prisma.transaction.create({
-    data: {
-      userId: req.user!.id,
-      amountMinor: parsed.data.amountMinor,
-      currency: parsed.data.currency,
-      type: parsed.data.type,
-      merchant: parsed.data.merchant,
-      note: parsed.data.note,
-      categoryId: parsed.data.categoryId,
-      occurredAt: new Date(parsed.data.occurredAt),
-      source: "MANUAL",
-    },
-    include: { category: true, account: true },
+  const created = await Transaction.create({
+    userId: currentUserId(req),
+    amountMinor: parsed.data.amountMinor,
+    currency: parsed.data.currency,
+    type: parsed.data.type,
+    merchant: parsed.data.merchant,
+    note: parsed.data.note,
+    categoryId: parsed.data.categoryId ?? null,
+    occurredAt: new Date(parsed.data.occurredAt),
+    source: "MANUAL",
   });
+
+  const tx = await Transaction.findById(created._id).populate("category").populate("account");
   res.status(201).json(tx);
 });
 
@@ -143,25 +149,28 @@ const updateTransactionSchema = z.object({
   isTransfer: z.boolean().optional(),
 });
 
-transactionsRouter.patch("/:id", async (req, res) => {
+transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   const parsed = updateTransactionSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const existing = await prisma.transaction.findUnique({ where: { id: req.params.id } });
-  if (!existing || existing.userId !== req.user!.id) return res.status(404).json({ error: "Not found" });
+  const updated = await Transaction.findOneAndUpdate(
+    { _id: req.params.id, userId: currentUserId(req) },
+    { $set: parsed.data },
+    { new: true }
+  )
+    .populate("category")
+    .populate("account");
+  if (!updated) return res.status(404).json({ error: "Not found" });
 
-  const updated = await prisma.transaction.update({
-    where: { id: existing.id },
-    data: parsed.data,
-    include: { category: true, account: true },
-  });
   res.json(updated);
 });
 
-transactionsRouter.delete("/:id", async (req, res) => {
-  const existing = await prisma.transaction.findUnique({ where: { id: req.params.id } });
-  if (!existing || existing.userId !== req.user!.id) return res.status(404).json({ error: "Not found" });
+transactionsRouter.delete("/:id", validObjectIdParam("id"), async (req, res) => {
+  const deleted = await Transaction.findOneAndDelete({
+    _id: req.params.id,
+    userId: currentUserId(req),
+  });
+  if (!deleted) return res.status(404).json({ error: "Not found" });
 
-  await prisma.transaction.delete({ where: { id: existing.id } });
   res.status(204).end();
 });

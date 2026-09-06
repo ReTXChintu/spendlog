@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
-import { prisma } from "../../db";
-import { requireAuth } from "../../middleware/auth";
+import { currentUserId, requireAuth } from "../../middleware/auth";
+import { Category, CategoryRule } from "../../models";
 import { RULE_MATCH_TYPES } from "../../types";
 
 export const categoriesRouter = Router();
@@ -9,10 +9,10 @@ categoriesRouter.use(requireAuth);
 
 // GET /categories — system defaults + this user's custom categories.
 categoriesRouter.get("/", async (req, res) => {
-  const categories = await prisma.category.findMany({
-    where: { OR: [{ userId: null }, { userId: req.user!.id }] },
-    orderBy: [{ isSystem: "desc" }, { name: "asc" }],
-  });
+  const categories = await Category.find({
+    $or: [{ userId: null }, { userId: currentUserId(req) }],
+  }).sort({ isSystem: -1, name: 1 });
+
   res.json(categories);
 });
 
@@ -26,8 +26,10 @@ categoriesRouter.post("/", async (req, res) => {
   const parsed = createCategorySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const category = await prisma.category.create({
-    data: { ...parsed.data, userId: req.user!.id, isSystem: false },
+  const category = await Category.create({
+    ...parsed.data,
+    userId: currentUserId(req),
+    isSystem: false,
   });
   res.status(201).json(category);
 });
@@ -42,21 +44,25 @@ categoriesRouter.patch("/:id", async (req, res) => {
   const parsed = updateCategorySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const category = await prisma.category.findUnique({ where: { id: req.params.id } });
-  if (!category || category.userId !== req.user!.id) {
-    return res.status(404).json({ error: "Category not found" });
-  }
+  // Scoping the query by userId means a user can never edit a system
+  // category or another user's, without a separate ownership check.
+  const updated = await Category.findOneAndUpdate(
+    { _id: req.params.id, userId: currentUserId(req) },
+    { $set: parsed.data },
+    { new: true }
+  );
+  if (!updated) return res.status(404).json({ error: "Category not found" });
 
-  const updated = await prisma.category.update({ where: { id: category.id }, data: parsed.data });
   res.json(updated);
 });
 
 categoriesRouter.delete("/:id", async (req, res) => {
-  const category = await prisma.category.findUnique({ where: { id: req.params.id } });
-  if (!category || category.userId !== req.user!.id) {
-    return res.status(404).json({ error: "Category not found" });
-  }
-  await prisma.category.delete({ where: { id: category.id } });
+  const deleted = await Category.findOneAndDelete({
+    _id: req.params.id,
+    userId: currentUserId(req),
+  });
+  if (!deleted) return res.status(404).json({ error: "Category not found" });
+
   res.status(204).end();
 });
 
@@ -74,19 +80,19 @@ categoriesRouter.post("/rules", async (req, res) => {
   const parsed = createRuleSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const category = await prisma.category.findFirst({
-    where: { id: parsed.data.categoryId, OR: [{ userId: null }, { userId: req.user!.id }] },
+  const userId = currentUserId(req);
+  const category = await Category.findOne({
+    _id: parsed.data.categoryId,
+    $or: [{ userId: null }, { userId }],
   });
   if (!category) return res.status(404).json({ error: "Category not found" });
 
-  const rule = await prisma.categoryRule.create({
-    data: {
-      userId: req.user!.id,
-      categoryId: category.id,
-      matchType: parsed.data.matchType,
-      pattern: parsed.data.pattern.toLowerCase(),
-      priority: parsed.data.priority ?? 0,
-    },
+  const rule = await CategoryRule.create({
+    userId,
+    categoryId: category._id,
+    matchType: parsed.data.matchType,
+    pattern: parsed.data.pattern.toLowerCase(),
+    priority: parsed.data.priority ?? 0,
   });
   res.status(201).json(rule);
 });

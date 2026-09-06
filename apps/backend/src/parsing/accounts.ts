@@ -1,4 +1,5 @@
-import { prisma } from "../db";
+import { Types } from "mongoose";
+import { Account } from "../models";
 import { AccountType } from "../types";
 
 /**
@@ -7,28 +8,21 @@ import { AccountType } from "../types";
  * (needed for self-transfer detection across two of the user's accounts).
  */
 export async function resolveAccount(
-  userId: string,
+  userId: Types.ObjectId,
   detected: { bankName: string; last4: string | null; accountType: AccountType } | null
-): Promise<string | null> {
+): Promise<Types.ObjectId | null> {
   if (!detected) return null;
 
-  const existing = await prisma.account.findFirst({
-    where: {
+  const account = await Account.findOneAndUpdate(
+    {
       userId,
       bankName: detected.bankName,
       last4: detected.last4,
       accountType: detected.accountType,
     },
-  });
-  if (existing) return existing.id;
+    { $setOnInsert: { userId, ...detected } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 
-  const created = await prisma.account.create({
-    data: {
-      userId,
-      bankName: detected.bankName,
-      last4: detected.last4,
-      accountType: detected.accountType,
-    },
-  });
-  return created.id;
+  return account._id;
 }
