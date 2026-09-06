@@ -23,4 +23,8 @@ export const env = {
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
   googleOAuthRedirectUri: process.env.GOOGLE_OAUTH_REDIRECT_URI ?? "",
   frontendUrl: process.env.FRONTEND_URL ?? "http://localhost:5173",
+  // When both are set the backend serves HTTPS instead of HTTP. Google
+  // requires HTTPS for any non-localhost OAuth redirect URI.
+  sslCertPath: process.env.SSL_CERT_PATH ?? "",
+  sslKeyPath: process.env.SSL_KEY_PATH ?? "",
 };

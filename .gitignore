@@ -5,6 +5,20 @@ build/
 *.log
 *.tsbuildinfo
 
+# TLS material — never commit private keys
+certs/
+*.pem
+*.key
+*.crt
+
+# Published by CI, not tracked (a release APK is tens of MB)
+apps/frontend/public/SpendLog.apk
+apps/frontend/dist/SpendLog.apk
+
+# PM2
+.pm2/
+logs/
+
 # Frontend
 apps/frontend/dist/
 # tsc -b emits these next to vite.config.ts because tsconfig.node.json is a

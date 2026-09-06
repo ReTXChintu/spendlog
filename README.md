@@ -108,6 +108,78 @@ npm run dev -- -d emulator-5554
 (Ctrl+C) stops all three. You can also run each app individually with
 `npm run dev:backend`, `npm run dev:frontend`, or `npm run dev:mobile`.
 
+## Deploying to a VPS (PM2)
+
+```
+git clone <repo> /opt/var/spendlog && cd /opt/var/spendlog
+npm ci
+cp .env.example .env          # then fill it in
+
+./scripts/generate-certs.sh <your-ip-or-hostname>
+# add the printed SSL_CERT_PATH / SSL_KEY_PATH to .env
+
+npm run build:backend
+npm run build:frontend
+
+pm2 start ecosystem.config.cjs
+pm2 save && pm2 startup
+```
+
+`ecosystem.config.cjs` runs two processes: `spendlog-backend` (compiled
+`dist/server.js`) and `spendlog-frontend` (`apps/frontend/server.js`, a
+dependency-free static server). Both serve HTTPS when `SSL_CERT_PATH` and
+`SSL_KEY_PATH` are set and plain HTTP otherwise, so local development needs
+no certificates.
+
+### Google sign-in needs a hostname, not an IP
+
+Google **rejects raw IP addresses as OAuth redirect URIs entirely** — this
+is not a matter of adding HTTPS. Only `localhost` and `127.0.0.1` are
+exempt, and the host's TLD must be on the
+[public suffix list](https://publicsuffix.org/list/). A self-signed
+certificate on `https://203.0.113.5` will serve fine but sign-in will fail
+with `Invalid Redirect URI`.
+
+To make sign-in work, put a hostname in front of the IP:
+
+- **Free, no registration:** `sslip.io` / `nip.io` resolve
+  `203-0-113-5.nip.io` straight to that IP, with no DNS setup.
+- **Free, with a record you control:** a DuckDNS subdomain.
+- **Cleanest:** any cheap domain.
+
+With a real hostname you can also use Let's Encrypt instead of a
+self-signed certificate, which removes the browser warnings entirely.
+
+### Self-signed certificate caveat
+
+Browsers reject a self-signed certificate until it's accepted manually, and
+**you must accept it on both origins** — the frontend and the backend. If
+only the frontend is accepted, its API calls to the backend are blocked
+with no visible prompt, and the app looks broken rather than untrusted.
+
+## Android APK builds
+
+`.github/workflows/build-and-publish-apk.yml` builds a release APK on every
+push, then copies it to the VPS at
+`/opt/var/spendlog/apps/frontend/public/SpendLog.apk`, where the web app
+offers it for download from Settings. The frontend server also serves files
+straight out of `public/`, so a newly published APK is live immediately
+without a frontend rebuild.
+
+Required repository secrets:
+
+| Secret | Purpose |
+| --- | --- |
+| `VPS_HOST` | server hostname or IP |
+| `VPS_USER` | SSH user |
+| `VPS_PORT` | SSH port (optional, defaults to 22) |
+| `VPS_SSH_KEY` | private key for that user |
+| `MOBILE_API_URL` | backend URL the app is built against |
+| `GOOGLE_CLIENT_ID` | web OAuth client id, used as `serverClientId` |
+
+The APK is signed with the debug key (see `android/app/build.gradle.kts`),
+which is fine for sideloading but not for the Play Store.
+
 ## How ingestion works
 
 - **SMS** (Android only): the app listens for incoming SMS in the background and posts each one to `POST /ingestion/sms`. On first launch it also offers a one-time backfill scan via `POST /ingestion/sms/batch`.

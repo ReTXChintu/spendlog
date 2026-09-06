@@ -6,6 +6,8 @@ import { EmailConnectionStatus } from "../types";
 export function SettingsPage() {
   const [connections, setConnections] = useState<EmailConnectionStatus[]>([]);
   const [syncing, setSyncing] = useState(false);
+  // null while unknown, so the button isn't hidden on a slow check.
+  const [apkAvailable, setApkAvailable] = useState<boolean | null>(null);
   const [searchParams] = useSearchParams();
   const gmailStatus = searchParams.get("gmail");
 
@@ -14,6 +16,14 @@ export function SettingsPage() {
   }
 
   useEffect(reload, [gmailStatus]);
+
+  // The APK is published by CI rather than committed, so it may not exist
+  // on a fresh deployment. A HEAD request avoids offering a broken link.
+  useEffect(() => {
+    fetch("/SpendLog.apk", { method: "HEAD" })
+      .then((res) => setApkAvailable(res.ok))
+      .catch(() => setApkAvailable(false));
+  }, []);
 
   async function handleConnect() {
     const { url } = await api.get<{ url: string }>("/ingestion/email/connect");
@@ -71,8 +81,22 @@ export function SettingsPage() {
         </div>
       )}
 
-      <h2>SMS import</h2>
-      <p>SMS auto-import is available in the Android mobile app. Install it and sign in with the same account to start capturing SMS transactions automatically.</p>
+      <h2>Android app</h2>
+      <p>
+        SMS auto-import only works on Android — iOS doesn't let apps read SMS. Install the app and sign
+        in with this same account to start capturing SMS transactions automatically.
+      </p>
+      {apkAvailable === false ? (
+        <p className="hint">No build available yet. The APK is published here by CI on each build.</p>
+      ) : (
+        <a className="google-button" href="/SpendLog.apk" download>
+          Download SpendLog.apk
+        </a>
+      )}
+      <p className="hint">
+        Android blocks installs from outside the Play Store by default — you'll be prompted to allow
+        installs from your browser the first time.
+      </p>
     </div>
   );
 }
