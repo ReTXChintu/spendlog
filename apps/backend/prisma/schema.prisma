@@ -1,13 +1,15 @@
-// Expense Tracker data model.
+// Expense Tracker data model (MongoDB).
 //
 // Amounts are stored as integers in "minor units" (paise/cents) to avoid
 // floating point rounding issues in totals. Enums are deliberately avoided
-// (plain String columns instead) because the default SQLite dev database
-// does not support native enum types; validity is enforced in application
-// code (see src/types.ts for the allowed string unions).
+// (plain String columns instead); validity is enforced in application code
+// (see src/types.ts for the allowed string unions).
+//
+// Note: MongoDB has no migration history — schema/index changes are applied
+// with `npm run prisma:push` rather than `prisma migrate`.
 
 datasource db {
-  provider = "sqlite"
+  provider = "mongodb"
   url      = env("DATABASE_URL")
 }
 
@@ -16,7 +18,7 @@ generator client {
 }
 
 model User {
-  id       String  @id @default(cuid())
+  id       String  @id @default(auto()) @map("_id") @db.ObjectId
   email    String  @unique
   name     String?
   googleId String? @unique
@@ -34,8 +36,8 @@ model User {
 // text (e.g. "HDFC Bank account ending 1234"). Used to tell a user's own
 // accounts apart for self-transfer detection.
 model Account {
-  id          String  @id @default(cuid())
-  userId      String
+  id          String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String  @db.ObjectId
   user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   bankName    String
   last4       String?
@@ -51,9 +53,9 @@ model Account {
 }
 
 model Category {
-  id       String  @id @default(cuid())
+  id       String  @id @default(auto()) @map("_id") @db.ObjectId
   // null = system default category, shared by all users
-  userId   String?
+  userId   String? @db.ObjectId
   user     User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
   name     String
   icon     String?
@@ -71,11 +73,11 @@ model Category {
 // A user (or system) defined rule used to auto-assign a category to a new
 // transaction, e.g. merchant text contains "swiggy" -> Food & Dining.
 model CategoryRule {
-  id         String   @id @default(cuid())
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
   // null = system default rule, shared by all users
-  userId     String?
+  userId     String?  @db.ObjectId
   user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  categoryId String
+  categoryId String   @db.ObjectId
   category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   matchType  String // "MERCHANT_CONTAINS" | "KEYWORD" | "EXACT"
   pattern    String // stored lowercase
@@ -87,16 +89,16 @@ model CategoryRule {
 }
 
 model Transaction {
-  id         String    @id @default(cuid())
-  userId     String
+  id         String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String    @db.ObjectId
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  accountId  String?
+  accountId  String?   @db.ObjectId
   account    Account?  @relation(fields: [accountId], references: [id])
-  categoryId String?
+  categoryId String?   @db.ObjectId
   category   Category? @relation(fields: [categoryId], references: [id])
 
   amountMinor Int // always positive; sign is derived from `type`
-  currency    String @default("INR")
+  currency    String  @default("INR")
   type        String // "DEBIT" | "CREDIT"
   merchant    String?
   note        String?
@@ -122,8 +124,8 @@ model Transaction {
 // bank/UPI transaction emails. Access tokens are short-lived; refreshToken
 // is what allows unattended background syncing.
 model EmailConnection {
-  id           String    @id @default(cuid())
-  userId       String
+  id           String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId       String    @db.ObjectId
   user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   email        String
   accessToken  String

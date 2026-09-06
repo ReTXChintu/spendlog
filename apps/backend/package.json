@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json && npm run prisma:generate",
     "start": "node dist/server.js",
     "prisma:generate": "dotenv -e ../../.env -- prisma generate",
-    "prisma:migrate": "dotenv -e ../../.env -- prisma migrate dev",
+    "prisma:push": "dotenv -e ../../.env -- prisma db push",
     "prisma:studio": "dotenv -e ../../.env -- prisma studio",
     "seed": "tsx src/seed.ts",
     "test": "tsx --test src/**/*.test.ts"

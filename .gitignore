@@ -5,10 +5,6 @@ build/
 *.log
 *.tsbuildinfo
 
-# Prisma / SQLite
-apps/backend/prisma/dev.db
-apps/backend/prisma/dev.db-journal
-
 # Frontend
 apps/frontend/dist/
 # tsc -b emits these next to vite.config.ts because tsconfig.node.json is a
