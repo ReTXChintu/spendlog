@@ -6,7 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../config.dart';
 import 'api_client.dart';
 
-const String _backfillDoneKey = 'expense_tracker_sms_backfill_done';
+const String _backfillDoneKey = 'spendlog_sms_backfill_done';
 
 String _messageId(SmsMessage message) => '${message.address ?? 'unknown'}-${message.date ?? 0}';
 

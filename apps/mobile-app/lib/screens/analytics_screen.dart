@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
 import '../utils/format.dart';
@@ -79,7 +80,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       widthFactor: c.amountMinor / maxCategorySpend,
                       child: Container(
                         height: 8,
-                        decoration: BoxDecoration(color: Colors.deepOrange, borderRadius: BorderRadius.circular(4)),
+                        decoration: BoxDecoration(color: brandBlue, borderRadius: BorderRadius.circular(4)),
                       ),
                     ),
                   ],
@@ -104,7 +105,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                         children: [
                           Container(
                             height: 120 * ((point['spendMinor'] as int) / maxTrendSpend),
-                            decoration: BoxDecoration(color: Colors.deepOrange, borderRadius: BorderRadius.circular(4)),
+                            decoration: BoxDecoration(color: brandBlue, borderRadius: BorderRadius.circular(4)),
                           ),
                           const SizedBox(height: 6),
                           Text(

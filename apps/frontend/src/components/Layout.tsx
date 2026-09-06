@@ -14,7 +14,12 @@ export function Layout() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <span className="app-title">Expense Tracker</span>
+        {/* The icon tile plus a wordmark, rather than the full lockup —
+            its tagline would be illegible at header size. */}
+        <span className="app-brand">
+          <img className="app-brand-icon" src="/app_icon.png" alt="" />
+          <span className="app-title">SpendLog</span>
+        </span>
         <nav className="app-nav">
           {navItems.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => (isActive ? "active" : "")}>

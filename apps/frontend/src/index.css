@@ -8,6 +8,8 @@
   --muted: #64748b;
   --debit: #dc2626;
   --credit: #16a34a;
+  /* Brand blue, sampled from the SpendLog logo. */
+  --brand: #3d6bf5;
 }
 
 * {
@@ -57,8 +59,27 @@ select {
   border-bottom: 1px solid var(--border);
 }
 
+.app-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-brand-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+
 .app-title {
   font-weight: 700;
+}
+
+.login-logo {
+  width: 100%;
+  max-width: 300px;
+  height: auto;
+  margin-bottom: 24px;
 }
 
 .app-nav {
@@ -110,7 +131,13 @@ select {
 }
 
 .google-button:hover {
-  border-color: var(--muted);
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+.app-nav a.active {
+  color: var(--brand);
+  border-bottom-color: var(--brand);
 }
 
 .hint {

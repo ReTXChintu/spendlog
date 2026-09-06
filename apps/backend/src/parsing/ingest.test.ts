@@ -12,7 +12,7 @@ let mongod: MongoMemoryServer;
 
 before(async () => {
   mongod = await MongoMemoryServer.create();
-  await mongoose.connect(mongod.getUri("expense_tracker_test"));
+  await mongoose.connect(mongod.getUri("spendlog_test"));
 });
 
 after(async () => {

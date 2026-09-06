@@ -1,5 +1,5 @@
-name: expense_tracker_mobile
-description: Auto-imports transactions from SMS and Gmail.
+name: spendlog
+description: SpendLog — auto-imports transactions from SMS and Gmail.
 publish_to: "none"
 version: 0.1.0
 
@@ -20,6 +20,20 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.1
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/app_icon.png
+    - assets/logo_full.png
+
+# Generates the native Android/iOS launcher icons from the brand asset.
+# Run after `flutter create .`:  dart run flutter_launcher_icons
+flutter_launcher_icons:
+  image_path: "assets/app_icon.png"
+  android: true
+  ios: true
+  remove_alpha_ios: true
+  adaptive_icon_background: "#2f3540"
+  adaptive_icon_foreground: "assets/app_icon.png"

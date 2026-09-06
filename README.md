@@ -1,4 +1,6 @@
-# Expense Tracker
+# SpendLog
+
+_Track every rupee, every day._
 
 Auto-imports transactions from SMS and Gmail, groups them day-by-day, and
 auto-categorizes them so you don't have to add anything by hand.
@@ -51,10 +53,10 @@ including the database name.
 
 ```
 # Atlas
-DATABASE_URL="mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/expense_tracker?retryWrites=true&w=majority"
+DATABASE_URL="mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/spendlog?retryWrites=true&w=majority"
 
 # Local
-DATABASE_URL="mongodb://localhost:27017/expense_tracker"
+DATABASE_URL="mongodb://localhost:27017/spendlog"
 ```
 
 Mongoose creates collections and indexes on demand, so there is no
@@ -80,7 +82,7 @@ so there is no separate "connect Gmail" step.
 Because `gmail.readonly` is a restricted scope, Google shows an
 "unverified app" warning until the project goes through verification. In
 testing mode that's fine for accounts listed as test users — click
-*Advanced > Go to Expense Tracker (unsafe)* to continue.
+*Advanced > Go to SpendLog (unsafe)* to continue.
 
 The browser never loads Google's JavaScript SDK: `/auth/google/start`
 redirects to Google, and `/auth/google/callback` redirects back with the

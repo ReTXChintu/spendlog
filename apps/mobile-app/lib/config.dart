@@ -10,4 +10,4 @@ const String apiBaseUrl = String.fromEnvironment(
 // Key used for the stored session JWT in SharedPreferences. Declared here
 // because the background SMS isolate reads it without going through
 // ApiClient.
-const String tokenStorageKey = 'expense_tracker_token';
+const String tokenStorageKey = 'spendlog_token';

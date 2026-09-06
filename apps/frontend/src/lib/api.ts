@@ -1,5 +1,5 @@
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
-const TOKEN_STORAGE_KEY = "expense-tracker-token";
+const TOKEN_STORAGE_KEY = "spendlog-token";
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_STORAGE_KEY);

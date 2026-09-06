@@ -1,5 +1,5 @@
 {
-  "name": "@expense-tracker/backend",
+  "name": "@spendlog/backend",
   "version": "0.1.0",
   "private": true,
   "main": "dist/server.js",

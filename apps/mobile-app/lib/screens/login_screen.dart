@@ -39,9 +39,8 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('Expense Tracker', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              const Text('Auto-import and track your spending.', textAlign: TextAlign.center),
+              // The lockup already carries the name and tagline.
+              Image.asset('assets/logo_full.png', width: 280, fit: BoxFit.contain),
               const SizedBox(height: 32),
               if (_loading)
                 const CircularProgressIndicator()

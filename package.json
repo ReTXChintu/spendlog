@@ -1,5 +1,5 @@
 {
-  "name": "expense-tracker",
+  "name": "spendlog",
   "private": true,
   "workspaces": [
     "apps/backend",

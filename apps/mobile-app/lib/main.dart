@@ -4,17 +4,18 @@ import 'screens/login_screen.dart';
 import 'services/api_client.dart';
 
 void main() {
-  runApp(const ExpenseTrackerApp());
+  runApp(const SpendLogApp());
 }
 
-class ExpenseTrackerApp extends StatelessWidget {
-  const ExpenseTrackerApp({super.key});
+class SpendLogApp extends StatelessWidget {
+  const SpendLogApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Expense Tracker',
-      theme: ThemeData(colorSchemeSeed: Colors.deepOrange, useMaterial3: true),
+      title: 'SpendLog',
+      // Seeded from the brand blue in the SpendLog logo.
+      theme: ThemeData(colorSchemeSeed: const Color(0xFF3D6BF5), useMaterial3: true),
       home: const _StartupGate(),
     );
   }

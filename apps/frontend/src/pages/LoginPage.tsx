@@ -14,8 +14,9 @@ export function LoginPage() {
 
   return (
     <div className="login-page">
-      <h1>Expense Tracker</h1>
-      <p>Sign in to auto-import and track your spending.</p>
+      {/* The full lockup already carries the name and tagline, so the page
+          needs no heading of its own. */}
+      <img className="login-logo" src="/logo_full.png" alt="SpendLog — track every rupee, every day." />
 
       {/* A plain link to the backend, which redirects on to Google. No
           Google JavaScript SDK, so nothing here can be blocked by an
