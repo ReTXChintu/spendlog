@@ -53,6 +53,37 @@ function resolveHost(env) {
   return "localhost";
 }
 
+/**
+ * Rejects the two ways these paths are commonly mis-set, both of which
+ * otherwise fail deep inside generation with a confusing error: pointing
+ * them at a directory, or at the same file. They must name two distinct
+ * files, which will be created.
+ */
+function validatePaths(certPath, keyPath) {
+  const example = (dir) =>
+    `  SSL_CERT_PATH="${path.join(dir, "spendlog.crt")}"\n  SSL_KEY_PATH="${path.join(dir, "spendlog.key")}"`;
+
+  if (path.resolve(certPath) === path.resolve(keyPath)) {
+    throw new Error(
+      `SSL_CERT_PATH and SSL_KEY_PATH are the same path:\n  ${certPath}\n\n` +
+        `They must name two different files — the certificate and its private key.\n` +
+        `If that is meant to be a directory, use:\n${example(certPath)}`
+    );
+  }
+
+  for (const [label, target] of [
+    ["SSL_CERT_PATH", certPath],
+    ["SSL_KEY_PATH", keyPath],
+  ]) {
+    if (fs.existsSync(target) && fs.statSync(target).isDirectory()) {
+      throw new Error(
+        `${label} points at a directory, not a file:\n  ${target}\n\n` +
+          `Name the files inside it instead:\n${example(target)}`
+      );
+    }
+  }
+}
+
 function generate(certPath, keyPath, host) {
   // Browsers reject a certificate identified only by Common Name, so the
   // host must appear in subjectAltName — as IP: or DNS: depending on kind.
@@ -89,9 +120,21 @@ function generate(certPath, keyPath, host) {
     throw new Error(`openssl failed:\n${result.stderr ?? result.stdout ?? "(no output)"}`);
   }
 
-  fs.renameSync(tmpCert, certPath);
-  fs.renameSync(tmpKey, keyPath);
-  fs.chmodSync(keyPath, 0o600);
+  try {
+    fs.renameSync(tmpCert, certPath);
+    fs.renameSync(tmpKey, keyPath);
+    fs.chmodSync(keyPath, 0o600);
+  } catch (err) {
+    // Don't leave half a pair behind for the next start to trust.
+    for (const leftover of [tmpCert, tmpKey, certPath, keyPath]) {
+      try {
+        fs.unlinkSync(leftover);
+      } catch {
+        /* not there */
+      }
+    }
+    throw err;
+  }
 
   return alt;
 }
@@ -104,7 +147,10 @@ function generate(certPath, keyPath, host) {
 function ensureCerts({ certPath, keyPath, host, force = false, log = console.log } = {}) {
   if (!certPath || !keyPath) return "skipped: SSL_CERT_PATH/SSL_KEY_PATH not set";
 
-  const present = () => fs.existsSync(certPath) && fs.existsSync(keyPath);
+  validatePaths(certPath, keyPath);
+
+  const present = () =>
+    fs.existsSync(certPath) && fs.existsSync(keyPath) && fs.statSync(certPath).isFile();
   if (present() && !force) return "exists";
 
   fs.mkdirSync(path.dirname(certPath), { recursive: true });
