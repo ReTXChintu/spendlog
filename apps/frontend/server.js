@@ -10,10 +10,34 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT_ENV = path.join(__dirname, "..", "..", ".env");
 
-const PORT = Number(process.env.FRONTEND_PORT ?? 5173);
-const CERT_PATH = process.env.SSL_CERT_PATH ?? "";
-const KEY_PATH = process.env.SSL_KEY_PATH ?? "";
+/**
+ * Reads the repo-root .env, the same file the backend loads. Done here
+ * rather than relying on PM2 to inject the values, because PM2 caches a
+ * process's environment and only refreshes it when restarted with
+ * --update-env — so an edit to .env would otherwise appear to do nothing.
+ * Real environment variables still win, for one-off overrides.
+ */
+function readRootEnv() {
+  const values = {};
+  try {
+    for (const line of fs.readFileSync(ROOT_ENV, "utf8").split(/\r?\n/)) {
+      const match = line.match(/^\s*([A-Za-z0-9_]+)\s*=\s*(.*)$/);
+      if (match) values[match[1]] = match[2].trim().replace(/^["']|["']$/g, "");
+    }
+  } catch {
+    // No .env (local dev, or a container passing real env vars) — fine.
+  }
+  return values;
+}
+
+const fileEnv = readRootEnv();
+const setting = (key, fallback) => process.env[key] || fileEnv[key] || fallback;
+
+const PORT = Number(setting("FRONTEND_PORT", 5173));
+const CERT_PATH = setting("SSL_CERT_PATH", "");
+const KEY_PATH = setting("SSL_KEY_PATH", "");
 
 // dist/ is the build output. public/ is checked as a fallback so a file
 // dropped there after the build — notably SpendLog.apk from CI — is served
@@ -96,11 +120,42 @@ function handler(req, res) {
   fs.createReadStream(target).pipe(res);
 }
 
-const useHttps = CERT_PATH && KEY_PATH;
-const server = useHttps
-  ? https.createServer({ cert: fs.readFileSync(CERT_PATH), key: fs.readFileSync(KEY_PATH) }, handler)
-  : http.createServer(handler);
+/** Reads the TLS pair, failing with a pointed message rather than a stack. */
+function readCredentials() {
+  for (const [label, file] of [
+    ["SSL_CERT_PATH", CERT_PATH],
+    ["SSL_KEY_PATH", KEY_PATH],
+  ]) {
+    if (!fs.existsSync(file)) {
+      console.error(`${label} points at a file that does not exist:\n  ${file}`);
+      console.error("Generate a pair with:  ./scripts/generate-certs.sh <ip-or-hostname>");
+      process.exit(1);
+    }
+  }
+  return { cert: fs.readFileSync(CERT_PATH), key: fs.readFileSync(KEY_PATH) };
+}
+
+const useHttps = Boolean(CERT_PATH && KEY_PATH);
+const server = useHttps ? https.createServer(readCredentials(), handler) : http.createServer(handler);
 
 server.listen(PORT, () => {
   console.log(`Frontend listening on ${useHttps ? "https" : "http"}://0.0.0.0:${PORT}`);
+  if (!useHttps) {
+    console.log("TLS is off (SSL_CERT_PATH / SSL_KEY_PATH not set in .env) — serving plain HTTP.");
+  }
+});
+
+server.on("error", (err) => {
+  if (err.code === "EACCES" && PORT < 1024) {
+    console.error(
+      `Cannot bind port ${PORT}: ports below 1024 need privileges. Either run\n` +
+        `  sudo setcap 'cap_net_bind_service=+ep' $(which node)\n` +
+        `or put a reverse proxy in front and keep FRONTEND_PORT above 1024.`
+    );
+  } else if (err.code === "EADDRINUSE") {
+    console.error(`Port ${PORT} is already in use — is another copy of the frontend running?`);
+  } else {
+    console.error("Frontend server error:", err);
+  }
+  process.exit(1);
 });

@@ -112,24 +112,59 @@ npm run dev -- -d emulator-5554
 
 ```
 git clone <repo> /opt/var/spendlog && cd /opt/var/spendlog
-npm ci
 cp .env.example .env          # then fill it in
 
 ./scripts/generate-certs.sh <your-ip-or-hostname>
-# add the printed SSL_CERT_PATH / SSL_KEY_PATH to .env
+# add the printed SSL_CERT_PATH / SSL_KEY_PATH to .env, and set FRONTEND_PORT
 
-npm run build:backend
-npm run build:frontend
-
-pm2 start ecosystem.config.cjs
-pm2 save && pm2 startup
+npm run deploy                # npm ci + build + start/restart PM2 + save
+npm run pm2:persist           # one-time: survive a reboot
 ```
 
-`ecosystem.config.cjs` runs two processes: `spendlog-backend` (compiled
-`dist/server.js`) and `spendlog-frontend` (`apps/frontend/server.js`, a
-dependency-free static server). Both serve HTTPS when `SSL_CERT_PATH` and
-`SSL_KEY_PATH` are set and plain HTTP otherwise, so local development needs
-no certificates.
+### Scripts
+
+Every deployment action has an npm script, so CI and manual operation use
+the same commands:
+
+| Command | Does |
+| --- | --- |
+| `npm run deploy` | full deploy: `npm ci`, build both apps, start/restart PM2, save |
+| `npm run build` | build backend and frontend |
+| `npm run pm2:start` | `startOrRestart` — starts if stopped, restarts if running |
+| `npm run pm2:restart` / `pm2:reload` | restart / reload both processes |
+| `npm run pm2:stop` / `pm2:delete` | stop / remove them |
+| `npm run pm2:status` | process list |
+| `npm run pm2:logs` | tail both (`pm2:logs:backend`, `pm2:logs:frontend` for one) |
+| `npm run pm2:persist` | install the boot service and snapshot the process list |
+
+All of them pass `--update-env`. PM2 caches a process's environment, so
+without it a changed `.env` appears to have no effect on restart.
+
+### Surviving a reboot
+
+`npm run pm2:persist` does both halves of this, which are easy to confuse:
+
+1. `pm2 startup` installs a systemd unit that launches PM2 at boot
+2. `pm2 save` snapshots the current process list for that unit to restore
+
+Doing only one leaves nothing running after a reboot. `pm2 startup` needs
+root, so when run as a normal user the script prints the exact `sudo …`
+command to run once, then asks you to re-run it.
+
+### Configuration
+
+Both processes read the single `.env` at the repo root themselves — values
+are not injected through PM2, precisely so that a `.env` edit plus a
+restart is enough. The frontend uses:
+
+| Key | Meaning |
+| --- | --- |
+| `FRONTEND_PORT` | port for the built site (default `5173`) |
+| `SSL_CERT_PATH` / `SSL_KEY_PATH` | serve HTTPS when both are set |
+
+Ports below 1024 need privileges. Either grant them once with
+`sudo setcap 'cap_net_bind_service=+ep' $(which node)`, or keep
+`FRONTEND_PORT` above 1024 and put a reverse proxy in front.
 
 ### Google sign-in needs a hostname, not an IP
 

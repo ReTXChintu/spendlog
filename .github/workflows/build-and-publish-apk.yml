@@ -94,6 +94,28 @@ jobs:
             fi
             ls -lh apps/frontend/public/$ARTIFACT_NAME"
 
+      # Pulls the new commit, rebuilds, and restarts PM2 through the npm
+      # scripts, so the same commands work by hand on the box. Skipped
+      # unless DEPLOY_ON_PUSH is set, to keep the APK publish above usable
+      # on its own.
+      - name: Deploy web apps
+        if: vars.DEPLOY_ON_PUSH == 'true'
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          set -euo pipefail
+          PORT="${VPS_PORT:-22}"
+          ssh -i ~/.ssh/deploy_key -p "$PORT" "$VPS_USER@$VPS_HOST" "set -e
+            cd $APP_DIR
+            git pull --ff-only
+            npm ci
+            npm run build
+            npm run pm2:start
+            npm run pm2:save
+            npm run pm2:status"
+
       - name: Clean up SSH key
         if: always()
         run: rm -f ~/.ssh/deploy_key
