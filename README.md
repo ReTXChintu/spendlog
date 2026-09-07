@@ -114,8 +114,8 @@ npm run dev -- -d emulator-5554
 git clone <repo> /opt/var/spendlog && cd /opt/var/spendlog
 cp .env.example .env          # then fill it in
 
-./scripts/generate-certs.sh <your-ip-or-hostname>
-# add the printed SSL_CERT_PATH / SSL_KEY_PATH to .env, and set FRONTEND_PORT
+# set FRONTEND_PORT, SSL_CERT_PATH and SSL_KEY_PATH in .env — the
+# certificate itself is generated automatically if it isn't there
 
 npm run deploy                # npm ci + build + start/restart PM2 + save
 npm run pm2:persist           # one-time: survive a reboot
@@ -184,6 +184,29 @@ To make sign-in work, put a hostname in front of the IP:
 
 With a real hostname you can also use Let's Encrypt instead of a
 self-signed certificate, which removes the browser warnings entirely.
+
+### Certificates
+
+Set `SSL_CERT_PATH` and `SSL_KEY_PATH` in `.env` and leave it at that: if no
+certificate exists at those paths, **both servers generate a self-signed one
+at startup**, so a fresh box needs no separate step. Generation is
+locked, so the two processes starting together produce one certificate
+rather than racing.
+
+The certificate is issued for `SSL_HOST`, falling back to the hostname in
+`FRONTEND_URL`. The host is placed in `subjectAltName` — as an `IP:` or
+`DNS:` entry as appropriate — because browsers reject a certificate
+identified only by Common Name.
+
+To do it up front or to reissue (after changing the host, say):
+
+```
+npm run certs           # generate only if absent
+npm run certs:force     # regenerate
+```
+
+`./scripts/generate-certs.sh [host] [--force]` still works; it's a wrapper
+around the same code.
 
 ### Self-signed certificate caveat
 

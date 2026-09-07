@@ -6,8 +6,13 @@
 import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+// This file is ESM; the shared cert helper is CommonJS and used by the
+// backend too, so it's loaded through createRequire rather than duplicated.
+const require = createRequire(import.meta.url);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_ENV = path.join(__dirname, "..", "..", ".env");
@@ -120,18 +125,20 @@ function handler(req, res) {
   fs.createReadStream(target).pipe(res);
 }
 
-/** Reads the TLS pair, failing with a pointed message rather than a stack. */
+/** Reads the TLS pair, generating a self-signed one if it isn't there. */
 function readCredentials() {
-  for (const [label, file] of [
-    ["SSL_CERT_PATH", CERT_PATH],
-    ["SSL_KEY_PATH", KEY_PATH],
-  ]) {
-    if (!fs.existsSync(file)) {
-      console.error(`${label} points at a file that does not exist:\n  ${file}`);
-      console.error("Generate a pair with:  ./scripts/generate-certs.sh <ip-or-hostname>");
-      process.exit(1);
-    }
+  const { ensureCerts, resolveConfig } = require(
+    path.join(__dirname, "..", "..", "scripts", "ensure-certs.js")
+  );
+
+  try {
+    const status = ensureCerts({ ...resolveConfig(), certPath: CERT_PATH, keyPath: KEY_PATH });
+    if (status !== "exists") console.log(`TLS certificate: ${status}`);
+  } catch (err) {
+    console.error(`Could not prepare a TLS certificate: ${err.message}`);
+    process.exit(1);
   }
+
   return { cert: fs.readFileSync(CERT_PATH), key: fs.readFileSync(KEY_PATH) };
 }
 
