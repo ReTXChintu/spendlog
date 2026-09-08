@@ -18,6 +18,7 @@
     "test": "npm run test --workspace apps/backend",
     "certs": "node scripts/ensure-certs.js",
     "certs:force": "node scripts/ensure-certs.js --force",
+    "certs:letsencrypt": "bash scripts/setup-letsencrypt.sh",
 
     "pm2:start": "pm2 startOrRestart ecosystem.config.cjs --update-env",
     "pm2:restart": "pm2 restart ecosystem.config.cjs --update-env",

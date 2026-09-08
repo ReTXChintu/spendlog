@@ -171,49 +171,66 @@ Ports below 1024 need privileges. Either grant them once with
 Google **rejects raw IP addresses as OAuth redirect URIs entirely** — this
 is not a matter of adding HTTPS. Only `localhost` and `127.0.0.1` are
 exempt, and the host's TLD must be on the
-[public suffix list](https://publicsuffix.org/list/). A self-signed
-certificate on `https://203.0.113.5` will serve fine but sign-in will fail
-with `Invalid Redirect URI`.
+[public suffix list](https://publicsuffix.org/list/).
 
-To make sign-in work, put a hostname in front of the IP:
+Android compounds this: since Android 7 apps do not trust self-signed
+certificates, and there is no prompt to accept one. A self-signed
+certificate therefore breaks the mobile app's API calls outright, not just
+the browser experience.
 
-- **Free, no registration:** `sslip.io` / `nip.io` resolve
-  `203-0-113-5.nip.io` straight to that IP, with no DNS setup.
-- **Free, with a record you control:** a DuckDNS subdomain.
-- **Cleanest:** any cheap domain.
+So a deployed instance needs a hostname *and* a CA-issued certificate. Both
+are free.
 
-With a real hostname you can also use Let's Encrypt instead of a
-self-signed certificate, which removes the browser warnings entirely.
+#### DuckDNS + Let's Encrypt
 
-### Certificates
+`duckdns.org` is on the public suffix list, so each subdomain gets its own
+Let's Encrypt rate limit. `nip.io` and `sslip.io` resolve just as well and
+Google accepts them, but they are **not** on the list — every subdomain in
+the world shares one exhausted rate-limit bucket, so Let's Encrypt will not
+issue and you would be stuck on self-signed.
 
-Set `SSL_CERT_PATH` and `SSL_KEY_PATH` in `.env` and leave it at that: if no
-certificate exists at those paths, **both servers generate a self-signed one
-at startup**, so a fresh box needs no separate step. Generation is
-locked, so the two processes starting together produce one certificate
-rather than racing.
+1. Sign in at [duckdns.org](https://www.duckdns.org), create a subdomain,
+   point it at the server's IP, and copy the token from the top of the page.
+2. Set in `.env`:
 
-The certificate is issued for `SSL_HOST`, falling back to the hostname in
-`FRONTEND_URL`. The host is placed in `subjectAltName` — as an `IP:` or
-`DNS:` entry as appropriate — because browsers reject a certificate
-identified only by Common Name.
+   ```
+   DUCKDNS_DOMAIN="yourname"
+   DUCKDNS_TOKEN="<token>"
+   LETSENCRYPT_EMAIL="you@example.com"
+   SSL_HOST="yourname.duckdns.org"
+   ```
 
-To do it up front or to reissue (after changing the host, say):
+3. Install certbot (`sudo apt install -y certbot`) and run:
 
-```
-npm run certs           # generate only if absent
-npm run certs:force     # regenerate
-```
+   ```
+   sudo ./scripts/setup-letsencrypt.sh
+   ```
 
-`./scripts/generate-certs.sh [host] [--force]` still works; it's a wrapper
-around the same code.
+   It uses the DNS-01 challenge through DuckDNS, so no inbound port has to
+   be reachable. Without `DUCKDNS_TOKEN` it falls back to HTTP-01, which
+   needs port 80 free and open.
 
-### Self-signed certificate caveat
+4. Point `.env` at the issued files, and update the URLs:
 
-Browsers reject a self-signed certificate until it's accepted manually, and
-**you must accept it on both origins** — the frontend and the backend. If
-only the frontend is accepted, its API calls to the backend are blocked
-with no visible prompt, and the app looks broken rather than untrusted.
+   ```
+   SSL_CERT_PATH="/etc/letsencrypt/live/yourname.duckdns.org/fullchain.pem"
+   SSL_KEY_PATH="/etc/letsencrypt/live/yourname.duckdns.org/privkey.pem"
+   FRONTEND_URL="https://yourname.duckdns.org:5173"
+   GOOGLE_OAUTH_REDIRECT_URI="https://yourname.duckdns.org:4000/auth/google/callback"
+   VITE_API_URL="https://yourname.duckdns.org:4000"
+   MOBILE_API_URL="https://yourname.duckdns.org:4000"
+   ```
+
+5. Add that same redirect URI to the OAuth client in Google Cloud Console,
+   then `npm run build && npm run pm2:restart`.
+
+Renewal is handled by certbot's own timer. The deploy hook registered
+during setup restarts PM2 afterwards, without which the processes keep
+serving the expired certificate from memory. Check with
+`sudo certbot renew --dry-run`.
+
+`npm run certs:force` refuses to overwrite a CA-issued certificate, so it
+cannot accidentally replace this with a self-signed one.
 
 ## Android APK builds
 

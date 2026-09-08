@@ -54,6 +54,25 @@ function resolveHost(env) {
 }
 
 /**
+ * True when the certificate was issued by someone else — i.e. its issuer
+ * differs from its subject, which a self-signed certificate's never does.
+ * Used to avoid overwriting a real certificate. Unreadable or unparseable
+ * files are treated as not CA-issued, so this can never block generation
+ * on a corrupt file.
+ */
+function isCaIssued(certPath) {
+  const read = (field) =>
+    spawnSync("openssl", ["x509", "-in", certPath, "-noout", `-${field}`], { encoding: "utf8" });
+
+  const subject = read("subject");
+  const issuer = read("issuer");
+  if (subject.status !== 0 || issuer.status !== 0) return false;
+
+  const normalise = (out) => out.replace(/^\w+=/, "").trim();
+  return normalise(subject.stdout) !== normalise(issuer.stdout);
+}
+
+/**
  * Rejects the two ways these paths are commonly mis-set, both of which
  * otherwise fail deep inside generation with a confusing error: pointing
  * them at a directory, or at the same file. They must name two distinct
@@ -152,6 +171,18 @@ function ensureCerts({ certPath, keyPath, host, force = false, log = console.log
   const present = () =>
     fs.existsSync(certPath) && fs.existsSync(keyPath) && fs.statSync(certPath).isFile();
   if (present() && !force) return "exists";
+
+  // Replacing a CA-issued certificate with a self-signed one would break
+  // the Android app (which won't trust self-signed at all) and reintroduce
+  // browser warnings — never something --force is meant to do silently.
+  if (present() && force && isCaIssued(certPath)) {
+    throw new Error(
+      `${certPath} holds a CA-issued certificate, not a self-signed one.\n\n` +
+        `Replacing it with a self-signed certificate would break the Android app and\n` +
+        `bring back browser warnings. Renew it with:  sudo certbot renew\n` +
+        `If you really mean to discard it, delete the file first.`
+    );
+  }
 
   fs.mkdirSync(path.dirname(certPath), { recursive: true });
   fs.mkdirSync(path.dirname(keyPath), { recursive: true });
