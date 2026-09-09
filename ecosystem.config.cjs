@@ -24,6 +24,12 @@ module.exports = {
       // interval, so a single instance avoids duplicate scheduled syncs.
       exec_mode: "fork",
       autorestart: true,
+      // max_restarts only counts starts that failed to stay up for
+      // min_uptime. Without min_uptime set, a process that dies after a
+      // couple of seconds still counts as a successful start, the counter
+      // resets, and a fatal misconfiguration restarts forever instead of
+      // stopping — filling the logs and hiding the actual error.
+      min_uptime: "10s",
       max_restarts: 10,
       restart_delay: 2000,
       max_memory_restart: "500M",
@@ -37,6 +43,12 @@ module.exports = {
       instances: 1,
       exec_mode: "fork",
       autorestart: true,
+      // max_restarts only counts starts that failed to stay up for
+      // min_uptime. Without min_uptime set, a process that dies after a
+      // couple of seconds still counts as a successful start, the counter
+      // resets, and a fatal misconfiguration restarts forever instead of
+      // stopping — filling the logs and hiding the actual error.
+      min_uptime: "10s",
       max_restarts: 10,
       restart_delay: 2000,
       max_memory_restart: "300M",
