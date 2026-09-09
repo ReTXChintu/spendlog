@@ -69,8 +69,11 @@ echo "Requesting a certificate for $DOMAIN"
 
 # Restart PM2 after every successful issuance and renewal, otherwise the
 # running processes keep serving the old certificate until something else
-# restarts them.
-DEPLOY_HOOK="cd $ROOT && npm run pm2:restart"
+# restarts them. It has to be a path to an executable: certbot validates
+# the hook and rejects an inline command ("Unable to find deploy-hook
+# command cd").
+DEPLOY_HOOK="$ROOT/scripts/certbot-deploy-hook.sh"
+chmod +x "$DEPLOY_HOOK"
 
 if [ -n "$TOKEN" ]; then
   echo "Using the DNS-01 challenge via DuckDNS (no inbound port needed)."
