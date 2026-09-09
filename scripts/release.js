@@ -8,14 +8,14 @@
  * answer. Everything here follows the root package.json.
  *
  *   npm run release              # 0.1.0 -> 0.1.1
- *   npm run release -- minor     # 0.1.0 -> 0.2.0
+ *   npm run release:minor        # 0.1.0 -> 0.2.0
  *   npm run release -- 1.4.0     # an explicit version
- *   npm run release -- minor --push
+ *   npm run release -- --local   # bump and tag, but ship nothing
  *
- * Without --push it stops after the tag and prints what to run next, so a
- * bump can be inspected before anything leaves the machine. With --push it
- * pushes the commit and the tag and opens the GitHub release, which is
- * what the deploy workflow triggers on.
+ * Releasing means releasing: this bumps, commits, tags, pushes and
+ * publishes the GitHub release, which is what starts the deploy workflow.
+ * Pass --local to stop after the tag, for when you want to look at the
+ * bump before anything leaves the machine.
  */
 const { execFileSync } = require("child_process");
 const fs = require("fs");
@@ -81,7 +81,7 @@ function nextBuildNumber(pubspec) {
 
 function main() {
   const args = process.argv.slice(2);
-  const push = args.includes("--push");
+  const push = !args.includes("--local");
   const bump = args.find((arg) => !arg.startsWith("--")) ?? "patch";
 
   // A release commit should contain the version bump and nothing else,
@@ -134,10 +134,10 @@ function main() {
   console.log(`\n${current} -> ${version} (Android build ${build}), committed and tagged ${tag}.`);
 
   if (!push) {
-    console.log("\nNothing has been pushed. To ship it:");
+    console.log("\n--local, so nothing has been pushed. To ship it:");
     console.log(`  git push && git push origin ${tag}`);
     console.log(`  gh release create ${tag} --generate-notes`);
-    console.log("\nOr re-run with --push to do both.");
+    console.log(`\nOr to undo it:  git reset --hard HEAD~1 && git tag -d ${tag}`);
     return;
   }
 
@@ -145,15 +145,20 @@ function main() {
   git(["push", "origin", branch]);
   git(["push", "origin", tag]);
 
+  // Publishing the release is what triggers the deploy workflow. Pushing
+  // the tag on its own deploys nothing, so a failure here is a failure.
   try {
-    run("gh", ["release", "create", tag, "--title", tag, "--generate-notes"]);
-    console.log(`\nReleased ${tag}. The deploy workflow takes it from here.`);
+    run("gh", ["release", "create", tag, "--title", tag, "--generate-notes"], {
+      shell: process.platform === "win32",
+    });
+    console.log(`\nReleased ${tag}. The deploy workflow takes it from here:`);
+    console.log("  gh run watch");
   } catch {
-    // gh isn't installed or isn't logged in — the tag is pushed either way,
-    // and the workflow triggers on the release, not the tag.
-    console.log(`\nPushed ${tag}, but couldn't create the GitHub release with gh.`);
-    console.log(`Create it in the GitHub UI (or run: gh release create ${tag} --generate-notes)`);
-    console.log("— publishing the release is what starts the deploy.");
+    console.log(`\nPushed ${tag}, but couldn't publish the release with gh.`);
+    console.log("Install it from https://cli.github.com and run `gh auth login`, then:");
+    console.log(`  gh release create ${tag} --generate-notes`);
+    console.log("Nothing deploys until the release is published.");
+    process.exitCode = 1;
   }
 }
 

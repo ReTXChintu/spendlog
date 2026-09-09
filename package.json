@@ -22,6 +22,7 @@
     "release:patch": "node scripts/release.js patch",
     "release:minor": "node scripts/release.js minor",
     "release:major": "node scripts/release.js major",
+    "release:local": "node scripts/release.js --local",
 
     "certs": "node scripts/ensure-certs.js",
     "certs:force": "node scripts/ensure-certs.js --force",
