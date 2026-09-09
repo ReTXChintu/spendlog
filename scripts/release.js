@@ -154,10 +154,11 @@ function main() {
     console.log(`\nReleased ${tag}. The deploy workflow takes it from here:`);
     console.log("  gh run watch");
   } catch {
-    console.log(`\nPushed ${tag}, but couldn't publish the release with gh.`);
-    console.log("Install it from https://cli.github.com and run `gh auth login`, then:");
+    // gh has already printed why on stderr — repeating a guess here only
+    // sends people looking in the wrong place.
+    console.log(`\nPushed ${tag}, but gh couldn't publish the release (see above).`);
+    console.log("Nothing deploys until it is published. Once the cause is fixed:");
     console.log(`  gh release create ${tag} --generate-notes`);
-    console.log("Nothing deploys until the release is published.");
     process.exitCode = 1;
   }
 }
