@@ -1,11 +1,10 @@
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { RequireAuth } from "./components/RequireAuth";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { AuthCallbackPage } from "./pages/AuthCallbackPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SettingsPage } from "./pages/SettingsPage";
-import { TodayPage } from "./pages/TodayPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
 
 export default function App() {
@@ -20,8 +19,9 @@ export default function App() {
           </RequireAuth>
         }
       >
-        <Route path="/" element={<TodayPage />} />
-        <Route path="/transactions" element={<TransactionsPage />} />
+        <Route path="/" element={<TransactionsPage />} />
+        {/* The ledger used to be split across two pages; keep the old path working. */}
+        <Route path="/transactions" element={<Navigate to="/" replace />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>

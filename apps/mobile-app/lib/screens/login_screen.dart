@@ -117,7 +117,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           Expanded(
                             child: Text(
                               _error!,
-                              style: const TextStyle(fontSize: 12.5, color: Color(0xFF991B1B)),
+                              style: TextStyle(fontSize: 12.5, color: context.c.debit),
                             ),
                           ),
                         ],

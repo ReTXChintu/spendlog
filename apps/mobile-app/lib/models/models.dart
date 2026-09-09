@@ -46,6 +46,9 @@ class Transaction {
   final bool isTransfer;
   final bool pending;
   final DateTime occurredAt;
+  /// Set when a person corrected the transaction by hand, so the list can
+  /// say so rather than implying the figures came straight from the bank.
+  final DateTime? editedAt;
   final Category? category;
   final Account? account;
 
@@ -61,6 +64,7 @@ class Transaction {
     required this.isTransfer,
     required this.pending,
     required this.occurredAt,
+    this.editedAt,
     this.category,
     this.account,
   });
@@ -77,6 +81,7 @@ class Transaction {
         isTransfer: json['isTransfer'] as bool? ?? false,
         pending: json['pending'] as bool? ?? false,
         occurredAt: DateTime.parse(json['occurredAt'] as String),
+        editedAt: json['editedAt'] != null ? DateTime.parse(json['editedAt'] as String) : null,
         category: json['category'] != null ? Category.fromJson(json['category'] as Map<String, dynamic>) : null,
         account: json['account'] != null ? Account.fromJson(json['account'] as Map<String, dynamic>) : null,
       );

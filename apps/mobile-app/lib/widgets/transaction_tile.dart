@@ -12,12 +12,16 @@ class TransactionTile extends StatelessWidget {
   final Transaction transaction;
   final List<Category> categories;
   final ValueChanged<Transaction> onUpdated;
+  /// Opens the full edit form. Parsing gets most things right but not all,
+  /// so every row has to be correctable by hand.
+  final VoidCallback? onEdit;
 
   const TransactionTile({
     super.key,
     required this.transaction,
     required this.categories,
     required this.onUpdated,
+    this.onEdit,
   });
 
   String get _meta {
@@ -72,6 +76,13 @@ class TransactionTile extends StatelessWidget {
                         style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.8, color: context.c.ink),
                       ),
                     ),
+                    if (onEdit != null) ...[
+                      const SizedBox(width: 6),
+                      GestureDetector(
+                        onTap: onEdit,
+                        child: Icon(Icons.edit_outlined, size: 14, color: context.c.mutedLight),
+                      ),
+                    ],
                     if (transaction.rawText != null) ...[
                       const SizedBox(width: 6),
                       GestureDetector(
@@ -100,18 +111,26 @@ class TransactionTile extends StatelessWidget {
                     ),
                   ],
                 ),
-                if (isTransfer) ...[
+                if (isTransfer || transaction.editedAt != null) ...[
                   const SizedBox(height: 5),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF1F5F9),
-                      borderRadius: BorderRadius.circular(100),
-                    ),
-                    child: Text(
-                      'Not counted',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.c.transfer),
-                    ),
+                  Wrap(
+                    spacing: 6,
+                    children: [
+                      if (isTransfer)
+                        _Badge(
+                          label: 'Not counted',
+                          background: context.c.chipNeutral,
+                          foreground: context.c.transfer,
+                        ),
+                      // Says plainly that these figures are the user's, not
+                      // the bank's, so a corrected row isn't second-guessed.
+                      if (transaction.editedAt != null)
+                        _Badge(
+                          label: 'Edited',
+                          background: context.c.chipNeutral,
+                          foreground: context.c.muted,
+                        ),
+                    ],
                   ),
                 ],
               ],
@@ -145,7 +164,7 @@ class _CategoryChip extends StatelessWidget {
       return Container(
         width: 36,
         height: 36,
-        decoration: const BoxDecoration(color: Color(0xFFF1F5F9), shape: BoxShape.circle),
+        decoration: BoxDecoration(color: context.c.chipNeutral, shape: BoxShape.circle),
         child: Icon(Icons.arrow_forward, size: 17, color: context.c.transfer),
       );
     }
@@ -173,6 +192,26 @@ class _CategoryChip extends StatelessWidget {
           size: 17,
           color: uncategorized ? context.c.mutedLight : Colors.white,
         ),
+      ),
+    );
+  }
+}
+
+class _Badge extends StatelessWidget {
+  final String label;
+  final Color background;
+  final Color foreground;
+
+  const _Badge({required this.label, required this.background, required this.foreground});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(color: background, borderRadius: BorderRadius.circular(100)),
+      child: Text(
+        label,
+        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: foreground),
       ),
     );
   }

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../theme.dart';
 import 'analytics_screen.dart';
 import 'settings_screen.dart';
-import 'today_screen.dart';
 import 'transactions_screen.dart';
 
 class HomeShell extends StatefulWidget {
@@ -14,29 +13,13 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
-  // Rebuilt when the nudge on Today sends the user to review uncategorized
-  // transactions, so the filter is applied on arrival.
-  Key _transactionsKey = UniqueKey();
-  bool _startUncategorized = false;
 
-  static const _titles = ['Today', 'Transactions', 'Analytics', 'Settings'];
-
-  void _reviewUncategorized() {
-    setState(() {
-      _startUncategorized = true;
-      _transactionsKey = UniqueKey();
-      _index = 1;
-    });
-  }
+  static const _titles = ['Transactions', 'Analytics', 'Settings'];
 
   @override
   Widget build(BuildContext context) {
     final screens = [
-      TodayScreen(
-        onReviewUncategorized: _reviewUncategorized,
-        onOpenSettings: () => setState(() => _index = 3),
-      ),
-      TransactionsScreen(key: _transactionsKey, startUncategorized: _startUncategorized),
+      TransactionsScreen(onOpenSettings: () => setState(() => _index = 2)),
       const AnalyticsScreen(),
       const SettingsScreen(),
     ];
@@ -61,12 +44,8 @@ class _HomeShellState extends State<HomeShell> {
       body: IndexedStack(index: _index, children: screens),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() {
-          if (i != 1) _startUncategorized = false;
-          _index = i;
-        }),
+        onDestinationSelected: (i) => setState(() => _index = i),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.today_outlined), selectedIcon: Icon(Icons.today), label: 'Today'),
           NavigationDestination(
             icon: Icon(Icons.receipt_long_outlined),
             selectedIcon: Icon(Icons.receipt_long),

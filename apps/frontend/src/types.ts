@@ -29,6 +29,7 @@ export interface Transaction {
   isTransfer: boolean;
   pending: boolean;
   occurredAt: string;
+  editedAt: string | null;
   category: Category | null;
   account: Account | null;
 }

@@ -15,11 +15,13 @@ export function TransactionRow({
   categories,
   onUpdated,
   onShowRaw,
+  onEdit,
 }: {
   transaction: Transaction;
   categories: Category[];
   onUpdated: (updated: Transaction) => void;
   onShowRaw: (transaction: Transaction) => void;
+  onEdit: (transaction: Transaction) => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   // Set after a category is chosen, offering to remember the merchant.
@@ -66,6 +68,9 @@ export function TransactionRow({
           <div className="row-main">
             <div className="row-merchant">
               <span className="txt">{transaction.merchant ?? "Unknown"}</span>
+              <button className="row-info-btn" onClick={() => onEdit(transaction)} title="Edit transaction">
+                <Icon name="ic-pencil" />
+              </button>
               {transaction.rawText && (
                 <button className="row-info-btn" onClick={() => onShowRaw(transaction)} title="View original message">
                   <Icon name="ic-info" />
@@ -82,6 +87,11 @@ export function TransactionRow({
                   <Icon name="ic-arrow-right" />
                   Between your accounts · not counted
                 </span>
+              </div>
+            )}
+            {transaction.editedAt && !transaction.isTransfer && (
+              <div className="row-badges">
+                <span className="badge badge-edited">Edited</span>
               </div>
             )}
             {transaction.pending && (

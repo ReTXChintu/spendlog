@@ -75,9 +75,12 @@ class _CategorySheetState extends State<_CategorySheet> {
     messenger.showSnackBar(
       SnackBar(
         duration: const Duration(seconds: 8),
-        backgroundColor: context.c.ink,
+        backgroundColor: context.c.darkPanel,
         behavior: SnackBarBehavior.floating,
-        content: Text('Categorized as ${category.name}. Apply to future "$shown" payments?'),
+        content: Text(
+          'Categorized as ${category.name}. Apply to future "$shown" payments?',
+          style: TextStyle(color: context.c.darkPanelText),
+        ),
         action: SnackBarAction(
           label: 'Yes',
           textColor: const Color(0xFF9DB6FF),

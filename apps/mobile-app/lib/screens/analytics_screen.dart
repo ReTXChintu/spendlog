@@ -266,7 +266,7 @@ class _CategoryBar extends StatelessWidget {
             child: LinearProgressIndicator(
               value: fraction.clamp(0.0, 1.0),
               minHeight: 11,
-              backgroundColor: const Color(0xFFEFEFEA),
+              backgroundColor: context.c.track,
               valueColor: AlwaysStoppedAnimation<Color>(color),
             ),
           ),
@@ -311,7 +311,7 @@ class _Trend extends StatelessWidget {
                         width: 30,
                         height: 6,
                         decoration: BoxDecoration(
-                          color: const Color(0xFFE7E7E2),
+                          color: context.c.lineStrong,
                           borderRadius: BorderRadius.circular(3),
                         ),
                       )

@@ -149,6 +149,9 @@ export interface TransactionDoc {
   isTransfer: boolean;
   pending: boolean;
   occurredAt: Date;
+  /// Set when a person edited the transaction by hand, so the UI can say so
+  /// and automatic passes can leave their corrections alone.
+  editedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -170,6 +173,7 @@ const transactionSchema = new Schema<TransactionDoc>(
     isTransfer: { type: Boolean, default: false },
     pending: { type: Boolean, default: false },
     occurredAt: { type: Date, required: true },
+    editedAt: { type: Date, default: null },
   },
   { timestamps: true, ...serialization }
 );

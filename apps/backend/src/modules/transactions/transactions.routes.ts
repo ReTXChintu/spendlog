@@ -3,7 +3,7 @@ import { FilterQuery } from "mongoose";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
-import { Transaction, TransactionDoc } from "../../models";
+import { Account, Transaction, TransactionDoc } from "../../models";
 import { TRANSACTION_TYPES } from "../../types";
 
 export const transactionsRouter = Router();
@@ -73,26 +73,64 @@ transactionsRouter.get("/", async (req, res) => {
   res.json({ items, total, page: parsed.data.page, pageSize: parsed.data.pageSize });
 });
 
-// GET /transactions/by-day — the "Today"/ledger view: transactions grouped
-// by calendar day, most recent day first.
+const byDaySchema = listQuerySchema.extend({
+  // Paginates by *day* rather than by transaction, so a day's totals are
+  // always computed from every transaction in it. Paginating by transaction
+  // would split a day across pages and show a partial total as if it were
+  // the whole day.
+  days: z.coerce.number().int().min(1).max(120).default(30),
+  before: z.coerce.date().optional(),
+});
+
+// GET /transactions/by-day — the ledger: transactions grouped by calendar
+// day, most recent first, with each day's spend and income.
 transactionsRouter.get("/by-day", async (req, res) => {
-  const parsed = listQuerySchema.safeParse(req.query);
+  const parsed = byDaySchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const transactions = await Transaction.find(buildFilter(req, parsed.data))
+  const filter = buildFilter(req, parsed.data);
+  if (parsed.data.before) {
+    // Continue below the oldest day already shown.
+    filter.occurredAt = { ...(filter.occurredAt as object), $lt: parsed.data.before };
+  }
+
+  // Which days to return, newest first — asked separately so each returned
+  // day is complete.
+  const dayRows = await Transaction.aggregate<{ _id: string; earliest: Date }>([
+    { $match: filter },
+    {
+      $group: {
+        _id: { $dateToString: { format: "%Y-%m-%d", date: "$occurredAt" } },
+        earliest: { $min: "$occurredAt" },
+      },
+    },
+    { $sort: { _id: -1 } },
+    { $limit: parsed.data.days + 1 },
+  ]);
+
+  // One extra day was requested purely to detect whether more exist.
+  const hasMore = dayRows.length > parsed.data.days;
+  const page = dayRows.slice(0, parsed.data.days);
+
+  if (page.length === 0) {
+    return res.json({ days: [], hasMore: false, nextBefore: null });
+  }
+
+  const oldest = page[page.length - 1].earliest;
+  const transactions = await Transaction.find({ ...filter, occurredAt: { ...(filter.occurredAt as object), $gte: oldest } })
     .populate("category")
     .populate("account")
     .sort({ occurredAt: -1 });
 
-  const days = new Map<string, typeof transactions>();
+  const grouped = new Map<string, typeof transactions>();
   for (const tx of transactions) {
     const dayKey = tx.occurredAt.toISOString().slice(0, 10);
-    const bucket = days.get(dayKey);
+    const bucket = grouped.get(dayKey);
     if (bucket) bucket.push(tx);
-    else days.set(dayKey, [tx]);
+    else grouped.set(dayKey, [tx]);
   }
 
-  const result = Array.from(days.entries()).map(([date, items]) => {
+  const days = Array.from(grouped.entries()).map(([date, items]) => {
     const spend = items
       .filter((t) => t.type === "DEBIT" && !t.isTransfer)
       .reduce((sum, t) => sum + t.amountMinor, 0);
@@ -102,7 +140,7 @@ transactionsRouter.get("/by-day", async (req, res) => {
     return { date, spendMinor: spend, incomeMinor: income, transactions: items };
   });
 
-  res.json(result);
+  res.json({ days, hasMore, nextBefore: hasMore ? oldest.toISOString() : null });
 });
 
 transactionsRouter.get("/:id", validObjectIdParam("id"), async (req, res) => {
@@ -114,14 +152,19 @@ transactionsRouter.get("/:id", validObjectIdParam("id"), async (req, res) => {
   res.json(tx);
 });
 
+// Mirrors the edit form field for field: the same form adds a transaction
+// and corrects one, so it has to accept the same shape — including the
+// nulls it sends for fields the user left blank.
 const createTransactionSchema = z.object({
   amountMinor: z.number().int().positive(),
-  currency: z.string().default("INR"),
+  currency: z.string().min(1).max(8).default("INR"),
   type: z.enum(TRANSACTION_TYPES),
-  merchant: z.string().optional(),
-  note: z.string().optional(),
-  categoryId: z.string().optional(),
-  occurredAt: z.string().datetime(),
+  merchant: z.string().max(120).nullable().optional(),
+  note: z.string().max(500).nullable().optional(),
+  categoryId: z.string().nullable().optional(),
+  accountId: z.string().nullable().optional(),
+  occurredAt: z.coerce.date(),
+  isTransfer: z.boolean().optional(),
 });
 
 // POST /transactions — manual entry (cash spends, or anything the auto
@@ -130,15 +173,24 @@ transactionsRouter.post("/", async (req, res) => {
   const parsed = createTransactionSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
+  // Reject an id that isn't one of this user's own accounts, rather than
+  // storing a dangling reference.
+  if (parsed.data.accountId) {
+    const owned = await Account.exists({ _id: parsed.data.accountId, userId: currentUserId(req) });
+    if (!owned) return res.status(400).json({ error: "Unknown account" });
+  }
+
   const created = await Transaction.create({
     userId: currentUserId(req),
     amountMinor: parsed.data.amountMinor,
     currency: parsed.data.currency,
     type: parsed.data.type,
-    merchant: parsed.data.merchant,
-    note: parsed.data.note,
+    merchant: parsed.data.merchant ?? null,
+    note: parsed.data.note ?? null,
     categoryId: parsed.data.categoryId ?? null,
-    occurredAt: new Date(parsed.data.occurredAt),
+    accountId: parsed.data.accountId ?? null,
+    occurredAt: parsed.data.occurredAt,
+    isTransfer: parsed.data.isTransfer ?? false,
     source: "MANUAL",
   });
 
@@ -146,20 +198,36 @@ transactionsRouter.post("/", async (req, res) => {
   res.status(201).json(tx);
 });
 
+// Every field a person might need to correct. Automatic parsing gets a
+// lot right but not everything, so a transaction has to be fully editable
+// by hand — including the amount and which way the money went.
 const updateTransactionSchema = z.object({
+  amountMinor: z.number().int().positive().optional(),
+  currency: z.string().min(1).max(8).optional(),
+  type: z.enum(TRANSACTION_TYPES).optional(),
+  merchant: z.string().max(120).nullable().optional(),
+  note: z.string().max(500).nullable().optional(),
   categoryId: z.string().nullable().optional(),
-  merchant: z.string().optional(),
-  note: z.string().optional(),
+  accountId: z.string().nullable().optional(),
+  occurredAt: z.coerce.date().optional(),
   isTransfer: z.boolean().optional(),
+  pending: z.boolean().optional(),
 });
 
 transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   const parsed = updateTransactionSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
+  // Reject an id that isn't one of this user's own accounts, rather than
+  // storing a dangling reference.
+  if (parsed.data.accountId) {
+    const owned = await Account.exists({ _id: parsed.data.accountId, userId: currentUserId(req) });
+    if (!owned) return res.status(400).json({ error: "Unknown account" });
+  }
+
   const updated = await Transaction.findOneAndUpdate(
     { _id: req.params.id, userId: currentUserId(req) },
-    { $set: parsed.data },
+    { $set: { ...parsed.data, editedAt: new Date() } },
     { new: true }
   )
     .populate("category")

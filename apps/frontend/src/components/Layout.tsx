@@ -4,8 +4,7 @@ import { Icon, IconSprite } from "./Icon";
 import { ThemeToggle } from "./ThemeToggle";
 
 const NAV = [
-  { to: "/", label: "Today", icon: "ic-calendar", end: true },
-  { to: "/transactions", label: "Transactions", icon: "ic-search" },
+  { to: "/", label: "Transactions", icon: "ic-receipt", end: true },
   { to: "/analytics", label: "Analytics", icon: "ic-trend" },
   { to: "/settings", label: "Settings", icon: "ic-filter" },
 ];
