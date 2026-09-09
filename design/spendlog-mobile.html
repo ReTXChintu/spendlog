@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpendLog — Mobile</title>
+<style>
+:root{
+  --ink:#0F172A;
+  --ink-70:#334155;
+  --brand:#3D6BF5;
+  --brand-dark:#2F53C9;
+  --brand-50:#EEF2FF;
+  --brand-100:#E0E7FF;
+  --debit:#DC2626;
+  --debit-50:#FEF2F2;
+  --credit:#16A34A;
+  --credit-50:#F0FDF4;
+  --muted:#64748B;
+  --muted-light:#94A3B8;
+  --paper:#F5F5F2;
+  --surface:#FFFFFF;
+  --line:#E4E4DF;
+  --line-strong:#D6D6D0;
+  --transfer:#94A3B8;
+  --warn:#B45309;
+  --warn-bg:#FFFBEB;
+  --radius-sm:8px;
+  --radius-md:14px;
+  --radius-lg:20px;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Consolas, "Liberation Mono", monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:var(--font-sans);
+  background:#DADAD3;
+  color:var(--ink);
+  -webkit-font-smoothing:antialiased;
+  font-size:14px;
+  min-height:100vh;
+  display:flex;align-items:flex-start;justify-content:center;
+  padding:36px 16px;
+  gap:28px;
+  flex-wrap:wrap;
+}
+button{font-family:inherit;cursor:pointer}
+svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.num{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+
+/* ---------- phone frame ---------- */
+.phone{
+  width:390px;height:844px;background:#000;border-radius:52px;
+  padding:14px;box-shadow:0 30px 60px rgba(0,0,0,.35);flex-shrink:0;
+  position:sticky; top:36px;
+}
+.phone-screen{
+  width:100%;height:100%;background:var(--paper);border-radius:38px;overflow:hidden;
+  position:relative;display:flex;flex-direction:column;
+}
+.notch{position:absolute;top:0;left:50%;transform:translateX(-50%);width:120px;height:26px;background:#000;border-radius:0 0 16px 16px;z-index:50}
+.status-bar{height:46px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 26px 6px 26px;font-size:13px;font-weight:700;flex-shrink:0}
+.status-icons{display:flex;gap:5px;align-items:center}
+
+.screen-body{flex:1;overflow-y:auto;display:none;flex-direction:column}
+.screen-body.active{display:flex}
+.mob-scroll{flex:1;overflow-y:auto;padding:14px 16px 20px 16px}
+
+.tab-bar{height:64px;flex-shrink:0;border-top:1px solid var(--line);background:var(--surface);display:none;align-items:stretch}
+.tab-bar.active{display:flex}
+.tab-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border:none;background:none;color:var(--muted-light)}
+.tab-item svg{width:21px;height:21px}
+.tab-item span{font-size:10.5px;font-weight:700}
+.tab-item.active{color:var(--brand)}
+
+.mob-header{display:flex;align-items:center;justify-content:space-between;padding:10px 16px 6px 16px;flex-shrink:0}
+.mob-title{font-size:24px;font-weight:800;letter-spacing:-0.02em;margin:0}
+.mob-header-btn{width:34px;height:34px;border-radius:50%;border:1px solid var(--line-strong);background:var(--surface);display:flex;align-items:center;justify-content:center;color:var(--ink-70)}
+.mob-header-btn svg{width:16px;height:16px}
+.pull-refresh{text-align:center;padding:8px 0;color:var(--muted);font-size:11.5px;display:flex;align-items:center;justify-content:center;gap:6px}
+.pull-refresh svg{width:13px;height:13px}
+
+/* ---------- day ledger (mobile) ---------- */
+.day-group{margin-bottom:20px}
+.day-header{display:flex;align-items:baseline;justify-content:space-between;padding:0 2px 8px 2px;border-bottom:2px solid var(--ink);margin-bottom:2px}
+.day-label{font-weight:800;font-size:13.5px}
+.day-totals{display:flex;gap:10px;font-size:12px}
+.day-totals .spend{color:var(--debit);font-family:var(--font-mono);font-weight:700}
+.day-totals .income{color:var(--credit);font-family:var(--font-mono);font-weight:700}
+.day-totals .dsep{color:var(--muted-light)}
+
+.row{display:grid;grid-template-columns:36px 1fr auto;gap:11px;align-items:center;padding:11px 2px;border-bottom:1px solid var(--line)}
+.row-cat-chip{width:32px;height:32px;border-radius:50%;border:none;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#fff;padding:0}
+.row-cat-chip svg{width:15px;height:15px}
+.row-cat-chip.uncat{background:var(--surface);border:1.6px dashed var(--muted-light);color:var(--muted-light)}
+.row-main{min-width:0}
+.row-merchant{font-weight:700;font-size:13.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:5px}
+.row-merchant .txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row-info-btn{background:none;border:none;color:var(--muted-light);padding:0;display:flex;flex-shrink:0}
+.row-info-btn svg{width:12px;height:12px}
+.row-meta{display:flex;align-items:center;gap:4px;color:var(--muted);font-size:11px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row-meta svg{width:10px;height:10px;flex-shrink:0}
+.row-badges{display:flex;gap:5px;margin-top:4px}
+.badge{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:700;padding:2px 7px;border-radius:100px}
+.badge svg{width:9px;height:9px}
+.badge-transfer{background:#F1F5F9;color:var(--transfer)}
+.badge-pending{background:var(--warn-bg);color:var(--warn)}
+.row-amount{font-family:var(--font-mono);font-weight:700;font-size:13.5px;white-space:nowrap;text-align:right}
+.row-amount.debit{color:var(--debit)}
+.row-amount.credit{color:var(--credit)}
+.row-amount.transfer-amt{color:var(--transfer)}
+.row.is-transfer{background:#FBFBFA}
+
+.remember-banner{margin:0 0 8px 45px;background:var(--brand-50);border:1px solid var(--brand-100);border-radius:8px;padding:8px 10px;font-size:11.3px}
+.remember-banner b{color:var(--brand-dark)}
+.remember-actions{display:flex;gap:6px;margin-top:6px}
+.remember-actions button{font-size:11px;padding:4px 9px;border-radius:6px;font-weight:700;border:1px solid var(--line-strong);background:var(--surface)}
+.remember-actions button.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+
+.month-rollup{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md);padding:14px 16px;margin:0 16px 16px 16px;display:flex;justify-content:space-between}
+.month-rollup .mr-item .label{font-size:11px;color:var(--muted);font-weight:600}
+.month-rollup .mr-item .value{font-size:15px;font-weight:800;font-family:var(--font-mono);margin-top:2px}
+.nudge-strip{margin:0 16px 16px 16px;background:var(--brand-50);border:1px solid var(--brand-100);border-radius:var(--radius-md);padding:11px 13px;display:flex;align-items:center;gap:10px;font-size:12px}
+.nudge-strip svg{width:16px;height:16px;color:var(--brand-dark);flex-shrink:0}
+.nudge-strip b{color:var(--brand-dark)}
+.nudge-strip .go{margin-left:auto;color:var(--brand-dark);font-weight:700;font-size:11.5px;flex-shrink:0}
+
+/* ---------- states ---------- */
+.state-block{display:flex;flex-direction:column;align-items:center;text-align:center;padding:60px 24px 30px 24px}
+.state-icon{width:48px;height:48px;border-radius:13px;background:var(--brand-50);color:var(--brand);display:flex;align-items:center;justify-content:center;margin-bottom:16px}
+.state-icon.warn{background:var(--warn-bg);color:var(--warn)}
+.state-icon svg{width:24px;height:24px}
+.state-title{font-size:16.5px;font-weight:800;margin:0 0 8px 0}
+.state-body{color:var(--ink-70);font-size:13px;line-height:1.55;margin:0 0 20px 0;max-width:280px}
+.state-actions{display:flex;flex-direction:column;gap:8px;width:100%;max-width:240px}
+
+.skel-row{display:grid;grid-template-columns:36px 1fr 70px;gap:11px;align-items:center;padding:11px 2px}
+.skel{background:linear-gradient(90deg,#ECECE8 25%,#F3F3EF 37%,#ECECE8 63%);background-size:400% 100%;animation:shimmer 1.4s infinite;border-radius:6px}
+@keyframes shimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
+.skel-circle{width:32px;height:32px;border-radius:50%}
+.skel-line{height:10px}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:11px 16px;border-radius:11px;font-weight:700;font-size:13.5px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);width:100%}
+.btn svg{width:15px;height:15px}
+.btn-primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.btn-ghost{border-color:transparent;background:none}
+
+/* ---------- transactions ---------- */
+.search-bar{margin:0 16px 12px 16px;position:relative}
+.search-bar svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:15px;height:15px;color:var(--muted-light)}
+.search-bar input{width:100%;padding:10px 12px 10px 34px;border:1px solid var(--line-strong);border-radius:11px;font-size:13.5px;background:var(--surface);font-family:inherit}
+.chip-scroll{display:flex;gap:7px;overflow-x:auto;margin:0 0 14px 16px;padding-right:16px}
+.filter-chip{flex-shrink:0;padding:7px 13px;border-radius:100px;border:1px solid var(--line-strong);background:var(--surface);font-size:12px;font-weight:600;color:var(--ink-70);display:flex;align-items:center;gap:5px;white-space:nowrap}
+.filter-chip.on{background:var(--brand-50);border-color:var(--brand);color:var(--brand-dark)}
+.filter-chip svg{width:12px;height:12px}
+.mob-pagination{display:flex;align-items:center;justify-content:center;gap:14px;padding:16px 0}
+.mob-pagination button{width:34px;height:34px;border-radius:50%;border:1px solid var(--line-strong);background:var(--surface);display:flex;align-items:center;justify-content:center}
+.mob-pagination button:disabled{opacity:.4}
+.mob-pagination span{font-size:12px;color:var(--muted);font-weight:600}
+
+/* ---------- analytics ---------- */
+.stat-row-3{display:flex;gap:8px;padding:0 16px 16px 16px}
+.stat-mini{flex:1;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:11px 10px}
+.stat-mini .label{font-size:10px;color:var(--muted);font-weight:700;margin-bottom:4px}
+.stat-mini .value{font-size:14px;font-weight:800;font-family:var(--font-mono)}
+.month-picker-mob{display:flex;align-items:center;justify-content:center;gap:14px;padding:2px 16px 14px 16px}
+.month-picker-mob button{width:28px;height:28px;border-radius:50%;border:none;background:var(--paper);display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.month-picker-mob span{font-weight:700;font-size:13.5px}
+.hbars{display:flex;flex-direction:column;gap:11px;padding:0 16px}
+.hbar-row{display:grid;grid-template-columns:1fr;gap:4px}
+.hbar-top{display:flex;justify-content:space-between;font-size:12px}
+.hbar-label{display:flex;align-items:center;gap:6px;font-weight:600}
+.hbar-dot{width:8px;height:8px;border-radius:3px}
+.hbar-val{font-family:var(--font-mono);font-weight:700}
+.hbar-track{height:9px;background:#EFEFEA;border-radius:5px;overflow:hidden}
+.hbar-fill{height:100%;border-radius:5px}
+.section-block{margin:22px 0}
+.section-block h3{font-size:13.5px;font-weight:800;margin:0 16px 3px 16px}
+.section-sub{font-size:11.5px;color:var(--muted);margin:0 16px 14px 16px;line-height:1.4}
+.trend-wrap{display:flex;align-items:flex-end;gap:12px;height:130px;padding:0 16px;border-bottom:1px solid var(--line)}
+.trend-col{flex:1;display:flex;flex-direction:column;align-items:center;height:100%;justify-content:flex-end;gap:5px}
+.trend-bars{display:flex;gap:3px;align-items:flex-end;height:96px}
+.trend-bar{width:11px;border-radius:3px 3px 0 0}
+.trend-bar.spend{background:var(--debit)}
+.trend-bar.income{background:var(--credit)}
+.trend-bar.placeholder{background:repeating-linear-gradient(135deg,#E7E7E2,#E7E7E2 3px,#EFEFEA 3px,#EFEFEA 6px);height:5px!important}
+.trend-month{font-size:10px;color:var(--muted);font-weight:600}
+.trend-legend{display:flex;gap:12px;padding:12px 16px 0 16px;font-size:11px;color:var(--muted);flex-wrap:wrap}
+.trend-legend span{display:inline-flex;align-items:center;gap:5px}
+.legend-dot{width:8px;height:8px;border-radius:3px}
+
+/* ---------- settings ---------- */
+.set-list{padding:6px 16px 20px 16px;display:flex;flex-direction:column;gap:12px}
+.set-banner{background:linear-gradient(135deg,var(--ink),#1E2A47);color:#fff;border-radius:16px;padding:18px}
+.set-banner-icon{width:38px;height:38px;border-radius:10px;background:rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;margin-bottom:10px}
+.set-banner-icon svg{width:19px;height:19px;color:var(--brand)}
+.set-banner h4{margin:0 0 5px 0;font-size:14.5px}
+.set-banner p{margin:0 0 12px 0;font-size:12px;color:#C7D0E8;line-height:1.5}
+.set-card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:15px}
+.set-card-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.set-card-icon{width:32px;height:32px;border-radius:9px;background:var(--brand-50);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.set-card-icon svg{width:16px;height:16px;color:var(--brand)}
+.set-card h4{margin:0;font-size:13.8px}
+.set-card-sub{font-size:11px;color:var(--muted);margin:1px 0 0 0}
+.set-card p.desc{font-size:12.5px;color:var(--ink-70);line-height:1.5;margin:8px 0 12px 0}
+.status-pill{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;padding:2px 8px;border-radius:100px}
+.status-on{background:var(--credit-50);color:var(--credit)}
+.status-off{background:#F1F5F9;color:var(--muted)}
+.set-card-actions{display:flex;gap:8px}
+.set-card-actions .btn{padding:8px 12px;font-size:12.5px}
+.roadmap-list{display:flex;flex-wrap:wrap;gap:7px}
+.roadmap-chip{font-size:11px;color:var(--muted);background:var(--paper);border:1px solid var(--line);border-radius:100px;padding:5px 10px}
+.platform-note{background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:9px 11px;font-size:11.5px;line-height:1.5;margin-top:8px}
+
+/* ---------- sign in ---------- */
+.signin-wrap{flex:1;display:flex;flex-direction:column}
+.signin-hero{flex:1;background:var(--ink);color:#fff;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:0 30px;position:relative;overflow:hidden}
+.signin-hero .receipt-bg{position:absolute;width:280px;height:280px;opacity:.06;right:-50px;bottom:-40px;transform:rotate(10deg)}
+.signin-lockup{display:flex;align-items:center;gap:11px;margin-bottom:16px}
+.brand-tile{width:44px;height:44px;border-radius:12px;background:rgba(255,255,255,.08);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.brand-tile svg{width:23px;height:23px;color:var(--brand)}
+.signin-lockup .word{font-size:23px;font-weight:800;letter-spacing:-0.015em}
+.signin-tagline{font-size:13.5px;color:#AEB8D6;text-align:center;line-height:1.5;margin:0;max-width:260px}
+.signin-panel{padding:26px 24px 34px 24px;background:var(--paper)}
+.btn-google{background:#fff;justify-content:center;gap:9px}
+.btn-google svg{width:17px;height:17px}
+.permission-note{display:flex;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 11px;margin-top:13px;font-size:11.5px;color:var(--ink-70);line-height:1.45}
+.permission-note svg{width:14px;height:14px;color:var(--muted);flex-shrink:0;margin-top:1px}
+.signin-error,.signin-notice{display:flex;gap:7px;border-radius:10px;padding:10px 11px;margin-top:12px;font-size:11.5px;align-items:flex-start;line-height:1.45}
+.signin-error{background:var(--debit-50);color:#991B1B}
+.signin-notice{background:var(--warn-bg);color:var(--warn)}
+.signin-error svg,.signin-notice svg{width:14px;height:14px;flex-shrink:0;margin-top:1px}
+
+/* ---------- permission priming ---------- */
+.perm-wrap{flex:1;display:flex;flex-direction:column;padding:28px 24px 24px 24px}
+.perm-icon{width:56px;height:56px;border-radius:16px;background:var(--brand-50);color:var(--brand);display:flex;align-items:center;justify-content:center;margin-bottom:18px}
+.perm-icon svg{width:28px;height:28px}
+.perm-title{font-size:20px;font-weight:800;margin:0 0 8px 0;letter-spacing:-0.01em}
+.perm-sub{font-size:13px;color:var(--muted);margin:0 0 22px 0;line-height:1.5}
+.perm-point{display:flex;gap:12px;margin-bottom:16px}
+.perm-point-icon{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.perm-point-icon svg{width:15px;height:15px}
+.perm-point-body b{display:block;font-size:13px;margin-bottom:2px}
+.perm-point-body p{margin:0;font-size:12.3px;color:var(--muted);line-height:1.45}
+.perm-actions{margin-top:auto;display:flex;flex-direction:column;gap:10px;padding-top:18px}
+.perm-notnow{text-align:center;font-size:12.5px;color:var(--muted);background:none;border:none;padding:6px}
+
+.oscard{background:#fff;border-radius:16px;padding:0;margin:0 24px;box-shadow:0 10px 30px rgba(0,0,0,.15)}
+.osdialog-wrap{flex:1;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.4)}
+.osdialog{background:#fff;border-radius:20px;width:280px;padding:20px 18px;text-align:center}
+.osdialog .ic{width:34px;height:34px;color:var(--brand);margin:0 auto 10px auto;display:flex;align-items:center;justify-content:center;background:var(--brand-50);border-radius:50%}
+.osdialog .ic svg{width:17px;height:17px}
+.osdialog h4{font-size:14.5px;margin:0 0 6px 0}
+.osdialog p{font-size:12px;color:var(--ink-70);line-height:1.5;margin:0 0 16px 0}
+.osdialog-actions{display:flex;flex-direction:column;gap:2px;border-top:1px solid var(--line);margin-top:4px}
+.osdialog-actions button{background:none;border:none;padding:11px;font-size:13.5px;font-weight:700;color:var(--brand)}
+.osdialog-actions button.deny{color:var(--ink-70);font-weight:600}
+
+/* ---------- popover / modal ---------- */
+.cat-sheet-overlay{position:absolute;inset:0;background:rgba(15,23,42,.4);z-index:60;display:none;align-items:flex-end}
+.cat-sheet-overlay.active{display:flex}
+.cat-sheet{background:var(--surface);width:100%;border-radius:20px 20px 0 0;padding:16px 16px 22px 16px;max-height:70%;overflow-y:auto}
+.cat-sheet-handle{width:36px;height:4px;background:var(--line-strong);border-radius:3px;margin:0 auto 14px auto}
+.cat-sheet-title{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:0 0 12px 4px}
+.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.cat-opt{display:flex;align-items:center;gap:9px;padding:10px 8px;border-radius:10px;border:none;background:none;text-align:left;font-size:13px;font-weight:600;color:var(--ink-70)}
+.cat-opt:active{background:var(--paper)}
+.cat-opt .dot{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;flex-shrink:0}
+.cat-opt .dot svg{width:12px;height:12px}
+
+.raw-overlay{position:absolute;inset:0;background:rgba(15,23,42,.4);z-index:60;display:none;align-items:flex-end}
+.raw-overlay.active{display:flex}
+.raw-sheet{background:var(--surface);width:100%;border-radius:20px 20px 0 0;padding:18px 18px 26px 18px}
+.raw-sheet-handle{width:36px;height:4px;background:var(--line-strong);border-radius:3px;margin:0 auto 14px auto}
+.raw-sheet h3{margin:0 0 3px 0;font-size:15px}
+.raw-sheet .sub{font-size:11.5px;color:var(--muted);margin:0 0 12px 0;display:flex;align-items:center;gap:6px}
+.raw-block{background:var(--ink);color:#D9E2F5;font-family:var(--font-mono);font-size:11.8px;line-height:1.65;padding:14px;border-radius:12px;white-space:pre-wrap}
+.raw-footnote{display:flex;align-items:center;gap:7px;margin-top:13px;font-size:11px;color:var(--muted-light)}
+.raw-footnote svg{width:13px;height:13px}
+
+/* ---------- side control panel ---------- */
+.controls{
+  width:260px;background:#fff;border-radius:16px;padding:16px;
+  box-shadow:0 8px 24px rgba(0,0,0,.12);flex-shrink:0;position:sticky;top:36px;
+  border:1.5px dashed var(--brand);
+}
+.controls h4{font-family:var(--font-mono);color:var(--brand-dark);margin:0 0 12px 0;font-size:12.5px}
+.controls label{display:block;font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;font-weight:700}
+.controls select{width:100%;margin-bottom:12px;padding:7px 8px;border-radius:7px;border:1px solid var(--line-strong);font-size:12.5px;font-family:inherit}
+.controls .hint{font-size:11px;color:var(--muted-light);line-height:1.5;margin-top:6px;padding-top:10px;border-top:1px dashed var(--line-strong)}
+</style>
+</head>
+<body>
+
+<!-- ============ ICON SPRITE ============ -->
+<svg style="display:none">
+<defs>
+<symbol id="ic-food" viewBox="0 0 24 24"><path d="M7 2v7a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2V2M8 2v20M16 2c-1.5 0-2.5 1.5-2.5 4s1 4 2.5 5v9"/></symbol>
+<symbol id="ic-basket" viewBox="0 0 24 24"><path d="M4 9h16l-1.5 10a2 2 0 0 1-2 1.7H7.5a2 2 0 0 1-2-1.7L4 9Z"/><path d="M8 9V6a4 4 0 0 1 8 0v3"/></symbol>
+<symbol id="ic-car" viewBox="0 0 24 24"><path d="M3 13l1.5-5A2 2 0 0 1 6.4 6.5h11.2A2 2 0 0 1 19.5 8l1.5 5"/><path d="M3 13h18v4a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H6v1a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-4Z"/><circle cx="7.5" cy="17.5" r="1.5"/><circle cx="16.5" cy="17.5" r="1.5"/></symbol>
+<symbol id="ic-bag" viewBox="0 0 24 24"><path d="M6 8h12l1 12.5a1.5 1.5 0 0 1-1.5 1.5H6.5A1.5 1.5 0 0 1 5 20.5L6 8Z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></symbol>
+<symbol id="ic-bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></symbol>
+<symbol id="ic-play" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M10 8.5 16 12l-6 3.5v-7Z"/></symbol>
+<symbol id="ic-health" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 7v10M7 12h10"/></symbol>
+<symbol id="ic-home" viewBox="0 0 24 24"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9a1 1 0 0 0 1 1h4v-6h2v6h4a1 1 0 0 0 1-1v-9"/></symbol>
+<symbol id="ic-percent" viewBox="0 0 24 24"><circle cx="7" cy="7" r="3"/><circle cx="17" cy="17" r="3"/><path d="M19 5 5 19"/></symbol>
+<symbol id="ic-trend" viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></symbol>
+<symbol id="ic-wallet" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v3"/><path d="M3 7v11a2 2 0 0 0 2 2h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-5a2.5 2.5 0 0 0 0 5h6"/></symbol>
+<symbol id="ic-dots" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></symbol>
+<symbol id="ic-question" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-dasharray="2.8 3"/><path d="M9.3 9.2a2.7 2.7 0 1 1 3.8 2.4c-1 .5-1.1 1.1-1.1 2.1"/><circle cx="12" cy="17.2" r="0.9" fill="currentColor" stroke="none"/></symbol>
+<symbol id="ic-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></symbol>
+<symbol id="ic-filter" viewBox="0 0 24 24"><line x1="4" y1="6" x2="20" y2="6"/><circle cx="9" cy="6" r="2" fill="var(--surface)"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="15" cy="12" r="2" fill="var(--surface)"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="7" cy="18" r="2" fill="var(--surface)"/></symbol>
+<symbol id="ic-chevron-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+<symbol id="ic-chevron-left" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
+<symbol id="ic-chevron-right" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+<symbol id="ic-sync" viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 13.7-5.7L20 8"/><path d="M20 4v4h-4"/><path d="M20 12a8 8 0 0 1-13.7 5.7L4 16"/><path d="M4 20v-4h4"/></symbol>
+<symbol id="ic-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></symbol>
+<symbol id="ic-message" viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4V5Z"/></symbol>
+<symbol id="ic-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><circle cx="12" cy="7.4" r="0.9" fill="currentColor" stroke="none"/></symbol>
+<symbol id="ic-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+<symbol id="ic-check" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></symbol>
+<symbol id="ic-alert" viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3Z"/><path d="M12 10v4"/><circle cx="12" cy="17" r="0.9" fill="currentColor" stroke="none"/></symbol>
+<symbol id="ic-download" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/></symbol>
+<symbol id="ic-phone" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/></symbol>
+<symbol id="ic-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+<symbol id="ic-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="ic-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+<symbol id="ic-wifioff" viewBox="0 0 24 24"><path d="M2 8.5a16 16 0 0 1 20 0"/><path d="M5 12a11 11 0 0 1 14 0"/><path d="M8.5 15.5a6 6 0 0 1 7 0"/><circle cx="12" cy="19" r="0.9" fill="currentColor" stroke="none"/><path d="M3 3l18 18"/></symbol>
+<symbol id="ic-receipt" viewBox="0 0 24 24"><path d="M6 2h12v19l-2-1.3L14 21l-2-1.3L10 21l-2-1.3L6 21V2Z"/><path d="M9 7h6M9 11h6M9 15h4"/></symbol>
+<symbol id="ic-pencil" viewBox="0 0 24 24"><path d="M4 20l1-4L16 5l3 3L8 19l-4 1Z"/></symbol>
+<symbol id="ic-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="ic-eye-off" viewBox="0 0 24 24"><path d="M3 3l18 18"/><path d="M10.6 5.2A10.6 10.6 0 0 1 12 5c6.5 0 10 7 10 7a17.5 17.5 0 0 1-3.3 4.2M6.6 6.6C4 8.3 2 12 2 12s3.5 7 10 7c1.4 0 2.7-.3 3.8-.8"/><path d="M9.5 9.8a3 3 0 0 0 4.2 4.2"/></symbol>
+<symbol id="ic-google" viewBox="0 0 24 24"><path fill="#4285F4" d="M23 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.2c-.3 1.4-1.1 2.6-2.4 3.4v2.8h3.9c2.3-2.1 3.3-5.2 3.3-8.3Z"/><path fill="#34A853" d="M12 24c3.2 0 5.9-1.1 7.8-2.9l-3.9-2.8c-1.1.7-2.4 1.1-3.9 1.1-3 0-5.5-2-6.4-4.7H1.6v2.9C3.5 21.3 7.4 24 12 24Z"/><path fill="#FBBC05" d="M5.6 14.7c-.2-.7-.4-1.4-.4-2.2s.1-1.5.4-2.2V7.4H1.6C.8 9 .3 10.9.3 12.9s.5 3.9 1.3 5.5l4-3.7Z"/><path fill="#EA4335" d="M12 4.8c1.7 0 3.3.6 4.5 1.8l3.4-3.4C17.9 1.2 15.2 0 12 0 7.4 0 3.5 2.7 1.6 6.6l4 3.1c.9-2.7 3.4-4.9 6.4-4.9Z"/></symbol>
+</defs>
+</svg>
+
+<!-- ============ PHONE FRAME ============ -->
+<div class="phone">
+  <div class="phone-screen">
+    <div class="notch"></div>
+    <div class="status-bar"><span>9:41</span><span class="status-icons">●●●</span></div>
+
+    <!-- SIGN IN -->
+    <div class="screen-body active" id="mscreen-signin" style="flex:1">
+      <div class="signin-wrap">
+        <div class="signin-hero">
+          <svg class="icon receipt-bg" viewBox="0 0 24 24" style="stroke:#fff"><use href="#ic-receipt"/></svg>
+          <div class="signin-lockup"><div class="brand-tile"><svg class="icon"><use href="#ic-receipt"/></svg></div><div class="word">SpendLog</div></div>
+          <p class="signin-tagline">Track every rupee, every day.</p>
+        </div>
+        <div class="signin-panel">
+          <a href="#" class="btn btn-google" onclick="return false;"><svg class="icon"><use href="#ic-google"/></svg>Sign in with Google</a>
+          <div class="permission-note"><svg class="icon"><use href="#ic-mail"/></svg><div>Google will also ask for read-only Gmail access in this step, for email-based alerts.</div></div>
+          <div id="ms-error" class="signin-error" style="display:none"><svg class="icon"><use href="#ic-alert"/></svg><div>Sign-in didn't go through — the link may have expired.</div></div>
+          <div id="ms-session" class="signin-notice" style="display:none"><svg class="icon"><use href="#ic-lock"/></svg><div>Signed out after 30 days for security. Sign in again to continue.</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PERMISSION PRIMING (Android) -->
+    <div class="screen-body" id="mscreen-permission">
+      <div class="perm-wrap">
+        <div class="perm-icon"><svg class="icon"><use href="#ic-message"/></svg></div>
+        <h2 class="perm-title">Before we ask for SMS access</h2>
+        <p class="perm-sub">Android's next screen won't explain this, so here's exactly what happens.</p>
+
+        <div class="perm-point">
+          <div class="perm-point-icon" style="background:var(--brand-50)"><svg class="icon" style="color:var(--brand)"><use href="#ic-eye"/></svg></div>
+          <div class="perm-point-body"><b>What we read</b><p>Incoming messages from banks and UPI apps, plus a one-time scan of existing messages so nothing's missed.</p></div>
+        </div>
+        <div class="perm-point">
+          <div class="perm-point-icon" style="background:var(--debit-50)"><svg class="icon" style="color:var(--debit)"><use href="#ic-eye-off"/></svg></div>
+          <div class="perm-point-body"><b>What we never read</b><p>Messages from people you know, OTPs, or anything that isn't a transaction alert — those are discarded immediately.</p></div>
+        </div>
+        <div class="perm-point">
+          <div class="perm-point-icon" style="background:var(--credit-50)"><svg class="icon" style="color:var(--credit)"><use href="#ic-receipt"/></svg></div>
+          <div class="perm-point-body"><b>What you get</b><p>Each message becomes one line in your ledger — amount, merchant, account. Nothing else leaves the message.</p></div>
+        </div>
+
+        <div class="perm-actions">
+          <button class="btn btn-primary" onclick="showOsDialog()">Continue</button>
+          <button class="perm-notnow" onclick="setScreen('settings');setSettingsState('sms','denied')">Not now</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- OS PERMISSION DIALOG (overlay-like screen) -->
+    <div class="screen-body" id="mscreen-osdialog">
+      <div class="osdialog-wrap">
+        <div class="osdialog">
+          <div class="ic"><svg class="icon"><use href="#ic-message"/></svg></div>
+          <h4>Allow SpendLog to send and view SMS messages?</h4>
+          <p>This lets the app read text messages on this device.</p>
+          <div class="osdialog-actions">
+            <button onclick="setScreen('today');setState('today','populated');setSettingsState('sms','granted')">Allow</button>
+            <button class="deny" onclick="setScreen('settings');setSettingsState('sms','denied')">Deny</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TODAY -->
+    <div class="screen-body" id="mscreen-today">
+      <div class="mob-header"><h1 class="mob-title">Today</h1><button class="mob-header-btn" onclick="fakeSync(this)"><svg class="icon"><use href="#ic-sync"/></svg></button></div>
+      <div class="mob-scroll" id="today-scroll">
+
+        <div class="state-variant" data-state="populated">
+          <div class="pull-refresh"><svg class="icon"><use href="#ic-sync"/></svg>Pull to refresh</div>
+          <div class="month-rollup">
+            <div class="mr-item"><div class="label">Spent (Sep)</div><div class="value num" style="color:var(--debit)">₹42,318</div></div>
+            <div class="mr-item"><div class="label">Received</div><div class="value num" style="color:var(--credit)">₹85,000</div></div>
+          </div>
+          <div class="nudge-strip"><svg class="icon"><use href="#ic-question"/></svg><span><b>4</b> need a category</span><span class="go" onclick="setScreen('transactions')">Review</span></div>
+
+          <div class="day-group">
+            <div class="day-header"><span class="day-label">Today</span><span class="day-totals"><span class="spend num">−₹615.00</span></span></div>
+            <div class="row" data-cat="">
+              <button class="row-cat-chip uncat" onclick="openCatSheet(this,'r1')"><svg class="icon"><use href="#ic-plus"/></svg></button>
+              <div class="row-main"><div class="row-merchant"><span class="txt">paytmqr6g6fjc@ptys</span><button class="row-info-btn" onclick="openRaw('r1')"><svg class="icon"><use href="#ic-info"/></svg></button></div><div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg>HDFC ••1377 · 9:42 AM</div></div>
+              <div class="row-amount debit num">−₹105.00</div>
+            </div>
+            <div class="row" data-cat="food">
+              <button class="row-cat-chip" style="background:#F97316" onclick="openCatSheet(this,'r2')"><svg class="icon"><use href="#ic-food"/></svg></button>
+              <div class="row-main"><div class="row-merchant"><span class="txt">swiggy@icici</span></div><div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg>Axis ••9876 · 1:15 PM</div></div>
+              <div class="row-amount debit num">−₹349.00</div>
+            </div>
+            <div class="row" data-cat="">
+              <button class="row-cat-chip uncat" onclick="openCatSheet(this,'r3')"><svg class="icon"><use href="#ic-plus"/></svg></button>
+              <div class="row-main"><div class="row-merchant"><span class="txt">Dharmendra S</span></div><div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg>Federal ••5130 · 6:03 PM</div></div>
+              <div class="row-amount debit num">−₹161.00</div>
+            </div>
+          </div>
+
+          <div class="day-group">
+            <div class="day-header"><span class="day-label">Yesterday</span><span class="day-totals"><span class="spend num">−₹8,654.00</span></span></div>
+            <div class="row" data-cat="shopping">
+              <button class="row-cat-chip" style="background:#EC4899" onclick="openCatSheet(this,'r4')"><svg class="icon"><use href="#ic-bag"/></svg></button>
+              <div class="row-main"><div class="row-merchant"><span class="txt">FlipkartInternetPvtLtd…</span></div><div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg>CSB Bank · 11:20 AM</div></div>
+              <div class="row-amount debit num">−₹654.00</div>
+            </div>
+            <div class="row is-transfer">
+              <div class="row-cat-chip" style="background:#F1F5F9;color:var(--transfer)"><svg class="icon"><use href="#ic-arrow-right"/></svg></div>
+              <div class="row-main"><div class="row-merchant"><span class="txt">Self transfer</span></div><div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg>ICICI ••2009 · 2:05 PM</div><div class="row-badges"><span class="badge badge-transfer">Not counted</span></div></div>
+              <div class="row-amount transfer-amt num">−₹5,000.00</div>
+            </div>
+            <div class="row is-transfer">
+              <div class="row-cat-chip" style="background:#F1F5F9;color:var(--transfer)"><svg class="icon"><use href="#ic-arrow-right"/></svg></div>
+              <div class="row-main"><div class="row-merchant"><span class="txt">Self transfer</span></div><div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg>Federal ••5130 · 2:05 PM</div><div class="row-badges"><span class="badge badge-transfer">Not counted</span></div></div>
+              <div class="row-amount num" style="color:var(--transfer)">+₹5,000.00</div>
+            </div>
+            <div class="row" data-cat="">
+              <button class="row-cat-chip uncat" onclick="openCatSheet(this,'r5')"><svg class="icon"><use href="#ic-plus"/></svg></button>
+              <div class="row-main"><div class="row-merchant"><span class="txt">TITANCOMPANY</span></div><div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg>ICICI ••2009 · 4:30 PM</div></div>
+              <div class="row-amount debit num">−₹8,000.00</div>
+            </div>
+          </div>
+
+          <div class="day-group">
+            <div class="day-header"><span class="day-label">Sat, 6 Sep</span><span class="day-totals"><span class="spend num">−₹220</span><span class="dsep">·</span><span class="income num">+₹85,000</span></span></div>
+            <div class="row" data-cat="income">
+              <button class="row-cat-chip" style="background:#16A34A" onclick="openCatSheet(this,'r6')"><svg class="icon"><use href="#ic-wallet"/></svg></button>
+              <div class="row-main"><div class="row-merchant"><span class="txt">SALARY</span></div><div class="row-meta"><svg class="icon"><use href="#ic-mail"/></svg>ICICI ••5678 · 10:02 AM</div></div>
+              <div class="row-amount credit num">+₹85,000.00</div>
+            </div>
+            <div class="row" data-cat="">
+              <button class="row-cat-chip uncat" onclick="openCatSheet(this,'r7')"><svg class="icon"><use href="#ic-plus"/></svg></button>
+              <div class="row-main"><div class="row-merchant"><span class="txt">UBER TRIP</span></div><div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg>Axis ••9876 · 8:47 PM</div><div class="row-badges"><span class="badge badge-pending">Pending</span></div></div>
+              <div class="row-amount debit num">−₹220.00</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="state-variant" data-state="loading" hidden>
+          <div class="skel-row"><span class="skel skel-circle"></span><div><span class="skel skel-line" style="width:70%;display:block;margin-bottom:6px"></span><span class="skel skel-line" style="width:45%;display:block"></span></div><span class="skel skel-line" style="width:100%"></span></div>
+          <div class="skel-row"><span class="skel skel-circle"></span><div><span class="skel skel-line" style="width:55%;display:block;margin-bottom:6px"></span><span class="skel skel-line" style="width:35%;display:block"></span></div><span class="skel skel-line" style="width:100%"></span></div>
+          <div class="skel-row"><span class="skel skel-circle"></span><div><span class="skel skel-line" style="width:60%;display:block;margin-bottom:6px"></span><span class="skel skel-line" style="width:40%;display:block"></span></div><span class="skel skel-line" style="width:100%"></span></div>
+        </div>
+
+        <div class="state-variant" data-state="empty-new" hidden>
+          <div class="state-block">
+            <div class="state-icon"><svg class="icon"><use href="#ic-receipt"/></svg></div>
+            <h3 class="state-title">Nothing here yet</h3>
+            <p class="state-body">SpendLog fills in automatically once a bank message arrives — there's nothing to add by hand. Turn on SMS access or connect Gmail to get started.</p>
+            <div class="state-actions"><button class="btn btn-primary" onclick="setScreen('settings')">Go to Settings</button></div>
+          </div>
+        </div>
+        <div class="state-variant" data-state="empty-gmail-only" hidden>
+          <div class="state-block">
+            <div class="state-icon"><svg class="icon"><use href="#ic-mail"/></svg></div>
+            <h3 class="state-title">No bank emails found yet</h3>
+            <p class="state-body">Gmail's connected, but no transaction email has turned up. If your bank only texts you, turn on SMS access — you're on Android, so this app can catch those.</p>
+            <div class="state-actions"><button class="btn btn-primary" onclick="setScreen('settings')">Turn on SMS access</button></div>
+          </div>
+        </div>
+        <div class="state-variant" data-state="empty-platform" hidden>
+          <div class="state-block">
+            <div class="state-icon"><svg class="icon"><use href="#ic-phone"/></svg></div>
+            <h3 class="state-title">This device can only see email</h3>
+            <p class="state-body">iOS doesn't allow any app to read SMS — that's an Apple restriction, not a choice SpendLog made. If your bank only texts you, it won't appear here. Gmail-based alerts still will.</p>
+          </div>
+        </div>
+        <div class="state-variant" data-state="error" hidden>
+          <div class="state-block">
+            <div class="state-icon warn"><svg class="icon"><use href="#ic-wifioff"/></svg></div>
+            <h3 class="state-title">Couldn't load your transactions</h3>
+            <p class="state-body">The connection to SpendLog's server failed. Your data's safe — check your internet and try again.</p>
+            <div class="state-actions"><button class="btn btn-primary" onclick="setState('today','populated')"><svg class="icon"><use href="#ic-sync"/></svg>Retry</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TRANSACTIONS -->
+    <div class="screen-body" id="mscreen-transactions">
+      <div class="mob-header"><h1 class="mob-title">Transactions</h1></div>
+      <div class="search-bar"><svg class="icon"><use href="#ic-search"/></svg><input placeholder="Search merchant or note"></div>
+      <div class="chip-scroll">
+        <div class="filter-chip on">All categories</div>
+        <div class="filter-chip"><svg class="icon"><use href="#ic-calendar"/></svg>Date range</div>
+        <div class="filter-chip"><svg class="icon"><use href="#ic-bank"/></svg>Account</div>
+        <div class="filter-chip"><svg class="icon"><use href="#ic-filter"/></svg>Debit / Credit</div>
+      </div>
+      <div class="mob-scroll" style="padding-top:0">
+        <div class="state-variant" data-state="populated">
+          <div class="row" data-cat="">
+            <button class="row-cat-chip uncat" onclick="openCatSheet(this,'t1')"><svg class="icon"><use href="#ic-plus"/></svg></button>
+            <div class="row-main"><div class="row-merchant"><span class="txt">paytmqr6g6fjc@ptys</span></div><div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg>HDFC ••1377 · Wed</div></div>
+            <div class="row-amount debit num">−₹105.00</div>
+          </div>
+          <div class="row" data-cat="food">
+            <button class="row-cat-chip" style="background:#F97316" onclick="openCatSheet(this,'t2')"><svg class="icon"><use href="#ic-food"/></svg></button>
+            <div class="row-main"><div class="row-merchant"><span class="txt">swiggy@icici</span></div><div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg>Axis ••9876 · Wed</div></div>
+            <div class="row-amount debit num">−₹349.00</div>
+          </div>
+          <div class="row" data-cat="shopping">
+            <button class="row-cat-chip" style="background:#EC4899" onclick="openCatSheet(this,'t3')"><svg class="icon"><use href="#ic-bag"/></svg></button>
+            <div class="row-main"><div class="row-merchant"><span class="txt">FlipkartInternetPvtLtd…</span></div><div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg>CSB Bank · Tue</div></div>
+            <div class="row-amount debit num">−₹654.00</div>
+          </div>
+          <div class="row" data-cat="">
+            <button class="row-cat-chip uncat" onclick="openCatSheet(this,'t4')"><svg class="icon"><use href="#ic-plus"/></svg></button>
+            <div class="row-main"><div class="row-merchant"><span class="txt">TITANCOMPANY</span></div><div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg>ICICI ••2009 · Tue</div></div>
+            <div class="row-amount debit num">−₹8,000.00</div>
+          </div>
+          <div class="row" data-cat="income">
+            <button class="row-cat-chip" style="background:#16A34A" onclick="openCatSheet(this,'t5')"><svg class="icon"><use href="#ic-wallet"/></svg></button>
+            <div class="row-main"><div class="row-merchant"><span class="txt">SALARY</span></div><div class="row-meta"><svg class="icon"><use href="#ic-mail"/></svg>ICICI ••5678 · Sat</div></div>
+            <div class="row-amount credit num">+₹85,000.00</div>
+          </div>
+          <div class="mob-pagination">
+            <button id="mpg-prev" onclick="mpgChange(-1)" disabled><svg class="icon"><use href="#ic-chevron-left"/></svg></button>
+            <span id="mpg-label">Page 1 of 7</span>
+            <button id="mpg-next" onclick="mpgChange(1)"><svg class="icon"><use href="#ic-chevron-right"/></svg></button>
+          </div>
+        </div>
+        <div class="state-variant" data-state="empty-filter" hidden>
+          <div class="state-block">
+            <div class="state-icon"><svg class="icon"><use href="#ic-search"/></svg></div>
+            <h3 class="state-title">No matches</h3>
+            <p class="state-body">Nothing matches these filters. Try widening the date range or clearing a filter.</p>
+            <div class="state-actions"><button class="btn btn-primary" onclick="setState('transactions','populated')">Clear filters</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ANALYTICS -->
+    <div class="screen-body" id="mscreen-analytics">
+      <div class="mob-header"><h1 class="mob-title">Analytics</h1></div>
+      <div class="month-picker-mob"><button onclick="return false;"><svg class="icon"><use href="#ic-chevron-left"/></svg></button><span>September 2026</span><button onclick="return false;"><svg class="icon"><use href="#ic-chevron-right"/></svg></button></div>
+      <div class="mob-scroll" style="padding-top:0">
+        <div class="state-variant" data-state="populated">
+          <div class="stat-row-3">
+            <div class="stat-mini"><div class="label">SPENT</div><div class="value num" style="color:var(--debit)">₹42,318</div></div>
+            <div class="stat-mini"><div class="label">RECEIVED</div><div class="value num" style="color:var(--credit)">₹85,000</div></div>
+            <div class="stat-mini"><div class="label">TXNS</div><div class="value num">47</div></div>
+          </div>
+
+          <div class="section-block">
+            <h3 style="margin-left:0">Spend by category</h3>
+            <p class="section-sub" style="margin-left:0">Transfers are excluded from every figure.</p>
+            <div class="hbars" style="padding:0">
+              <div class="hbar-row"><div class="hbar-top"><div class="hbar-label"><span class="hbar-dot" style="border:1.4px dashed var(--muted-light)"></span>Uncategorized</div><div class="hbar-val num">₹18,420</div></div><div class="hbar-track"><div class="hbar-fill" style="width:43%;background:var(--muted-light)"></div></div></div>
+              <div class="hbar-row"><div class="hbar-top"><div class="hbar-label"><span class="hbar-dot" style="background:#EC4899"></span>Shopping</div><div class="hbar-val num">₹9,654</div></div><div class="hbar-track"><div class="hbar-fill" style="width:23%;background:#EC4899"></div></div></div>
+              <div class="hbar-row"><div class="hbar-top"><div class="hbar-label"><span class="hbar-dot" style="background:#F97316"></span>Food & Dining</div><div class="hbar-val num">₹6,210</div></div><div class="hbar-track"><div class="hbar-fill" style="width:15%;background:#F97316"></div></div></div>
+              <div class="hbar-row"><div class="hbar-top"><div class="hbar-label"><span class="hbar-dot" style="background:#0EA5E9"></span>Transport</div><div class="hbar-val num">₹3,890</div></div><div class="hbar-track"><div class="hbar-fill" style="width:9%;background:#0EA5E9"></div></div></div>
+              <div class="hbar-row"><div class="hbar-top"><div class="hbar-label"><span class="hbar-dot" style="background:#EAB308"></span>Bills & Utilities</div><div class="hbar-val num">₹2,144</div></div><div class="hbar-track"><div class="hbar-fill" style="width:5%;background:#EAB308"></div></div></div>
+              <div class="hbar-row"><div class="hbar-top"><div class="hbar-label"><span class="hbar-dot" style="background:#94A3B8"></span>Others</div><div class="hbar-val num">₹2,000</div></div><div class="hbar-track"><div class="hbar-fill" style="width:5%;background:#94A3B8"></div></div></div>
+            </div>
+          </div>
+
+          <div class="section-block">
+            <h3>Last 6 months</h3>
+            <p class="section-sub">Under a month of history — five bars are still empty.</p>
+            <div class="trend-wrap">
+              <div class="trend-col"><div class="trend-bars"><div class="trend-bar placeholder"></div></div><span class="trend-month">Apr</span></div>
+              <div class="trend-col"><div class="trend-bars"><div class="trend-bar placeholder"></div></div><span class="trend-month">May</span></div>
+              <div class="trend-col"><div class="trend-bars"><div class="trend-bar placeholder"></div></div><span class="trend-month">Jun</span></div>
+              <div class="trend-col"><div class="trend-bars"><div class="trend-bar placeholder"></div></div><span class="trend-month">Jul</span></div>
+              <div class="trend-col"><div class="trend-bars"><div class="trend-bar placeholder"></div></div><span class="trend-month">Aug</span></div>
+              <div class="trend-col"><div class="trend-bars"><div class="trend-bar spend" style="height:40px"></div><div class="trend-bar income" style="height:80px"></div></div><span class="trend-month">Sep</span></div>
+            </div>
+            <div class="trend-legend"><span><span class="legend-dot" style="background:var(--debit)"></span>Spend</span><span><span class="legend-dot" style="background:var(--credit)"></span>Income</span><span><span class="legend-dot" style="background:repeating-linear-gradient(135deg,#E7E7E2,#E7E7E2 3px,#EFEFEA 3px,#EFEFEA 6px)"></span>No data</span></div>
+          </div>
+        </div>
+        <div class="state-variant" data-state="empty-data" hidden>
+          <div class="state-block">
+            <div class="state-icon"><svg class="icon"><use href="#ic-trend"/></svg></div>
+            <h3 class="state-title">Nothing to analyze yet</h3>
+            <p class="state-body">Charts need transactions first. This fills in on its own once a few payments come in.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div class="screen-body" id="mscreen-settings">
+      <div class="mob-header"><h1 class="mob-title">Settings</h1></div>
+      <div class="mob-scroll set-list" style="padding-top:0">
+
+        <div class="set-banner state-variant" data-state="build-available">
+          <div class="set-banner-icon"><svg class="icon"><use href="#ic-phone"/></svg></div>
+          <h4>You're on the Android app</h4>
+          <p>SMS import works here — it's the only place it can.</p>
+        </div>
+
+        <div class="set-card">
+          <div class="set-card-head"><div class="set-card-icon"><svg class="icon"><use href="#ic-mail"/></svg></div><div><h4>Email import</h4><p class="set-card-sub">Gmail, read-only</p></div></div>
+          <div class="state-variant" data-state="connected">
+            <p class="desc"><span class="status-pill status-on"><svg class="icon"><use href="#ic-check"/></svg>Connected</span><br>dharmendra@gmail.com · synced 12 min ago.</p>
+            <div class="set-card-actions"><button class="btn" onclick="fakeSync(this)"><svg class="icon"><use href="#ic-sync"/></svg>Sync now</button><button class="btn btn-ghost" style="color:var(--debit)">Disconnect</button></div>
+          </div>
+          <div class="state-variant" data-state="disconnected" hidden>
+            <p class="desc"><span class="status-pill status-off">Not connected</span><br>Declined at sign-in — connect it here instead.</p>
+            <div class="set-card-actions"><button class="btn btn-primary">Connect Gmail</button></div>
+          </div>
+        </div>
+
+        <div class="set-card">
+          <div class="set-card-head"><div class="set-card-icon"><svg class="icon"><use href="#ic-message"/></svg></div><div><h4>SMS import</h4><p class="set-card-sub">Android only</p></div></div>
+          <div class="state-variant" data-state="granted">
+            <p class="desc"><span class="status-pill status-on"><svg class="icon"><use href="#ic-check"/></svg>Granted</span><br>Reading bank and UPI messages as they arrive.</p>
+          </div>
+          <div class="state-variant" data-state="denied" hidden>
+            <p class="desc"><span class="status-pill status-off">Not granted</span><br>Without this, only email-based alerts show up. Turn it on any time.</p>
+            <div class="set-card-actions"><button class="btn btn-primary" onclick="setScreen('permission')">Grant SMS access</button></div>
+          </div>
+          <div class="state-variant" data-state="ios" hidden>
+            <p class="desc"><span class="status-pill status-off">Not available here</span></p>
+            <div class="platform-note">iOS blocks all apps from reading SMS — that's Apple's restriction, not SpendLog's choice. Email-based alerts still work.</div>
+          </div>
+        </div>
+
+        <div class="set-card">
+          <div class="set-card-head"><div class="set-card-icon"><svg class="icon"><use href="#ic-lock"/></svg></div><div><h4>Account</h4><p class="set-card-sub">dharmendra@gmail.com</p></div></div>
+          <p class="desc" style="margin-top:8px">Signed in with Google — no separate password.</p>
+          <div class="set-card-actions"><button class="btn btn-ghost" style="color:var(--debit)" onclick="setScreen('signin')">Sign out</button></div>
+        </div>
+
+        <div class="set-card">
+          <h4 style="margin-bottom:2px">More, on the way</h4>
+          <p class="set-card-sub" style="margin-bottom:10px">API-ready, no interface yet.</p>
+          <div class="roadmap-list">
+            <span class="roadmap-chip">Manual cash entry</span><span class="roadmap-chip">Custom categories</span><span class="roadmap-chip">Delete a transaction</span><span class="roadmap-chip">Budgets & alerts</span><span class="roadmap-chip">CSV export</span><span class="roadmap-chip">Dark mode</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- tab bar -->
+    <div class="tab-bar" id="tab-bar">
+      <button class="tab-item active" data-tab="today" onclick="setScreen('today')"><svg class="icon"><use href="#ic-receipt"/></svg><span>Today</span></button>
+      <button class="tab-item" data-tab="transactions" onclick="setScreen('transactions')"><svg class="icon"><use href="#ic-search"/></svg><span>Transactions</span></button>
+      <button class="tab-item" data-tab="analytics" onclick="setScreen('analytics')"><svg class="icon"><use href="#ic-trend"/></svg><span>Analytics</span></button>
+      <button class="tab-item" data-tab="settings" onclick="setScreen('settings')"><svg class="icon"><use href="#ic-filter" style="transform:rotate(90deg)"/></svg><span>Settings</span></button>
+    </div>
+
+    <!-- category bottom sheet -->
+    <div class="cat-sheet-overlay" id="cat-sheet-overlay" onclick="if(event.target===this)closeCatSheet()">
+      <div class="cat-sheet">
+        <div class="cat-sheet-handle"></div>
+        <div class="cat-sheet-title">Set category</div>
+        <div class="cat-grid" id="cat-grid"></div>
+      </div>
+    </div>
+
+    <!-- raw message bottom sheet -->
+    <div class="raw-overlay" id="raw-overlay" onclick="if(event.target===this)closeRaw()">
+      <div class="raw-sheet">
+        <div class="raw-sheet-handle"></div>
+        <h3>Original message</h3>
+        <div class="sub"><svg class="icon" id="raw-source-icon"><use href="#ic-message"/></svg><span id="raw-source-text">SMS · Wed, 9 Sep</span></div>
+        <div class="raw-block" id="raw-text"></div>
+        <div class="raw-footnote"><svg class="icon"><use href="#ic-pencil"/></svg>Editing the merchant from here is coming soon.</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ============ SIDE CONTROL PANEL ============ -->
+<div class="controls">
+  <h4>PROTOTYPE CONTROLS</h4>
+  <label>Screen</label>
+  <select id="screen-select" onchange="setScreen(this.value)">
+    <option value="signin">Sign in</option>
+    <option value="permission">Permission priming (Android)</option>
+    <option value="osdialog">Android system dialog</option>
+    <option value="today">Today</option>
+    <option value="transactions">Transactions</option>
+    <option value="analytics">Analytics</option>
+    <option value="settings">Settings</option>
+  </select>
+  <label>Platform</label>
+  <select id="platform-select" onchange="setPlatform(this.value)">
+    <option value="android">Android</option>
+    <option value="ios">iOS</option>
+  </select>
+  <div id="state-controls"></div>
+  <div class="hint">This app is built with Flutter for Android today. The iOS option here simulates what the same five screens would honestly show if the SMS-reading restriction applies.</div>
+</div>
+
+<script>
+const CATEGORIES = [
+  {id:'food', label:'Food & Dining', color:'#F97316', icon:'ic-food'},
+  {id:'groceries', label:'Groceries', color:'#84CC16', icon:'ic-basket'},
+  {id:'transport', label:'Transport', color:'#0EA5E9', icon:'ic-car'},
+  {id:'shopping', label:'Shopping', color:'#EC4899', icon:'ic-bag'},
+  {id:'bills', label:'Bills & Utilities', color:'#EAB308', icon:'ic-bolt'},
+  {id:'entertainment', label:'Entertainment', color:'#A855F7', icon:'ic-play'},
+  {id:'health', label:'Health', color:'#F43F5E', icon:'ic-health'},
+  {id:'housing', label:'Housing', color:'#A8A29E', icon:'ic-home'},
+  {id:'emi', label:'EMI & Loans', color:'#64748B', icon:'ic-percent'},
+  {id:'investments', label:'Investments', color:'#16A34A', icon:'ic-trend'},
+  {id:'income', label:'Income', color:'#16A34A', icon:'ic-wallet'},
+  {id:'others', label:'Others', color:'#94A3B8', icon:'ic-dots'},
+];
+const RAW_MESSAGES = {
+  r1:{source:'SMS', when:'Wed, 9 Sep · 9:42 AM', text:"Txn Rs.105.00\nOn HDFC Bank Card 1377\nAt paytmqr6g6fjc@ptys\nby UPI 661266604357\nOn 03-09\nNot You?\nCall 18002586161/SMS BLOCK CC 1377 to 7308080808"},
+  r2:{source:'SMS', when:'Wed, 9 Sep · 1:15 PM', text:"Rs.349.00 debited from A/c XX9876 on 09-09 to VPA swiggy@icici. UPI Ref 447108825612. Not you? Call 1800-419-5555 -Axis Bank"},
+  r3:{source:'SMS', when:'Wed, 9 Sep · 6:03 PM', text:"Rs 161.00 debited from A/c XX5130 to Dharmendra S. UPI Ref No 331200619204. If not done by you, call 1800-425-1199 -Federal Bank"},
+  r4:{source:'SMS', when:'Tue, 8 Sep · 11:20 AM', text:"Your CSB Bank Card used for Rs.654.00 at FlipkartInternetPvtLtd Bengaluru kaIN on 08-SEP-26. Avl Lmt: Rs.42,110.00. Not you? SMS BLOCK to 9895088888"},
+  r5:{source:'SMS', when:'Tue, 8 Sep · 4:30 PM', text:"Txn Rs.8000.00 On ICICI Bank Card XX2009 At TITANCOMPANY On 08-09-26. Call 18002662 if not done by you."},
+  r6:{source:'Email', when:'Sat, 6 Sep · 10:02 AM', text:"Dear Customer,\n\nAn amount of Rs.85,000.00 has been credited to your A/c No. XX5678 on 06-09-2026.\nInfo: SALARY\nAvailable Balance: Rs.1,12,430.00\n\n- ICICI Bank"},
+  r7:{source:'SMS', when:'Sat, 6 Sep · 8:47 PM', text:"Rs.220.00 will be debited from A/c XX9876 for UBER TRIP. This is a pending authorisation and may take up to 3 days to settle. -Axis Bank"},
+};
+
+const TAB_SCREENS = ['today','transactions','analytics','settings'];
+function setScreen(name){
+  document.querySelectorAll('.screen-body').forEach(s=>s.classList.remove('active'));
+  document.getElementById('mscreen-'+name).classList.add('active');
+  const tabBar = document.getElementById('tab-bar');
+  if(TAB_SCREENS.includes(name)){
+    tabBar.classList.add('active');
+    document.querySelectorAll('.tab-item').forEach(t=>t.classList.toggle('active', t.dataset.tab===name));
+  } else {
+    tabBar.classList.remove('active');
+  }
+  document.getElementById('screen-select').value = name;
+  renderStateControls(name);
+}
+
+const STATE_OPTIONS = {
+  today: [['populated','Populated'],['loading','Loading'],['empty-new','Empty — new user'],['empty-gmail-only','Empty — Gmail only'],['empty-platform','Empty — iOS/web limit'],['error','Error — server unreachable']],
+  transactions: [['populated','Populated'],['empty-filter','Empty — filters match nothing']],
+  analytics: [['populated','Populated'],['empty-data','Empty — no data yet']],
+  settings: [],
+  signin: [['default','Default'],['error','Error'],['session','Session expired']],
+};
+const SETTINGS_SUBCONTROLS = [
+  {group:'email', label:'Email import', options:[['connected','Connected'],['disconnected','Not connected']]},
+  {group:'sms', label:'SMS import', options:[['granted','Granted'],['denied','Denied']]},
+];
+
+function renderStateControls(screen){
+  const el = document.getElementById('state-controls');
+  el.innerHTML='';
+  if(screen==='settings'){
+    SETTINGS_SUBCONTROLS.forEach(sc=>{
+      const label=document.createElement('label'); label.textContent=sc.label; el.appendChild(label);
+      const sel=document.createElement('select');
+      sc.options.forEach(([v,l])=>{const o=document.createElement('option');o.value=v;o.textContent=l;sel.appendChild(o);});
+      sel.onchange=()=>setSettingsState(sc.group, sel.value);
+      el.appendChild(sel);
+    });
+    return;
+  }
+  if(screen==='signin'){
+    const label=document.createElement('label'); label.textContent='Notice'; el.appendChild(label);
+    const sel=document.createElement('select');
+    STATE_OPTIONS.signin.forEach(([v,l])=>{const o=document.createElement('option');o.value=v;o.textContent=l;sel.appendChild(o);});
+    sel.onchange=()=>{
+      document.getElementById('ms-error').style.display = sel.value==='error'?'flex':'none';
+      document.getElementById('ms-session').style.display = sel.value==='session'?'flex':'none';
+    };
+    el.appendChild(sel);
+    return;
+  }
+  const opts = STATE_OPTIONS[screen]||[];
+  if(!opts.length) return;
+  const label=document.createElement('label'); label.textContent='State'; el.appendChild(label);
+  const sel=document.createElement('select');
+  opts.forEach(([v,l])=>{const o=document.createElement('option');o.value=v;o.textContent=l;sel.appendChild(o);});
+  sel.onchange=()=>setState(screen, sel.value);
+  el.appendChild(sel);
+}
+
+function setState(screen, state){
+  document.querySelectorAll('#mscreen-'+screen+' .state-variant').forEach(v=>{ v.hidden = v.dataset.state !== state; });
+}
+function setSettingsState(group, value){
+  const map = {email:['connected','disconnected'], sms:['granted','denied','ios']};
+  map[group].forEach(v=>{
+    document.querySelectorAll('#mscreen-settings .state-variant[data-state="'+v+'"]').forEach(el=>{ el.hidden = v!==value; });
+  });
+}
+function setPlatform(p){
+  if(p==='ios'){
+    setSettingsState('sms','ios');
+    document.querySelector('#mscreen-settings .set-banner').style.display='none';
+  } else {
+    setSettingsState('sms','granted');
+    document.querySelector('#mscreen-settings .set-banner').style.display='block';
+  }
+}
+
+let catTarget = null;
+function openCatSheet(btn, rowId){
+  catTarget = btn;
+  const grid = document.getElementById('cat-grid');
+  grid.innerHTML='';
+  CATEGORIES.forEach(c=>{
+    const b=document.createElement('button');
+    b.className='cat-opt';
+    b.innerHTML='<span class="dot" style="background:'+c.color+'"><svg class="icon"><use href="#'+c.icon+'"/></svg></span>'+c.label;
+    b.onclick=()=>assignCategory(c);
+    grid.appendChild(b);
+  });
+  document.getElementById('cat-sheet-overlay').classList.add('active');
+}
+function closeCatSheet(){ document.getElementById('cat-sheet-overlay').classList.remove('active'); }
+function assignCategory(cat){
+  const btn = catTarget;
+  btn.style.background = cat.color;
+  btn.classList.remove('uncat');
+  btn.innerHTML = '<svg class="icon"><use href="#'+cat.icon+'"/></svg>';
+  closeCatSheet();
+  const row = btn.closest('.row');
+  const merchant = row.querySelector('.row-merchant .txt').textContent;
+  showRememberBanner(row, merchant, cat.label);
+}
+function showRememberBanner(row, merchant, catLabel){
+  const old = row.parentElement.querySelector('.remember-banner');
+  if(old) old.remove();
+  const div = document.createElement('div');
+  div.className='remember-banner';
+  div.innerHTML = 'Categorized as <b>'+catLabel+'</b>. Apply to future "'+(merchant.length>22?merchant.slice(0,22)+'…':merchant)+'" too?'+
+    '<div class="remember-actions"><button class="primary" onclick="this.closest(\'.remember-banner\').remove()">Yes</button><button onclick="this.closest(\'.remember-banner\').remove()">Just this one</button></div>';
+  row.insertAdjacentElement('afterend', div);
+}
+
+function openRaw(id){
+  const m = RAW_MESSAGES[id];
+  if(!m) return;
+  document.getElementById('raw-source-text').textContent = m.source+' · '+m.when;
+  document.getElementById('raw-source-icon').innerHTML = '<use href="#'+(m.source==='Email'?'ic-mail':'ic-message')+'"/>';
+  document.getElementById('raw-text').textContent = m.text;
+  document.getElementById('raw-overlay').classList.add('active');
+}
+function closeRaw(){ document.getElementById('raw-overlay').classList.remove('active'); }
+
+function showOsDialog(){ setScreen('osdialog'); }
+
+function fakeSync(btn){
+  const icon = btn.querySelector('svg');
+  icon.style.animation='spin .7s linear 2';
+  setTimeout(()=>icon.style.animation='',1500);
+}
+const style = document.createElement('style');
+style.textContent='@keyframes spin{to{transform:rotate(360deg)}}';
+document.head.appendChild(style);
+
+let mpg = 1;
+function mpgChange(d){
+  mpg = Math.max(1, Math.min(7, mpg+d));
+  document.getElementById('mpg-label').textContent = 'Page '+mpg+' of 7';
+  document.getElementById('mpg-prev').disabled = mpg===1;
+  document.getElementById('mpg-next').disabled = mpg===7;
+}
+
+renderStateControls('signin');
+</script>
+</body>
+</html>

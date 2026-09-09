@@ -1,65 +1,124 @@
 import { useState } from "react";
-import { api } from "../lib/api";
-import { formatMoney } from "../lib/format";
+import { formatMoney, formatTime } from "../lib/format";
 import { Category, Transaction } from "../types";
+import { CategoryPopover } from "./CategoryPopover";
+import { Icon } from "./Icon";
+import { RememberBanner } from "./RememberBanner";
 
+/**
+ * One transaction. The category is set from the round chip on the left
+ * rather than a permanently visible dropdown, so a long list reads as a
+ * ledger instead of a wall of form controls.
+ */
 export function TransactionRow({
   transaction,
   categories,
   onUpdated,
+  onShowRaw,
 }: {
   transaction: Transaction;
   categories: Category[];
   onUpdated: (updated: Transaction) => void;
+  onShowRaw: (transaction: Transaction) => void;
 }) {
-  const [saving, setSaving] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  // Set after a category is chosen, offering to remember the merchant.
+  const [justCategorized, setJustCategorized] = useState<Category | null>(null);
 
-  async function handleCategoryChange(categoryId: string) {
-    setSaving(true);
-    try {
-      const updated = await api.patch<Transaction>(`/transactions/${transaction.id}`, {
-        categoryId: categoryId || null,
-      });
-      onUpdated(updated);
-    } finally {
-      setSaving(false);
-    }
+  const isDebit = transaction.type === "DEBIT";
+  const category = transaction.category;
+  const account = transaction.account;
+
+  function handlePicked(picked: Category, updated: Transaction) {
+    onUpdated(updated);
+    setPickerOpen(false);
+    // Only worth remembering when there's a merchant to match on later.
+    if (transaction.merchant) setJustCategorized(picked);
   }
 
-  const sign = transaction.type === "DEBIT" ? "-" : "+";
-  const amountClass = transaction.type === "DEBIT" ? "amount debit" : "amount credit";
+  const meta = [
+    account ? `${account.bankName}${account.last4 ? ` ••${account.last4}` : ""}` : null,
+    account?.accountType === "CARD" ? "Card" : account ? "Bank" : null,
+    formatTime(transaction.occurredAt),
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
-    <div className={`transaction-row${transaction.isTransfer ? " transfer" : ""}`}>
-      <div className="transaction-main">
-        <div className="transaction-merchant">
-          {transaction.merchant ?? "Unknown"}
-          {transaction.isTransfer && <span className="badge">Transfer</span>}
-          {transaction.pending && <span className="badge">Pending</span>}
+    <>
+      <div className="row-wrap">
+        <div className={`row${transaction.isTransfer ? " is-transfer" : ""}`}>
+          {transaction.isTransfer ? (
+            <div className="row-cat-chip" style={{ background: "#F1F5F9", color: "var(--transfer)" }}>
+              <Icon name="ic-arrow-right" />
+            </div>
+          ) : (
+            <button
+              className={`row-cat-chip${category ? "" : " uncat"}`}
+              style={category?.color ? { background: category.color } : undefined}
+              onClick={() => setPickerOpen((open) => !open)}
+              title={category ? `Category: ${category.name}` : "Set category"}
+            >
+              <Icon name={category?.icon ?? "ic-plus"} />
+            </button>
+          )}
+
+          <div className="row-main">
+            <div className="row-merchant">
+              <span className="txt">{transaction.merchant ?? "Unknown"}</span>
+              {transaction.rawText && (
+                <button className="row-info-btn" onClick={() => onShowRaw(transaction)} title="View original message">
+                  <Icon name="ic-info" />
+                </button>
+              )}
+            </div>
+            <div className="row-meta">
+              <Icon name={transaction.source === "EMAIL" ? "ic-mail" : "ic-message"} />
+              {meta}
+            </div>
+            {transaction.isTransfer && (
+              <div className="row-badges">
+                <span className="badge badge-transfer">
+                  <Icon name="ic-arrow-right" />
+                  Between your accounts · not counted
+                </span>
+              </div>
+            )}
+            {transaction.pending && (
+              <div className="row-badges">
+                <span className="badge badge-pending">Pending</span>
+              </div>
+            )}
+          </div>
+
+          <div className="row-amount-wrap">
+            <div
+              className={`row-amount num ${transaction.isTransfer ? "transfer-amt" : isDebit ? "debit" : "credit"}`}
+              style={transaction.isTransfer ? { color: "var(--transfer)" } : undefined}
+            >
+              {isDebit ? "−" : "+"}
+              {formatMoney(transaction.amountMinor, transaction.currency)}
+            </div>
+          </div>
         </div>
-        <div className="transaction-meta">
-          {transaction.account ? `${transaction.account.bankName} ••${transaction.account.last4 ?? "----"}` : transaction.source}
-          {" · "}
-          {new Date(transaction.occurredAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
-        </div>
+
+        {pickerOpen && (
+          <CategoryPopover
+            categories={categories}
+            transaction={transaction}
+            onPicked={handlePicked}
+            onClose={() => setPickerOpen(false)}
+          />
+        )}
       </div>
-      <select
-        className="category-select"
-        value={transaction.category?.id ?? ""}
-        disabled={saving}
-        onChange={(e) => handleCategoryChange(e.target.value)}
-      >
-        <option value="">Uncategorized</option>
-        {categories.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
-          </option>
-        ))}
-      </select>
-      <div className={amountClass}>
-        {sign}
-        {formatMoney(transaction.amountMinor, transaction.currency)}
-      </div>
-    </div>
+
+      {justCategorized && transaction.merchant && (
+        <RememberBanner
+          merchant={transaction.merchant}
+          category={justCategorized}
+          onDone={() => setJustCategorized(null)}
+        />
+      )}
+    </>
   );
 }

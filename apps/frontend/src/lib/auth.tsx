@@ -1,7 +1,9 @@
-import { createContext, useContext, ReactNode } from "react";
-import { clearToken, getToken } from "./api";
+import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { api, clearToken, getToken } from "./api";
+import { User } from "../types";
 
 interface AuthContextValue {
+  user: User | null;
   isSignedIn: boolean;
   logout: () => void;
 }
@@ -9,15 +11,24 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  // Signing in is a full-page redirect through the backend
-  // (/auth/google/start), so there is no client-side login call to hold
-  // state for — the presence of a stored token is the whole session state.
+  const [user, setUser] = useState<User | null>(null);
+
+  // Signing in is a full-page redirect through the backend, so there is no
+  // client-side login call to hold state for — the stored token is the whole
+  // session. The user record is fetched for the sidebar's account block.
+  useEffect(() => {
+    if (!getToken()) return;
+    api.get<User>("/auth/me").then(setUser).catch(() => setUser(null));
+  }, []);
+
   function logout() {
     clearToken();
     window.location.href = "/login";
   }
 
-  return <AuthContext.Provider value={{ isSignedIn: !!getToken(), logout }}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={{ user, isSignedIn: !!getToken(), logout }}>{children}</AuthContext.Provider>
+  );
 }
 
 export function useAuth(): AuthContextValue {

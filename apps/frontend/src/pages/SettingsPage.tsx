@@ -1,36 +1,37 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { Icon } from "../components/Icon";
 import { api } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { EmailConnectionStatus } from "../types";
 
 export function SettingsPage() {
+  const { user, logout } = useAuth();
   const [connections, setConnections] = useState<EmailConnectionStatus[]>([]);
   const [syncing, setSyncing] = useState(false);
-  // null while unknown, so the button isn't hidden on a slow check.
   const [apkAvailable, setApkAvailable] = useState<boolean | null>(null);
   const [searchParams] = useSearchParams();
   const gmailStatus = searchParams.get("gmail");
 
-  function reload() {
-    api.get<EmailConnectionStatus[]>("/ingestion/email/status").then(setConnections);
-  }
+  const reload = useCallback(() => {
+    api.get<EmailConnectionStatus[]>("/ingestion/email/status").then(setConnections).catch(() => setConnections([]));
+  }, []);
 
-  useEffect(reload, [gmailStatus]);
+  useEffect(reload, [reload, gmailStatus]);
 
-  // The APK is published by CI rather than committed, so it may not exist
-  // on a fresh deployment. A HEAD request avoids offering a broken link.
+  // The APK is published by CI, so a fresh deployment may not have one yet.
   useEffect(() => {
     fetch("/SpendLog.apk", { method: "HEAD" })
       .then((res) => setApkAvailable(res.ok))
       .catch(() => setApkAvailable(false));
   }, []);
 
-  async function handleConnect() {
+  async function connect() {
     const { url } = await api.get<{ url: string }>("/ingestion/email/connect");
     window.location.href = url;
   }
 
-  async function handleSync() {
+  async function syncNow() {
     setSyncing(true);
     try {
       await api.post("/ingestion/email/sync");
@@ -40,63 +41,151 @@ export function SettingsPage() {
     }
   }
 
-  async function handleDisconnect(id: string) {
+  async function disconnect(id: string) {
     await api.delete(`/ingestion/email/${id}`);
     reload();
   }
 
+  const connection = connections[0];
+
   return (
-    <div className="settings-page">
-      <h2>Email import</h2>
-      {gmailStatus === "connected" && <p className="success-text">Gmail connected successfully.</p>}
-      {gmailStatus === "denied" && (
-        <p className="error-text">Gmail access wasn't granted. Email import stays off until you allow it.</p>
-      )}
-      {gmailStatus === "error" && <p className="error-text">Couldn't connect Gmail — please try again.</p>}
+    <section className="screen">
+      <div className="screen-header">
+        <h1 className="screen-title">Settings</h1>
+      </div>
 
-      {connections.length === 0 ? (
-        <div>
-          <p>
-            Gmail access is normally granted when you sign in. It looks like it was declined or revoked —
-            connect it here to turn email import back on.
-          </p>
-          <button onClick={handleConnect}>Connect Gmail</button>
-        </div>
-      ) : (
-        <div>
-          {connections.map((c) => (
-            <div key={c.id} className="connection-row">
-              <div>
-                <strong>{c.email}</strong>
-                <div className="transaction-meta">
-                  {c.lastSyncedAt ? `Last synced ${new Date(c.lastSyncedAt).toLocaleString("en-IN")}` : "Not synced yet"}
-                </div>
+      <div className="settings-grid">
+        {apkAvailable === false ? (
+          <div className="settings-banner">
+            <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+              <div className="settings-banner-icon">
+                <Icon name="ic-phone" />
               </div>
-              <button onClick={() => handleDisconnect(c.id)}>Disconnect</button>
+              <div>
+                <h3>Android app — build in progress</h3>
+                <p>
+                  No build has been published yet. Check back shortly, or continue with Gmail import in the
+                  meantime.
+                </p>
+              </div>
             </div>
-          ))}
-          <button onClick={handleSync} disabled={syncing}>
-            {syncing ? "Syncing…" : "Sync now"}
-          </button>
-        </div>
-      )}
+          </div>
+        ) : (
+          <div className="settings-banner">
+            <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+              <div className="settings-banner-icon">
+                <Icon name="ic-phone" />
+              </div>
+              <div>
+                <h3>Get the Android app</h3>
+                <p>
+                  SMS import — catching bank and UPI texts the moment they arrive — only works from the Android
+                  app. It's the only route to that data.
+                </p>
+              </div>
+            </div>
+            <div className="settings-banner-right">
+              <a className="btn btn-primary" href="/SpendLog.apk" download>
+                <Icon name="ic-download" /> Download APK
+              </a>
+              <span className="settings-banner-note">
+                Android will warn about installing outside the Play Store — that's expected for a direct download.
+              </span>
+            </div>
+          </div>
+        )}
 
-      <h2>Android app</h2>
-      <p>
-        SMS auto-import only works on Android — iOS doesn't let apps read SMS. Install the app and sign
-        in with this same account to start capturing SMS transactions automatically.
-      </p>
-      {apkAvailable === false ? (
-        <p className="hint">No build available yet. The APK is published here by CI on each build.</p>
-      ) : (
-        <a className="google-button" href="/SpendLog.apk" download>
-          Download SpendLog.apk
-        </a>
-      )}
-      <p className="hint">
-        Android blocks installs from outside the Play Store by default — you'll be prompted to allow
-        installs from your browser the first time.
-      </p>
-    </div>
+        <div className="card set-card">
+          <div className="set-card-head">
+            <div className="set-card-icon" style={{ background: "var(--brand-50)" }}>
+              <Icon name="ic-mail" />
+            </div>
+            <div>
+              <h4>Email import</h4>
+              <p className="set-card-sub">Gmail, read-only</p>
+            </div>
+          </div>
+
+          {gmailStatus === "connected" && <p className="desc">Gmail connected successfully.</p>}
+          {gmailStatus === "denied" && (
+            <p className="desc">Gmail access wasn't granted. Email import stays off until you allow it.</p>
+          )}
+
+          {connection ? (
+            <>
+              <p className="desc">
+                <span className="status-pill status-on">
+                  <Icon name="ic-check" />
+                  Connected
+                </span>
+                &nbsp;{connection.email}
+                <br />
+                {connection.lastSyncedAt
+                  ? `Last synced ${new Date(connection.lastSyncedAt).toLocaleString("en-IN")}.`
+                  : "Not synced yet."}
+              </p>
+              <div className="set-card-actions">
+                <button className="btn btn-sm" onClick={syncNow} disabled={syncing}>
+                  <Icon name="ic-sync" />
+                  {syncing ? "Syncing…" : "Sync now"}
+                </button>
+                <button className="btn btn-sm btn-ghost btn-danger-text" onClick={() => disconnect(connection.id)}>
+                  Disconnect
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="desc">
+                <span className="status-pill status-off">Not connected</span>
+                <br />
+                Email access was declined when you signed in. You can grant it here instead.
+              </p>
+              <div className="set-card-actions">
+                <button className="btn btn-sm btn-primary" onClick={connect}>
+                  Connect Gmail
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="card set-card">
+          <div className="set-card-head">
+            <div className="set-card-icon" style={{ background: "var(--brand-50)" }}>
+              <Icon name="ic-message" />
+            </div>
+            <div>
+              <h4>SMS import</h4>
+              <p className="set-card-sub">Android only</p>
+            </div>
+          </div>
+          <p className="desc">
+            <span className="status-pill status-off">Not available here</span>
+            <br />
+            Reading text messages isn't something a browser is allowed to do. Install the Android app to capture
+            SMS automatically.
+          </p>
+        </div>
+
+        <div className="card set-card">
+          <div className="set-card-head">
+            <div className="set-card-icon" style={{ background: "var(--brand-50)" }}>
+              <Icon name="ic-lock" />
+            </div>
+            <div>
+              <h4>Account</h4>
+              <p className="set-card-sub">{user?.email ?? ""}</p>
+            </div>
+          </div>
+          <p className="desc">Signed in with Google. Signing out doesn't remove any imported transactions.</p>
+          <div className="set-card-actions">
+            <button className="btn btn-sm btn-ghost btn-danger-text" onClick={logout}>
+              Sign out
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }

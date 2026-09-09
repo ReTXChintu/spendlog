@@ -1,3 +1,6 @@
+// icon values are ids in the shared icon sprite from the approved design
+// (apps/frontend/src/components/Icon.tsx). The Flutter app maps the same ids
+// to Material icons, so category appearance is defined once, here.
 export interface DefaultCategorySeed {
   name: string;
   icon: string;
@@ -11,74 +14,74 @@ export interface DefaultCategorySeed {
 export const DEFAULT_CATEGORIES: DefaultCategorySeed[] = [
   {
     name: "Food & Dining",
-    icon: "utensils",
-    color: "#f97316",
+    icon: "ic-food",
+    color: "#F97316",
     keywords: ["swiggy", "zomato", "restaurant", "cafe", "eatery", "dominos", "pizza", "starbucks"],
   },
   {
     name: "Groceries",
-    icon: "shopping-basket",
-    color: "#22c55e",
+    icon: "ic-basket",
+    color: "#84CC16",
     keywords: ["bigbasket", "blinkit", "zepto", "grofers", "dmart", "grocery", "supermarket"],
   },
   {
     name: "Transport",
-    icon: "car",
-    color: "#0ea5e9",
+    icon: "ic-car",
+    color: "#0EA5E9",
     keywords: ["uber", "ola", "rapido", "irctc", "fuel", "petrol", "diesel", "metro", "fastag"],
   },
   {
     name: "Shopping",
-    icon: "shopping-bag",
-    color: "#a855f7",
+    icon: "ic-bag",
+    color: "#EC4899",
     keywords: ["amazon", "flipkart", "myntra", "ajio", "meesho", "nykaa"],
   },
   {
     name: "Bills & Utilities",
-    icon: "receipt",
-    color: "#eab308",
+    icon: "ic-bolt",
+    color: "#EAB308",
     keywords: ["electricity", "airtel", "jio", "vodafone", "vi ", "recharge", "broadband", "water bill", "gas bill"],
   },
   {
     name: "Entertainment",
-    icon: "film",
-    color: "#ec4899",
+    icon: "ic-play",
+    color: "#A855F7",
     keywords: ["netflix", "spotify", "hotstar", "prime video", "bookmyshow", "pvr", "inox"],
   },
   {
     name: "Health",
-    icon: "heart-pulse",
-    color: "#ef4444",
+    icon: "ic-health",
+    color: "#F43F5E",
     keywords: ["pharmacy", "apollo", "hospital", "clinic", "medplus", "1mg", "diagnostic"],
   },
   {
     name: "Housing",
-    icon: "home",
-    color: "#8b5cf6",
+    icon: "ic-home",
+    color: "#A8A29E",
     keywords: ["rent", "landlord", "maintenance charge", "society"],
   },
   {
     name: "EMI & Loans",
-    icon: "credit-card",
-    color: "#f43f5e",
+    icon: "ic-percent",
+    color: "#64748B",
     keywords: ["emi", "loan", "installment"],
   },
   {
     name: "Investments",
-    icon: "trending-up",
-    color: "#14b8a6",
+    icon: "ic-trend",
+    color: "#16A34A",
     keywords: ["mutual fund", "sip ", "zerodha", "groww", "upstox", "nps"],
   },
   {
     name: "Income",
-    icon: "wallet",
-    color: "#16a34a",
+    icon: "ic-wallet",
+    color: "#16A34A",
     keywords: ["salary", "payroll", "interest credited", "cashback", "refund"],
   },
   {
     name: "Others",
-    icon: "more-horizontal",
-    color: "#64748b",
+    icon: "ic-dots",
+    color: "#94A3B8",
     keywords: [],
   },
 ];

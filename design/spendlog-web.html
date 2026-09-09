@@ -1,0 +1,1108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpendLog — Web</title>
+<style>
+:root{
+  --ink:#0F172A;
+  --ink-70:#334155;
+  --brand:#3D6BF5;
+  --brand-dark:#2F53C9;
+  --brand-50:#EEF2FF;
+  --brand-100:#E0E7FF;
+  --debit:#DC2626;
+  --debit-50:#FEF2F2;
+  --credit:#16A34A;
+  --credit-50:#F0FDF4;
+  --muted:#64748B;
+  --muted-light:#94A3B8;
+  --paper:#F5F5F2;
+  --surface:#FFFFFF;
+  --line:#E4E4DF;
+  --line-strong:#D6D6D0;
+  --transfer:#94A3B8;
+  --warn:#B45309;
+  --warn-bg:#FFFBEB;
+  --radius-sm:8px;
+  --radius-md:12px;
+  --radius-lg:18px;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "Roboto Mono", Consolas, "Liberation Mono", monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:var(--font-sans);
+  background:var(--paper);
+  color:var(--ink);
+  -webkit-font-smoothing:antialiased;
+  font-size:14.5px;
+}
+button{font-family:inherit;cursor:pointer}
+a{color:inherit}
+svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.num{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+
+/* ---------- shell ---------- */
+#app-shell{display:none;min-height:100vh;width:100%;}
+#app-shell.active{display:grid;grid-template-columns:248px 1fr;}
+
+.sidebar{
+  background:var(--surface);
+  border-right:1px solid var(--line);
+  padding:20px 14px;
+  display:flex;flex-direction:column;
+  position:sticky;top:0;height:100vh;
+}
+.brand-mark{display:flex;align-items:center;gap:10px;padding:6px 8px 22px 8px;}
+.brand-tile{width:34px;height:34px;border-radius:9px;background:var(--ink);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.brand-tile svg{width:19px;height:19px;color:var(--brand)}
+.brand-word{font-weight:800;font-size:16.5px;letter-spacing:-0.01em}
+
+.nav{display:flex;flex-direction:column;gap:2px;flex:1}
+.nav-item{
+  display:flex;align-items:center;gap:11px;
+  padding:10px 12px;border-radius:var(--radius-sm);
+  color:var(--ink-70);font-weight:600;font-size:14px;
+  border:none;background:none;text-align:left;width:100%;
+}
+.nav-item svg{width:18px;height:18px;color:var(--muted)}
+.nav-item:hover{background:var(--paper)}
+.nav-item.active{background:var(--brand-50);color:var(--brand-dark)}
+.nav-item.active svg{color:var(--brand)}
+.nav-foot{border-top:1px solid var(--line);padding-top:12px;margin-top:8px}
+.nav-user{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:var(--radius-sm)}
+.nav-avatar{width:26px;height:26px;border-radius:50%;background:var(--brand-100);color:var(--brand-dark);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11.5px;flex-shrink:0}
+.nav-user-meta{min-width:0}
+.nav-user-name{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nav-user-email{color:var(--muted);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nav-signout{margin-top:6px;font-size:12.5px;color:var(--muted);background:none;border:none;padding:6px 10px;font-weight:600}
+.nav-signout:hover{color:var(--debit)}
+
+.content{padding:28px 32px 60px 32px;min-width:0}
+.screen{display:none}
+.screen.active{display:block}
+.screen-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;gap:16px;flex-wrap:wrap}
+.screen-title{font-size:23px;font-weight:800;letter-spacing:-0.015em;margin:0}
+.screen-actions{display:flex;gap:8px;align-items:center}
+
+.btn{display:inline-flex;align-items:center;gap:7px;padding:9px 15px;border-radius:var(--radius-sm);font-weight:600;font-size:13.5px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink)}
+.btn:hover{border-color:var(--muted-light)}
+.btn svg{width:15px;height:15px}
+.btn-primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.btn-primary:hover{background:var(--brand-dark);border-color:var(--brand-dark)}
+.btn-ghost{border-color:transparent;background:none}
+.btn-ghost:hover{background:var(--paper);border-color:transparent}
+.btn-sm{padding:6px 10px;font-size:12.5px}
+.btn-danger-text{color:var(--debit)}
+
+/* two/three column screen layouts for full-width use */
+.layout-2{display:grid;grid-template-columns:1fr 300px;gap:26px;align-items:start}
+.layout-filters{display:grid;grid-template-columns:230px 1fr;gap:26px;align-items:start}
+
+/* ---------- rail / cards ---------- */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md);padding:18px}
+.rail{position:sticky;top:28px;display:flex;flex-direction:column;gap:14px}
+.rail-title{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;margin:0 0 12px 2px}
+.stat-line{display:flex;justify-content:space-between;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--line)}
+.stat-line:last-child{border-bottom:none}
+.stat-line .label{color:var(--muted);font-size:13px}
+.stat-line .value{font-weight:700;font-size:15px}
+.nudge{background:var(--brand-50);border:1px solid var(--brand-100);border-radius:var(--radius-md);padding:14px}
+.nudge-title{font-weight:700;font-size:13.5px;color:var(--brand-dark);display:flex;align-items:center;gap:7px;margin-bottom:5px}
+.nudge p{margin:0 0 10px 0;font-size:12.8px;color:var(--ink-70);line-height:1.45}
+.nudge a{font-size:12.8px;font-weight:700;color:var(--brand-dark);display:inline-flex;align-items:center;gap:4px}
+.mini-cats{display:flex;flex-direction:column;gap:9px;margin-top:2px}
+.mini-cat-row{display:flex;align-items:center;gap:8px;font-size:12.5px}
+.mini-cat-dot{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+.mini-cat-label{flex:1;color:var(--ink-70)}
+.mini-cat-val{font-family:var(--font-mono);font-weight:600}
+
+/* ---------- day ledger ---------- */
+.day-group{margin-bottom:26px}
+.day-header{display:flex;align-items:baseline;justify-content:space-between;padding:0 2px 10px 2px;border-bottom:2px solid var(--ink);margin-bottom:4px}
+.day-label{font-weight:800;font-size:14.5px;letter-spacing:-0.01em}
+.day-totals{display:flex;gap:16px;font-size:12.8px}
+.day-totals .spend{color:var(--debit);font-family:var(--font-mono);font-weight:700}
+.day-totals .income{color:var(--credit);font-family:var(--font-mono);font-weight:700}
+.day-totals .dsep{color:var(--muted-light)}
+
+.row-wrap{position:relative}
+.row{display:grid;grid-template-columns:40px 1fr auto;gap:13px;align-items:center;padding:12px 4px;border-bottom:1px solid var(--line)}
+.row:hover{background:#FCFCFB}
+.row-cat-chip{width:36px;height:36px;border-radius:50%;border:none;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#fff}
+.row-cat-chip svg{width:17px;height:17px}
+.row-cat-chip.uncat{background:var(--surface);border:1.6px dashed var(--muted-light);color:var(--muted-light)}
+.row-main{min-width:0}
+.row-merchant{display:flex;align-items:center;gap:6px;font-weight:700;font-size:13.8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row-merchant .txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row-info-btn{background:none;border:none;color:var(--muted-light);padding:0;display:flex;flex-shrink:0}
+.row-info-btn:hover{color:var(--brand)}
+.row-info-btn svg{width:13.5px;height:13.5px}
+.row-meta{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:12px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row-meta svg{width:11.5px;height:11.5px;flex-shrink:0}
+.row-badges{display:flex;gap:6px;margin-top:5px}
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;padding:2px 8px;border-radius:100px}
+.badge svg{width:10px;height:10px}
+.badge-transfer{background:#F1F5F9;color:var(--transfer)}
+.badge-pending{background:var(--warn-bg);color:var(--warn)}
+.row-amount-wrap{text-align:right}
+.row-amount{font-family:var(--font-mono);font-weight:700;font-size:14.5px;white-space:nowrap}
+.row-amount.debit{color:var(--debit)}
+.row-amount.credit{color:var(--credit)}
+.row-amount.transfer-amt{color:var(--transfer)}
+.row.is-transfer{background:#FBFBFA}
+.row.is-transfer .row-cat-chip{opacity:.55}
+
+.remember-banner{margin:0 4px 10px 53px;background:var(--brand-50);border:1px solid var(--brand-100);border-radius:var(--radius-sm);padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px}
+.remember-banner b{color:var(--brand-dark)}
+.remember-actions{display:flex;gap:6px;flex-shrink:0}
+.remember-actions button{font-size:12px;padding:5px 10px;border-radius:6px;font-weight:700}
+
+/* ---------- empty / error states ---------- */
+.state-block{display:flex;flex-direction:column;align-items:flex-start;padding:56px 8px;max-width:480px}
+.state-icon{width:52px;height:52px;border-radius:14px;background:var(--brand-50);color:var(--brand);display:flex;align-items:center;justify-content:center;margin-bottom:18px}
+.state-icon.warn{background:var(--warn-bg);color:var(--warn)}
+.state-icon svg{width:26px;height:26px}
+.state-title{font-size:18px;font-weight:800;margin:0 0 8px 0;letter-spacing:-0.01em}
+.state-body{color:var(--ink-70);font-size:13.8px;line-height:1.55;margin:0 0 20px 0}
+.state-actions{display:flex;gap:10px}
+
+/* ---------- skeleton ---------- */
+.skel-row{display:grid;grid-template-columns:40px 1fr 90px;gap:13px;align-items:center;padding:12px 4px}
+.skel{background:linear-gradient(90deg,#ECECE8 25%,#F3F3EF 37%,#ECECE8 63%);background-size:400% 100%;animation:shimmer 1.4s infinite;border-radius:6px}
+@keyframes shimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
+.skel-circle{width:36px;height:36px;border-radius:50%}
+.skel-line{height:11px}
+
+/* ---------- transactions screen ---------- */
+.filters-panel{display:flex;flex-direction:column;gap:16px;position:sticky;top:28px}
+.filter-group label{display:block;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px}
+.filter-input, .filter-select{width:100%;padding:9px 11px;border:1px solid var(--line-strong);border-radius:8px;font-size:13px;font-family:inherit;background:var(--surface)}
+.filter-input-icon{position:relative}
+.filter-input-icon svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--muted-light)}
+.filter-input-icon input{padding-left:32px}
+.filter-radio-row{display:flex;gap:8px}
+.filter-radio{flex:1;text-align:center;padding:8px;border:1px solid var(--line-strong);border-radius:8px;font-size:12.5px;font-weight:600;color:var(--ink-70)}
+.filter-radio.on{background:var(--brand-50);border-color:var(--brand);color:var(--brand-dark)}
+.filter-daterange{display:flex;gap:6px;align-items:center}
+.filter-daterange input{width:100%}
+.filter-note{font-size:11px;color:var(--muted-light);margin-top:14px;line-height:1.5}
+
+.txn-list-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:12px;color:var(--muted)}
+.pagination{display:flex;align-items:center;gap:10px;justify-content:center;margin-top:22px}
+.pagination button{width:32px;height:32px;border-radius:8px;border:1px solid var(--line-strong);background:var(--surface);display:flex;align-items:center;justify-content:center}
+.pagination button:disabled{opacity:.4;cursor:default}
+.pagination span{font-size:12.8px;color:var(--muted);font-weight:600}
+
+/* ---------- analytics ---------- */
+.month-picker{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line-strong);border-radius:100px;padding:5px 8px}
+.month-picker button{width:26px;height:26px;border:none;background:none;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.month-picker button:hover{background:var(--paper)}
+.month-picker span{font-weight:700;font-size:13.5px;min-width:112px;text-align:center}
+
+.section-block{margin-bottom:30px}
+.section-block h3{font-size:14.5px;font-weight:800;margin:0 0 3px 0}
+.section-sub{font-size:12.5px;color:var(--muted);margin:0 0 16px 0}
+
+.hbars{display:flex;flex-direction:column;gap:13px}
+.hbar-row{display:grid;grid-template-columns:150px 1fr 92px;align-items:center;gap:12px}
+.hbar-label{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hbar-dot{width:9px;height:9px;border-radius:3px;flex-shrink:0}
+.hbar-track{height:11px;background:#EFEFEA;border-radius:6px;overflow:hidden}
+.hbar-fill{height:100%;border-radius:6px}
+.hbar-val{text-align:right;font-family:var(--font-mono);font-weight:700;font-size:13px}
+.hbar-pct{color:var(--muted);font-weight:500;font-size:11.5px;margin-left:4px}
+
+.trend-wrap{display:flex;align-items:flex-end;gap:22px;height:170px;padding:0 6px 0 6px;border-bottom:1px solid var(--line)}
+.trend-col{flex:1;display:flex;flex-direction:column;align-items:center;height:100%;justify-content:flex-end;gap:6px}
+.trend-bars{display:flex;gap:5px;align-items:flex-end;height:130px}
+.trend-bar{width:16px;border-radius:4px 4px 0 0}
+.trend-bar.spend{background:var(--debit)}
+.trend-bar.income{background:var(--credit)}
+.trend-bar.placeholder{background:repeating-linear-gradient(135deg,#E7E7E2,#E7E7E2 4px,#EFEFEA 4px,#EFEFEA 8px);height:6px!important}
+.trend-month{font-size:11.5px;color:var(--muted);font-weight:600}
+.trend-legend{display:flex;gap:16px;margin-top:14px;font-size:12px;color:var(--muted)}
+.trend-legend span{display:inline-flex;align-items:center;gap:6px}
+.legend-dot{width:9px;height:9px;border-radius:3px}
+
+.stat-tiles{display:grid;grid-template-columns:1fr;gap:12px}
+.stat-tile{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md);padding:16px 18px}
+.stat-tile .label{font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px}
+.stat-tile .value{font-size:21px;font-weight:800;font-family:var(--font-mono)}
+.stat-tile .value.debit{color:var(--debit)}
+.stat-tile .value.credit{color:var(--credit)}
+
+/* ---------- settings ---------- */
+.settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.settings-banner{grid-column:1/-1;background:linear-gradient(135deg,var(--ink),#1E2A47);color:#fff;border-radius:var(--radius-lg);padding:24px 28px;display:flex;align-items:center;justify-content:space-between;gap:24px}
+.settings-banner-icon{width:46px;height:46px;border-radius:12px;background:rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.settings-banner-icon svg{width:24px;height:24px;color:var(--brand);}
+.settings-banner h3{margin:0 0 5px 0;font-size:16.5px}
+.settings-banner p{margin:0;font-size:13px;color:#C7D0E8;max-width:480px;line-height:1.5}
+.settings-banner-right{display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex-shrink:0}
+.settings-banner .btn-primary{background:var(--brand);border-color:var(--brand)}
+.settings-banner-note{font-size:11px;color:#9AA6C4;max-width:200px;text-align:right}
+
+.set-card{grid-column:span 1}
+.set-card-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.set-card-icon{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.set-card-icon svg{width:17px;height:17px}
+.set-card h4{margin:0;font-size:14.5px}
+.set-card-sub{font-size:12px;color:var(--muted);margin:2px 0 0 0}
+.set-card p.desc{font-size:13px;color:var(--ink-70);line-height:1.5;margin:10px 0 14px 0}
+.set-card-actions{display:flex;gap:8px}
+.status-pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:100px}
+.status-on{background:var(--credit-50);color:var(--credit)}
+.status-off{background:#F1F5F9;color:var(--muted)}
+
+.full-row{grid-column:1/-1}
+.roadmap-list{display:flex;flex-wrap:wrap;gap:8px}
+.roadmap-chip{font-size:12px;color:var(--muted);background:var(--paper);border:1px solid var(--line);border-radius:100px;padding:6px 12px}
+
+/* ---------- sign in ---------- */
+#screen-signin{display:none;min-height:100vh;grid-template-columns:1fr 1fr}
+#screen-signin.active{display:grid}
+.signin-brand{background:var(--ink);color:#fff;display:flex;flex-direction:column;justify-content:center;padding:60px;position:relative;overflow:hidden}
+.signin-brand .receipt-bg{position:absolute;right:-60px;top:50%;transform:translateY(-50%) rotate(8deg);opacity:.07;width:420px;height:420px}
+.signin-lockup{display:flex;align-items:center;gap:14px;margin-bottom:22px;position:relative}
+.signin-lockup .brand-tile{width:52px;height:52px;background:rgba(255,255,255,.08)}
+.signin-lockup .brand-tile svg{width:28px;height:28px;color:var(--brand)}
+.signin-lockup .word{font-size:27px;font-weight:800;letter-spacing:-0.015em}
+.signin-tagline{font-size:15px;color:#AEB8D6;margin:0;position:relative;max-width:340px;line-height:1.5}
+.signin-panel{display:flex;flex-direction:column;justify-content:center;align-items:center;padding:60px}
+.signin-card{width:100%;max-width:360px}
+.signin-card h2{font-size:19px;margin:0 0 6px 0}
+.signin-card .sub{font-size:13px;color:var(--muted);margin:0 0 26px 0;line-height:1.5}
+.btn-google{width:100%;justify-content:center;padding:12px;font-size:14px;border-radius:10px;background:#fff;border:1px solid var(--line-strong)}
+.btn-google svg{width:18px;height:18px}
+.permission-note{display:flex;gap:9px;background:var(--paper);border-radius:10px;padding:11px 13px;margin-top:16px;font-size:12px;color:var(--ink-70);line-height:1.5}
+.permission-note svg{width:15px;height:15px;color:var(--muted);flex-shrink:0;margin-top:1px}
+.signin-error{display:flex;gap:8px;background:var(--debit-50);color:#991B1B;border-radius:10px;padding:11px 13px;margin-top:14px;font-size:12.5px;align-items:flex-start}
+.signin-error svg{width:15px;height:15px;flex-shrink:0;margin-top:1px}
+.signin-notice{display:flex;gap:8px;background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:11px 13px;margin-top:14px;font-size:12.5px;align-items:flex-start}
+.signin-notice svg{width:15px;height:15px;flex-shrink:0;margin-top:1px}
+
+/* ---------- popover / modal ---------- */
+.cat-popover{position:fixed;z-index:60;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md);box-shadow:0 12px 32px rgba(15,23,42,.16);padding:12px;width:280px}
+.cat-popover-title{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:2px 0 10px 4px}
+.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.cat-opt{display:flex;align-items:center;gap:8px;padding:8px;border-radius:8px;border:none;background:none;text-align:left;font-size:12.5px;font-weight:600;color:var(--ink-70)}
+.cat-opt:hover{background:var(--paper)}
+.cat-opt .dot{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;flex-shrink:0}
+.cat-opt .dot svg{width:10px;height:10px}
+
+.overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:70;display:none;align-items:center;justify-content:center}
+.overlay.active{display:flex}
+.modal{background:var(--surface);border-radius:var(--radius-lg);width:460px;max-width:92vw;padding:24px;position:relative}
+.modal-close{position:absolute;top:16px;right:16px;background:none;border:none;color:var(--muted)}
+.modal h3{margin:0 0 4px 0;font-size:16.5px}
+.modal .modal-sub{font-size:12.5px;color:var(--muted);margin:0 0 16px 0;display:flex;gap:8px;align-items:center}
+.raw-block{background:var(--ink);color:#D9E2F5;font-family:var(--font-mono);font-size:12.5px;line-height:1.7;padding:16px;border-radius:10px;white-space:pre-wrap}
+.modal-footnote{display:flex;align-items:center;gap:8px;margin-top:16px;font-size:12px;color:var(--muted-light)}
+.modal-footnote svg{width:14px;height:14px}
+
+/* ---------- proto control panel ---------- */
+.proto-panel{position:fixed;bottom:16px;right:16px;background:#fff;border:1.5px dashed var(--brand);border-radius:12px;padding:12px 14px;z-index:90;box-shadow:0 8px 24px rgba(0,0,0,.12);font-size:12px;width:250px}
+.proto-panel-title{font-family:var(--font-mono);font-weight:700;color:var(--brand-dark);margin-bottom:8px;display:flex;align-items:center;justify-content:space-between}
+.proto-panel select{width:100%;margin-bottom:8px;padding:6px 7px;border-radius:6px;border:1px solid var(--line-strong);font-size:12px;font-family:inherit}
+.proto-panel label{display:block;font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;font-weight:700}
+.proto-min-btn{position:fixed;bottom:16px;right:16px;background:var(--brand);color:#fff;border:none;border-radius:100px;padding:9px 14px;font-size:12px;font-weight:700;z-index:90;display:none;align-items:center;gap:6px}
+</style>
+</head>
+<body>
+
+<!-- ============ ICON SPRITE ============ -->
+<svg style="display:none">
+<defs>
+<symbol id="ic-food" viewBox="0 0 24 24"><path d="M7 2v7a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2V2M8 2v20M16 2c-1.5 0-2.5 1.5-2.5 4s1 4 2.5 5v9"/></symbol>
+<symbol id="ic-basket" viewBox="0 0 24 24"><path d="M4 9h16l-1.5 10a2 2 0 0 1-2 1.7H7.5a2 2 0 0 1-2-1.7L4 9Z"/><path d="M8 9V6a4 4 0 0 1 8 0v3"/></symbol>
+<symbol id="ic-car" viewBox="0 0 24 24"><path d="M3 13l1.5-5A2 2 0 0 1 6.4 6.5h11.2A2 2 0 0 1 19.5 8l1.5 5"/><path d="M3 13h18v4a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H6v1a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-4Z"/><circle cx="7.5" cy="17.5" r="1.5"/><circle cx="16.5" cy="17.5" r="1.5"/></symbol>
+<symbol id="ic-bag" viewBox="0 0 24 24"><path d="M6 8h12l1 12.5a1.5 1.5 0 0 1-1.5 1.5H6.5A1.5 1.5 0 0 1 5 20.5L6 8Z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></symbol>
+<symbol id="ic-bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></symbol>
+<symbol id="ic-play" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M10 8.5 16 12l-6 3.5v-7Z"/></symbol>
+<symbol id="ic-health" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 7v10M7 12h10"/></symbol>
+<symbol id="ic-home" viewBox="0 0 24 24"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9a1 1 0 0 0 1 1h4v-6h2v6h4a1 1 0 0 0 1-1v-9"/></symbol>
+<symbol id="ic-percent" viewBox="0 0 24 24"><circle cx="7" cy="7" r="3"/><circle cx="17" cy="17" r="3"/><path d="M19 5 5 19"/></symbol>
+<symbol id="ic-trend" viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></symbol>
+<symbol id="ic-wallet" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v3"/><path d="M3 7v11a2 2 0 0 0 2 2h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-5a2.5 2.5 0 0 0 0 5h6"/></symbol>
+<symbol id="ic-dots" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></symbol>
+<symbol id="ic-question" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-dasharray="2.8 3"/><path d="M9.3 9.2a2.7 2.7 0 1 1 3.8 2.4c-1 .5-1.1 1.1-1.1 2.1"/><circle cx="12" cy="17.2" r="0.9" fill="currentColor" stroke="none"/></symbol>
+<symbol id="ic-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></symbol>
+<symbol id="ic-filter" viewBox="0 0 24 24"><line x1="4" y1="6" x2="20" y2="6"/><circle cx="9" cy="6" r="2" fill="var(--surface)"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="15" cy="12" r="2" fill="var(--surface)"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="7" cy="18" r="2" fill="var(--surface)"/></symbol>
+<symbol id="ic-chevron-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+<symbol id="ic-chevron-left" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
+<symbol id="ic-chevron-right" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+<symbol id="ic-sync" viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 13.7-5.7L20 8"/><path d="M20 4v4h-4"/><path d="M20 12a8 8 0 0 1-13.7 5.7L4 16"/><path d="M4 20v-4h4"/></symbol>
+<symbol id="ic-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></symbol>
+<symbol id="ic-message" viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4V5Z"/></symbol>
+<symbol id="ic-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><circle cx="12" cy="7.4" r="0.9" fill="currentColor" stroke="none"/></symbol>
+<symbol id="ic-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+<symbol id="ic-check" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></symbol>
+<symbol id="ic-alert" viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3Z"/><path d="M12 10v4"/><circle cx="12" cy="17" r="0.9" fill="currentColor" stroke="none"/></symbol>
+<symbol id="ic-download" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/></symbol>
+<symbol id="ic-phone" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/></symbol>
+<symbol id="ic-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+<symbol id="ic-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="ic-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
+<symbol id="ic-bank" viewBox="0 0 24 24"><path d="M3 10l9-6 9 6"/><path d="M5 10v9M10 10v9M14 10v9M19 10v9"/><path d="M3 21h18"/></symbol>
+<symbol id="ic-updown" viewBox="0 0 24 24"><path d="M7 15l5 5 5-5"/><path d="M7 9l5-5 5 5"/></symbol>
+<symbol id="ic-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+<symbol id="ic-wifioff" viewBox="0 0 24 24"><path d="M2 8.5a16 16 0 0 1 20 0"/><path d="M5 12a11 11 0 0 1 14 0"/><path d="M8.5 15.5a6 6 0 0 1 7 0"/><circle cx="12" cy="19" r="0.9" fill="currentColor" stroke="none"/><path d="M3 3l18 18"/></symbol>
+<symbol id="ic-receipt" viewBox="0 0 24 24"><path d="M6 2h12v19l-2-1.3L14 21l-2-1.3L10 21l-2-1.3L6 21V2Z"/><path d="M9 7h6M9 11h6M9 15h4"/></symbol>
+<symbol id="ic-pencil" viewBox="0 0 24 24"><path d="M4 20l1-4L16 5l3 3L8 19l-4 1Z"/></symbol>
+<symbol id="ic-google" viewBox="0 0 24 24"><path fill="#4285F4" d="M23 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.2c-.3 1.4-1.1 2.6-2.4 3.4v2.8h3.9c2.3-2.1 3.3-5.2 3.3-8.3Z"/><path fill="#34A853" d="M12 24c3.2 0 5.9-1.1 7.8-2.9l-3.9-2.8c-1.1.7-2.4 1.1-3.9 1.1-3 0-5.5-2-6.4-4.7H1.6v2.9C3.5 21.3 7.4 24 12 24Z"/><path fill="#FBBC05" d="M5.6 14.7c-.2-.7-.4-1.4-.4-2.2s.1-1.5.4-2.2V7.4H1.6C.8 9 .3 10.9.3 12.9s.5 3.9 1.3 5.5l4-3.7Z"/><path fill="#EA4335" d="M12 4.8c1.7 0 3.3.6 4.5 1.8l3.4-3.4C17.9 1.2 15.2 0 12 0 7.4 0 3.5 2.7 1.6 6.6l4 3.1c.9-2.7 3.4-4.9 6.4-4.9Z"/></symbol>
+</defs>
+</svg>
+
+<!-- ============ SIGN IN ============ -->
+<section id="screen-signin" class="active">
+  <div class="signin-brand">
+    <svg class="icon receipt-bg" viewBox="0 0 24 24" style="stroke:#fff"><use href="#ic-receipt"/></svg>
+    <div class="signin-lockup">
+      <div class="brand-tile"><svg class="icon"><use href="#ic-receipt"/></svg></div>
+      <div class="word">SpendLog</div>
+    </div>
+    <p class="signin-tagline">Track every rupee, every day. Connect your bank messages once — every transaction after that files itself.</p>
+  </div>
+  <div class="signin-panel">
+    <div class="signin-card">
+      <h2>Sign in to SpendLog</h2>
+      <p class="sub">One Google account. Your first sign-in creates your ledger — there's no separate sign-up.</p>
+      <a href="#" class="btn btn-google" onclick="return false;"><svg class="icon"><use href="#ic-google"/></svg> Sign in with Google</a>
+      <div class="permission-note"><svg class="icon"><use href="#ic-mail"/></svg><div>Google will also ask for read-only access to your Gmail in this same step — that's how email-based transaction alerts get picked up.</div></div>
+
+      <div id="signin-state-error" class="signin-error" style="display:none">
+        <svg class="icon"><use href="#ic-alert"/></svg>
+        <div>Sign-in didn't go through — the link may have expired. <a href="#" onclick="return false;" style="font-weight:700;text-decoration:underline">Try again</a>.</div>
+      </div>
+      <div id="signin-state-session" class="signin-notice" style="display:none">
+        <svg class="icon"><use href="#ic-lock"/></svg>
+        <div>You were signed out after 30 days for security. Sign in again to pick up where you left off.</div>
+      </div>
+      <div id="signin-state-unverified" class="signin-notice" style="display:none">
+        <svg class="icon"><use href="#ic-alert"/></svg>
+        <div>Google may show an "unverified app" screen before you continue — that's expected while SpendLog completes verification. It's safe to proceed.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ APP SHELL ============ -->
+<div id="app-shell">
+  <aside class="sidebar">
+    <div class="brand-mark">
+      <div class="brand-tile"><svg class="icon"><use href="#ic-receipt"/></svg></div>
+      <div class="brand-word">SpendLog</div>
+    </div>
+    <nav class="nav">
+      <button class="nav-item active" data-screen="today" onclick="setScreen('today')"><svg class="icon"><use href="#ic-calendar"/></svg>Today</button>
+      <button class="nav-item" data-screen="transactions" onclick="setScreen('transactions')"><svg class="icon"><use href="#ic-search"/></svg>Transactions</button>
+      <button class="nav-item" data-screen="analytics" onclick="setScreen('analytics')"><svg class="icon"><use href="#ic-trend"/></svg>Analytics</button>
+      <button class="nav-item" data-screen="settings" onclick="setScreen('settings')"><svg class="icon"><use href="#ic-filter" style="transform:rotate(90deg)"/></svg>Settings</button>
+    </nav>
+    <div class="nav-foot">
+      <div class="nav-user">
+        <div class="nav-avatar">DS</div>
+        <div class="nav-user-meta">
+          <div class="nav-user-name">Dharmendra S</div>
+          <div class="nav-user-email">dharmendra@gmail.com</div>
+        </div>
+      </div>
+      <button class="nav-signout" onclick="setScreen('signin')">Sign out</button>
+    </div>
+  </aside>
+
+  <main class="content">
+
+    <!-- ================= TODAY ================= -->
+    <section id="screen-today" class="screen active">
+      <div class="screen-header">
+        <h1 class="screen-title">Today</h1>
+        <div class="screen-actions">
+          <button class="btn btn-ghost btn-sm" onclick="fakeSync(this)"><svg class="icon"><use href="#ic-sync"/></svg> Sync now</button>
+        </div>
+      </div>
+
+      <div class="layout-2">
+        <div>
+          <!-- populated -->
+          <div class="state-variant" data-state="populated">
+            <div class="day-group">
+              <div class="day-header">
+                <span class="day-label">Today</span>
+                <span class="day-totals"><span class="spend num">− ₹615.00</span></span>
+              </div>
+
+              <div class="row-wrap">
+                <div class="row" data-cat="">
+                  <button class="row-cat-chip uncat" onclick="openCatPopover(this,'r1')"><svg class="icon"><use href="#ic-plus"/></svg></button>
+                  <div class="row-main">
+                    <div class="row-merchant"><span class="txt">paytmqr6g6fjc@ptys</span><button class="row-info-btn" onclick="openRaw('r1')" title="View original message"><svg class="icon"><use href="#ic-info"/></svg></button></div>
+                    <div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg> HDFC Bank ••1377 · Card · 9:42 AM</div>
+                  </div>
+                  <div class="row-amount-wrap"><div class="row-amount debit num">−₹105.00</div></div>
+                </div>
+              </div>
+
+              <div class="row-wrap">
+                <div class="row" data-cat="food">
+                  <button class="row-cat-chip" style="background:#F97316" onclick="openCatPopover(this,'r2')"><svg class="icon"><use href="#ic-food"/></svg></button>
+                  <div class="row-main">
+                    <div class="row-merchant"><span class="txt">swiggy@icici</span><button class="row-info-btn" onclick="openRaw('r2')" title="View original message"><svg class="icon"><use href="#ic-info"/></svg></button></div>
+                    <div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg> Axis Bank ••9876 · Bank · 1:15 PM</div>
+                  </div>
+                  <div class="row-amount-wrap"><div class="row-amount debit num">−₹349.00</div></div>
+                </div>
+              </div>
+
+              <div class="row-wrap">
+                <div class="row" data-cat="">
+                  <button class="row-cat-chip uncat" onclick="openCatPopover(this,'r3')"><svg class="icon"><use href="#ic-plus"/></svg></button>
+                  <div class="row-main">
+                    <div class="row-merchant"><span class="txt">Dharmendra S</span><button class="row-info-btn" onclick="openRaw('r3')" title="View original message"><svg class="icon"><use href="#ic-info"/></svg></button></div>
+                    <div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg> Federal Bank ••5130 · Bank · 6:03 PM</div>
+                  </div>
+                  <div class="row-amount-wrap"><div class="row-amount debit num">−₹161.00</div></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="day-group">
+              <div class="day-header">
+                <span class="day-label">Yesterday</span>
+                <span class="day-totals"><span class="spend num">− ₹8,654.00</span></span>
+              </div>
+
+              <div class="row-wrap">
+                <div class="row" data-cat="shopping">
+                  <button class="row-cat-chip" style="background:#EC4899" onclick="openCatPopover(this,'r4')"><svg class="icon"><use href="#ic-bag"/></svg></button>
+                  <div class="row-main">
+                    <div class="row-merchant"><span class="txt">FlipkartInternetPvtLtd Bengaluru kaIN</span><button class="row-info-btn" onclick="openRaw('r4')" title="View original message"><svg class="icon"><use href="#ic-info"/></svg></button></div>
+                    <div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg> CSB Bank · Card · 11:20 AM</div>
+                  </div>
+                  <div class="row-amount-wrap"><div class="row-amount debit num">−₹654.00</div></div>
+                </div>
+              </div>
+
+              <div class="row-wrap">
+                <div class="row is-transfer">
+                  <div class="row-cat-chip" style="background:#F1F5F9;color:var(--transfer)"><svg class="icon"><use href="#ic-arrow-right"/></svg></div>
+                  <div class="row-main">
+                    <div class="row-merchant"><span class="txt">Self transfer</span></div>
+                    <div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg> ICICI Bank ••2009 · Card · 2:05 PM</div>
+                    <div class="row-badges"><span class="badge badge-transfer"><svg class="icon"><use href="#ic-arrow-right"/></svg>Between your accounts · not counted</span></div>
+                  </div>
+                  <div class="row-amount-wrap"><div class="row-amount transfer-amt num">−₹5,000.00</div></div>
+                </div>
+              </div>
+              <div class="row-wrap">
+                <div class="row is-transfer">
+                  <div class="row-cat-chip" style="background:#F1F5F9;color:var(--transfer)"><svg class="icon"><use href="#ic-arrow-right"/></svg></div>
+                  <div class="row-main">
+                    <div class="row-merchant"><span class="txt">Self transfer</span></div>
+                    <div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg> Federal Bank ••5130 · Bank · 2:05 PM</div>
+                    <div class="row-badges"><span class="badge badge-transfer"><svg class="icon"><use href="#ic-arrow-right"/></svg>Between your accounts · not counted</span></div>
+                  </div>
+                  <div class="row-amount-wrap"><div class="row-amount credit num" style="color:var(--transfer)">+₹5,000.00</div></div>
+                </div>
+              </div>
+
+              <div class="row-wrap">
+                <div class="row" data-cat="">
+                  <button class="row-cat-chip uncat" onclick="openCatPopover(this,'r5')"><svg class="icon"><use href="#ic-plus"/></svg></button>
+                  <div class="row-main">
+                    <div class="row-merchant"><span class="txt">TITANCOMPANY</span><button class="row-info-btn" onclick="openRaw('r5')" title="View original message"><svg class="icon"><use href="#ic-info"/></svg></button></div>
+                    <div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg> ICICI Bank ••2009 · Card · 4:30 PM</div>
+                  </div>
+                  <div class="row-amount-wrap"><div class="row-amount debit num">−₹8,000.00</div></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="day-group">
+              <div class="day-header">
+                <span class="day-label">Sat, 6 Sep</span>
+                <span class="day-totals"><span class="spend num">− ₹220.00</span><span class="dsep">·</span><span class="income num">+ ₹85,000.00</span></span>
+              </div>
+
+              <div class="row-wrap">
+                <div class="row" data-cat="income">
+                  <button class="row-cat-chip" style="background:#16A34A" onclick="openCatPopover(this,'r6')"><svg class="icon"><use href="#ic-wallet"/></svg></button>
+                  <div class="row-main">
+                    <div class="row-merchant"><span class="txt">SALARY</span><button class="row-info-btn" onclick="openRaw('r6')" title="View original message"><svg class="icon"><use href="#ic-info"/></svg></button></div>
+                    <div class="row-meta"><svg class="icon"><use href="#ic-mail"/></svg> ICICI Bank ••5678 · Bank · 10:02 AM</div>
+                  </div>
+                  <div class="row-amount-wrap"><div class="row-amount credit num">+₹85,000.00</div></div>
+                </div>
+              </div>
+
+              <div class="row-wrap">
+                <div class="row" data-cat="">
+                  <button class="row-cat-chip uncat" onclick="openCatPopover(this,'r7')"><svg class="icon"><use href="#ic-plus"/></svg></button>
+                  <div class="row-main">
+                    <div class="row-merchant"><span class="txt">UBER TRIP</span><button class="row-info-btn" onclick="openRaw('r7')" title="View original message"><svg class="icon"><use href="#ic-info"/></svg></button></div>
+                    <div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg> Axis Bank ••9876 · Bank · 8:47 PM</div>
+                    <div class="row-badges"><span class="badge badge-pending"><svg class="icon"><use href="#ic-alert"/></svg>Pending</span></div>
+                  </div>
+                  <div class="row-amount-wrap"><div class="row-amount debit num">−₹220.00</div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- loading -->
+          <div class="state-variant" data-state="loading" hidden>
+            <div class="day-header" style="border-bottom-color:var(--line)"><span class="skel skel-line" style="width:70px"></span><span class="skel skel-line" style="width:60px"></span></div>
+            <div class="skel-row"><span class="skel skel-circle"></span><div><span class="skel skel-line" style="width:70%;display:block;margin-bottom:7px"></span><span class="skel skel-line" style="width:45%;display:block"></span></div><span class="skel skel-line" style="width:100%"></span></div>
+            <div class="skel-row"><span class="skel skel-circle"></span><div><span class="skel skel-line" style="width:55%;display:block;margin-bottom:7px"></span><span class="skel skel-line" style="width:35%;display:block"></span></div><span class="skel skel-line" style="width:100%"></span></div>
+            <div class="skel-row"><span class="skel skel-circle"></span><div><span class="skel skel-line" style="width:60%;display:block;margin-bottom:7px"></span><span class="skel skel-line" style="width:40%;display:block"></span></div><span class="skel skel-line" style="width:100%"></span></div>
+          </div>
+
+          <!-- empty: brand new user -->
+          <div class="state-variant" data-state="empty-new" hidden>
+            <div class="state-block">
+              <div class="state-icon"><svg class="icon"><use href="#ic-receipt"/></svg></div>
+              <h3 class="state-title">Nothing here yet</h3>
+              <p class="state-body">SpendLog fills in on its own once a bank message arrives — there's no "add transaction" button because there's nothing to type. Connect Gmail or turn on SMS access and today's spending will show up here automatically.</p>
+              <div class="state-actions"><button class="btn btn-primary" onclick="setScreen('settings')">Go to Settings</button></div>
+            </div>
+          </div>
+
+          <!-- empty: gmail connected, no bank mail -->
+          <div class="state-variant" data-state="empty-gmail-only" hidden>
+            <div class="state-block">
+              <div class="state-icon"><svg class="icon"><use href="#ic-mail"/></svg></div>
+              <h3 class="state-title">No bank emails found yet</h3>
+              <p class="state-body">Your Gmail is connected and we've checked it, but no transaction email from your bank has turned up. Many Indian banks only send SMS for card and UPI payments, not email — if that's yours, the Android app can catch those automatically.</p>
+              <div class="state-actions"><button class="btn btn-primary" onclick="setScreen('settings')">Get the Android app</button><button class="btn btn-ghost">Sync Gmail now</button></div>
+            </div>
+          </div>
+
+          <!-- empty: web/ios platform limit -->
+          <div class="state-variant" data-state="empty-platform" hidden>
+            <div class="state-block">
+              <div class="state-icon"><svg class="icon"><use href="#ic-phone"/></svg></div>
+              <h3 class="state-title">This browser can only see email</h3>
+              <p class="state-body">Reading text messages isn't something a website — or an iPhone — is allowed to do; that's a platform restriction, not a SpendLog choice. If your bank only texts you about spending, it won't show up here unless you install the Android app. Gmail-based alerts will still appear on their own.</p>
+              <div class="state-actions"><button class="btn btn-primary" onclick="setScreen('settings')">Get the Android app</button></div>
+            </div>
+          </div>
+
+          <!-- error -->
+          <div class="state-variant" data-state="error" hidden>
+            <div class="state-block">
+              <div class="state-icon warn"><svg class="icon"><use href="#ic-wifioff"/></svg></div>
+              <h3 class="state-title">Couldn't load your transactions</h3>
+              <p class="state-body">The connection to SpendLog's server failed. Your data is safe — this is just a connection problem. Check your internet and try again.</p>
+              <div class="state-actions"><button class="btn btn-primary" onclick="setState('today','populated')"><svg class="icon"><use href="#ic-sync"/></svg> Retry</button></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- right rail -->
+        <div class="rail">
+          <div class="card">
+            <div class="rail-title">This month</div>
+            <div class="stat-line"><span class="label">Spent</span><span class="value num" style="color:var(--debit)">₹42,318.00</span></div>
+            <div class="stat-line"><span class="label">Received</span><span class="value num" style="color:var(--credit)">₹85,000.00</span></div>
+          </div>
+          <div class="nudge">
+            <div class="nudge-title"><svg class="icon"><use href="#ic-question"/></svg>Needs a category</div>
+            <p>4 transactions this month don't have one yet — mostly UPI codes and person-to-person payments nothing can guess from the message alone.</p>
+            <a href="#" onclick="setScreen('transactions');return false;">Review them <svg class="icon"><use href="#ic-arrow-right"/></svg></a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= TRANSACTIONS ================= -->
+    <section id="screen-transactions" class="screen">
+      <div class="screen-header">
+        <h1 class="screen-title">Transactions</h1>
+      </div>
+      <div class="layout-filters">
+        <div class="filters-panel">
+          <div class="filter-group">
+            <label>Search</label>
+            <div class="filter-input-icon"><svg class="icon"><use href="#ic-search"/></svg><input class="filter-input" placeholder="Merchant or note"></div>
+          </div>
+          <div class="filter-group">
+            <label>Category</label>
+            <select class="filter-select"><option>All categories</option><option>Uncategorized</option><option>Food & Dining</option><option>Shopping</option><option>Income</option></select>
+          </div>
+          <div class="filter-group">
+            <label>Date range</label>
+            <div class="filter-daterange"><input class="filter-input" placeholder="From"><span style="color:var(--muted-light)">–</span><input class="filter-input" placeholder="To"></div>
+          </div>
+          <div class="filter-group">
+            <label>Account</label>
+            <select class="filter-select"><option>All accounts</option><option>HDFC Bank ••1377</option><option>ICICI Bank ••2009</option><option>Axis Bank ••9876</option><option>Federal Bank ••5130</option></select>
+          </div>
+          <div class="filter-group">
+            <label>Direction</label>
+            <div class="filter-radio-row">
+              <div class="filter-radio on">All</div><div class="filter-radio">Debit</div><div class="filter-radio">Credit</div>
+            </div>
+          </div>
+          <p class="filter-note">Date range, account and direction filters run on data the server already indexes — no backend change needed to turn these on.</p>
+        </div>
+
+        <div>
+          <div class="state-variant" data-state="populated">
+            <div class="txn-list-head"><span>187 results</span><span>Sorted by newest first</span></div>
+
+            <div class="row-wrap">
+              <div class="row" data-cat="">
+                <button class="row-cat-chip uncat" onclick="openCatPopover(this,'t1')"><svg class="icon"><use href="#ic-plus"/></svg></button>
+                <div class="row-main"><div class="row-merchant"><span class="txt">paytmqr6g6fjc@ptys</span><button class="row-info-btn" onclick="openRaw('r1')"><svg class="icon"><use href="#ic-info"/></svg></button></div><div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg> HDFC Bank ••1377 · Card · Wed, 9 Sep</div></div>
+                <div class="row-amount-wrap"><div class="row-amount debit num">−₹105.00</div></div>
+              </div>
+            </div>
+            <div class="row-wrap">
+              <div class="row" data-cat="food">
+                <button class="row-cat-chip" style="background:#F97316" onclick="openCatPopover(this,'t2')"><svg class="icon"><use href="#ic-food"/></svg></button>
+                <div class="row-main"><div class="row-merchant"><span class="txt">swiggy@icici</span></div><div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg> Axis Bank ••9876 · Bank · Wed, 9 Sep</div></div>
+                <div class="row-amount-wrap"><div class="row-amount debit num">−₹349.00</div></div>
+              </div>
+            </div>
+            <div class="row-wrap">
+              <div class="row" data-cat="shopping">
+                <button class="row-cat-chip" style="background:#EC4899" onclick="openCatPopover(this,'t3')"><svg class="icon"><use href="#ic-bag"/></svg></button>
+                <div class="row-main"><div class="row-merchant"><span class="txt">FlipkartInternetPvtLtd Bengaluru kaIN</span></div><div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg> CSB Bank · Card · Tue, 8 Sep</div></div>
+                <div class="row-amount-wrap"><div class="row-amount debit num">−₹654.00</div></div>
+              </div>
+            </div>
+            <div class="row-wrap">
+              <div class="row" data-cat="">
+                <button class="row-cat-chip uncat" onclick="openCatPopover(this,'t4')"><svg class="icon"><use href="#ic-plus"/></svg></button>
+                <div class="row-main"><div class="row-merchant"><span class="txt">TITANCOMPANY</span></div><div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg> ICICI Bank ••2009 · Card · Tue, 8 Sep</div></div>
+                <div class="row-amount-wrap"><div class="row-amount debit num">−₹8,000.00</div></div>
+              </div>
+            </div>
+            <div class="row-wrap">
+              <div class="row" data-cat="income">
+                <button class="row-cat-chip" style="background:#16A34A" onclick="openCatPopover(this,'t5')"><svg class="icon"><use href="#ic-wallet"/></svg></button>
+                <div class="row-main"><div class="row-merchant"><span class="txt">SALARY</span></div><div class="row-meta"><svg class="icon"><use href="#ic-mail"/></svg> ICICI Bank ••5678 · Bank · Sat, 6 Sep</div></div>
+                <div class="row-amount-wrap"><div class="row-amount credit num">+₹85,000.00</div></div>
+              </div>
+            </div>
+            <div class="row-wrap">
+              <div class="row" data-cat="">
+                <button class="row-cat-chip uncat" onclick="openCatPopover(this,'t6')"><svg class="icon"><use href="#ic-plus"/></svg></button>
+                <div class="row-main"><div class="row-merchant"><span class="txt">Dharmendra S</span></div><div class="row-meta"><svg class="icon"><use href="#ic-message"/></svg> Federal Bank ••5130 · Bank · Wed, 9 Sep</div></div>
+                <div class="row-amount-wrap"><div class="row-amount debit num">−₹161.00</div></div>
+              </div>
+            </div>
+
+            <div class="pagination">
+              <button id="pg-prev" onclick="pgChange(-1)" disabled><svg class="icon"><use href="#ic-chevron-left"/></svg></button>
+              <span id="pg-label">Page 1 of 7</span>
+              <button id="pg-next" onclick="pgChange(1)"><svg class="icon"><use href="#ic-chevron-right"/></svg></button>
+            </div>
+          </div>
+
+          <div class="state-variant" data-state="empty-filter" hidden>
+            <div class="state-block">
+              <div class="state-icon"><svg class="icon"><use href="#ic-search"/></svg></div>
+              <h3 class="state-title">No matches</h3>
+              <p class="state-body">Nothing matches these filters. Try a wider date range, a different category, or clear everything and start over.</p>
+              <div class="state-actions"><button class="btn btn-primary" onclick="setState('transactions','populated')">Clear filters</button></div>
+            </div>
+          </div>
+
+          <div class="state-variant" data-state="loading" hidden>
+            <div class="skel-row"><span class="skel skel-circle"></span><div><span class="skel skel-line" style="width:70%;display:block;margin-bottom:7px"></span><span class="skel skel-line" style="width:45%;display:block"></span></div><span class="skel skel-line" style="width:100%"></span></div>
+            <div class="skel-row"><span class="skel skel-circle"></span><div><span class="skel skel-line" style="width:55%;display:block;margin-bottom:7px"></span><span class="skel skel-line" style="width:35%;display:block"></span></div><span class="skel skel-line" style="width:100%"></span></div>
+            <div class="skel-row"><span class="skel skel-circle"></span><div><span class="skel skel-line" style="width:60%;display:block;margin-bottom:7px"></span><span class="skel skel-line" style="width:40%;display:block"></span></div><span class="skel skel-line" style="width:100%"></span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= ANALYTICS ================= -->
+    <section id="screen-analytics" class="screen">
+      <div class="screen-header">
+        <h1 class="screen-title">Analytics</h1>
+        <div class="month-picker">
+          <button onclick="return false;"><svg class="icon"><use href="#ic-chevron-left"/></svg></button>
+          <span>September 2026</span>
+          <button onclick="return false;"><svg class="icon"><use href="#ic-chevron-right"/></svg></button>
+        </div>
+      </div>
+
+      <div class="state-variant" data-state="populated">
+        <div class="layout-2">
+          <div>
+            <div class="section-block">
+              <h3>Spend by category</h3>
+              <p class="section-sub">Transfers between your own accounts are excluded from every figure below.</p>
+              <div class="hbars">
+                <div class="hbar-row"><div class="hbar-label"><span class="hbar-dot" style="background:var(--muted-light);border:1.5px dashed var(--muted-light);background:transparent"></span>Uncategorized</div><div class="hbar-track"><div class="hbar-fill" style="width:43%;background:var(--muted-light)"></div></div><div class="hbar-val num">₹18,420<span class="hbar-pct">43%</span></div></div>
+                <div class="hbar-row"><div class="hbar-label"><span class="hbar-dot" style="background:#EC4899"></span>Shopping</div><div class="hbar-track"><div class="hbar-fill" style="width:23%;background:#EC4899"></div></div><div class="hbar-val num">₹9,654<span class="hbar-pct">23%</span></div></div>
+                <div class="hbar-row"><div class="hbar-label"><span class="hbar-dot" style="background:#F97316"></span>Food & Dining</div><div class="hbar-track"><div class="hbar-fill" style="width:15%;background:#F97316"></div></div><div class="hbar-val num">₹6,210<span class="hbar-pct">15%</span></div></div>
+                <div class="hbar-row"><div class="hbar-label"><span class="hbar-dot" style="background:#0EA5E9"></span>Transport</div><div class="hbar-track"><div class="hbar-fill" style="width:9%;background:#0EA5E9"></div></div><div class="hbar-val num">₹3,890<span class="hbar-pct">9%</span></div></div>
+                <div class="hbar-row"><div class="hbar-label"><span class="hbar-dot" style="background:#EAB308"></span>Bills & Utilities</div><div class="hbar-track"><div class="hbar-fill" style="width:5%;background:#EAB308"></div></div><div class="hbar-val num">₹2,144<span class="hbar-pct">5%</span></div></div>
+                <div class="hbar-row"><div class="hbar-label"><span class="hbar-dot" style="background:#94A3B8"></span>Others</div><div class="hbar-track"><div class="hbar-fill" style="width:5%;background:#94A3B8"></div></div><div class="hbar-val num">₹2,000<span class="hbar-pct">5%</span></div></div>
+              </div>
+            </div>
+
+            <div class="section-block">
+              <h3>Last 6 months</h3>
+              <p class="section-sub">You've been using SpendLog for less than a month — five bars are still empty, and that's expected.</p>
+              <div class="trend-wrap">
+                <div class="trend-col"><div class="trend-bars"><div class="trend-bar placeholder"></div></div><span class="trend-month">Apr</span></div>
+                <div class="trend-col"><div class="trend-bars"><div class="trend-bar placeholder"></div></div><span class="trend-month">May</span></div>
+                <div class="trend-col"><div class="trend-bars"><div class="trend-bar placeholder"></div></div><span class="trend-month">Jun</span></div>
+                <div class="trend-col"><div class="trend-bars"><div class="trend-bar placeholder"></div></div><span class="trend-month">Jul</span></div>
+                <div class="trend-col"><div class="trend-bars"><div class="trend-bar placeholder"></div></div><span class="trend-month">Aug</span></div>
+                <div class="trend-col"><div class="trend-bars"><div class="trend-bar spend" style="height:55px"></div><div class="trend-bar income" style="height:110px"></div></div><span class="trend-month">Sep</span></div>
+              </div>
+              <div class="trend-legend"><span><span class="legend-dot" style="background:var(--debit)"></span>Spend</span><span><span class="legend-dot" style="background:var(--credit)"></span>Income</span><span><span class="legend-dot" style="background:repeating-linear-gradient(135deg,#E7E7E2,#E7E7E2 3px,#EFEFEA 3px,#EFEFEA 6px)"></span>No data yet</span></div>
+            </div>
+          </div>
+
+          <div class="rail">
+            <div class="stat-tiles">
+              <div class="stat-tile"><div class="label">Total spent</div><div class="value debit num">₹42,318.00</div></div>
+              <div class="stat-tile"><div class="label">Total received</div><div class="value credit num">₹85,000.00</div></div>
+              <div class="stat-tile"><div class="label">Transactions</div><div class="value num">47</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="state-variant" data-state="empty-data" hidden>
+        <div class="state-block">
+          <div class="state-icon"><svg class="icon"><use href="#ic-trend"/></svg></div>
+          <h3 class="state-title">Nothing to analyze yet</h3>
+          <p class="state-body">Charts need transactions first. Once a few payments come in from SMS or Gmail, this page fills in on its own — no setup required here.</p>
+          <div class="state-actions"><button class="btn btn-primary" onclick="setScreen('today')">Back to Today</button></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= SETTINGS ================= -->
+    <section id="screen-settings" class="screen">
+      <div class="screen-header"><h1 class="screen-title">Settings</h1></div>
+
+      <div class="settings-grid">
+
+        <!-- android download: available -->
+        <div class="settings-banner state-variant" data-state="build-available">
+          <div style="display:flex;gap:16px;align-items:center">
+            <div class="settings-banner-icon"><svg class="icon"><use href="#ic-phone"/></svg></div>
+            <div>
+              <h3>Get the Android app</h3>
+              <p>SMS import — catching bank and UPI texts the moment they arrive — only works from the Android app. It's the only route to that data.</p>
+            </div>
+          </div>
+          <div class="settings-banner-right">
+            <button class="btn btn-primary"><svg class="icon"><use href="#ic-download"/></svg> Download APK · v1.4.2</button>
+            <span class="settings-banner-note">Android will warn about installing outside the Play Store — that's expected for a direct download.</span>
+          </div>
+        </div>
+        <div class="settings-banner state-variant" data-state="build-unavailable" hidden>
+          <div style="display:flex;gap:16px;align-items:center">
+            <div class="settings-banner-icon"><svg class="icon"><use href="#ic-phone"/></svg></div>
+            <div>
+              <h3>Android app — build in progress</h3>
+              <p>No build has been published yet. Check back shortly, or continue with Gmail import in the meantime.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- email import -->
+        <div class="card set-card">
+          <div class="set-card-head">
+            <div class="set-card-icon" style="background:var(--brand-50)"><svg class="icon" style="color:var(--brand)"><use href="#ic-mail"/></svg></div>
+            <div><h4>Email import</h4><p class="set-card-sub">Gmail, read-only</p></div>
+          </div>
+          <div class="state-variant" data-state="connected">
+            <p class="desc"><span class="status-pill status-on"><svg class="icon"><use href="#ic-check"/></svg>Connected</span> &nbsp;dharmendra@gmail.com<br>Last synced 12 minutes ago.</p>
+            <div class="set-card-actions"><button class="btn btn-sm" onclick="fakeSync(this)"><svg class="icon"><use href="#ic-sync"/></svg>Sync now</button><button class="btn btn-sm btn-ghost btn-danger-text">Disconnect</button></div>
+          </div>
+          <div class="state-variant" data-state="disconnected" hidden>
+            <p class="desc"><span class="status-pill status-off">Not connected</span><br>Email access was declined when you signed in. You can grant it here instead.</p>
+            <div class="set-card-actions"><button class="btn btn-sm btn-primary">Connect Gmail</button></div>
+          </div>
+        </div>
+
+        <!-- sms import -->
+        <div class="card set-card">
+          <div class="set-card-head">
+            <div class="set-card-icon" style="background:var(--brand-50)"><svg class="icon" style="color:var(--brand)"><use href="#ic-message"/></svg></div>
+            <div><h4>SMS import</h4><p class="set-card-sub">Android only</p></div>
+          </div>
+          <div class="state-variant" data-state="granted">
+            <p class="desc"><span class="status-pill status-on"><svg class="icon"><use href="#ic-check"/></svg>Granted</span><br>Reading bank and UPI messages as they arrive, on your Android device.</p>
+          </div>
+          <div class="state-variant" data-state="denied" hidden>
+            <p class="desc"><span class="status-pill status-off">Not granted</span><br>Without this, SpendLog can only see what your bank emails — most Indian banks only text. Turn it on any time.</p>
+            <div class="set-card-actions"><button class="btn btn-sm btn-primary">Grant SMS access</button></div>
+          </div>
+          <div class="state-variant" data-state="web-platform" hidden>
+            <p class="desc"><span class="status-pill status-off">Not available here</span><br>Reading text messages isn't something a browser is allowed to do. Install the Android app to capture SMS automatically.</p>
+          </div>
+        </div>
+
+        <!-- account -->
+        <div class="card set-card">
+          <div class="set-card-head">
+            <div class="set-card-icon" style="background:var(--brand-50)"><svg class="icon" style="color:var(--brand)"><use href="#ic-lock"/></svg></div>
+            <div><h4>Account</h4><p class="set-card-sub">dharmendra@gmail.com</p></div>
+          </div>
+          <p class="desc">Signed in with Google. There's no separate password to manage.</p>
+          <div class="set-card-actions"><button class="btn btn-sm btn-ghost btn-danger-text" onclick="setScreen('signin')">Sign out</button></div>
+        </div>
+
+        <!-- roadmap -->
+        <div class="card full-row">
+          <h4 style="margin:0 0 3px 0">More, on the way</h4>
+          <p class="set-card-sub" style="margin-bottom:14px">Backed by working API endpoints already — just no interface yet.</p>
+          <div class="roadmap-list">
+            <span class="roadmap-chip">Manual cash entry</span>
+            <span class="roadmap-chip">Custom categories</span>
+            <span class="roadmap-chip">Edit merchant / note</span>
+            <span class="roadmap-chip">Delete a transaction</span>
+            <span class="roadmap-chip">Budgets & alerts</span>
+            <span class="roadmap-chip">CSV export</span>
+            <span class="roadmap-chip">Recurring payments</span>
+            <span class="roadmap-chip">Dark mode</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ============ CATEGORY POPOVER ============ -->
+<div class="cat-popover" id="cat-popover" style="display:none">
+  <div class="cat-popover-title">Set category</div>
+  <div class="cat-grid" id="cat-grid"></div>
+</div>
+
+<!-- ============ RAW MESSAGE MODAL ============ -->
+<div class="overlay" id="raw-overlay" onclick="if(event.target===this)closeRaw()">
+  <div class="modal">
+    <button class="modal-close" onclick="closeRaw()"><svg class="icon"><use href="#ic-x"/></svg></button>
+    <h3>Original message</h3>
+    <div class="modal-sub"><svg class="icon" id="raw-source-icon"><use href="#ic-message"/></svg><span id="raw-source-text">SMS · Wed, 9 Sep, 9:42 AM</span></div>
+    <div class="raw-block" id="raw-text"></div>
+    <div class="modal-footnote"><svg class="icon"><use href="#ic-pencil"/></svg>Editing the merchant name from here is coming soon.</div>
+  </div>
+</div>
+
+<!-- ============ PROTOTYPE CONTROL PANEL ============ -->
+<div class="proto-panel" id="proto-panel">
+  <div class="proto-panel-title">PROTOTYPE <button onclick="minimizeProto()" style="background:none;border:none;color:var(--brand-dark);font-family:inherit;font-weight:700;cursor:pointer">–</button></div>
+  <label>Screen</label>
+  <select onchange="setScreen(this.value)" id="screen-select">
+    <option value="signin">Sign in</option>
+    <option value="today" selected>Today</option>
+    <option value="transactions">Transactions</option>
+    <option value="analytics">Analytics</option>
+    <option value="settings">Settings</option>
+  </select>
+  <div id="state-controls"></div>
+</div>
+<button class="proto-min-btn" id="proto-min-btn" onclick="minimizeProto()">Show prototype controls</button>
+
+<script>
+const CATEGORIES = [
+  {id:'food', label:'Food & Dining', color:'#F97316', icon:'ic-food'},
+  {id:'groceries', label:'Groceries', color:'#84CC16', icon:'ic-basket'},
+  {id:'transport', label:'Transport', color:'#0EA5E9', icon:'ic-car'},
+  {id:'shopping', label:'Shopping', color:'#EC4899', icon:'ic-bag'},
+  {id:'bills', label:'Bills & Utilities', color:'#EAB308', icon:'ic-bolt'},
+  {id:'entertainment', label:'Entertainment', color:'#A855F7', icon:'ic-play'},
+  {id:'health', label:'Health', color:'#F43F5E', icon:'ic-health'},
+  {id:'housing', label:'Housing', color:'#A8A29E', icon:'ic-home'},
+  {id:'emi', label:'EMI & Loans', color:'#64748B', icon:'ic-percent'},
+  {id:'investments', label:'Investments', color:'#16A34A', icon:'ic-trend'},
+  {id:'income', label:'Income', color:'#16A34A', icon:'ic-wallet'},
+  {id:'others', label:'Others', color:'#94A3B8', icon:'ic-dots'},
+];
+
+const RAW_MESSAGES = {
+  r1:{source:'SMS', when:'Wed, 9 Sep · 9:42 AM', text:"Txn Rs.105.00\nOn HDFC Bank Card 1377\nAt paytmqr6g6fjc@ptys\nby UPI 661266604357\nOn 03-09\nNot You?\nCall 18002586161/SMS BLOCK CC 1377 to 7308080808"},
+  r2:{source:'SMS', when:'Wed, 9 Sep · 1:15 PM', text:"Rs.349.00 debited from A/c XX9876 on 09-09 to VPA swiggy@icici. UPI Ref 447108825612. Not you? Call 1800-419-5555 -Axis Bank"},
+  r3:{source:'SMS', when:'Wed, 9 Sep · 6:03 PM', text:"Rs 161.00 debited from A/c XX5130 to Dharmendra S. UPI Ref No 331200619204. If not done by you, call 1800-425-1199 -Federal Bank"},
+  r4:{source:'SMS', when:'Tue, 8 Sep · 11:20 AM', text:"Your CSB Bank Card used for Rs.654.00 at FlipkartInternetPvtLtd Bengaluru kaIN on 08-SEP-26. Avl Lmt: Rs.42,110.00. Not you? SMS BLOCK to 9895088888"},
+  r5:{source:'SMS', when:'Tue, 8 Sep · 4:30 PM', text:"Txn Rs.8000.00 On ICICI Bank Card XX2009 At TITANCOMPANY On 08-09-26. Call 18002662 if not done by you."},
+  r6:{source:'Email', when:'Sat, 6 Sep · 10:02 AM', text:"Dear Customer,\n\nAn amount of Rs.85,000.00 has been credited to your A/c No. XX5678 on 06-09-2026.\nInfo: SALARY\nAvailable Balance: Rs.1,12,430.00\n\n- ICICI Bank"},
+  r7:{source:'SMS', when:'Sat, 6 Sep · 8:47 PM', text:"Rs.220.00 will be debited from A/c XX9876 for UBER TRIP. This is a pending authorisation and may take up to 3 days to settle. -Axis Bank"},
+};
+
+function setScreen(name){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  const shell = document.getElementById('app-shell');
+  const signin = document.getElementById('screen-signin');
+  if(name==='signin'){
+    signin.classList.add('active');
+    shell.classList.remove('active');
+  } else {
+    signin.classList.remove('active');
+    shell.classList.add('active');
+    document.getElementById('screen-'+name).classList.add('active');
+  }
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.screen===name));
+  document.getElementById('screen-select').value = name;
+  renderStateControls(name);
+}
+
+const STATE_OPTIONS = {
+  today: [
+    ['populated','Populated'],['loading','Loading'],
+    ['empty-new','Empty — new user'],['empty-gmail-only','Empty — Gmail only, no SMS match'],
+    ['empty-platform','Empty — web/iOS platform limit'],['error','Error — server unreachable']
+  ],
+  transactions: [['populated','Populated'],['loading','Loading'],['empty-filter','Empty — filters match nothing']],
+  analytics: [['populated','Populated'],['empty-data','Empty — no data yet']],
+  settings: [],
+  signin: [['default','Default'],['error','Error — sign-in failed'],['session','Notice — session expired'],['unverified','Notice — unverified app warning']],
+};
+const SETTINGS_SUBCONTROLS = [
+  {group:'email', label:'Email import', options:[['connected','Connected'],['disconnected','Not connected']]},
+  {group:'sms', label:'SMS import', options:[['granted','Granted'],['denied','Denied'],['web-platform','Web/iOS platform']]},
+  {group:'build', label:'Android build', options:[['build-available','Published'],['build-unavailable','Not published yet']]},
+];
+
+function renderStateControls(screen){
+  const el = document.getElementById('state-controls');
+  el.innerHTML='';
+  if(screen==='settings'){
+    SETTINGS_SUBCONTROLS.forEach(sc=>{
+      const label=document.createElement('label'); label.textContent=sc.label; el.appendChild(label);
+      const sel=document.createElement('select');
+      sc.options.forEach(([v,l])=>{const o=document.createElement('option');o.value=v;o.textContent=l;sel.appendChild(o);});
+      sel.onchange=()=>setSettingsState(sc.group, sel.value);
+      el.appendChild(sel);
+    });
+    return;
+  }
+  if(screen==='signin'){
+    const opts = STATE_OPTIONS.signin;
+    const label=document.createElement('label'); label.textContent='Notice'; el.appendChild(label);
+    const sel=document.createElement('select');
+    opts.forEach(([v,l])=>{const o=document.createElement('option');o.value=v;o.textContent=l;sel.appendChild(o);});
+    sel.onchange=()=>setSigninState(sel.value);
+    el.appendChild(sel);
+    return;
+  }
+  const opts = STATE_OPTIONS[screen]||[];
+  if(!opts.length) return;
+  const label=document.createElement('label'); label.textContent='State'; el.appendChild(label);
+  const sel=document.createElement('select');
+  opts.forEach(([v,l])=>{const o=document.createElement('option');o.value=v;o.textContent=l;sel.appendChild(o);});
+  sel.onchange=()=>setState(screen, sel.value);
+  el.appendChild(sel);
+}
+
+function setState(screen, state){
+  document.querySelectorAll('#screen-'+screen+' .state-variant').forEach(v=>{
+    v.hidden = v.dataset.state !== state;
+  });
+}
+
+function setSettingsState(group, value){
+  const map = {email:['connected','disconnected'], sms:['granted','denied','web-platform'], build:['build-available','build-unavailable']};
+  map[group].forEach(v=>{
+    document.querySelectorAll('#screen-settings .state-variant[data-state="'+v+'"]').forEach(el=>{ el.hidden = v!==value; });
+  });
+}
+
+function setSigninState(value){
+  document.getElementById('signin-state-error').style.display = value==='error' ? 'flex':'none';
+  document.getElementById('signin-state-session').style.display = value==='session' ? 'flex':'none';
+  document.getElementById('signin-state-unverified').style.display = value==='unverified' ? 'flex':'none';
+}
+
+function openCatPopover(btn, rowId){
+  const pop = document.getElementById('cat-popover');
+  const grid = document.getElementById('cat-grid');
+  grid.innerHTML='';
+  CATEGORIES.forEach(c=>{
+    const b=document.createElement('button');
+    b.className='cat-opt';
+    b.innerHTML='<span class="dot" style="background:'+c.color+'"><svg class="icon"><use href="#'+c.icon+'"/></svg></span>'+c.label;
+    b.onclick=()=>assignCategory(btn, rowId, c);
+    grid.appendChild(b);
+  });
+  const r = btn.getBoundingClientRect();
+  pop.style.display='block';
+  let left = r.left;
+  if(left + 290 > window.innerWidth) left = window.innerWidth - 300;
+  pop.style.left = left+'px';
+  pop.style.top = (r.bottom+6+window.scrollY)+'px';
+  pop.dataset.target = rowId;
+  setTimeout(()=>document.addEventListener('click', outsideClosePop),0);
+}
+function outsideClosePop(e){
+  const pop = document.getElementById('cat-popover');
+  if(!pop.contains(e.target)){ pop.style.display='none'; document.removeEventListener('click', outsideClosePop); }
+}
+function assignCategory(btn, rowId, cat){
+  btn.style.background = cat.color;
+  btn.classList.remove('uncat');
+  btn.innerHTML = '<svg class="icon"><use href="#'+cat.icon+'"/></svg>';
+  document.getElementById('cat-popover').style.display='none';
+  const row = btn.closest('.row');
+  const merchant = row.querySelector('.row-merchant .txt').textContent;
+  showRememberBanner(row, merchant, cat.label);
+}
+function showRememberBanner(row, merchant, catLabel){
+  const wrap = row.closest('.row-wrap');
+  const old = wrap.parentElement.querySelector('.remember-banner[data-for="'+wrap.dataset.id+'"]');
+  if(old) old.remove();
+  const div = document.createElement('div');
+  div.className='remember-banner';
+  div.innerHTML = 'Categorized as <b>'+catLabel+'</b>. Apply to future "'+(merchant.length>26?merchant.slice(0,26)+'…':merchant)+'" payments too?'+
+    '<span class="remember-actions"><button class="btn btn-sm btn-primary" onclick="this.closest(\'.remember-banner\').remove()">Yes</button><button class="btn btn-sm btn-ghost" onclick="this.closest(\'.remember-banner\').remove()">Just this one</button></span>';
+  wrap.insertAdjacentElement('afterend', div);
+}
+
+function openRaw(id){
+  const m = RAW_MESSAGES[id];
+  if(!m) return;
+  document.getElementById('raw-source-text').textContent = m.source+' · '+m.when;
+  document.getElementById('raw-source-icon').innerHTML = '<use href="#'+(m.source==='Email'?'ic-mail':'ic-message')+'"/>';
+  document.getElementById('raw-text').textContent = m.text;
+  document.getElementById('raw-overlay').classList.add('active');
+}
+function closeRaw(){ document.getElementById('raw-overlay').classList.remove('active'); }
+
+function fakeSync(btn){
+  const icon = btn.querySelector('svg');
+  icon.style.animation='spin .7s linear 2';
+  setTimeout(()=>icon.style.animation='',1500);
+}
+const style = document.createElement('style');
+style.textContent='@keyframes spin{to{transform:rotate(360deg)}}';
+document.head.appendChild(style);
+
+let pg = 1;
+function pgChange(d){
+  pg = Math.max(1, Math.min(7, pg+d));
+  document.getElementById('pg-label').textContent = 'Page '+pg+' of 7';
+  document.getElementById('pg-prev').disabled = pg===1;
+  document.getElementById('pg-next').disabled = pg===7;
+}
+
+function minimizeProto(){
+  const panel = document.getElementById('proto-panel');
+  const btn = document.getElementById('proto-min-btn');
+  const hiding = panel.style.display !== 'none';
+  panel.style.display = hiding ? 'none':'block';
+  btn.style.display = hiding ? 'flex':'none';
+}
+
+// init
+renderStateControls('today');
+</script>
+</body>
+</html>

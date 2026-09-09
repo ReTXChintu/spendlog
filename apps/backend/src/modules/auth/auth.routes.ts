@@ -3,7 +3,7 @@ import { OAuth2Client, TokenPayload } from "google-auth-library";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { env } from "../../env";
-import { signSessionToken } from "../../middleware/auth";
+import { requireAuth, signSessionToken } from "../../middleware/auth";
 import { User } from "../../models";
 import {
   buildConsentUrl,
@@ -46,6 +46,15 @@ authRouter.get("/google/start", (_req, res) => {
     return res.status(500).json({ error: "Google OAuth is not configured on the server" });
   }
   res.redirect(buildConsentUrl(signOAuthState({ purpose: "login" })));
+});
+
+// GET /auth/me — the signed-in user, for the account block in the sidebar.
+// The session token carries only an id and email, and the display name is
+// not in it, so the client asks for the record.
+authRouter.get("/me", requireAuth, async (req, res) => {
+  const user = await User.findById(req.user!.id);
+  if (!user) return res.status(404).json({ error: "Not found" });
+  res.json({ id: user._id.toString(), email: user.email, name: user.name });
 });
 
 const callbackSchema = z.object({

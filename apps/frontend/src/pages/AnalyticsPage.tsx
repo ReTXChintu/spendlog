@@ -1,15 +1,19 @@
 import { useEffect, useState } from "react";
-import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { useNavigate } from "react-router-dom";
+import { Icon } from "../components/Icon";
+import { StateBlock } from "../components/States";
 import { api } from "../lib/api";
-import { formatMoney } from "../lib/format";
-import { AnalyticsSummary, TrendPoint } from "../types";
+import { currentMonth, formatMoney, formatMoneyShort, formatMonthLabel, shiftMonth } from "../lib/format";
+import { AnalyticsSummary, Category, TrendPoint } from "../types";
 
-const COLORS = ["#f97316", "#22c55e", "#0ea5e9", "#a855f7", "#eab308", "#ec4899", "#ef4444", "#8b5cf6", "#14b8a6", "#64748b"];
+const TREND_MAX_HEIGHT = 110;
 
 export function AnalyticsPage() {
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const navigate = useNavigate();
+  const [month, setMonth] = useState(currentMonth());
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
 
   useEffect(() => {
     api.get<AnalyticsSummary>(`/analytics/summary?month=${month}`).then(setSummary);
@@ -17,74 +21,168 @@ export function AnalyticsPage() {
 
   useEffect(() => {
     api.get<TrendPoint[]>("/analytics/trend?months=6").then(setTrend);
+    api.get<Category[]>("/categories").then(setCategories);
   }, []);
 
-  const trendInRupees = trend.map((p) => ({
-    month: p.month,
-    spend: p.spendMinor / 100,
-    income: p.incomeMinor / 100,
-  }));
+  const colorFor = (categoryId: string | null) =>
+    categoryId ? categories.find((c) => c.id === categoryId)?.color ?? "var(--muted)" : "var(--muted-light)";
+
+  const totalSpend = summary?.totalSpendMinor ?? 0;
+  // Bars scale against the largest single month so the tallest fills the plot.
+  const trendMax = Math.max(1, ...trend.flatMap((p) => [p.spendMinor, p.incomeMinor]));
+  const monthsWithData = trend.filter((p) => p.spendMinor > 0 || p.incomeMinor > 0).length;
+
+  const hasData = summary !== null && summary.transactionCount > 0;
 
   return (
-    <div className="analytics-page">
-      <div className="filters">
-        <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+    <section className="screen">
+      <div className="screen-header">
+        <h1 className="screen-title">Analytics</h1>
+        <div className="month-picker">
+          <button onClick={() => setMonth(shiftMonth(month, -1))} aria-label="Previous month">
+            <Icon name="ic-chevron-left" />
+          </button>
+          <span>{formatMonthLabel(month)}</span>
+          <button
+            onClick={() => setMonth(shiftMonth(month, 1))}
+            disabled={month >= currentMonth()}
+            aria-label="Next month"
+          >
+            <Icon name="ic-chevron-right" />
+          </button>
+        </div>
       </div>
 
-      {summary && (
-        <>
-          <div className="summary-cards">
-            <div className="card">
-              <span>Spent</span>
-              <strong>{formatMoney(summary.totalSpendMinor)}</strong>
+      {!hasData ? (
+        <StateBlock
+          icon="ic-trend"
+          title="Nothing to analyze yet"
+          body="Charts need transactions first. Once a few payments come in from SMS or Gmail, this page fills in on its own — no setup required here."
+          actions={
+            <button className="btn btn-primary" onClick={() => navigate("/")}>
+              Back to Today
+            </button>
+          }
+        />
+      ) : (
+        <div className="layout-2">
+          <div>
+            <div className="section-block">
+              <h3>Spend by category</h3>
+              <p className="section-sub">
+                Transfers between your own accounts are excluded from every figure below.
+              </p>
+              <div className="hbars">
+                {summary!.byCategory.map((entry) => {
+                  const pct = totalSpend > 0 ? Math.round((entry.amountMinor / totalSpend) * 100) : 0;
+                  const color = colorFor(entry.categoryId);
+                  const isUncategorized = entry.categoryId === null;
+                  return (
+                    <div className="hbar-row" key={entry.categoryId ?? "none"}>
+                      <div className="hbar-label">
+                        <span
+                          className="hbar-dot"
+                          style={
+                            isUncategorized
+                              ? { background: "transparent", border: "1.5px dashed var(--muted-light)" }
+                              : { background: color }
+                          }
+                        />
+                        {entry.name}
+                      </div>
+                      <div className="hbar-track">
+                        <div className="hbar-fill" style={{ width: `${pct}%`, background: color }} />
+                      </div>
+                      <div className="hbar-val num">
+                        {formatMoneyShort(entry.amountMinor)}
+                        <span className="hbar-pct">{pct}%</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-            <div className="card">
-              <span>Received</span>
-              <strong>{formatMoney(summary.totalIncomeMinor)}</strong>
-            </div>
-            <div className="card">
-              <span>Transactions</span>
-              <strong>{summary.transactionCount}</strong>
+
+            <div className="section-block">
+              <h3>Last 6 months</h3>
+              <p className="section-sub">
+                {monthsWithData <= 1
+                  ? "You've been using SpendLog for less than a month — the earlier bars are still empty, and that's expected."
+                  : "Spending and income side by side, month by month."}
+              </p>
+              <div className="trend-wrap">
+                {trend.map((point) => {
+                  const empty = point.spendMinor === 0 && point.incomeMinor === 0;
+                  const label = new Date(`${point.month}-01T00:00:00Z`).toLocaleDateString("en-IN", {
+                    month: "short",
+                    timeZone: "UTC",
+                  });
+                  return (
+                    <div className="trend-col" key={point.month}>
+                      <div className="trend-bars">
+                        {empty ? (
+                          <div className="trend-bar placeholder" />
+                        ) : (
+                          <>
+                            <div
+                              className="trend-bar spend"
+                              style={{ height: (point.spendMinor / trendMax) * TREND_MAX_HEIGHT }}
+                              title={`Spent ${formatMoney(point.spendMinor)}`}
+                            />
+                            <div
+                              className="trend-bar income"
+                              style={{ height: (point.incomeMinor / trendMax) * TREND_MAX_HEIGHT }}
+                              title={`Received ${formatMoney(point.incomeMinor)}`}
+                            />
+                          </>
+                        )}
+                      </div>
+                      <span className="trend-month">{label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="trend-legend">
+                <span>
+                  <span className="legend-dot" style={{ background: "var(--debit)" }} />
+                  Spend
+                </span>
+                <span>
+                  <span className="legend-dot" style={{ background: "var(--credit)" }} />
+                  Income
+                </span>
+                <span>
+                  <span
+                    className="legend-dot"
+                    style={{
+                      background:
+                        "repeating-linear-gradient(135deg,#E7E7E2,#E7E7E2 3px,#EFEFEA 3px,#EFEFEA 6px)",
+                    }}
+                  />
+                  No data yet
+                </span>
+              </div>
             </div>
           </div>
 
-          <h3>Spend by category</h3>
-          {summary.byCategory.length === 0 ? (
-            <p className="empty-state">No spend recorded this month.</p>
-          ) : (
-            <ResponsiveContainer width="100%" height={280}>
-              <PieChart>
-                <Pie
-                  data={summary.byCategory}
-                  dataKey="amountMinor"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={100}
-                  label={(entry) => entry.name}
-                >
-                  {summary.byCategory.map((_, i) => (
-                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value: number) => formatMoney(value)} />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </>
+          <div className="rail">
+            <div className="stat-tiles">
+              <div className="stat-tile">
+                <div className="label">Total spent</div>
+                <div className="value debit num">{formatMoney(summary!.totalSpendMinor)}</div>
+              </div>
+              <div className="stat-tile">
+                <div className="label">Total received</div>
+                <div className="value credit num">{formatMoney(summary!.totalIncomeMinor)}</div>
+              </div>
+              <div className="stat-tile">
+                <div className="label">Transactions</div>
+                <div className="value num">{summary!.transactionCount}</div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
-
-      <h3>Last 6 months</h3>
-      <ResponsiveContainer width="100%" height={280}>
-        <BarChart data={trendInRupees}>
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="month" />
-          <YAxis />
-          <Tooltip formatter={(value: number) => `₹${value.toFixed(0)}`} />
-          <Bar dataKey="spend" name="Spend" fill="#f97316" />
-          <Bar dataKey="income" name="Income" fill="#22c55e" />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
+    </section>
   );
 }

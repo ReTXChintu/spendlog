@@ -10,8 +10,8 @@ export const transactionsRouter = Router();
 transactionsRouter.use(requireAuth);
 
 const listQuerySchema = z.object({
-  from: z.string().datetime().optional(),
-  to: z.string().datetime().optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
   categoryId: z.string().optional(),
   accountId: z.string().optional(),
   type: z.enum(TRANSACTION_TYPES).optional(),
@@ -31,14 +31,18 @@ function buildFilter(
 ): FilterQuery<TransactionDoc> {
   const filter: FilterQuery<TransactionDoc> = { userId: currentUserId(req) };
 
-  if (filters.categoryId) filter.categoryId = filters.categoryId;
+  // "none" filters for transactions nothing could categorize — the ones
+  // that actually need the user's attention.
+  if (filters.categoryId === "none") filter.categoryId = null;
+  else if (filters.categoryId) filter.categoryId = filters.categoryId;
   if (filters.accountId) filter.accountId = filters.accountId;
   if (filters.type) filter.type = filters.type;
 
   if (filters.from || filters.to) {
     filter.occurredAt = {
-      ...(filters.from ? { $gte: new Date(filters.from) } : {}),
-      ...(filters.to ? { $lte: new Date(filters.to) } : {}),
+      ...(filters.from ? { $gte: filters.from } : {}),
+      // A bare date means the whole of that day, not midnight at its start.
+      ...(filters.to ? { $lte: new Date(filters.to.getTime() + 24 * 60 * 60 * 1000 - 1) } : {}),
     };
   }
 

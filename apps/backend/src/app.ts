@@ -5,6 +5,7 @@
 import "express-async-errors";
 import cors from "cors";
 import express, { NextFunction, Request, Response } from "express";
+import { accountsRouter } from "./modules/accounts/accounts.routes";
 import { authRouter } from "./modules/auth/auth.routes";
 import { categoriesRouter } from "./modules/categories/categories.routes";
 import { analyticsRouter } from "./modules/analytics/analytics.routes";
@@ -25,6 +26,7 @@ app.use(express.json());
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 app.use("/auth", authRouter);
+app.use("/accounts", accountsRouter);
 app.use("/categories", categoriesRouter);
 app.use("/transactions", transactionsRouter);
 app.use("/ingestion/sms", smsRouter);

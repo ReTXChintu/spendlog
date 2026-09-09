@@ -24,6 +24,7 @@ export interface Transaction {
   type: TransactionType;
   merchant: string | null;
   note: string | null;
+  rawText: string | null;
   source: TransactionSource;
   isTransfer: boolean;
   pending: boolean;
