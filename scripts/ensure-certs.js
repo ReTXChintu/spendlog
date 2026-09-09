@@ -82,6 +82,7 @@ function validatePaths(certPath, keyPath) {
   const example = (dir) =>
     `  SSL_CERT_PATH="${path.join(dir, "spendlog.crt")}"\n  SSL_KEY_PATH="${path.join(dir, "spendlog.key")}"`;
 
+
   if (path.resolve(certPath) === path.resolve(keyPath)) {
     throw new Error(
       `SSL_CERT_PATH and SSL_KEY_PATH are the same path:\n  ${certPath}\n\n` +
@@ -101,6 +102,11 @@ function validatePaths(certPath, keyPath) {
       );
     }
   }
+}
+
+/** True for paths certbot owns, where we must never write our own files. */
+function isCertbotManaged(target) {
+  return path.resolve(target).replace(/\\/g, "/").startsWith("/etc/letsencrypt/");
 }
 
 function generate(certPath, keyPath, host) {
@@ -170,7 +176,29 @@ function ensureCerts({ certPath, keyPath, host, force = false, log = console.log
 
   const present = () =>
     fs.existsSync(certPath) && fs.existsSync(keyPath) && fs.statSync(certPath).isFile();
+  // Checked before the certbot guard below, so an already-issued Let's
+  // Encrypt certificate is simply used — the guard is about not creating
+  // files in certbot's directory, not about refusing to read from it.
   if (present() && !force) return "exists";
+
+  // /etc/letsencrypt/live is certbot's, and its entries are symlinks into
+  // archive/. Writing a self-signed file there would collide with certbot
+  // and quietly serve an untrusted certificate, which Android rejects
+  // outright. Configuring these paths before the certificate is issued is
+  // the natural order to get things wrong in, so it's worth catching.
+  for (const [label, target] of [
+    ["SSL_CERT_PATH", certPath],
+    ["SSL_KEY_PATH", keyPath],
+  ]) {
+    if (isCertbotManaged(target)) {
+      throw new Error(
+        `${label} points inside /etc/letsencrypt, which certbot manages, but no\n` +
+          `certificate is there yet:\n  ${target}\n\n` +
+          `Issue the real one first:\n  sudo ./scripts/setup-letsencrypt.sh\n` +
+          `A self-signed certificate must not be written into certbot's directory.`
+      );
+    }
+  }
 
   // Replacing a CA-issued certificate with a self-signed one would break
   // the Android app (which won't trust self-signed at all) and reintroduce
