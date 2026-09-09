@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import '../theme.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
+import '../theme.dart';
 import '../utils/format.dart';
+import '../widgets/state_block.dart';
 
 class AnalyticsScreen extends StatefulWidget {
   const AnalyticsScreen({super.key});
@@ -12,139 +13,376 @@ class AnalyticsScreen extends StatefulWidget {
 }
 
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
+  static const _trendHeight = 110.0;
+
   late String _month;
   AnalyticsSummary? _summary;
   List<Map<String, dynamic>> _trend = [];
+  List<Category> _categories = [];
 
   @override
   void initState() {
     super.initState();
-    final now = DateTime.now();
-    _month = '${now.year}-${now.month.toString().padLeft(2, '0')}';
+    _month = currentMonth();
     _loadSummary();
-    _loadTrend();
+    _loadRest();
   }
 
   Future<void> _loadSummary() async {
     final result = await ApiClient.instance.get('/analytics/summary?month=$_month');
+    if (!mounted) return;
     setState(() => _summary = AnalyticsSummary.fromJson(result as Map<String, dynamic>));
   }
 
-  Future<void> _loadTrend() async {
-    final result = await ApiClient.instance.get('/analytics/trend?months=6') as List<dynamic>;
-    setState(() => _trend = result.cast<Map<String, dynamic>>());
+  Future<void> _loadRest() async {
+    final results = await Future.wait([
+      ApiClient.instance.get('/analytics/trend?months=6'),
+      ApiClient.instance.get('/categories'),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _trend = (results[0] as List<dynamic>).cast<Map<String, dynamic>>();
+      _categories = (results[1] as List<dynamic>).map((c) => Category.fromJson(c as Map<String, dynamic>)).toList();
+    });
+  }
+
+  Color _colorFor(String? categoryId) {
+    if (categoryId == null) return T.mutedLight;
+    final match = _categories.where((c) => c.id == categoryId);
+    return match.isEmpty ? T.muted : parseHexColor(match.first.color);
   }
 
   @override
   Widget build(BuildContext context) {
     final summary = _summary;
-    final maxCategorySpend =
-        summary == null || summary.byCategory.isEmpty ? 1 : summary.byCategory.map((c) => c.amountMinor).reduce((a, b) => a > b ? a : b);
-    final maxTrendSpend = _trend.isEmpty
-        ? 1
-        : _trend.map((t) => t['spendMinor'] as int).reduce((a, b) => a > b ? a : b).clamp(1, 1 << 62);
 
-    return ListView(
-      padding: const EdgeInsets.all(16),
+    return Column(
       children: [
-        if (summary != null) ...[
-          Row(
-            children: [
-              _SummaryCard(label: 'Spent', value: formatMoney(summary.totalSpendMinor)),
-              const SizedBox(width: 12),
-              _SummaryCard(label: 'Received', value: formatMoney(summary.totalIncomeMinor)),
-            ],
-          ),
-          const SizedBox(height: 24),
-          const Text('Spend by category', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
-          if (summary.byCategory.isEmpty)
-            const Text('No spend recorded this month.')
-          else
-            ...summary.byCategory.map(
-              (c) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        _MonthPicker(
+          month: _month,
+          onChange: (delta) {
+            final next = shiftMonth(_month, delta);
+            if (delta > 0 && next.compareTo(currentMonth()) > 0) return;
+            setState(() {
+              _month = next;
+              _summary = null;
+            });
+            _loadSummary();
+          },
+        ),
+        Expanded(
+          child: summary == null
+              ? const Center(child: CircularProgressIndicator())
+              : summary.transactionCount == 0
+                  ? const StateBlock(
+                      icon: Icons.trending_up,
+                      title: 'Nothing to analyze yet',
+                      body: 'Charts need transactions first. Once a few payments come in from SMS or Gmail, '
+                          'this fills in on its own.',
+                    )
+                  : ListView(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
                       children: [
-                        Text(c.name),
-                        Text(formatMoney(c.amountMinor), style: const TextStyle(fontWeight: FontWeight.w600)),
+                        Row(
+                          children: [
+                            _Tile(label: 'Spent', value: formatMoney(summary.totalSpendMinor), color: T.debit),
+                            const SizedBox(width: 12),
+                            _Tile(label: 'Received', value: formatMoney(summary.totalIncomeMinor), color: T.credit),
+                          ],
+                        ),
+                        const SizedBox(height: 26),
+                        const _SectionTitle(
+                          title: 'Spend by category',
+                          sub: 'Transfers between your own accounts are excluded.',
+                        ),
+                        const SizedBox(height: 14),
+                        ...summary.byCategory.map((entry) {
+                          final pct = summary.totalSpendMinor == 0
+                              ? 0.0
+                              : entry.amountMinor / summary.totalSpendMinor;
+                          return _CategoryBar(
+                            name: entry.name,
+                            amountMinor: entry.amountMinor,
+                            fraction: pct,
+                            color: _colorFor(entry.categoryId),
+                            dashed: entry.categoryId == null,
+                          );
+                        }),
+                        const SizedBox(height: 30),
+                        const _SectionTitle(title: 'Last 6 months', sub: 'Spending and income side by side.'),
+                        const SizedBox(height: 16),
+                        _Trend(points: _trend, maxHeight: _trendHeight),
                       ],
                     ),
-                    const SizedBox(height: 4),
-                    FractionallySizedBox(
-                      alignment: Alignment.centerLeft,
-                      widthFactor: c.amountMinor / maxCategorySpend,
-                      child: Container(
-                        height: 8,
-                        decoration: BoxDecoration(color: brandBlue, borderRadius: BorderRadius.circular(4)),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-        ],
-        const SizedBox(height: 32),
-        const Text('Last 6 months', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 12),
-        SizedBox(
-          height: 160,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: _trend
-                .map(
-                  (point) => Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          Container(
-                            height: 120 * ((point['spendMinor'] as int) / maxTrendSpend),
-                            decoration: BoxDecoration(color: brandBlue, borderRadius: BorderRadius.circular(4)),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            (point['month'] as String).substring(5),
-                            style: const TextStyle(fontSize: 11),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                )
-                .toList(),
-          ),
         ),
       ],
     );
   }
 }
 
-class _SummaryCard extends StatelessWidget {
+class _MonthPicker extends StatelessWidget {
+  final String month;
+  final ValueChanged<int> onChange;
+
+  const _MonthPicker({required this.month, required this.onChange});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: T.surface,
+          border: Border.all(color: T.lineStrong),
+          borderRadius: BorderRadius.circular(100),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            IconButton(
+              iconSize: 18,
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.chevron_left, color: T.muted),
+              onPressed: () => onChange(-1),
+            ),
+            Text(
+              formatMonthLabel(month),
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: T.ink),
+            ),
+            IconButton(
+              iconSize: 18,
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.chevron_right, color: T.muted),
+              onPressed: () => onChange(1),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionTitle extends StatelessWidget {
+  final String title;
+  final String sub;
+  const _SectionTitle({required this.title, required this.sub});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: T.ink)),
+        const SizedBox(height: 3),
+        Text(sub, style: const TextStyle(fontSize: 12.5, color: T.muted)),
+      ],
+    );
+  }
+}
+
+class _Tile extends StatelessWidget {
   final String label;
   final String value;
-  const _SummaryCard({required this.label, required this.value});
+  final Color color;
+
+  const _Tile({required this.label, required this.value, required this.color});
 
   @override
   Widget build(BuildContext context) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: T.surface,
+          border: Border.all(color: T.line),
+          borderRadius: BorderRadius.circular(T.rMd),
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
-            const SizedBox(height: 4),
-            Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            Text(label, style: const TextStyle(fontSize: 12, color: T.muted, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 6),
+            Text(value, style: kNum.copyWith(fontSize: 18, fontWeight: FontWeight.w800, color: color)),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _CategoryBar extends StatelessWidget {
+  final String name;
+  final int amountMinor;
+  final double fraction;
+  final Color color;
+  final bool dashed;
+
+  const _CategoryBar({
+    required this.name,
+    required this.amountMinor,
+    required this.fraction,
+    required this.color,
+    required this.dashed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 13),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 9,
+                height: 9,
+                decoration: BoxDecoration(
+                  color: dashed ? Colors.transparent : color,
+                  border: dashed ? Border.all(color: T.mutedLight, width: 1.5) : null,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: T.ink),
+                ),
+              ),
+              Text(formatMoneyShort(amountMinor),
+                  style: kNum.copyWith(fontSize: 13, fontWeight: FontWeight.w700, color: T.ink)),
+              const SizedBox(width: 5),
+              Text('${(fraction * 100).round()}%',
+                  style: const TextStyle(fontSize: 11.5, color: T.muted)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: LinearProgressIndicator(
+              value: fraction.clamp(0.0, 1.0),
+              minHeight: 11,
+              backgroundColor: const Color(0xFFEFEFEA),
+              valueColor: AlwaysStoppedAnimation<Color>(color),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Trend extends StatelessWidget {
+  final List<Map<String, dynamic>> points;
+  final double maxHeight;
+
+  const _Trend({required this.points, required this.maxHeight});
+
+  @override
+  Widget build(BuildContext context) {
+    if (points.isEmpty) return const SizedBox.shrink();
+
+    final peak = points
+        .expand((p) => [p['spendMinor'] as int, p['incomeMinor'] as int])
+        .fold<int>(1, (a, b) => a > b ? a : b);
+
+    return Column(
+      children: [
+        SizedBox(
+          height: maxHeight + 30,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: points.map((point) {
+              final spend = point['spendMinor'] as int;
+              final income = point['incomeMinor'] as int;
+              final empty = spend == 0 && income == 0;
+              final label = formatMonthLabel('${point['month']}').split(' ').first.substring(0, 3);
+
+              return Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    if (empty)
+                      Container(
+                        width: 30,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE7E7E2),
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                      )
+                    else
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          _Bar(height: spend / peak * maxHeight, color: T.debit),
+                          const SizedBox(width: 4),
+                          _Bar(height: income / peak * maxHeight, color: T.credit),
+                        ],
+                      ),
+                    const SizedBox(height: 6),
+                    Text(label, style: const TextStyle(fontSize: 11.5, color: T.muted, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        const Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _LegendDot(color: T.debit, label: 'Spend'),
+            SizedBox(width: 16),
+            _LegendDot(color: T.credit, label: 'Income'),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _Bar extends StatelessWidget {
+  final double height;
+  final Color color;
+  const _Bar({required this.height, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 14,
+      height: height.clamp(2.0, double.infinity),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+      ),
+    );
+  }
+}
+
+class _LegendDot extends StatelessWidget {
+  final Color color;
+  final String label;
+  const _LegendDot({required this.color, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 9,
+          height: 9,
+          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3)),
+        ),
+        const SizedBox(width: 6),
+        Text(label, style: const TextStyle(fontSize: 12, color: T.muted)),
+      ],
     );
   }
 }

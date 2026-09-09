@@ -7,6 +7,7 @@ import '../config.dart';
 import 'api_client.dart';
 
 const String _backfillDoneKey = 'spendlog_sms_backfill_done';
+const String _permissionGrantedKey = 'spendlog_sms_permission_granted';
 
 String _messageId(SmsMessage message) => '${message.address ?? 'unknown'}-${message.date ?? 0}';
 
@@ -47,7 +48,21 @@ class SmsService {
 
   final Telephony _telephony = Telephony.instance;
 
-  Future<bool> requestPermissions() => _telephony.requestPhoneAndSmsPermissions.then((v) => v ?? false);
+  Future<bool> requestPermissions() async {
+    final granted = await _telephony.requestPhoneAndSmsPermissions ?? false;
+    // Remembered so Settings can show the status without re-prompting.
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_permissionGrantedKey, granted);
+    return granted;
+  }
+
+  /// Whether SMS access was granted, for the Settings status pill. Reads the
+  /// remembered answer rather than asking, so opening Settings never triggers
+  /// a system dialog.
+  Future<bool> hasPermission() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_permissionGrantedKey) ?? false;
+  }
 
   void startListening() {
     _telephony.listenIncomingSms(

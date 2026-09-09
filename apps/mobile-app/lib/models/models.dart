@@ -39,6 +39,9 @@ class Transaction {
   final String type; // DEBIT | CREDIT
   final String? merchant;
   final String? note;
+  /// The SMS or email this was parsed from, shown on demand so figures the
+  /// user never typed can be checked.
+  final String? rawText;
   final String source; // SMS | EMAIL | MANUAL
   final bool isTransfer;
   final bool pending;
@@ -53,6 +56,7 @@ class Transaction {
     required this.type,
     this.merchant,
     this.note,
+    this.rawText,
     required this.source,
     required this.isTransfer,
     required this.pending,
@@ -68,6 +72,7 @@ class Transaction {
         type: json['type'] as String,
         merchant: json['merchant'] as String?,
         note: json['note'] as String?,
+        rawText: json['rawText'] as String?,
         source: json['source'] as String,
         isTransfer: json['isTransfer'] as bool? ?? false,
         pending: json['pending'] as bool? ?? false,

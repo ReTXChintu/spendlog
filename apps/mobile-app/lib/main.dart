@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
 import 'services/api_client.dart';
+import 'theme.dart';
 
 void main() {
   runApp(const SpendLogApp());
@@ -14,8 +15,8 @@ class SpendLogApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'SpendLog',
-      // Seeded from the brand blue in the SpendLog logo.
-      theme: ThemeData(colorSchemeSeed: const Color(0xFF3D6BF5), useMaterial3: true),
+      // Tokens from the approved design; see lib/theme.dart.
+      theme: buildTheme(),
       home: const _StartupGate(),
     );
   }
