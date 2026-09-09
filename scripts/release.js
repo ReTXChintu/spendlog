@@ -1,166 +1,42 @@
 #!/usr/bin/env node
 /**
- * Cuts a release: one version number for the whole monorepo.
+ * Runs release-it with the repo's own conventions applied.
  *
- * The web apps, the backend and the Android app are deployed together from
- * the same commit, so a per-app version would only ever be a source of
- * confusion — "which backend is this APK talking to?" has to have one
- * answer. Everything here follows the root package.json.
+ * All it adds is the token: release-it reads GITHUB_TOKEN from the
+ * environment, and this repo keeps every secret in one .env at the root
+ * rather than expecting them to be exported by hand. Everything else —
+ * the bump, the commit, the tag, the push, the GitHub release — is
+ * release-it's, configured in .release-it.json.
  *
- *   npm run release              # 0.1.0 -> 0.1.1
- *   npm run release:minor        # 0.1.0 -> 0.2.0
+ *   npm run release              # patch, with a prompt for each step
+ *   npm run release:minor
  *   npm run release -- 1.4.0     # an explicit version
- *   npm run release -- --local   # bump and tag, but ship nothing
+ *   npm run release:dry          # go through the motions, change nothing
  *
- * Releasing means releasing: this bumps, commits, tags, pushes and
- * publishes the GitHub release, which is what starts the deploy workflow.
- * Pass --local to stop after the tag, for when you want to look at the
- * bump before anything leaves the machine.
+ * Publishing the GitHub release is what triggers the deploy workflow; a
+ * pushed tag on its own ships nothing.
  */
-const { execFileSync } = require("child_process");
-const fs = require("fs");
+const { spawnSync } = require("child_process");
 const path = require("path");
 
 const ROOT = path.resolve(__dirname, "..");
 
-/** Files carrying the version, each with its own format. */
-const PACKAGE_FILES = [
-  "package.json",
-  "apps/backend/package.json",
-  "apps/frontend/package.json",
-];
-const PUBSPEC = "apps/mobile-app/pubspec.yaml";
-const DART_VERSION_FILE = "apps/mobile-app/lib/version.dart";
+require("dotenv").config({ path: path.join(ROOT, ".env") });
 
-function run(command, args, options = {}) {
-  return execFileSync(command, args, {
-    cwd: ROOT,
-    encoding: "utf8",
-    stdio: options.capture ? "pipe" : "inherit",
-    ...options,
-  });
+if (!process.env.GITHUB_TOKEN) {
+  console.error("GITHUB_TOKEN isn't set, so the GitHub release can't be published.\n");
+  console.error("Create a token with the 'repo' and 'workflow' scopes at");
+  console.error("  https://github.com/settings/tokens");
+  console.error("and add it to the .env at the repo root:");
+  console.error("  GITHUB_TOKEN=ghp_...\n");
+  console.error("See .env.example.");
+  process.exit(1);
 }
 
-function git(args, options = {}) {
-  return run("git", args, options);
-}
+const result = spawnSync("npx", ["release-it", ...process.argv.slice(2)], {
+  cwd: ROOT,
+  stdio: "inherit",
+  shell: process.platform === "win32",
+});
 
-function readJson(relative) {
-  return JSON.parse(fs.readFileSync(path.join(ROOT, relative), "utf8"));
-}
-
-/** Rewrites only the version line, so formatting and key order survive. */
-function writeVersion(relative, version) {
-  const file = path.join(ROOT, relative);
-  const before = fs.readFileSync(file, "utf8");
-  const after = before.replace(/"version":\s*"[^"]*"/, `"version": "${version}"`);
-  if (before === after) throw new Error(`No version field to update in ${relative}`);
-  fs.writeFileSync(file, after);
-}
-
-function nextVersion(current, bump) {
-  if (/^\d+\.\d+\.\d+$/.test(bump)) return bump;
-
-  const [major, minor, patch] = current.split(".").map(Number);
-  if (bump === "major") return `${major + 1}.0.0`;
-  if (bump === "minor") return `${major}.${minor + 1}.0`;
-  if (bump === "patch") return `${major}.${minor}.${patch + 1}`;
-  throw new Error(`Unknown bump "${bump}" — use major, minor, patch, or an explicit x.y.z`);
-}
-
-/**
- * Android refuses an update whose versionCode isn't higher than the
- * installed one, and it has to be an integer — so the build number after
- * the "+" counts releases and only ever goes up.
- */
-function nextBuildNumber(pubspec) {
-  const match = pubspec.match(/^version:\s*\S+?(?:\+(\d+))?\s*$/m);
-  if (!match) throw new Error(`No version line found in ${PUBSPEC}`);
-  return Number(match[1] ?? 0) + 1;
-}
-
-function main() {
-  const args = process.argv.slice(2);
-  const push = !args.includes("--local");
-  const bump = args.find((arg) => !arg.startsWith("--")) ?? "patch";
-
-  // A release commit should contain the version bump and nothing else,
-  // otherwise the tag points at work nobody meant to ship.
-  const dirty = git(["status", "--porcelain"], { capture: true }).trim();
-  if (dirty) {
-    console.error("Working tree isn't clean. Commit or stash first:\n");
-    console.error(dirty);
-    process.exit(1);
-  }
-
-  const current = readJson("package.json").version;
-  const version = nextVersion(current, bump);
-  const tag = `v${version}`;
-
-  if (git(["tag", "--list", tag], { capture: true }).trim()) {
-    console.error(`Tag ${tag} already exists.`);
-    process.exit(1);
-  }
-
-  for (const file of PACKAGE_FILES) writeVersion(file, version);
-
-  const pubspecPath = path.join(ROOT, PUBSPEC);
-  const pubspec = fs.readFileSync(pubspecPath, "utf8");
-  const build = nextBuildNumber(pubspec);
-  fs.writeFileSync(
-    pubspecPath,
-    pubspec.replace(/^version:\s*.*$/m, `version: ${version}+${build}`)
-  );
-
-  // Dart has no way to read pubspec.yaml at runtime without pulling in a
-  // package for it, so the version is generated into a source file.
-  fs.writeFileSync(
-    path.join(ROOT, DART_VERSION_FILE),
-    `// GENERATED by scripts/release.js — do not edit by hand.\n` +
-      `// The whole monorepo shares one version; see the root package.json.\n` +
-      `const String appVersion = '${version}';\n` +
-      `const int appBuildNumber = ${build};\n`
-  );
-
-  // The lockfile records each workspace's version, so leaving it behind
-  // makes `npm ci` refuse to install on the server. --package-lock-only
-  // rewrites it without touching node_modules.
-  run("npm", ["install", "--package-lock-only"], { shell: process.platform === "win32" });
-
-  git(["add", ...PACKAGE_FILES, PUBSPEC, DART_VERSION_FILE, "package-lock.json"]);
-  git(["commit", "-m", `chore(release): ${tag}`]);
-  git(["tag", "-a", tag, "-m", tag]);
-
-  console.log(`\n${current} -> ${version} (Android build ${build}), committed and tagged ${tag}.`);
-
-  if (!push) {
-    console.log("\n--local, so nothing has been pushed. To ship it:");
-    console.log(`  git push && git push origin ${tag}`);
-    console.log(`  gh release create ${tag} --generate-notes`);
-    console.log(`\nOr to undo it:  git reset --hard HEAD~1 && git tag -d ${tag}`);
-    return;
-  }
-
-  const branch = git(["rev-parse", "--abbrev-ref", "HEAD"], { capture: true }).trim();
-  git(["push", "origin", branch]);
-  git(["push", "origin", tag]);
-
-  // Publishing the release is what triggers the deploy workflow. Pushing
-  // the tag on its own deploys nothing, so a failure here is a failure.
-  try {
-    run("gh", ["release", "create", tag, "--title", tag, "--generate-notes"], {
-      shell: process.platform === "win32",
-    });
-    console.log(`\nReleased ${tag}. The deploy workflow takes it from here:`);
-    console.log("  gh run watch");
-  } catch {
-    // gh has already printed why on stderr — repeating a guess here only
-    // sends people looking in the wrong place.
-    console.log(`\nPushed ${tag}, but gh couldn't publish the release (see above).`);
-    console.log("Nothing deploys until it is published. Once the cause is fixed:");
-    console.log(`  gh release create ${tag} --generate-notes`);
-    process.exitCode = 1;
-  }
-}
-
-main();
+process.exit(result.status ?? 1);

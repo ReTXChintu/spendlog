@@ -22,12 +22,10 @@
     "release:patch": "node scripts/release.js patch",
     "release:minor": "node scripts/release.js minor",
     "release:major": "node scripts/release.js major",
-    "release:local": "node scripts/release.js --local",
-
+    "release:dry": "node scripts/release.js --dry-run",
     "certs": "node scripts/ensure-certs.js",
     "certs:force": "node scripts/ensure-certs.js --force",
     "certs:letsencrypt": "bash scripts/setup-letsencrypt.sh",
-
     "pm2:start": "pm2 startOrRestart ecosystem.config.cjs --update-env",
     "pm2:restart": "pm2 restart ecosystem.config.cjs --update-env",
     "pm2:reload": "pm2 reload ecosystem.config.cjs --update-env",
@@ -39,7 +37,9 @@
     "pm2:logs:frontend": "pm2 logs spendlog-frontend --lines 100",
     "pm2:save": "pm2 save",
     "pm2:persist": "node scripts/pm2-persist.js",
-
     "deploy": "npm ci && npm run build && npm run pm2:start && npm run pm2:save"
+  },
+  "devDependencies": {
+    "release-it": "20.2.1"
   }
 }
