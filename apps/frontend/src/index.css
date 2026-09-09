@@ -375,8 +375,8 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
 .roadmap-chip{font-size:12px;color:var(--muted);background:var(--paper);border:1px solid var(--line);border-radius:100px;padding:6px 12px}
 
 /* ---------- sign in ---------- */
-#screen-signin{display:none;min-height:100vh;grid-template-columns:1fr 1fr}
-#screen-signin.active{display:grid}
+/* Same as .overlay: the route only renders this when it applies. */
+#screen-signin{display:grid;min-height:100vh;grid-template-columns:1fr 1fr}
 .signin-brand{background:var(--raw-bg);color:#fff;display:flex;flex-direction:column;justify-content:center;padding:60px;position:relative;overflow:hidden}
 .signin-brand .receipt-bg{position:absolute;right:-60px;top:50%;transform:translateY(-50%) rotate(8deg);opacity:.07;width:420px;height:420px}
 .signin-lockup{display:flex;align-items:center;gap:14px;margin-bottom:22px;position:relative}
@@ -406,8 +406,9 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
 .cat-opt .dot{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;flex-shrink:0}
 .cat-opt .dot svg{width:10px;height:10px}
 
-.overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:70;display:none;align-items:center;justify-content:center}
-.overlay.active{display:flex}
+/* The mockup kept its modals in the markup and toggled .active; here an
+   overlay is only rendered while it's open, so it shows as soon as it exists. */
+.overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:70;display:flex;align-items:center;justify-content:center}
 .modal{background:var(--surface);border-radius:var(--radius-lg);width:460px;max-width:92vw;padding:24px;position:relative}
 .modal-close{position:absolute;top:16px;right:16px;background:none;border:none;color:var(--muted)}
 .modal h3{margin:0 0 4px 0;font-size:16.5px}
