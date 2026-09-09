@@ -52,11 +52,11 @@ class _HomeShellState extends State<HomeShell> {
             const SizedBox(width: 10),
             Text(
               _titles[_index],
-              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: T.ink),
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: context.c.ink),
             ),
           ],
         ),
-        shape: const Border(bottom: BorderSide(color: T.line)),
+        shape: Border(bottom: BorderSide(color: context.c.line)),
       ),
       body: IndexedStack(index: _index, children: screens),
       bottomNavigationBar: NavigationBar(

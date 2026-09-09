@@ -47,9 +47,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   Color _colorFor(String? categoryId) {
-    if (categoryId == null) return T.mutedLight;
+    if (categoryId == null) return context.c.mutedLight;
     final match = _categories.where((c) => c.id == categoryId);
-    return match.isEmpty ? T.muted : parseHexColor(match.first.color);
+    return match.isEmpty ? context.c.muted : parseHexColor(match.first.color);
   }
 
   @override
@@ -85,9 +85,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       children: [
                         Row(
                           children: [
-                            _Tile(label: 'Spent', value: formatMoney(summary.totalSpendMinor), color: T.debit),
+                            _Tile(label: 'Spent', value: formatMoney(summary.totalSpendMinor), color: context.c.debit),
                             const SizedBox(width: 12),
-                            _Tile(label: 'Received', value: formatMoney(summary.totalIncomeMinor), color: T.credit),
+                            _Tile(label: 'Received', value: formatMoney(summary.totalIncomeMinor), color: context.c.credit),
                           ],
                         ),
                         const SizedBox(height: 26),
@@ -133,8 +133,8 @@ class _MonthPicker extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
-          color: T.surface,
-          border: Border.all(color: T.lineStrong),
+          color: context.c.surface,
+          border: Border.all(color: context.c.lineStrong),
           borderRadius: BorderRadius.circular(100),
         ),
         child: Row(
@@ -143,17 +143,17 @@ class _MonthPicker extends StatelessWidget {
             IconButton(
               iconSize: 18,
               visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.chevron_left, color: T.muted),
+              icon: Icon(Icons.chevron_left, color: context.c.muted),
               onPressed: () => onChange(-1),
             ),
             Text(
               formatMonthLabel(month),
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: T.ink),
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: context.c.ink),
             ),
             IconButton(
               iconSize: 18,
               visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.chevron_right, color: T.muted),
+              icon: Icon(Icons.chevron_right, color: context.c.muted),
               onPressed: () => onChange(1),
             ),
           ],
@@ -173,9 +173,9 @@ class _SectionTitle extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: T.ink)),
+        Text(title, style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: context.c.ink)),
         const SizedBox(height: 3),
-        Text(sub, style: const TextStyle(fontSize: 12.5, color: T.muted)),
+        Text(sub, style: TextStyle(fontSize: 12.5, color: context.c.muted)),
       ],
     );
   }
@@ -194,14 +194,14 @@ class _Tile extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
-          color: T.surface,
-          border: Border.all(color: T.line),
+          color: context.c.surface,
+          border: Border.all(color: context.c.line),
           borderRadius: BorderRadius.circular(T.rMd),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: const TextStyle(fontSize: 12, color: T.muted, fontWeight: FontWeight.w600)),
+            Text(label, style: TextStyle(fontSize: 12, color: context.c.muted, fontWeight: FontWeight.w600)),
             const SizedBox(height: 6),
             Text(value, style: kNum.copyWith(fontSize: 18, fontWeight: FontWeight.w800, color: color)),
           ],
@@ -240,7 +240,7 @@ class _CategoryBar extends StatelessWidget {
                 height: 9,
                 decoration: BoxDecoration(
                   color: dashed ? Colors.transparent : color,
-                  border: dashed ? Border.all(color: T.mutedLight, width: 1.5) : null,
+                  border: dashed ? Border.all(color: context.c.mutedLight, width: 1.5) : null,
                   borderRadius: BorderRadius.circular(3),
                 ),
               ),
@@ -250,14 +250,14 @@ class _CategoryBar extends StatelessWidget {
                   name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: T.ink),
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: context.c.ink),
                 ),
               ),
               Text(formatMoneyShort(amountMinor),
-                  style: kNum.copyWith(fontSize: 13, fontWeight: FontWeight.w700, color: T.ink)),
+                  style: kNum.copyWith(fontSize: 13, fontWeight: FontWeight.w700, color: context.c.ink)),
               const SizedBox(width: 5),
               Text('${(fraction * 100).round()}%',
-                  style: const TextStyle(fontSize: 11.5, color: T.muted)),
+                  style: TextStyle(fontSize: 11.5, color: context.c.muted)),
             ],
           ),
           const SizedBox(height: 6),
@@ -320,13 +320,13 @@ class _Trend extends StatelessWidget {
                         mainAxisAlignment: MainAxisAlignment.center,
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          _Bar(height: spend / peak * maxHeight, color: T.debit),
+                          _Bar(height: spend / peak * maxHeight, color: context.c.debit),
                           const SizedBox(width: 4),
-                          _Bar(height: income / peak * maxHeight, color: T.credit),
+                          _Bar(height: income / peak * maxHeight, color: context.c.credit),
                         ],
                       ),
                     const SizedBox(height: 6),
-                    Text(label, style: const TextStyle(fontSize: 11.5, color: T.muted, fontWeight: FontWeight.w600)),
+                    Text(label, style: TextStyle(fontSize: 11.5, color: context.c.muted, fontWeight: FontWeight.w600)),
                   ],
                 ),
               );
@@ -334,12 +334,12 @@ class _Trend extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 12),
-        const Row(
+        Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _LegendDot(color: T.debit, label: 'Spend'),
-            SizedBox(width: 16),
-            _LegendDot(color: T.credit, label: 'Income'),
+            _LegendDot(color: context.c.debit, label: 'Spend'),
+            const SizedBox(width: 16),
+            _LegendDot(color: context.c.credit, label: 'Income'),
           ],
         ),
       ],
@@ -381,7 +381,7 @@ class _LegendDot extends StatelessWidget {
           decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3)),
         ),
         const SizedBox(width: 6),
-        Text(label, style: const TextStyle(fontSize: 12, color: T.muted)),
+        Text(label, style: TextStyle(fontSize: 12, color: context.c.muted)),
       ],
     );
   }

@@ -38,14 +38,14 @@ class TransactionTile extends StatelessWidget {
     final isTransfer = transaction.isTransfer;
 
     final amountColor = isTransfer
-        ? T.transfer
+        ? context.c.transfer
         : isDebit
-            ? T.debit
-            : T.credit;
+            ? context.c.debit
+            : context.c.credit;
 
     return Container(
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: T.line)),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: context.c.line)),
       ),
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
       child: Row(
@@ -69,14 +69,14 @@ class TransactionTile extends StatelessWidget {
                         transaction.merchant ?? 'Unknown',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.8, color: T.ink),
+                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.8, color: context.c.ink),
                       ),
                     ),
                     if (transaction.rawText != null) ...[
                       const SizedBox(width: 6),
                       GestureDetector(
                         onTap: () => showRawMessageSheet(context, transaction),
-                        child: const Icon(Icons.info_outline, size: 14, color: T.mutedLight),
+                        child: Icon(Icons.info_outline, size: 14, color: context.c.mutedLight),
                       ),
                     ],
                   ],
@@ -87,7 +87,7 @@ class TransactionTile extends StatelessWidget {
                     Icon(
                       transaction.source == 'EMAIL' ? Icons.mail_outline : Icons.sms_outlined,
                       size: 12,
-                      color: T.muted,
+                      color: context.c.muted,
                     ),
                     const SizedBox(width: 5),
                     Flexible(
@@ -95,7 +95,7 @@ class TransactionTile extends StatelessWidget {
                         _meta,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12, color: T.muted),
+                        style: TextStyle(fontSize: 12, color: context.c.muted),
                       ),
                     ),
                   ],
@@ -108,9 +108,9 @@ class TransactionTile extends StatelessWidget {
                       color: const Color(0xFFF1F5F9),
                       borderRadius: BorderRadius.circular(100),
                     ),
-                    child: const Text(
+                    child: Text(
                       'Not counted',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: T.transfer),
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.c.transfer),
                     ),
                   ),
                 ],
@@ -146,7 +146,7 @@ class _CategoryChip extends StatelessWidget {
         width: 36,
         height: 36,
         decoration: const BoxDecoration(color: Color(0xFFF1F5F9), shape: BoxShape.circle),
-        child: const Icon(Icons.arrow_forward, size: 17, color: T.transfer),
+        child: Icon(Icons.arrow_forward, size: 17, color: context.c.transfer),
       );
     }
 
@@ -164,14 +164,14 @@ class _CategoryChip extends StatelessWidget {
         width: 36,
         height: 36,
         decoration: BoxDecoration(
-          color: uncategorized ? T.surface : parseHexColor(category.color),
+          color: uncategorized ? context.c.surface : parseHexColor(category.color),
           shape: BoxShape.circle,
-          border: uncategorized ? Border.all(color: T.mutedLight, width: 1.6) : null,
+          border: uncategorized ? Border.all(color: context.c.mutedLight, width: 1.6) : null,
         ),
         child: Icon(
           uncategorized ? Icons.add : categoryIcon(category.icon),
           size: 17,
-          color: uncategorized ? T.mutedLight : Colors.white,
+          color: uncategorized ? context.c.mutedLight : Colors.white,
         ),
       ),
     );

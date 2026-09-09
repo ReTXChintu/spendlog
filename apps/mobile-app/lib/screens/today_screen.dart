@@ -153,8 +153,8 @@ class _MonthRollup extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
-        color: T.surface,
-        border: Border.all(color: T.line),
+        color: context.c.surface,
+        border: Border.all(color: context.c.line),
         borderRadius: BorderRadius.circular(T.rMd),
       ),
       child: Row(
@@ -163,12 +163,12 @@ class _MonthRollup extends StatelessWidget {
           _RollupItem(
             label: 'Spent ($month)',
             value: formatMoneyShort(summary.totalSpendMinor),
-            color: T.debit,
+            color: context.c.debit,
           ),
           _RollupItem(
             label: 'Received',
             value: formatMoneyShort(summary.totalIncomeMinor),
-            color: T.credit,
+            color: context.c.credit,
           ),
         ],
       ),
@@ -188,7 +188,7 @@ class _RollupItem extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(fontSize: 11, color: T.muted, fontWeight: FontWeight.w600)),
+        Text(label, style: TextStyle(fontSize: 11, color: context.c.muted, fontWeight: FontWeight.w600)),
         const SizedBox(height: 2),
         Text(value, style: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w800, color: color)),
       ],
@@ -208,25 +208,25 @@ class _NudgeStrip extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
       decoration: BoxDecoration(
-        color: T.brand50,
-        border: Border.all(color: T.brand100),
+        color: context.c.brand50,
+        border: Border.all(color: context.c.brand100),
         borderRadius: BorderRadius.circular(T.rMd),
       ),
       child: Row(
         children: [
-          const Icon(Icons.help_outline, size: 16, color: T.brandDark),
+          Icon(Icons.help_outline, size: 16, color: context.c.brandDark),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               '${formatMoneyShort(amountMinor)} needs a category',
-              style: const TextStyle(fontSize: 12, color: T.ink70),
+              style: TextStyle(fontSize: 12, color: context.c.ink70),
             ),
           ),
           GestureDetector(
             onTap: onReview,
-            child: const Text(
+            child: Text(
               'Review',
-              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: T.brandDark),
+              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: context.c.brandDark),
             ),
           ),
         ],
@@ -244,8 +244,8 @@ class _DayHeader extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 4),
       padding: const EdgeInsets.only(bottom: 8),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: T.ink, width: 2)),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: context.c.ink, width: 2)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -253,24 +253,24 @@ class _DayHeader extends StatelessWidget {
         children: [
           Text(
             formatDayLabel(day.date),
-            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: T.ink),
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: context.c.ink),
           ),
           Row(
             children: [
               if (day.spendMinor > 0)
                 Text(
                   '−${formatMoney(day.spendMinor)}',
-                  style: kNum.copyWith(fontSize: 12.8, fontWeight: FontWeight.w700, color: T.debit),
+                  style: kNum.copyWith(fontSize: 12.8, fontWeight: FontWeight.w700, color: context.c.debit),
                 ),
               if (day.spendMinor > 0 && day.incomeMinor > 0)
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 6),
-                  child: Text('·', style: TextStyle(color: T.mutedLight)),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Text('·', style: TextStyle(color: context.c.mutedLight)),
                 ),
               if (day.incomeMinor > 0)
                 Text(
                   '+${formatMoney(day.incomeMinor)}',
-                  style: kNum.copyWith(fontSize: 12.8, fontWeight: FontWeight.w700, color: T.credit),
+                  style: kNum.copyWith(fontSize: 12.8, fontWeight: FontWeight.w700, color: context.c.credit),
                 ),
             ],
           ),

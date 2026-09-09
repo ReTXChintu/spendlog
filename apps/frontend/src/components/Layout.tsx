@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { Icon, IconSprite } from "./Icon";
+import { ThemeToggle } from "./ThemeToggle";
 
 const NAV = [
   { to: "/", label: "Today", icon: "ic-calendar", end: true },
@@ -52,6 +53,7 @@ export function Layout() {
           </nav>
 
           <div className="nav-foot">
+            <ThemeToggle />
             <div className="nav-user">
               <div className="nav-avatar">{initials(user)}</div>
               <div className="nav-user-meta">

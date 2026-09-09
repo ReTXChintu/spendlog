@@ -42,6 +42,8 @@ export function IconSprite() {
     <symbol id="ic-receipt" viewBox="0 0 24 24"><path d="M6 2h12v19l-2-1.3L14 21l-2-1.3L10 21l-2-1.3L6 21V2Z"/><path d="M9 7h6M9 11h6M9 15h4"/></symbol>
     <symbol id="ic-pencil" viewBox="0 0 24 24"><path d="M4 20l1-4L16 5l3 3L8 19l-4 1Z"/></symbol>
     <symbol id="ic-google" viewBox="0 0 24 24"><path fill="#4285F4" d="M23 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.2c-.3 1.4-1.1 2.6-2.4 3.4v2.8h3.9c2.3-2.1 3.3-5.2 3.3-8.3Z"/><path fill="#34A853" d="M12 24c3.2 0 5.9-1.1 7.8-2.9l-3.9-2.8c-1.1.7-2.4 1.1-3.9 1.1-3 0-5.5-2-6.4-4.7H1.6v2.9C3.5 21.3 7.4 24 12 24Z"/><path fill="#FBBC05" d="M5.6 14.7c-.2-.7-.4-1.4-.4-2.2s.1-1.5.4-2.2V7.4H1.6C.8 9 .3 10.9.3 12.9s.5 3.9 1.3 5.5l4-3.7Z"/><path fill="#EA4335" d="M12 4.8c1.7 0 3.3.6 4.5 1.8l3.4-3.4C17.9 1.2 15.2 0 12 0 7.4 0 3.5 2.7 1.6 6.6l4 3.1c.9-2.7 3.4-4.9 6.4-4.9Z"/></symbol>
+    <symbol id="ic-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="ic-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></symbol>
     </defs>
     </svg>
   );

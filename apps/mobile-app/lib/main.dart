@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
 import 'services/api_client.dart';
+import 'services/theme_service.dart';
 import 'theme.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Loaded before the first frame so a dark-mode user never sees a light flash.
+  ThemeService.instance.load();
   runApp(const SpendLogApp());
 }
 
@@ -13,11 +17,16 @@ class SpendLogApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'SpendLog',
-      // Tokens from the approved design; see lib/theme.dart.
-      theme: buildTheme(),
-      home: const _StartupGate(),
+    return AnimatedBuilder(
+      animation: ThemeService.instance,
+      builder: (context, _) => MaterialApp(
+        title: 'SpendLog',
+        // Tokens from the approved design; see lib/theme.dart.
+        theme: buildTheme(Brightness.light),
+        darkTheme: buildTheme(Brightness.dark),
+        themeMode: ThemeService.instance.mode,
+        home: const _StartupGate(),
+      ),
     );
   }
 }

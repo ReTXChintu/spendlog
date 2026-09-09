@@ -109,18 +109,18 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
             onChanged: _search,
             decoration: InputDecoration(
               hintText: 'Merchant or note',
-              prefixIcon: const Icon(Icons.search, size: 18, color: T.mutedLight),
+              prefixIcon: Icon(Icons.search, size: 18, color: context.c.mutedLight),
               isDense: true,
               filled: true,
-              fillColor: T.surface,
+              fillColor: context.c.surface,
               contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(T.rSm),
-                borderSide: const BorderSide(color: T.lineStrong),
+                borderSide: BorderSide(color: context.c.lineStrong),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(T.rSm),
-                borderSide: const BorderSide(color: T.brand),
+                borderSide: BorderSide(color: context.c.brand),
               ),
             ),
           ),
@@ -214,7 +214,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                       : null,
                 ),
                 Text('Page $_page of $totalPages',
-                    style: const TextStyle(fontSize: 12.8, color: T.muted, fontWeight: FontWeight.w600)),
+                    style: TextStyle(fontSize: 12.8, color: context.c.muted, fontWeight: FontWeight.w600)),
                 IconButton(
                   icon: const Icon(Icons.chevron_right),
                   onPressed: _page < totalPages
@@ -249,8 +249,8 @@ class _FilterChip extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
           decoration: BoxDecoration(
-            color: on ? T.brand50 : T.surface,
-            border: Border.all(color: on ? T.brand : T.lineStrong),
+            color: on ? context.c.brand50 : context.c.surface,
+            border: Border.all(color: on ? context.c.brand : context.c.lineStrong),
             borderRadius: BorderRadius.circular(100),
           ),
           child: Row(
@@ -269,7 +269,7 @@ class _FilterChip extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
-                  color: on ? T.brandDark : T.ink70,
+                  color: on ? context.c.brandDark : context.c.ink70,
                 ),
               ),
             ],

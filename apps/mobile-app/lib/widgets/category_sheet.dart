@@ -13,7 +13,7 @@ Future<void> showCategorySheet(
 }) {
   return showModalBottomSheet<void>(
     context: context,
-    backgroundColor: T.surface,
+    backgroundColor: context.c.surface,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(T.rLg)),
     ),
@@ -75,7 +75,7 @@ class _CategorySheetState extends State<_CategorySheet> {
     messenger.showSnackBar(
       SnackBar(
         duration: const Duration(seconds: 8),
-        backgroundColor: T.ink,
+        backgroundColor: context.c.ink,
         behavior: SnackBarBehavior.floating,
         content: Text('Categorized as ${category.name}. Apply to future "$shown" payments?'),
         action: SnackBarAction(
@@ -109,15 +109,15 @@ class _CategorySheetState extends State<_CategorySheet> {
                 width: 38,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: T.lineStrong,
+                  color: context.c.lineStrong,
                   borderRadius: BorderRadius.circular(100),
                 ),
               ),
             ),
             const SizedBox(height: 14),
-            const Text(
+            Text(
               'Set category',
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: T.ink),
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: context.c.ink),
             ),
             const SizedBox(height: 12),
             Flexible(
@@ -140,9 +140,9 @@ class _CategorySheetState extends State<_CategorySheet> {
                       ),
                       title: Text(
                         category.name,
-                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: T.ink),
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: context.c.ink),
                       ),
-                      trailing: selected ? const Icon(Icons.check, size: 18, color: T.brand) : null,
+                      trailing: selected ? Icon(Icons.check, size: 18, color: context.c.brand) : null,
                     );
                   }).toList(),
                 ),

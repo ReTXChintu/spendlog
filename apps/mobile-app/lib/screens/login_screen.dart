@@ -34,7 +34,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: T.ink,
+      backgroundColor: context.c.darkPanel,
       body: SafeArea(
         child: Column(
           children: [
@@ -65,9 +65,9 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             Container(
               width: double.infinity,
-              decoration: const BoxDecoration(
-                color: T.surface,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(T.rLg)),
+              decoration: BoxDecoration(
+                color: context.c.surface,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(T.rLg)),
               ),
               padding: const EdgeInsets.fromLTRB(24, 26, 24, 30),
               child: Column(
@@ -86,19 +86,19 @@ class _LoginScreenState extends State<LoginScreen> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: T.brand50,
+                      color: context.c.brand50,
                       borderRadius: BorderRadius.circular(T.rSm),
                     ),
-                    child: const Row(
+                    child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(Icons.mail_outline, size: 15, color: T.brandDark),
-                        SizedBox(width: 8),
+                        Icon(Icons.mail_outline, size: 15, color: context.c.brandDark),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             'Google will also ask for read-only Gmail access in this step, so email-based '
                             'transaction alerts get picked up.',
-                            style: TextStyle(fontSize: 12.5, height: 1.45, color: T.ink70),
+                            style: TextStyle(fontSize: 12.5, height: 1.45, color: context.c.ink70),
                           ),
                         ),
                       ],
@@ -108,11 +108,11 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 12),
                     Container(
                       padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(color: T.debit50, borderRadius: BorderRadius.circular(T.rSm)),
+                      decoration: BoxDecoration(color: context.c.debit50, borderRadius: BorderRadius.circular(T.rSm)),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(Icons.error_outline, size: 15, color: T.debit),
+                          Icon(Icons.error_outline, size: 15, color: context.c.debit),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(

@@ -146,7 +146,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             actions: [
               OutlinedButton(
                 onPressed: _signOut,
-                style: OutlinedButton.styleFrom(foregroundColor: T.debit),
+                style: OutlinedButton.styleFrom(foregroundColor: context.c.debit),
                 child: const Text('Sign out'),
               ),
             ],
@@ -175,8 +175,8 @@ class _SettingsCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: T.surface,
-        border: Border.all(color: T.line),
+        color: context.c.surface,
+        border: Border.all(color: context.c.line),
         borderRadius: BorderRadius.circular(T.rMd),
       ),
       child: Column(
@@ -187,15 +187,15 @@ class _SettingsCard extends StatelessWidget {
               Container(
                 width: 34,
                 height: 34,
-                decoration: BoxDecoration(color: T.brand50, borderRadius: BorderRadius.circular(9)),
-                child: Icon(icon, size: 17, color: T.brand),
+                decoration: BoxDecoration(color: context.c.brand50, borderRadius: BorderRadius.circular(9)),
+                child: Icon(icon, size: 17, color: context.c.brand),
               ),
               const SizedBox(width: 10),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: T.ink)),
-                  Text(subtitle, style: const TextStyle(fontSize: 12, color: T.muted)),
+                  Text(title, style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: context.c.ink)),
+                  Text(subtitle, style: TextStyle(fontSize: 12, color: context.c.muted)),
                 ],
               ),
             ],
@@ -221,7 +221,7 @@ class _CardBody extends StatelessWidget {
       children: [
         const SizedBox(height: 12),
         if (pill != null) ...[pill!, const SizedBox(height: 8)],
-        Text(text, style: const TextStyle(fontSize: 13, height: 1.5, color: T.ink70)),
+        Text(text, style: TextStyle(fontSize: 13, height: 1.5, color: context.c.ink70)),
         if (actions != null) ...[
           const SizedBox(height: 14),
           Row(children: [for (final action in actions!) Padding(padding: const EdgeInsets.only(right: 8), child: action)]),
@@ -242,14 +242,14 @@ class _StatusPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
       decoration: BoxDecoration(
-        color: on ? T.credit50 : const Color(0xFFF1F5F9),
+        color: on ? context.c.credit50 : const Color(0xFFF1F5F9),
         borderRadius: BorderRadius.circular(100),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (on) ...[
-            const Icon(Icons.check, size: 12, color: T.credit),
+            Icon(Icons.check, size: 12, color: context.c.credit),
             const SizedBox(width: 4),
           ],
           Text(
@@ -257,7 +257,7 @@ class _StatusPill extends StatelessWidget {
             style: TextStyle(
               fontSize: 11.5,
               fontWeight: FontWeight.w700,
-              color: on ? T.credit : T.muted,
+              color: on ? context.c.credit : context.c.muted,
             ),
           ),
         ],

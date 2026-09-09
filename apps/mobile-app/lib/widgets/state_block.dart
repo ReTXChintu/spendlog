@@ -34,22 +34,22 @@ class StateBlock extends StatelessWidget {
               width: 52,
               height: 52,
               decoration: BoxDecoration(
-                color: warn ? T.warnBg : T.brand50,
+                color: warn ? context.c.warnBg : context.c.brand50,
                 borderRadius: BorderRadius.circular(14),
               ),
-              child: Icon(icon, size: 26, color: warn ? T.warn : T.brand),
+              child: Icon(icon, size: 26, color: warn ? context.c.warn : context.c.brand),
             ),
             const SizedBox(height: 18),
             Text(
               title,
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: T.ink),
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: context.c.ink),
             ),
             const SizedBox(height: 8),
             Text(
               body,
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 13.8, height: 1.55, color: T.ink70),
+              style: TextStyle(fontSize: 13.8, height: 1.55, color: context.c.ink70),
             ),
             if (actionLabel != null) ...[
               const SizedBox(height: 20),

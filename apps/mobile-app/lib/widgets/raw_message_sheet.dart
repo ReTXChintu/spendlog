@@ -16,7 +16,7 @@ Future<void> showRawMessageSheet(BuildContext context, Transaction transaction) 
 
   return showModalBottomSheet<void>(
     context: context,
-    backgroundColor: T.surface,
+    backgroundColor: context.c.surface,
     isScrollControlled: true,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(T.rLg)),
@@ -33,24 +33,24 @@ Future<void> showRawMessageSheet(BuildContext context, Transaction transaction) 
                 width: 38,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: T.lineStrong,
+                  color: context.c.lineStrong,
                   borderRadius: BorderRadius.circular(100),
                 ),
               ),
             ),
             const SizedBox(height: 14),
-            const Text(
+            Text(
               'Original message',
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: T.ink),
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: context.c.ink),
             ),
             const SizedBox(height: 6),
             Row(
               children: [
-                Icon(isEmail ? Icons.mail_outline : Icons.sms_outlined, size: 13, color: T.muted),
+                Icon(isEmail ? Icons.mail_outline : Icons.sms_outlined, size: 13, color: context.c.muted),
                 const SizedBox(width: 6),
                 Text(
                   '$sourceLabel · ${formatDateTime(transaction.occurredAt)}',
-                  style: const TextStyle(fontSize: 12, color: T.muted),
+                  style: TextStyle(fontSize: 12, color: context.c.muted),
                 ),
               ],
             ),
@@ -60,26 +60,26 @@ Future<void> showRawMessageSheet(BuildContext context, Transaction transaction) 
               constraints: const BoxConstraints(maxHeight: 260),
               padding: const EdgeInsets.all(13),
               decoration: BoxDecoration(
-                color: T.paper,
-                border: Border.all(color: T.line),
+                color: context.c.darkPanel,
+                border: Border.all(color: context.c.darkPanel),
                 borderRadius: BorderRadius.circular(T.rSm),
               ),
               child: SingleChildScrollView(
                 child: Text(
                   transaction.rawText ?? 'No original message stored for this transaction.',
-                  style: kNum.copyWith(fontSize: 12, height: 1.5, color: T.ink70),
+                  style: kNum.copyWith(fontSize: 12, height: 1.5, color: context.c.darkPanelText),
                 ),
               ),
             ),
             const SizedBox(height: 12),
-            const Row(
+            Row(
               children: [
-                Icon(Icons.edit_outlined, size: 13, color: T.mutedLight),
-                SizedBox(width: 6),
+                Icon(Icons.edit_outlined, size: 13, color: context.c.mutedLight),
+                const SizedBox(width: 6),
                 Expanded(
                   child: Text(
                     'Editing the merchant name from here is coming soon.',
-                    style: TextStyle(fontSize: 11.5, color: T.mutedLight),
+                    style: TextStyle(fontSize: 11.5, color: context.c.mutedLight),
                   ),
                 ),
               ],
