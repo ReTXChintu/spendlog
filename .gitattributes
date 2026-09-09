@@ -1,0 +1,19 @@
+# Normalise line endings in the repository to LF.
+#
+# Without this, committing from Windows can store CRLF in the blob. A shell
+# script with CRLF has a shebang of "#!/usr/bin/env bash\r", so Linux looks
+# for an interpreter named "bash\r" and reports "command not found" — which
+# is exactly how the deploy scripts failed on the server.
+* text=auto eol=lf
+
+# Scripts that must run on Linux, regardless of the checkout platform.
+*.sh text eol=lf
+
+# Never touched: byte-for-byte content.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.apk binary
+*.keystore binary
+*.jar binary
