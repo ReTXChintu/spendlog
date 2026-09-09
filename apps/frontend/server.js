@@ -44,6 +44,15 @@ const PORT = Number(setting("FRONTEND_PORT", 5173));
 const CERT_PATH = setting("SSL_CERT_PATH", "");
 const KEY_PATH = setting("SSL_KEY_PATH", "");
 
+// Requests under this prefix are forwarded to the backend, so the whole
+// app is reachable on a single HTTPS port and a single origin. That keeps
+// out of the way of anything already holding 80/443 (Traefik, here), means
+// only this process needs the TLS key — Let's Encrypt's privkey.pem is
+// root-readable only — and lets the backend bind to loopback instead of
+// being exposed. Same-origin also removes CORS from the picture entirely.
+const API_PREFIX = setting("API_PROXY_PREFIX", "/api");
+const API_TARGET = setting("API_PROXY_TARGET", `http://127.0.0.1:${setting("PORT", 4000)}`);
+
 // dist/ is the build output. public/ is checked as a fallback so a file
 // dropped there after the build — notably SpendLog.apk from CI — is served
 // immediately without needing a rebuild.
@@ -89,7 +98,63 @@ function send(res, status, body, headers = {}) {
   res.end(body);
 }
 
+const target = new URL(API_TARGET);
+
+/**
+ * Forwards an /api request to the backend, streaming both directions so
+ * request and response bodies are never buffered whole.
+ */
+function proxyToBackend(req, res) {
+  // The prefix exists only on the public side; the backend mounts its
+  // routes at the root. "/api/transactions" therefore becomes
+  // "/transactions", and a bare "/api" becomes "/".
+  const forwardedPath = req.url.slice(API_PREFIX.length) || "/";
+
+  const headers = { ...req.headers, host: target.host };
+  // Tell the backend what the client actually asked for; it sits on
+  // loopback and would otherwise see only this proxy.
+  headers["x-forwarded-for"] = req.socket.remoteAddress ?? "";
+  headers["x-forwarded-proto"] = useHttps ? "https" : "http";
+  headers["x-forwarded-host"] = req.headers.host ?? "";
+
+  const upstream = http.request(
+    {
+      protocol: target.protocol,
+      hostname: target.hostname,
+      port: target.port,
+      method: req.method,
+      path: forwardedPath,
+      headers,
+    },
+    (backendRes) => {
+      res.writeHead(backendRes.statusCode ?? 502, backendRes.headers);
+      backendRes.pipe(res);
+    }
+  );
+
+  upstream.on("error", (err) => {
+    console.error(`Proxy to ${API_TARGET} failed:`, err.message);
+    if (!res.headersSent) {
+      send(res, 502, JSON.stringify({ error: "Backend unavailable" }), {
+        "Content-Type": "application/json; charset=utf-8",
+      });
+    } else {
+      res.destroy();
+    }
+  });
+
+  // If the client goes away mid-request, don't leave the upstream hanging.
+  req.on("aborted", () => upstream.destroy());
+  req.pipe(upstream);
+}
+
 function handler(req, res) {
+  // Checked before the method guard below: the API accepts POST/PATCH/DELETE,
+  // while the static side is read-only.
+  if (req.url === API_PREFIX || req.url.startsWith(`${API_PREFIX}/`)) {
+    return proxyToBackend(req, res);
+  }
+
   if (req.method !== "GET" && req.method !== "HEAD") {
     return send(res, 405, "Method Not Allowed");
   }
@@ -147,6 +212,7 @@ const server = useHttps ? https.createServer(readCredentials(), handler) : http.
 
 server.listen(PORT, () => {
   console.log(`Frontend listening on ${useHttps ? "https" : "http"}://0.0.0.0:${PORT}`);
+  console.log(`  ${API_PREFIX}/* -> ${API_TARGET}`);
   if (!useHttps) {
     console.log("TLS is off (SSL_CERT_PATH / SSL_KEY_PATH not set in .env) — serving plain HTTP.");
   }

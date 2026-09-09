@@ -14,6 +14,11 @@ import { transactionsRouter } from "./modules/transactions/transactions.routes";
 
 export const app = express();
 
+// Behind the frontend's /api proxy, req.ip and req.protocol would otherwise
+// report the loopback hop. Only headers arriving from loopback are trusted,
+// so a direct client can't spoof them.
+app.set("trust proxy", "loopback");
+
 app.use(cors());
 app.use(express.json());
 

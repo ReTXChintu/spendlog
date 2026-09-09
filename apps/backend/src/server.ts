@@ -23,7 +23,7 @@ const certHelperPath = path.resolve(__dirname, "..", "..", "..", "scripts", "ens
  * only needs the paths set in .env.
  */
 function createServer() {
-  if (!env.sslCertPath || !env.sslKeyPath) {
+  if (!env.sslCertPath || !env.sslKeyPath || !env.backendTls) {
     return { server: http.createServer(app), scheme: "http" };
   }
 
@@ -48,8 +48,11 @@ async function start() {
   console.log("Connected to MongoDB");
 
   const { server, scheme } = createServer();
-  server.listen(env.port, () => {
-    console.log(`Backend listening on ${scheme}://localhost:${env.port}`);
+  server.listen(env.port, env.host, () => {
+    console.log(`Backend listening on ${scheme}://${env.host}:${env.port}`);
+    if (env.host === "127.0.0.1") {
+      console.log("Bound to loopback only — reachable through the frontend's /api proxy.");
+    }
   });
 
   setInterval(() => {

@@ -166,6 +166,50 @@ Ports below 1024 need privileges. Either grant them once with
 `sudo setcap 'cap_net_bind_service=+ep' $(which node)`, or keep
 `FRONTEND_PORT` above 1024 and put a reverse proxy in front.
 
+### Sharing a server that already uses 80/443
+
+The frontend forwards `/api/*` to the backend, so the whole app is served
+from **one HTTPS port and one origin**:
+
+```
+internet ──► :8443  apps/frontend/server.js  (HTTPS, Let's Encrypt cert)
+                     ├── /api/*  ──proxy──►  127.0.0.1:4000  backend (plain HTTP)
+                     └── /*      ─────────►  dist/ + public/  (incl. SpendLog.apk)
+```
+
+That stays clear of anything already holding 80 and 443 — Traefik, a
+control panel, another site — without touching its configuration. It also
+means only the frontend process needs the TLS key (Let's Encrypt's
+`privkey.pem` is root-readable only), there is no CORS because everything
+is same-origin, and the backend never listens on a public interface.
+
+Enable it with:
+
+```
+FRONTEND_PORT=8443
+BACKEND_HOST="127.0.0.1"
+BACKEND_TLS="false"
+
+VITE_API_URL="/api"
+MOBILE_API_URL="https://yourname.duckdns.org:8443/api"
+FRONTEND_URL="https://yourname.duckdns.org:8443"
+GOOGLE_OAUTH_REDIRECT_URI="https://yourname.duckdns.org:8443/api/auth/google/callback"
+```
+
+`VITE_API_URL="/api"` is relative, so no host or port is baked into the JS
+bundle. Only `FRONTEND_PORT` needs opening in the firewall.
+
+Register that redirect URI in Google Cloud Console before relying on it —
+Google's documentation doesn't state whether non-standard ports are
+accepted, and the Console validates the URI the moment you paste it.
+
+Leaving `BACKEND_HOST` and `BACKEND_TLS` unset keeps the old shape instead:
+the backend exposed directly on its own port, terminating its own TLS.
+
+Certificate issuance is unaffected either way — `setup-letsencrypt.sh` uses
+the DNS-01 challenge, so it never needs port 80, which something else is
+presumably already using.
+
 ### Google sign-in needs a hostname, not an IP
 
 Google **rejects raw IP addresses as OAuth redirect URIs entirely** — this
