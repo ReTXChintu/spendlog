@@ -21,6 +21,11 @@ env:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Uploading the APK to the release needs write access; without this the
+    # step depends on the repo's default workflow permission, which is
+    # read-only on most repos.
+    permissions:
+      contents: write
 
     steps:
       - name: Work out which tag is being released
