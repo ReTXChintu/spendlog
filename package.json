@@ -1,5 +1,6 @@
 {
   "name": "spendlog",
+  "version": "0.1.0",
   "private": true,
   "workspaces": [
     "apps/backend",
@@ -16,6 +17,12 @@
     "build:frontend": "npm run build --workspace apps/frontend",
     "seed": "npm run seed --workspace apps/backend",
     "test": "npm run test --workspace apps/backend",
+    "version:current": "node -p \"require('./package.json').version\"",
+    "release": "node scripts/release.js",
+    "release:patch": "node scripts/release.js patch",
+    "release:minor": "node scripts/release.js minor",
+    "release:major": "node scripts/release.js major",
+
     "certs": "node scripts/ensure-certs.js",
     "certs:force": "node scripts/ensure-certs.js --force",
     "certs:letsencrypt": "bash scripts/setup-letsencrypt.sh",

@@ -12,6 +12,7 @@ import { analyticsRouter } from "./modules/analytics/analytics.routes";
 import { emailRouter } from "./modules/ingestion/email.routes";
 import { smsRouter } from "./modules/ingestion/sms.routes";
 import { transactionsRouter } from "./modules/transactions/transactions.routes";
+import { APP_VERSION } from "./version";
 
 export const app = express();
 
@@ -23,7 +24,12 @@ app.set("trust proxy", "loopback");
 app.use(cors());
 app.use(express.json());
 
-app.get("/health", (_req, res) => res.json({ ok: true }));
+app.get("/health", (_req, res) => res.json({ ok: true, version: APP_VERSION }));
+
+// What version is deployed. Public on purpose: the Android app checks it on
+// startup to see whether the APK it's running is behind, which has to work
+// before anyone signs in.
+app.get("/version", (_req, res) => res.json({ version: APP_VERSION }));
 
 app.use("/auth", authRouter);
 app.use("/accounts", accountsRouter);

@@ -5,7 +5,9 @@ import '../models/models.dart';
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
 import '../services/sms_service.dart';
+import '../services/update_service.dart';
 import '../theme.dart';
+import '../version.dart';
 import 'login_screen.dart';
 import 'permission_screen.dart';
 
@@ -21,6 +23,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _smsGranted = false;
   bool _syncing = false;
 
+  /// null until a check has run; empty means "already up to date".
+  String? _latestVersion;
+  bool _checkingUpdate = false;
+
   @override
   void initState() {
     super.initState();
@@ -31,6 +37,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _refreshSmsStatus() async {
     final granted = await SmsService.instance.hasPermission();
     if (mounted) setState(() => _smsGranted = granted);
+  }
+
+  bool get _updateAvailable => _latestVersion != null && _latestVersion!.isNotEmpty;
+
+  Future<void> _checkForUpdate() async {
+    setState(() => _checkingUpdate = true);
+    // Asks for the deployed version rather than "is there an update", so an
+    // unreachable server can be reported as such instead of as "up to date".
+    final latest = await UpdateService.instance.latestVersion();
+    if (!mounted) return;
+
+    final newer = latest != null && UpdateService.isNewer(latest, appVersion);
+    setState(() {
+      // '' distinguishes "checked, nothing newer" from "not checked yet".
+      _latestVersion = newer ? latest : '';
+      _checkingUpdate = false;
+    });
+
+    if (newer) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          latest == null
+              ? "Couldn't reach the server to check."
+              : 'You are on the latest version.',
+        ),
+      ),
+    );
   }
 
   Future<void> _loadConnections() async {
@@ -149,6 +183,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 style: OutlinedButton.styleFrom(foregroundColor: context.c.debit),
                 child: const Text('Sign out'),
               ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        _SettingsCard(
+          icon: Icons.info_outline,
+          title: 'Version',
+          subtitle: 'SpendLog $appVersion (build $appBuildNumber)',
+          child: _CardBody(
+            pill: _updateAvailable ? const _StatusPill(label: 'Update available', on: false) : null,
+            text: _updateAvailable
+                ? 'Version $_latestVersion is out. Installing it over this one keeps your data.'
+                : 'The app, the website and the server are released together and share this version '
+                    'number, so what you are running always matches the server.',
+            actions: [
+              if (_updateAvailable)
+                FilledButton(
+                  onPressed: UpdateService.instance.openDownload,
+                  child: const Text('Download update'),
+                )
+              else
+                OutlinedButton(
+                  onPressed: _checkingUpdate ? null : _checkForUpdate,
+                  child: Text(_checkingUpdate ? 'Checking…' : 'Check for updates'),
+                ),
             ],
           ),
         ),

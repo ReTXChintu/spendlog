@@ -1,0 +1,177 @@
+name: Release
+
+# Runs when a GitHub release is published — cut one with `npm run release`.
+# Builds the Android APK, publishes it to the VPS, then updates the web
+# apps there to the same tag, so the phone and the website are never
+# running different versions of SpendLog.
+on:
+  release:
+    types: [published]
+  # Re-run a release by hand (for a failed deploy), naming the tag to ship.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to deploy, e.g. v0.2.0
+        required: true
+
+env:
+  APP_DIR: /opt/var/spendlog
+  ARTIFACT_NAME: SpendLog.apk
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Work out which tag is being released
+        id: release
+        run: echo "tag=${{ github.event.release.tag_name || inputs.tag }}" >> "$GITHUB_OUTPUT"
+
+      # The exact released commit, not whatever the branch has moved on to.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+
+      # A release ships one version across every app; a tag that disagrees
+      # with package.json means the release script wasn't used, and the APK
+      # would report a version the server never serves.
+      - name: Check the tag matches the repo version
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          if [ "${{ steps.release.outputs.tag }}" != "v$VERSION" ]; then
+            echo "Tag ${{ steps.release.outputs.tag }} doesn't match package.json version $VERSION." >&2
+            echo "Cut releases with 'npm run release' so every app carries the same version." >&2
+            exit 1
+          fi
+          echo "Releasing v$VERSION"
+
+      # AGP requires JDK 17; the runner's default is not guaranteed to be it.
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Dart dependencies
+        working-directory: apps/mobile-app
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: apps/mobile-app
+        run: flutter analyze
+
+      - name: Test
+        working-directory: apps/mobile-app
+        run: flutter test
+
+      # Release builds are signed with the debug key (see
+      # android/app/build.gradle.kts) — fine for sideloading, not for Play.
+      - name: Build release APK
+        working-directory: apps/mobile-app
+        run: |
+          flutter build apk --release \
+            --dart-define=API_URL="${{ secrets.MOBILE_API_URL }}" \
+            --dart-define=GOOGLE_WEB_CLIENT_ID="${{ secrets.GOOGLE_CLIENT_ID }}"
+
+      - name: Upload APK as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpendLog-${{ steps.release.outputs.tag }}-apk
+          path: apps/mobile-app/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+      # So the release page itself is a download, not just the VPS.
+      - name: Attach the APK to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cp apps/mobile-app/build/app/outputs/flutter-apk/app-release.apk "$ARTIFACT_NAME"
+          gh release upload "${{ steps.release.outputs.tag }}" "$ARTIFACT_NAME" --clobber
+
+      - name: Open an SSH connection to the VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      # The APK lands first so the build that follows copies it into dist/
+      # along with everything else in public/ — one build, no second step to
+      # make the download live.
+      - name: Publish the APK to the VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          set -euo pipefail
+          PORT="${VPS_PORT:-22}"
+          SSH="ssh -i ~/.ssh/deploy_key -p $PORT $VPS_USER@$VPS_HOST"
+          APK=apps/mobile-app/build/app/outputs/flutter-apk/app-release.apk
+
+          # Upload beside the target first, then move into place, so a
+          # partial transfer can never be served as a broken download.
+          $SSH "mkdir -p $APP_DIR/apps/frontend/public"
+          scp -i ~/.ssh/deploy_key -P "$PORT" "$APK" \
+            "$VPS_USER@$VPS_HOST:$APP_DIR/apps/frontend/public/$ARTIFACT_NAME.tmp"
+          $SSH "set -e
+            cd $APP_DIR
+            mv apps/frontend/public/$ARTIFACT_NAME.tmp apps/frontend/public/$ARTIFACT_NAME
+            ls -lh apps/frontend/public/$ARTIFACT_NAME"
+
+      # Deploys through the same npm scripts that work by hand on the box,
+      # so there's one way to do this and it's the documented one.
+      - name: Deploy the web apps
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" "set -e
+            cd $APP_DIR
+
+            # Checks out the released tag rather than pulling a branch, so
+            # the server runs exactly what was released even if main has
+            # moved on. Detached HEAD is expected here.
+            git fetch --tags --force origin
+            git checkout --detach '$TAG'
+            git --no-pager log -1 --oneline
+
+            npm ci
+            npm run build
+
+            # pm2:restart needs the processes to already exist; pm2:start is
+            # startOrRestart, which covers a first deploy or a wiped daemon.
+            npm run pm2:restart || npm run pm2:start
+            npm run pm2:save
+            npm run pm2:status"
+
+      - name: Confirm the deployed version
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" \
+            "cd $APP_DIR && node -p \"'deployed version: ' + require('./package.json').version\""
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

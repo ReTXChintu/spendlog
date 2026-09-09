@@ -185,6 +185,22 @@ export function SettingsPage() {
             </button>
           </div>
         </div>
+
+        <div className="card set-card">
+          <div className="set-card-head">
+            <div className="set-card-icon" style={{ background: "var(--brand-50)" }}>
+              <Icon name="ic-info" />
+            </div>
+            <div>
+              <h4>Version</h4>
+              <p className="set-card-sub">SpendLog {__APP_VERSION__}</p>
+            </div>
+          </div>
+          <p className="desc">
+            The web app, the server and the Android app are released together and share this version
+            number, so the app builds you are running always match.
+          </p>
+        </div>
       </div>
     </section>
   );
