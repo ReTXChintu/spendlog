@@ -124,6 +124,26 @@ describe("other common formats", () => {
     assert.equal(result.merchant, "RELIANCE SMART");
     assert.equal(result.account?.last4, "4321");
   });
+
+  it("parses a spend phrased as 'towards', which bank emails favour", () => {
+    const result = parseTransactionText(
+      "Dear Customer, Rs 349.00 has been debited from your Axis Bank A/c XX9876 on 15-08-26 towards SWIGGY ORDER. Ref 4433221100."
+    );
+
+    assert.ok(result, "should not be ignored");
+    assert.equal(result.amountMinor, 34900);
+    assert.equal(result.merchant, "SWIGGY ORDER");
+  });
+
+  it("does not read the date as the merchant when 'towards' follows it", () => {
+    // "on <date> towards <merchant>" is the trap: the "on" pattern would
+    // otherwise take the date and the merchant as one string.
+    const result = parseTransactionText(
+      "Rs 1250 debited towards BIG BAZAAR on 02-09-26 from A/c XX1234 -HDFC Bank"
+    );
+
+    assert.equal(result?.merchant, "BIG BAZAAR");
+  });
 });
 
 describe("messages that must be ignored", () => {

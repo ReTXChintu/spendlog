@@ -84,6 +84,10 @@ const CARD_CONTEXT_RE = /\b(credit card|debit card|rupay|visa|mastercard|card)\b
 const VPA_RE = /\b([\w.\-]{2,64}@[\w.\-]{2,20})\b/;
 
 const MERCHANT_PREFIX_RES = [
+  // Ahead of the others because it is the most specific: in "on 15-08-26
+  // towards SWIGGY ORDER" the "on" pattern would otherwise swallow the
+  // date and the merchant together, and then reject the lot as date-like.
+  /\btowards\s+([A-Za-z0-9&'.\- ]{2,50}?)(?=\s+on\b|\s+ref\b|\s+by\b|[.,]|$)/gi,
   /\bat\s+([A-Za-z0-9&'.\- ]{2,50}?)(?=\s+on\b|\s+ref\b|\s+by\b|[.,]|$)/gi,
   /\bto\s+([A-Za-z0-9&'.\- ]{2,50}?)(?=\s+on\b|\s+ref\b|\s+by\b|[.,]|$)/gi,
   /\bon\s+([A-Za-z0-9&'.\- ]{2,50}?)(?=\s+on\b|\s+ref\b|\s+by\b|[.,]|$)/gi,
