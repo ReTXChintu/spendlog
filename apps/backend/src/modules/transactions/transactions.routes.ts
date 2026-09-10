@@ -131,12 +131,15 @@ transactionsRouter.get("/by-day", async (req, res) => {
   }
 
   const days = Array.from(grouped.entries()).map(([date, items]) => {
+    // countedAmountMinor, not amountMinor: a transfer, a settlement or the
+    // unclaimed half of a split moved money that was never spent. It is
+    // already zero for those, so no filtering is needed here.
     const spend = items
-      .filter((t) => t.type === "DEBIT" && !t.isTransfer)
-      .reduce((sum, t) => sum + t.amountMinor, 0);
+      .filter((t) => t.type === "DEBIT")
+      .reduce((sum, t) => sum + t.countedAmountMinor, 0);
     const income = items
-      .filter((t) => t.type === "CREDIT" && !t.isTransfer)
-      .reduce((sum, t) => sum + t.amountMinor, 0);
+      .filter((t) => t.type === "CREDIT")
+      .reduce((sum, t) => sum + t.countedAmountMinor, 0);
     return { date, spendMinor: spend, incomeMinor: income, transactions: items };
   });
 

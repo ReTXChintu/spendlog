@@ -1,14 +1,17 @@
 import { Schema, Types, model } from "mongoose";
 import {
   ACCOUNT_TYPES,
+  COUNTED_REASONS,
   RULE_MATCH_TYPES,
   TRANSACTION_SOURCES,
   TRANSACTION_TYPES,
   AccountType,
+  CountedReason,
   RuleMatchType,
   TransactionSource,
   TransactionType,
 } from "../types";
+import { resolveCountedAmount } from "./counted";
 
 // Responses are serialized with `id` (a string) rather than Mongo's `_id`,
 // which is the shape the web and mobile clients already consume. Virtuals
@@ -149,6 +152,10 @@ export interface TransactionDoc {
   isTransfer: boolean;
   pending: boolean;
   occurredAt: Date;
+  /// How much of amountMinor counts as money actually spent or received,
+  /// and why it differs. Maintained by the hooks below, never set by hand.
+  countedAmountMinor: number;
+  countedReason: CountedReason;
   /// Set when a person edited the transaction by hand, so the UI can say so
   /// and automatic passes can leave their corrections alone.
   editedAt?: Date | null;
@@ -174,9 +181,37 @@ const transactionSchema = new Schema<TransactionDoc>(
     pending: { type: Boolean, default: false },
     occurredAt: { type: Date, required: true },
     editedAt: { type: Date, default: null },
+    countedAmountMinor: { type: Number, default: 0 },
+    countedReason: { type: String, enum: COUNTED_REASONS, default: "FULL" },
   },
   { timestamps: true, ...serialization }
 );
+
+// Keeping the counted amount correct is the whole point of storing it, so
+// it is derived on every write rather than at any call site. save() covers
+// create(); findOneAndUpdate needs its own hook because it never loads a
+// document. Any new write path has to go through one of these.
+transactionSchema.pre("save", function (next) {
+  Object.assign(this, resolveCountedAmount(this));
+  next();
+});
+
+transactionSchema.pre("findOneAndUpdate", async function (next) {
+  const update = this.getUpdate() as Record<string, unknown> | null;
+  if (!update) return next();
+
+  // The rule reads fields this update may not mention, so it has to run
+  // against the document as it will be once the update lands.
+  const current = await this.model.findOne(this.getQuery()).lean();
+  if (!current) return next();
+
+  const set = (update.$set as Record<string, unknown>) ?? {};
+  const merged = { ...current, ...update, ...set } as Record<string, unknown>;
+  const counted = resolveCountedAmount(merged as never);
+
+  this.setUpdate({ ...update, $set: { ...set, ...counted } });
+  next();
+});
 
 transactionSchema.index({ userId: 1, occurredAt: -1 });
 transactionSchema.index({ userId: 1, dedupeKey: 1 });

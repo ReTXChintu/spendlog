@@ -78,5 +78,10 @@ export async function detectSelfTransfer(transaction: HydratedDocument<Transacti
 
   if (!match) return;
 
-  await Transaction.updateMany({ _id: { $in: [transaction._id, match._id] } }, { $set: { isTransfer: true } });
+  // Saved rather than updateMany'd so the counted-amount hook runs on both
+  // sides: a transfer counts as zero, and deriving that here instead would
+  // put the rule in two places.
+  transaction.isTransfer = true;
+  match.isTransfer = true;
+  await Promise.all([transaction.save(), match.save()]);
 }

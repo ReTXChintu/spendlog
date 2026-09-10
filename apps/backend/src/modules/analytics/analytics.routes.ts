@@ -35,10 +35,11 @@ analyticsRouter.get("/summary", async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
   const { start, end } = monthRange(parsed.data.month);
+  // No isTransfer filter: transfers already count as zero, along with
+  // settlements, EMI parents and the unclaimed share of a split.
   const match = {
     userId: currentUserId(req),
     occurredAt: { $gte: start, $lt: end },
-    isTransfer: false,
   };
 
   // Totals and the category breakdown are computed in the database rather
@@ -46,11 +47,11 @@ analyticsRouter.get("/summary", async (req, res) => {
   const [totals, byCategory] = await Promise.all([
     Transaction.aggregate<{ _id: string; amountMinor: number; count: number }>([
       { $match: match },
-      { $group: { _id: "$type", amountMinor: { $sum: "$amountMinor" }, count: { $sum: 1 } } },
+      { $group: { _id: "$type", amountMinor: { $sum: "$countedAmountMinor" }, count: { $sum: 1 } } },
     ]),
     Transaction.aggregate<CategoryTotal>([
-      { $match: { ...match, type: "DEBIT" } },
-      { $group: { _id: "$categoryId", amountMinor: { $sum: "$amountMinor" } } },
+      { $match: { ...match, type: "DEBIT", countedAmountMinor: { $gt: 0 } } },
+      { $group: { _id: "$categoryId", amountMinor: { $sum: "$countedAmountMinor" } } },
       { $lookup: { from: "categories", localField: "_id", foreignField: "_id", as: "category" } },
       { $addFields: { name: { $ifNull: [{ $first: "$category.name" }, "Uncategorized"] } } },
       { $project: { amountMinor: 1, name: 1 } },
@@ -99,7 +100,6 @@ analyticsRouter.get("/trend", async (req, res) => {
       $match: {
         userId: currentUserId(req),
         occurredAt: { $gte: start, $lt: end },
-        isTransfer: false,
       },
     },
     {
@@ -108,7 +108,7 @@ analyticsRouter.get("/trend", async (req, res) => {
           month: { $dateToString: { format: "%Y-%m", date: "$occurredAt", timezone: "UTC" } },
           type: "$type",
         },
-        amountMinor: { $sum: "$amountMinor" },
+        amountMinor: { $sum: "$countedAmountMinor" },
       },
     },
   ]);
