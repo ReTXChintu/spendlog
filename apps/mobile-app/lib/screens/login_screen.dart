@@ -25,7 +25,9 @@ class _LoginScreenState extends State<LoginScreen> {
         Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const HomeShell()));
       }
     } catch (e) {
-      setState(() => _error = "Sign-in didn't go through. Please try again.");
+      // The reason is shown rather than swallowed: this app is sideloaded,
+      // so there is no console to check when sign-in fails on a phone.
+      setState(() => _error = e is SignInException ? e.message : "Sign-in didn't go through: $e");
     } finally {
       if (mounted) setState(() => _loading = false);
     }

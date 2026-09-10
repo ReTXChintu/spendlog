@@ -4,6 +4,23 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Release signing, supplied through the environment rather than a
+// key.properties file, so the values live with every other secret in the
+// repo-root .env and in CI's secrets.
+//
+// Signing a release with the debug key means signing it with whatever
+// ~/.android/debug.keystore the build machine happens to have. A CI runner
+// generates that file fresh on every run, so each build would carry a
+// different certificate — Google Sign-In rejects the app (the SHA-1
+// registered for the OAuth client can never match) and Android refuses to
+// install a new build over the previous one.
+val releaseStorePath: String? = System.getenv("ANDROID_KEYSTORE_PATH")
+val releaseStorePassword: String? = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+val releaseKeyAlias: String? = System.getenv("ANDROID_KEY_ALIAS")
+val releaseKeyPassword: String? = System.getenv("ANDROID_KEY_PASSWORD")
+val hasReleaseKeystore =
+    !releaseStorePath.isNullOrBlank() && file(releaseStorePath).exists()
+
 android {
     namespace = "com.example.spendlog"
     compileSdk = flutter.compileSdkVersion
@@ -15,25 +32,40 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.example.spendlog"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
-        // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
-        // You can force using the value of versionCode by specifying the `-P force-version-code-ignoring-abi=true`
-        // flag during build.
+        // Uses the version code from pubspec.yaml, which scripts/stamp-version.js
+        // increments on every release.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = file(releaseStorePath!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            } else {
+                // Keeps `flutter build apk --release` working locally for a
+                // quick check. CI refuses to publish a build that lands here.
+                logger.warn(
+                    "WARNING: no ANDROID_KEYSTORE_PATH, so this release APK is signed with the " +
+                        "debug key. Google Sign-In will not work in it and it cannot be installed " +
+                        "over a properly signed build."
+                )
+                signingConfig = signingConfigs.getByName("debug")
+            }
         }
     }
 }
