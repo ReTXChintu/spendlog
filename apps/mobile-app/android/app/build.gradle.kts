@@ -14,10 +14,33 @@ plugins {
 // different certificate — Google Sign-In rejects the app (the SHA-1
 // registered for the OAuth client can never match) and Android refuses to
 // install a new build over the previous one.
-val releaseStorePath: String? = System.getenv("ANDROID_KEYSTORE_PATH")
-val releaseStorePassword: String? = System.getenv("ANDROID_KEYSTORE_PASSWORD")
-val releaseKeyAlias: String? = System.getenv("ANDROID_KEY_ALIAS")
-val releaseKeyPassword: String? = System.getenv("ANDROID_KEY_PASSWORD")
+// Gradle only sees the process environment, which is how CI supplies these.
+// Locally they live in the repo-root .env with everything else, so that is
+// read as a fallback — a real environment variable still wins.
+val dotenv: Map<String, String> = rootProject.file("../../../.env").let { file ->
+    if (!file.exists()) {
+        emptyMap()
+    } else {
+        file.readLines()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && !it.startsWith("#") && it.contains("=") }
+            .associate { line ->
+                val key = line.substringBefore("=").trim()
+                val value = line.substringAfter("=").trim()
+                    .removeSurrounding("\"")
+                    .removeSurrounding("'")
+                key to value
+            }
+    }
+}
+
+fun secret(name: String): String? =
+    System.getenv(name)?.takeIf { it.isNotBlank() } ?: dotenv[name]?.takeIf { it.isNotBlank() }
+
+val releaseStorePath: String? = secret("ANDROID_KEYSTORE_PATH")
+val releaseStorePassword: String? = secret("ANDROID_KEYSTORE_PASSWORD")
+val releaseKeyAlias: String? = secret("ANDROID_KEY_ALIAS")
+val releaseKeyPassword: String? = secret("ANDROID_KEY_PASSWORD")
 val hasReleaseKeystore =
     !releaseStorePath.isNullOrBlank() && file(releaseStorePath).exists()
 
@@ -59,11 +82,16 @@ android {
             } else {
                 // Keeps `flutter build apk --release` working locally for a
                 // quick check. CI refuses to publish a build that lands here.
-                logger.warn(
-                    "WARNING: no ANDROID_KEYSTORE_PATH, so this release APK is signed with the " +
-                        "debug key. Google Sign-In will not work in it and it cannot be installed " +
-                        "over a properly signed build."
+                // println rather than logger.warn: Flutter filters Gradle's
+                // warn-level output, and an unsigned release that looks
+                // successful is exactly the thing worth shouting about.
+                println("")
+                println(
+                    "*** No ANDROID_KEYSTORE_PATH set, so this release APK is signed with the " +
+                        "DEBUG key. Google Sign-In will not work in it, and it cannot be installed " +
+                        "over a properly signed build. See docs/android-signing.md. ***"
                 )
+                println("")
                 signingConfig = signingConfigs.getByName("debug")
             }
         }
