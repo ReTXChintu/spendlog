@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
+import '../utils/format.dart';
 
 /// Full manual edit, and the same form used to add a transaction by hand.
 ///
@@ -58,12 +59,25 @@ class _EditSheetState extends State<_EditSheet> {
   String? _accountId;
   late DateTime _occurredAt;
   late bool _isTransfer;
+  late bool _isSplit;
+  late bool _isSettlement;
+  late final TextEditingController _myShare;
+  late final TextEditingController _groupLabel;
 
   bool _saving = false;
   bool _confirmDelete = false;
   String? _error;
 
   bool get _isNew => widget.transaction == null;
+
+  /// Says what the split will do, in the same terms the balance uses.
+  String get _owedHint {
+    final total = ((double.tryParse(_amount.text.trim()) ?? 0) * 100).round();
+    final share = ((double.tryParse(_myShare.text.trim()) ?? 0) * 100).round();
+    final owed = total - share;
+    if (owed <= 0) return 'All of it counts as your own spending.';
+    return '${formatMoney(owed)} counts as owed back to you, not as spending.';
+  }
 
   @override
   void initState() {
@@ -79,6 +93,12 @@ class _EditSheetState extends State<_EditSheet> {
     _accountId = t?.account?.id;
     _occurredAt = t?.occurredAt ?? DateTime.now();
     _isTransfer = t?.isTransfer ?? false;
+    _isSplit = t?.split != null;
+    _isSettlement = t?.isSettlement ?? false;
+    _myShare = TextEditingController(
+      text: t?.split != null ? (t!.split!.myShareMinor / 100).toStringAsFixed(2) : '',
+    );
+    _groupLabel = TextEditingController(text: t?.split?.groupLabel ?? '');
   }
 
   @override
@@ -86,6 +106,8 @@ class _EditSheetState extends State<_EditSheet> {
     _amount.dispose();
     _merchant.dispose();
     _note.dispose();
+    _myShare.dispose();
+    _groupLabel.dispose();
     super.dispose();
   }
 
@@ -142,6 +164,13 @@ class _EditSheetState extends State<_EditSheet> {
       'accountId': _accountId,
       'occurredAt': _occurredAt.toUtc().toIso8601String(),
       'isTransfer': _isTransfer,
+      'isSettlement': _isSettlement,
+      'split': _isSplit
+          ? {
+              'myShareMinor': ((double.tryParse(_myShare.text.trim()) ?? 0) * 100).round(),
+              'groupLabel': _groupLabel.text.trim().isEmpty ? null : _groupLabel.text.trim(),
+            }
+          : null,
     };
 
     try {
@@ -345,6 +374,70 @@ class _EditSheetState extends State<_EditSheet> {
               dense: true,
               title: Text(
                 'Between my own accounts — keep it out of totals',
+                style: TextStyle(fontSize: 12.8, color: c.ink70),
+              ),
+            ),
+
+            CheckboxListTile(
+              value: _isSplit,
+              onChanged: (value) => setState(() {
+                _isSplit = value ?? false;
+                // Anchored to the full bill, since the point of a split is
+                // usually that the share is some way below it.
+                if (_isSplit && _myShare.text.trim().isEmpty) _myShare.text = _amount.text;
+              }),
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              dense: true,
+              title: Text(
+                'Split — only part of this was mine',
+                style: TextStyle(fontSize: 12.8, color: c.ink70),
+              ),
+            ),
+
+            if (_isSplit) ...[
+              const SizedBox(height: 6),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: _Field(
+                      label: 'My share',
+                      child: TextField(
+                        controller: _myShare,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        onChanged: (_) => setState(() {}),
+                        style: kNum.copyWith(fontWeight: FontWeight.w700, color: c.ink),
+                        decoration: _inputDecoration(context, hint: '0.00', prefix: '₹ '),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _Field(
+                      label: 'What for',
+                      child: TextField(
+                        controller: _groupLabel,
+                        style: TextStyle(color: c.ink),
+                        decoration: _inputDecoration(context, hint: 'Goa trip'),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(_owedHint, style: TextStyle(fontSize: 12, color: c.muted, height: 1.45)),
+              const SizedBox(height: 6),
+            ],
+
+            CheckboxListTile(
+              value: _isSettlement,
+              onChanged: (value) => setState(() => _isSettlement = value ?? false),
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              dense: true,
+              title: Text(
+                'Settling up — paying back, or being paid back, for bills already recorded',
                 style: TextStyle(fontSize: 12.8, color: c.ink70),
               ),
             ),

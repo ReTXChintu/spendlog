@@ -48,6 +48,12 @@ export interface TransactionSourceEntry {
   receivedAt: string;
 }
 
+/** The part of a shared bill that was actually the user's own spending. */
+export interface TransactionSplit {
+  myShareMinor: number;
+  groupLabel: string | null;
+}
+
 export interface Transaction {
   id: string;
   amountMinor: number;
@@ -58,6 +64,8 @@ export interface Transaction {
   rawText: string | null;
   source: TransactionSource;
   isTransfer: boolean;
+  split: TransactionSplit | null;
+  isSettlement: boolean;
   pending: boolean;
   occurredAt: string;
   editedAt: string | null;
@@ -65,6 +73,16 @@ export interface Transaction {
   sources: TransactionSourceEntry[];
   category: Category | null;
   account: Account | null;
+}
+
+/** The running balance with everyone the user splits bills with. */
+export interface OwedSummary {
+  balanceMinor: number;
+  lentMinor: number;
+  settledInMinor: number;
+  settledOutMinor: number;
+  splitCount: number;
+  splits: Transaction[];
 }
 
 export interface DayGroup {

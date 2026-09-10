@@ -113,6 +113,19 @@ export function TransactionRow({
                 </span>
               </div>
             )}
+            {transaction.split && (
+              <div className="row-badges">
+                <span className="badge badge-split">
+                  My share {formatMoney(transaction.split.myShareMinor, transaction.currency)}
+                  {transaction.split.groupLabel ? ` · ${transaction.split.groupLabel}` : ""}
+                </span>
+              </div>
+            )}
+            {transaction.isSettlement && (
+              <div className="row-badges">
+                <span className="badge badge-settlement">Settling up · not counted</span>
+              </div>
+            )}
             {transaction.editedAt && !transaction.isTransfer && (
               <div className="row-badges">
                 <span className="badge badge-edited">Edited</span>

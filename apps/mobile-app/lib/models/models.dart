@@ -112,6 +112,19 @@ class TransactionSourceEntry {
       );
 }
 
+/// The part of a shared bill that was actually the user's own spending.
+class TransactionSplit {
+  final int myShareMinor;
+  final String? groupLabel;
+
+  TransactionSplit({required this.myShareMinor, this.groupLabel});
+
+  factory TransactionSplit.fromJson(Map<String, dynamic> json) => TransactionSplit(
+        myShareMinor: json['myShareMinor'] as int,
+        groupLabel: json['groupLabel'] as String?,
+      );
+}
+
 class Transaction {
   final String id;
   final int amountMinor;
@@ -124,6 +137,8 @@ class Transaction {
   final String? rawText;
   final String source; // SMS | EMAIL | MANUAL
   final bool isTransfer;
+  final TransactionSplit? split;
+  final bool isSettlement;
   final bool pending;
   final DateTime occurredAt;
   /// Set when a person corrected the transaction by hand, so the list can
@@ -144,6 +159,8 @@ class Transaction {
     this.rawText,
     required this.source,
     required this.isTransfer,
+    this.split,
+    this.isSettlement = false,
     required this.pending,
     required this.occurredAt,
     this.editedAt,
@@ -175,6 +192,10 @@ class Transaction {
         rawText: json['rawText'] as String?,
         source: json['source'] as String,
         isTransfer: json['isTransfer'] as bool? ?? false,
+        split: json['split'] != null
+            ? TransactionSplit.fromJson(json['split'] as Map<String, dynamic>)
+            : null,
+        isSettlement: json['isSettlement'] as bool? ?? false,
         pending: json['pending'] as bool? ?? false,
         occurredAt: DateTime.parse(json['occurredAt'] as String),
         editedAt: json['editedAt'] != null ? DateTime.parse(json['editedAt'] as String) : null,
@@ -240,6 +261,31 @@ class AnalyticsSummary {
         byCategory:
             (json['byCategory'] as List<dynamic>).map((c) => CategorySpend.fromJson(c as Map<String, dynamic>)).toList(),
         transactionCount: json['transactionCount'] as int,
+      );
+}
+
+/// The running balance with everyone the user splits bills with.
+class OwedSummary {
+  final int balanceMinor;
+  final int lentMinor;
+  final int settledInMinor;
+  final int settledOutMinor;
+  final int splitCount;
+
+  OwedSummary({
+    required this.balanceMinor,
+    required this.lentMinor,
+    required this.settledInMinor,
+    required this.settledOutMinor,
+    required this.splitCount,
+  });
+
+  factory OwedSummary.fromJson(Map<String, dynamic> json) => OwedSummary(
+        balanceMinor: json['balanceMinor'] as int? ?? 0,
+        lentMinor: json['lentMinor'] as int? ?? 0,
+        settledInMinor: json['settledInMinor'] as int? ?? 0,
+        settledOutMinor: json['settledOutMinor'] as int? ?? 0,
+        splitCount: json['splitCount'] as int? ?? 0,
       );
 }
 

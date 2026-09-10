@@ -480,6 +480,19 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
   color:var(--muted);margin-bottom:6px}
 .raw-source-head svg{width:13px;height:13px}
 
+.field-hint{font-size:12px;color:var(--muted);margin:0;line-height:1.5}
+
+.badge-split{background:var(--brand-50);color:var(--brand-dark)}
+.badge-settlement{background:var(--credit-50);color:var(--credit)}
+
+/* The owed-to-you card on Analytics. */
+.owed-card{display:flex;flex-direction:column;gap:4px}
+.owed-figure{font-family:var(--font-mono);font-size:26px;font-weight:800;letter-spacing:-.02em}
+.owed-figure.is-positive{color:var(--credit)}
+.owed-figure.is-negative{color:var(--debit)}
+.owed-breakdown{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:6px}
+.owed-breakdown b{font-family:var(--font-mono);color:var(--ink-70);font-weight:700}
+
 .badge-edited{background:var(--brand-50);color:var(--brand-dark)}
 .badge-merged{background:var(--brand-50);color:var(--brand-dark)}
 .load-more{display:flex;justify-content:center;margin:6px 0 10px 0}

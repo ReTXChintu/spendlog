@@ -4,7 +4,7 @@ import { Icon } from "../components/Icon";
 import { StateBlock } from "../components/States";
 import { api } from "../lib/api";
 import { currentMonth, formatMoney, formatMoneyShort, formatMonthLabel, shiftMonth } from "../lib/format";
-import { AnalyticsSummary, Category, TrendPoint } from "../types";
+import { AnalyticsSummary, Category, OwedSummary, TrendPoint } from "../types";
 
 const TREND_MAX_HEIGHT = 110;
 
@@ -14,6 +14,7 @@ export function AnalyticsPage() {
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [owed, setOwed] = useState<OwedSummary | null>(null);
 
   useEffect(() => {
     api.get<AnalyticsSummary>(`/analytics/summary?month=${month}`).then(setSummary);
@@ -22,6 +23,8 @@ export function AnalyticsPage() {
   useEffect(() => {
     api.get<TrendPoint[]>("/analytics/trend?months=6").then(setTrend);
     api.get<Category[]>("/categories").then(setCategories);
+    // Not month-scoped: what people owe each other does not reset in January.
+    api.get<OwedSummary>("/analytics/owed").then(setOwed).catch(() => setOwed(null));
   }, []);
 
   const colorFor = (categoryId: string | null) =>
@@ -67,10 +70,49 @@ export function AnalyticsPage() {
       ) : (
         <div className="layout-2">
           <div>
+            {owed && owed.splitCount > 0 && (
+              <div className="section-block">
+                <h3>Split bills</h3>
+                <p className="section-sub">
+                  Across all time, not just this month — what people owe each other doesn't reset in January.
+                </p>
+                <div className="owed-card">
+                  <div
+                    className={`owed-figure ${owed.balanceMinor >= 0 ? "is-positive" : "is-negative"}`}
+                  >
+                    {formatMoney(Math.abs(owed.balanceMinor))}
+                  </div>
+                  <div className="section-sub">
+                    {owed.balanceMinor > 0
+                      ? "owed to you"
+                      : owed.balanceMinor < 0
+                        ? "you owe"
+                        : "all settled up"}
+                  </div>
+                  <div className="owed-breakdown">
+                    <span>
+                      Paid for others <b>{formatMoneyShort(owed.lentMinor)}</b>
+                    </span>
+                    <span>
+                      Paid back to you <b>{formatMoneyShort(owed.settledInMinor)}</b>
+                    </span>
+                    <span>
+                      You paid back <b>{formatMoneyShort(owed.settledOutMinor)}</b>
+                    </span>
+                  </div>
+                  <p className="field-hint" style={{ marginTop: 10 }}>
+                    Compare this with Splitwise. It counts every bill you marked as split, so a gap
+                    usually means one of them needs its share correcting.
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="section-block">
               <h3>Spend by category</h3>
               <p className="section-sub">
-                Transfers between your own accounts are excluded from every figure below.
+                Transfers, settlements and the part of a split bill that wasn't yours are excluded from
+                every figure below.
               </p>
               <div className="hbars">
                 {summary!.byCategory.map((entry) => {

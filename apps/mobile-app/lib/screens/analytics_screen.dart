@@ -19,6 +19,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   AnalyticsSummary? _summary;
   List<Map<String, dynamic>> _trend = [];
   List<Category> _categories = [];
+  OwedSummary? _owed;
 
   @override
   void initState() {
@@ -38,11 +39,14 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     final results = await Future.wait([
       ApiClient.instance.get('/analytics/trend?months=6'),
       ApiClient.instance.get('/categories'),
+      // Not month-scoped: what people owe each other does not reset in January.
+      ApiClient.instance.get('/analytics/owed'),
     ]);
     if (!mounted) return;
     setState(() {
       _trend = (results[0] as List<dynamic>).cast<Map<String, dynamic>>();
       _categories = (results[1] as List<dynamic>).map((c) => Category.fromJson(c as Map<String, dynamic>)).toList();
+      _owed = OwedSummary.fromJson(results[2] as Map<String, dynamic>);
     });
   }
 
@@ -90,10 +94,20 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                             _Tile(label: 'Received', value: formatMoney(summary.totalIncomeMinor), color: context.c.credit),
                           ],
                         ),
+                        if (_owed != null && _owed!.splitCount > 0) ...[
+                          const SizedBox(height: 26),
+                          const _SectionTitle(
+                            title: 'Split bills',
+                            sub: 'Across all time, not just this month.',
+                          ),
+                          const SizedBox(height: 14),
+                          _OwedCard(owed: _owed!),
+                        ],
                         const SizedBox(height: 26),
                         const _SectionTitle(
                           title: 'Spend by category',
-                          sub: 'Transfers between your own accounts are excluded.',
+                          sub: "Transfers, settlements and the part of a split bill that wasn't yours "
+                              'are excluded.',
                         ),
                         const SizedBox(height: 14),
                         ...summary.byCategory.map((entry) {
@@ -382,6 +396,82 @@ class _LegendDot extends StatelessWidget {
         ),
         const SizedBox(width: 6),
         Text(label, style: TextStyle(fontSize: 12, color: context.c.muted)),
+      ],
+    );
+  }
+}
+
+class _OwedCard extends StatelessWidget {
+  final OwedSummary owed;
+  const _OwedCard({required this.owed});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final positive = owed.balanceMinor >= 0;
+    final caption = owed.balanceMinor > 0
+        ? 'owed to you'
+        : owed.balanceMinor < 0
+            ? 'you owe'
+            : 'all settled up';
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border.all(color: c.line),
+        borderRadius: BorderRadius.circular(T.rMd),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            formatMoney(owed.balanceMinor.abs()),
+            style: kNum.copyWith(
+              fontSize: 26,
+              fontWeight: FontWeight.w800,
+              color: positive ? c.credit : c.debit,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(caption, style: TextStyle(fontSize: 12.5, color: c.muted)),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 14,
+            runSpacing: 6,
+            children: [
+              _OwedStat(label: 'Paid for others', value: formatMoneyShort(owed.lentMinor)),
+              _OwedStat(label: 'Paid back to you', value: formatMoneyShort(owed.settledInMinor)),
+              _OwedStat(label: 'You paid back', value: formatMoneyShort(owed.settledOutMinor)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Compare this with Splitwise. A gap usually means one bill needs its share correcting.',
+            style: TextStyle(fontSize: 11.5, height: 1.45, color: c.mutedLight),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OwedStat extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _OwedStat({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('$label ', style: TextStyle(fontSize: 11.5, color: context.c.muted)),
+        Text(
+          value,
+          style: kNum.copyWith(fontSize: 11.5, fontWeight: FontWeight.w700, color: context.c.ink70),
+        ),
       ],
     );
   }

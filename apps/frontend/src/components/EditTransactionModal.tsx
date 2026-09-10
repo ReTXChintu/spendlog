@@ -49,6 +49,12 @@ export function EditTransactionModal({
   const [date, setDate] = useState(initial.date);
   const [time, setTime] = useState(initial.time);
   const [isTransfer, setIsTransfer] = useState(transaction?.isTransfer ?? false);
+  const [isSplit, setIsSplit] = useState(transaction?.split != null);
+  const [myShare, setMyShare] = useState(
+    transaction?.split ? (transaction.split.myShareMinor / 100).toFixed(2) : ""
+  );
+  const [groupLabel, setGroupLabel] = useState(transaction?.split?.groupLabel ?? "");
+  const [isSettlement, setIsSettlement] = useState(transaction?.isSettlement ?? false);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +71,15 @@ export function EditTransactionModal({
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
+
+  // Says what the split will do, in the same terms the balance uses.
+  const shareMinor = Math.round(Number.parseFloat(myShare || "0") * 100);
+  const totalMinor = Math.round(Number.parseFloat(amount || "0") * 100);
+  const owedBackMinor = Math.max(0, totalMinor - shareMinor);
+  const owedHint =
+    owedBackMinor > 0
+      ? `₹${(owedBackMinor / 100).toFixed(2)} counts as owed back to you, not as spending.`
+      : "All of it counts as your own spending.";
 
   async function unmerge() {
     if (!transaction) return;
@@ -98,6 +113,8 @@ export function EditTransactionModal({
       accountId: accountId || null,
       occurredAt: new Date(`${date}T${time}`).toISOString(),
       isTransfer,
+      isSettlement,
+      split: isSplit ? { myShareMinor: Math.round(Number.parseFloat(myShare || "0") * 100), groupLabel: groupLabel.trim() || null } : null,
     };
 
     try {
@@ -268,6 +285,71 @@ export function EditTransactionModal({
               <input type="checkbox" checked={isTransfer} onChange={(e) => setIsTransfer(e.target.checked)} />
               <span>
                 Between my own accounts — leave it out of spending and income totals
+              </span>
+            </label>
+          </div>
+
+          <div className="form-row form-row-wide">
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={isSplit}
+                onChange={(e) => {
+                  setIsSplit(e.target.checked);
+                  // Most of the time the point of splitting is that the
+                  // share is less than the bill; starting from the full
+                  // amount at least anchors it.
+                  if (e.target.checked && !myShare) setMyShare(amount);
+                }}
+              />
+              <span>Split — only part of this was mine</span>
+            </label>
+          </div>
+
+          {isSplit && (
+            <>
+              <div className="form-row">
+                <label htmlFor="e-share">My share</label>
+                <div className="amount-input">
+                  <span className="prefix">₹</span>
+                  <input
+                    id="e-share"
+                    className="filter-input"
+                    inputMode="decimal"
+                    value={myShare}
+                    onChange={(e) => setMyShare(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="form-row">
+                <label htmlFor="e-group">What for</label>
+                <input
+                  id="e-group"
+                  className="filter-input"
+                  placeholder="Goa trip"
+                  value={groupLabel}
+                  onChange={(e) => setGroupLabel(e.target.value)}
+                />
+              </div>
+
+              <div className="form-row form-row-wide">
+                <p className="field-hint">
+                  {owedHint}
+                </p>
+              </div>
+            </>
+          )}
+
+          <div className="form-row form-row-wide">
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={isSettlement}
+                onChange={(e) => setIsSettlement(e.target.checked)}
+              />
+              <span>
+                Settling up — paying back, or being paid back, for bills already recorded
               </span>
             </label>
           </div>

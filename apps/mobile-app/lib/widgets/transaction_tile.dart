@@ -141,7 +141,10 @@ class TransactionTile extends StatelessWidget {
                     ),
                   ],
                 ),
-                if (isTransfer || transaction.editedAt != null) ...[
+                if (isTransfer ||
+                    transaction.split != null ||
+                    transaction.isSettlement ||
+                    transaction.editedAt != null) ...[
                   const SizedBox(height: 5),
                   Wrap(
                     spacing: 6,
@@ -151,6 +154,19 @@ class TransactionTile extends StatelessWidget {
                           label: 'Not counted',
                           background: context.c.chipNeutral,
                           foreground: context.c.transfer,
+                        ),
+                      if (transaction.split != null)
+                        _Badge(
+                          label: 'My share ${formatMoney(transaction.split!.myShareMinor)}'
+                              '${transaction.split!.groupLabel != null ? ' · ${transaction.split!.groupLabel}' : ''}',
+                          background: context.c.brand50,
+                          foreground: context.c.brandDark,
+                        ),
+                      if (transaction.isSettlement)
+                        _Badge(
+                          label: 'Settling up',
+                          background: context.c.credit50,
+                          foreground: context.c.credit,
                         ),
                       // Says plainly that these figures are the user's, not
                       // the bank's, so a corrected row isn't second-guessed.
