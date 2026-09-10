@@ -44,6 +44,11 @@ class TransactionsScreenState extends State<TransactionsScreen> {
   String _direction = '';
   Timer? _debounce;
 
+  /// Rows picked for merging. Entered by long-pressing a row.
+  bool _selecting = false;
+  final List<String> _selectedIds = [];
+  bool _merging = false;
+
   @override
   void initState() {
     super.initState();
@@ -161,6 +166,57 @@ class TransactionsScreenState extends State<TransactionsScreen> {
     });
   }
 
+  void _startSelecting(Transaction transaction) {
+    setState(() {
+      _selecting = true;
+      _selectedIds
+        ..clear()
+        ..add(transaction.id);
+    });
+  }
+
+  void _toggleSelected(Transaction transaction) {
+    setState(() {
+      if (_selectedIds.contains(transaction.id)) {
+        _selectedIds.remove(transaction.id);
+      } else {
+        _selectedIds.add(transaction.id);
+      }
+    });
+  }
+
+  void _stopSelecting() {
+    setState(() {
+      _selecting = false;
+      _selectedIds.clear();
+    });
+  }
+
+  /// The first row picked survives; the rest are absorbed into it, so their
+  /// messages and any fields it lacks move across.
+  Future<void> _mergeSelected() async {
+    if (_selectedIds.length < 2) return;
+    final targetId = _selectedIds.first;
+    final sourceIds = _selectedIds.sublist(1);
+    final messenger = ScaffoldMessenger.of(context);
+
+    setState(() => _merging = true);
+    try {
+      await ApiClient.instance.post('/transactions/$targetId/merge', {'sourceIds': sourceIds});
+      _stopSelecting();
+      await _refreshAll();
+      messenger.showSnackBar(
+        SnackBar(content: Text('Merged ${sourceIds.length + 1} rows into one.')),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(e is ApiException ? e.message : "Couldn't merge those rows.")),
+      );
+    } finally {
+      if (mounted) setState(() => _merging = false);
+    }
+  }
+
   Future<void> _openEditor({Transaction? transaction}) async {
     final changed = await showEditTransactionSheet(
       context,
@@ -188,11 +244,44 @@ class TransactionsScreenState extends State<TransactionsScreen> {
 
     return Scaffold(
       backgroundColor: c.paper,
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _openEditor(),
-        tooltip: 'Add a transaction by hand',
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: _selecting
+          ? null
+          : FloatingActionButton(
+              onPressed: () => _openEditor(),
+              tooltip: 'Add a transaction by hand',
+              child: const Icon(Icons.add),
+            ),
+      // Replaces the search box while picking, so the bar that appears is
+      // about the one thing being done.
+      bottomNavigationBar: _selecting
+          ? SafeArea(
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+                decoration: BoxDecoration(
+                  color: c.surface,
+                  border: Border(top: BorderSide(color: c.line)),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _selectedIds.length < 2
+                            ? 'Pick the rows that are the same payment'
+                            : '${_selectedIds.length} selected',
+                        style: TextStyle(fontSize: 12.8, color: c.muted, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    TextButton(onPressed: _stopSelecting, child: const Text('Cancel')),
+                    const SizedBox(width: 6),
+                    FilledButton(
+                      onPressed: _selectedIds.length < 2 || _merging ? null : _mergeSelected,
+                      child: Text(_merging ? 'Merging…' : 'Merge'),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : null,
       body: Column(
         children: [
           Padding(
@@ -331,6 +420,10 @@ class TransactionsScreenState extends State<TransactionsScreen> {
                 categories: _categories,
                 onUpdated: _replace,
                 onEdit: () => _openEditor(transaction: transaction),
+                selectable: _selecting,
+                selected: _selectedIds.contains(transaction.id),
+                onToggleSelected: () => _toggleSelected(transaction),
+                onLongPress: _selecting ? null : () => _startSelecting(transaction),
               ),
             const SizedBox(height: 22),
           ],

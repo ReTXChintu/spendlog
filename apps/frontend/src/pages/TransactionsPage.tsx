@@ -35,6 +35,11 @@ export function TransactionsPage() {
   const [syncing, setSyncing] = useState(false);
 
   const [rawFor, setRawFor] = useState<Transaction | null>(null);
+  // Rows picked for merging. Empty means selection mode is off.
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selecting, setSelecting] = useState(false);
+  const [merging, setMerging] = useState(false);
+  const [mergeError, setMergeError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [adding, setAdding] = useState(false);
 
@@ -149,6 +154,38 @@ export function TransactionsPage() {
     loadContext();
   };
 
+  function toggleSelected(transaction: Transaction) {
+    setMergeError(null);
+    setSelectedIds((ids) =>
+      ids.includes(transaction.id) ? ids.filter((id) => id !== transaction.id) : [...ids, transaction.id]
+    );
+  }
+
+  function stopSelecting() {
+    setSelecting(false);
+    setSelectedIds([]);
+    setMergeError(null);
+  }
+
+  /// The first row picked is the one that survives; the rest are absorbed
+  /// into it, so their messages and any fields it lacks move across.
+  async function mergeSelected() {
+    if (selectedIds.length < 2) return;
+    const [targetId, ...sourceIds] = selectedIds;
+
+    setMerging(true);
+    setMergeError(null);
+    try {
+      await api.post(`/transactions/${targetId}/merge`, { sourceIds });
+      stopSelecting();
+      reloadAfterEdit();
+    } catch (err) {
+      setMergeError(err instanceof Error ? err.message : "Couldn't merge those transactions.");
+    } finally {
+      setMerging(false);
+    }
+  }
+
   function changeFilter<T>(setter: (value: T) => void) {
     return (value: T) => setter(value);
   }
@@ -170,12 +207,37 @@ export function TransactionsPage() {
       <div className="screen-header">
         <h1 className="screen-title">Transactions</h1>
         <div className="screen-actions">
-          <button className="btn btn-ghost btn-sm" onClick={syncNow} disabled={syncing}>
-            <Icon name="ic-sync" /> {syncing ? "Syncing…" : "Sync now"}
-          </button>
-          <button className="btn btn-sm btn-primary" onClick={() => setAdding(true)}>
-            <Icon name="ic-plus" /> Add
-          </button>
+          {selecting ? (
+            <>
+              <span className="select-count">
+                {selectedIds.length === 0
+                  ? "Pick the rows that are the same payment"
+                  : `${selectedIds.length} selected`}
+              </span>
+              <button
+                className="btn btn-sm btn-primary"
+                onClick={mergeSelected}
+                disabled={selectedIds.length < 2 || merging}
+              >
+                {merging ? "Merging…" : "Merge"}
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={stopSelecting}>
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn btn-ghost btn-sm" onClick={() => setSelecting(true)}>
+                <Icon name="ic-updown" /> Merge rows
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={syncNow} disabled={syncing}>
+                <Icon name="ic-sync" /> {syncing ? "Syncing…" : "Sync now"}
+              </button>
+              <button className="btn btn-sm btn-primary" onClick={() => setAdding(true)}>
+                <Icon name="ic-plus" /> Add
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -350,6 +412,9 @@ export function TransactionsPage() {
                       onUpdated={replaceTransaction}
                       onShowRaw={setRawFor}
                       onEdit={setEditing}
+                      selectable={selecting}
+                      selected={selectedIds.includes(transaction.id)}
+                      onToggleSelected={toggleSelected}
                     />
                   ))}
                 </div>
@@ -406,6 +471,8 @@ export function TransactionsPage() {
           )}
         </div>
       </div>
+
+      {mergeError && <div className="merge-error">{mergeError}</div>}
 
       {rawFor && <RawMessageModal transaction={rawFor} onClose={() => setRawFor(null)} />}
 

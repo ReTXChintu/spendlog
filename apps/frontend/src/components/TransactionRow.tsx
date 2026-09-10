@@ -16,12 +16,19 @@ export function TransactionRow({
   onUpdated,
   onShowRaw,
   onEdit,
+  selectable = false,
+  selected = false,
+  onToggleSelected,
 }: {
   transaction: Transaction;
   categories: Category[];
   onUpdated: (updated: Transaction) => void;
   onShowRaw: (transaction: Transaction) => void;
   onEdit: (transaction: Transaction) => void;
+  /** While picking rows to merge, the whole row becomes the checkbox. */
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelected?: (transaction: Transaction) => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   // Set after a category is chosen, offering to remember the merchant.
@@ -38,6 +45,11 @@ export function TransactionRow({
     if (transaction.merchant) setJustCategorized(picked);
   }
 
+  // Distinct source kinds, in the order they first arrived.
+  const sourceIcons = Array.from(
+    new Set((transaction.sources.length > 0 ? transaction.sources : [transaction]).map((s) => s.source))
+  ).map((source) => (source === "EMAIL" ? "ic-mail" : source === "MANUAL" ? "ic-pencil" : "ic-message"));
+
   const meta = [
     account ? accountLabel(account) : null,
     account?.accountType === "CARD" ? "Card" : account ? "Bank" : null,
@@ -49,7 +61,15 @@ export function TransactionRow({
   return (
     <>
       <div className="row-wrap">
-        <div className={`row${transaction.isTransfer ? " is-transfer" : ""}`}>
+        <div
+          className={`row${transaction.isTransfer ? " is-transfer" : ""}${selectable ? " is-selectable" : ""}${
+            selected ? " is-selected" : ""
+          }`}
+          onClick={selectable ? () => onToggleSelected?.(transaction) : undefined}
+        >
+          {selectable && (
+            <input type="checkbox" className="row-select" checked={selected} readOnly tabIndex={-1} />
+          )}
           {transaction.isTransfer ? (
             <div className="row-cat-chip" style={{ background: "#F1F5F9", color: "var(--transfer)" }}>
               <Icon name="ic-arrow-right" />
@@ -78,7 +98,11 @@ export function TransactionRow({
               )}
             </div>
             <div className="row-meta">
-              <Icon name={transaction.source === "EMAIL" ? "ic-mail" : "ic-message"} />
+              {/* One icon per message that reported this, so a row seen by
+                  both SMS and email says so without being opened. */}
+              {sourceIcons.map((name, i) => (
+                <Icon key={`${name}-${i}`} name={name} />
+              ))}
               {meta}
             </div>
             {transaction.isTransfer && (

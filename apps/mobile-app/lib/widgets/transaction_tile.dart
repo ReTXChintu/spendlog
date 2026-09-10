@@ -15,6 +15,11 @@ class TransactionTile extends StatelessWidget {
   /// Opens the full edit form. Parsing gets most things right but not all,
   /// so every row has to be correctable by hand.
   final VoidCallback? onEdit;
+  /// While picking rows to merge, the whole tile becomes the checkbox.
+  final bool selectable;
+  final bool selected;
+  final VoidCallback? onToggleSelected;
+  final VoidCallback? onLongPress;
 
   const TransactionTile({
     super.key,
@@ -22,6 +27,10 @@ class TransactionTile extends StatelessWidget {
     required this.categories,
     required this.onUpdated,
     this.onEdit,
+    this.selectable = false,
+    this.selected = false,
+    this.onToggleSelected,
+    this.onLongPress,
   });
 
   String get _meta {
@@ -44,15 +53,30 @@ class TransactionTile extends StatelessWidget {
             ? context.c.debit
             : context.c.credit;
 
-    return Container(
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: context.c.line)),
-      ),
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          _CategoryChip(
+    return GestureDetector(
+      onTap: selectable ? onToggleSelected : null,
+      onLongPress: onLongPress,
+      child: Container(
+        decoration: BoxDecoration(
+          color: selected ? context.c.brand50 : null,
+          border: Border(
+            bottom: BorderSide(color: context.c.line),
+            left: BorderSide(color: selected ? context.c.brand : Colors.transparent, width: 3),
+          ),
+        ),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            if (selectable) ...[
+              Icon(
+                selected ? Icons.check_circle : Icons.circle_outlined,
+                size: 20,
+                color: selected ? context.c.brand : context.c.mutedLight,
+              ),
+              const SizedBox(width: 10),
+            ],
+            _CategoryChip(
             transaction: transaction,
             categories: categories,
             onUpdated: onUpdated,
@@ -92,12 +116,21 @@ class TransactionTile extends StatelessWidget {
                 const SizedBox(height: 2),
                 Row(
                   children: [
-                    Icon(
-                      transaction.source == 'EMAIL' ? Icons.mail_outline : Icons.sms_outlined,
-                      size: 12,
-                      color: context.c.muted,
-                    ),
-                    const SizedBox(width: 5),
+                    // One per kind, so a row seen by both SMS and email
+                    // says so without being opened.
+                    for (final kind in transaction.sourceKinds) ...[
+                      Icon(
+                        kind == 'EMAIL'
+                            ? Icons.mail_outline
+                            : kind == 'MANUAL'
+                                ? Icons.edit_outlined
+                                : Icons.sms_outlined,
+                        size: 12,
+                        color: context.c.muted,
+                      ),
+                      const SizedBox(width: 3),
+                    ],
+                    const SizedBox(width: 2),
                     Flexible(
                       child: Text(
                         _meta,
@@ -133,12 +166,13 @@ class TransactionTile extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(width: 10),
-          Text(
-            '${isDebit ? '−' : '+'}${formatMoney(transaction.amountMinor, transaction.currency)}',
-            style: kNum.copyWith(fontWeight: FontWeight.w700, fontSize: 14.5, color: amountColor),
-          ),
-        ],
+            const SizedBox(width: 10),
+            Text(
+              '${isDebit ? '−' : '+'}${formatMoney(transaction.amountMinor, transaction.currency)}',
+              style: kNum.copyWith(fontWeight: FontWeight.w700, fontSize: 14.5, color: amountColor),
+            ),
+          ],
+        ),
       ),
     );
   }

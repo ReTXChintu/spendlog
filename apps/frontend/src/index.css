@@ -464,5 +464,22 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
 .account-row-sub{font-size:11.8px;color:var(--muted);margin-top:2px}
 .account-row-type{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
 
+/* Picking rows to merge: the whole row is the target, so it needs to look
+   like one without becoming a second kind of button. */
+.row.is-selectable{cursor:pointer}
+.row.is-selectable:hover{background:var(--brand-50)}
+.row.is-selected{background:var(--brand-50);box-shadow:inset 3px 0 0 var(--brand)}
+.row-select{margin-right:2px;flex-shrink:0;pointer-events:none}
+.select-count{font-size:12.5px;color:var(--muted);font-weight:600;margin-right:4px}
+.merge-error{margin:10px 0 0 0;padding:10px 12px;border-radius:var(--radius-sm);
+  background:var(--debit-50);color:var(--debit);font-size:12.5px}
+
+/* One block per message when a transaction was reported more than once. */
+.raw-source + .raw-source{margin-top:14px}
+.raw-source-head{display:flex;align-items:center;gap:7px;font-size:11.8px;font-weight:700;
+  color:var(--muted);margin-bottom:6px}
+.raw-source-head svg{width:13px;height:13px}
+
 .badge-edited{background:var(--brand-50);color:var(--brand-dark)}
+.badge-merged{background:var(--brand-50);color:var(--brand-dark)}
 .load-more{display:flex;justify-content:center;margin:6px 0 10px 0}

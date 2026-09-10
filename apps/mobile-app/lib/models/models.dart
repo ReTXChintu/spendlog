@@ -90,6 +90,28 @@ class Account {
       );
 }
 
+/// One message that reported a transaction.
+class TransactionSourceEntry {
+  final String source;
+  final String? sourceRef;
+  final String? rawText;
+  final DateTime receivedAt;
+
+  TransactionSourceEntry({
+    required this.source,
+    this.sourceRef,
+    this.rawText,
+    required this.receivedAt,
+  });
+
+  factory TransactionSourceEntry.fromJson(Map<String, dynamic> json) => TransactionSourceEntry(
+        source: json['source'] as String,
+        sourceRef: json['sourceRef'] as String?,
+        rawText: json['rawText'] as String?,
+        receivedAt: DateTime.parse(json['receivedAt'] as String),
+      );
+}
+
 class Transaction {
   final String id;
   final int amountMinor;
@@ -107,6 +129,8 @@ class Transaction {
   /// Set when a person corrected the transaction by hand, so the list can
   /// say so rather than implying the figures came straight from the bank.
   final DateTime? editedAt;
+  /// Every message that reported this transaction, oldest first.
+  final List<TransactionSourceEntry> sources;
   final Category? category;
   final Account? account;
 
@@ -123,9 +147,23 @@ class Transaction {
     required this.pending,
     required this.occurredAt,
     this.editedAt,
+    this.sources = const [],
     this.category,
     this.account,
   });
+
+  /// The distinct kinds of message behind this row. Older rows predate the
+  /// per-message list, so fall back to the single source they carry.
+  List<String> get sourceKinds {
+    if (sources.isEmpty) return [source];
+    final seen = <String>[];
+    for (final entry in sources) {
+      if (!seen.contains(entry.source)) seen.add(entry.source);
+    }
+    return seen;
+  }
+
+  bool get wasReportedTwice => sources.length > 1;
 
   factory Transaction.fromJson(Map<String, dynamic> json) => Transaction(
         id: json['id'] as String,
@@ -140,6 +178,9 @@ class Transaction {
         pending: json['pending'] as bool? ?? false,
         occurredAt: DateTime.parse(json['occurredAt'] as String),
         editedAt: json['editedAt'] != null ? DateTime.parse(json['editedAt'] as String) : null,
+        sources: (json['sources'] as List<dynamic>? ?? [])
+            .map((s) => TransactionSourceEntry.fromJson(s as Map<String, dynamic>))
+            .toList(),
         category: json['category'] != null ? Category.fromJson(json['category'] as Map<String, dynamic>) : null,
         account: json['account'] != null ? Account.fromJson(json['account'] as Map<String, dynamic>) : null,
       );

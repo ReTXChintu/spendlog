@@ -54,6 +54,10 @@ export function EditTransactionModal({
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  // More than one message means this row was merged, whether automatically
+  // or by hand — and either can be wrong, so both can be taken apart.
+  const mergedCount = transaction?.sources.length ?? 0;
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
@@ -61,6 +65,20 @@ export function EditTransactionModal({
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
+
+  async function unmerge() {
+    if (!transaction) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await api.post(`/transactions/${transaction.id}/unmerge`);
+      onSaved(transaction);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't split that transaction.");
+      setSaving(false);
+    }
+  }
 
   async function save() {
     const rupees = Number.parseFloat(amount);
@@ -265,6 +283,11 @@ export function EditTransactionModal({
               disabled={saving}
             >
               {confirmDelete ? "Really delete?" : "Delete"}
+            </button>
+          )}
+          {mergedCount > 1 && (
+            <button className="btn btn-sm btn-ghost" onClick={unmerge} disabled={saving}>
+              Split into {mergedCount}
             </button>
           )}
           <span className="modal-actions-spacer" />

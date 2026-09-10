@@ -40,6 +40,14 @@ export function accountLabel(account: Pick<Account, "bankName" | "last4" | "nick
   return account.last4 ? `${name} ••${account.last4}` : name;
 }
 
+/** One message that reported a transaction. */
+export interface TransactionSourceEntry {
+  source: TransactionSource;
+  sourceRef: string | null;
+  rawText: string | null;
+  receivedAt: string;
+}
+
 export interface Transaction {
   id: string;
   amountMinor: number;
@@ -53,6 +61,8 @@ export interface Transaction {
   pending: boolean;
   occurredAt: string;
   editedAt: string | null;
+  /** Every message that reported this transaction, oldest first. */
+  sources: TransactionSourceEntry[];
   category: Category | null;
   account: Account | null;
 }

@@ -159,6 +159,21 @@ class _EditSheetState extends State<_EditSheet> {
     }
   }
 
+  /// More than one message means the row was merged, automatically or by
+  /// hand — and either can be wrong, so both can be taken apart.
+  Future<void> _unmerge() async {
+    setState(() => _saving = true);
+    try {
+      await ApiClient.instance.post('/transactions/${widget.transaction!.id}/unmerge');
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      setState(() {
+        _error = e is ApiException ? e.message : "Couldn't split it apart.";
+        _saving = false;
+      });
+    }
+  }
+
   Future<void> _delete() async {
     setState(() => _saving = true);
     try {
@@ -349,6 +364,11 @@ class _EditSheetState extends State<_EditSheet> {
                         : () => _confirmDelete ? _delete() : setState(() => _confirmDelete = true),
                     style: TextButton.styleFrom(foregroundColor: c.debit),
                     child: Text(_confirmDelete ? 'Really delete?' : 'Delete'),
+                  ),
+                if (!_isNew && widget.transaction!.wasReportedTwice)
+                  TextButton(
+                    onPressed: _saving ? null : _unmerge,
+                    child: Text('Split into ${widget.transaction!.sources.length}'),
                   ),
                 const Spacer(),
                 TextButton(

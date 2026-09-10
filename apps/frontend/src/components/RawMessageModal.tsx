@@ -23,8 +23,24 @@ export function RawMessageModal({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
-  const isEmail = transaction.source === "EMAIL";
-  const sourceLabel = transaction.source === "MANUAL" ? "Added by hand" : isEmail ? "Email" : "SMS";
+  // Older rows predate the per-message list, so fall back to the single
+  // message they carry at the top level.
+  const sources =
+    transaction.sources.length > 0
+      ? transaction.sources
+      : [
+          {
+            source: transaction.source,
+            sourceRef: null,
+            rawText: transaction.rawText,
+            receivedAt: transaction.occurredAt,
+          },
+        ];
+
+  function labelFor(source: string): string {
+    if (source === "MANUAL") return "Added by hand";
+    return source === "EMAIL" ? "Email" : "SMS";
+  }
 
   return (
     <div
@@ -37,18 +53,31 @@ export function RawMessageModal({
         <button className="modal-close" onClick={onClose} aria-label="Close">
           <Icon name="ic-x" />
         </button>
-        <h3>Original message</h3>
+        <h3>{sources.length > 1 ? "Original messages" : "Original message"}</h3>
         <div className="modal-sub">
-          <Icon name={isEmail ? "ic-mail" : "ic-message"} />
+          <Icon name="ic-receipt" />
           <span>
-            {sourceLabel} · {formatDateTime(transaction.occurredAt)}
+            {sources.length > 1
+              ? `This transaction was reported ${sources.length} times`
+              : `${labelFor(sources[0].source)} · ${formatDateTime(sources[0].receivedAt)}`}
           </span>
         </div>
-        <div className="raw-block">{transaction.rawText ?? "No original message stored for this transaction."}</div>
-        <div className="modal-footnote">
-          <Icon name="ic-pencil" />
-          Editing the merchant name from here is coming soon.
-        </div>
+
+        {sources.map((entry, i) => (
+          <div key={entry.sourceRef ?? `${entry.source}-${i}`} className="raw-source">
+            {sources.length > 1 && (
+              <div className="raw-source-head">
+                <Icon name={entry.source === "EMAIL" ? "ic-mail" : "ic-message"} />
+                <span>
+                  {labelFor(entry.source)} · {formatDateTime(entry.receivedAt)}
+                </span>
+              </div>
+            )}
+            <div className="raw-block">
+              {entry.rawText ?? "No original message stored for this transaction."}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
