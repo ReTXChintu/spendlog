@@ -148,34 +148,44 @@ jobs:
           TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/deploy_key -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" "set -e
-            cd $APP_DIR
 
-            # Checks out the released tag rather than pulling a branch, so
-            # the server runs exactly what was released even if main has
-            # moved on. Detached HEAD is expected here.
-            git fetch --tags --force origin
-            git checkout --detach '$TAG'
-            git --no-pager log -1 --oneline
+          # Piped in rather than passed as an argument so that \$ can mark
+          # what the server expands (its own HOME) as opposed to the runner.
+          ssh -i ~/.ssh/deploy_key -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" bash -s <<REMOTE
+          set -e
+          cd $APP_DIR
 
-            npm ci
-            npm run build
+          # Checks out the released tag rather than pulling a branch, so
+          # the server runs exactly what was released even if main has
+          # moved on. Detached HEAD is expected here.
+          git fetch --tags --force origin
+          git checkout --detach '$TAG'
+          git --no-pager log -1 --oneline
 
-            # pm2:restart needs the processes to already exist; pm2:start is
-            # startOrRestart, which covers a first deploy or a wiped daemon.
-            npm run pm2:restart || npm run pm2:start
-            npm run pm2:save
-            npm run pm2:status"
+          # Node is installed with nvm, which only reaches PATH through an
+          # interactive shell's profile — and a command sent over SSH runs
+          # with neither, so npm has to be found the same way the certbot
+          # deploy hook finds it.
+          export NVM_DIR="\${NVM_DIR:-\$HOME/.nvm}"
+          if [ -s "\$NVM_DIR/nvm.sh" ]; then
+            . "\$NVM_DIR/nvm.sh" > /dev/null 2>&1 || true
+          fi
+          if ! command -v npm > /dev/null 2>&1; then
+            echo "npm is not on PATH, and no nvm install was found at \$NVM_DIR." >&2
+            exit 1
+          fi
 
-      - name: Confirm the deployed version
-        env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
-          VPS_USER: ${{ secrets.VPS_USER }}
-          VPS_PORT: ${{ secrets.VPS_PORT }}
-        run: |
-          set -euo pipefail
-          ssh -i ~/.ssh/deploy_key -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" \
-            "cd $APP_DIR && node -p \"'deployed version: ' + require('./package.json').version\""
+          npm ci
+          npm run build
+
+          # pm2:restart needs the processes to already exist; pm2:start is
+          # startOrRestart, which covers a first deploy or a wiped daemon.
+          npm run pm2:restart || npm run pm2:start
+          npm run pm2:save
+          npm run pm2:status
+
+          node -p "'deployed version: ' + require('./package.json').version"
+          REMOTE
 
       - name: Clean up SSH key
         if: always()
