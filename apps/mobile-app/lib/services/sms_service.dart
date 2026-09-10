@@ -37,10 +37,18 @@ class SmsSyncResult {
 
 String _messageId(SmsMessage message) => '${message.address ?? 'unknown'}-${message.date ?? 0}';
 
+/// Whether there is anything worth sending. An inbox holds plenty that is
+/// not a bank alert, and an empty body cannot be parsed into anything.
+bool _isSendable(SmsMessage message) => (message.body ?? '').trim().isNotEmpty;
+
 Map<String, dynamic> _toPayload(SmsMessage message) => {
       'rawText': message.body ?? '',
-      'sender': message.address,
+      if (message.address != null) 'sender': message.address,
+      // .toUtc() matters: fromMillisecondsSinceEpoch returns a *local*
+      // DateTime, and Dart omits the timezone when serialising one, so the
+      // server had no way to know what instant was meant.
       'receivedAt': DateTime.fromMillisecondsSinceEpoch(message.date ?? DateTime.now().millisecondsSinceEpoch)
+          .toUtc()
           .toIso8601String(),
       'messageId': _messageId(message),
     };
@@ -52,6 +60,8 @@ Map<String, dynamic> _toPayload(SmsMessage message) => {
 @pragma('vm:entry-point')
 void backgroundSmsHandler(SmsMessage message) async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (!_isSendable(message)) return;
+
   final prefs = await SharedPreferences.getInstance();
   final token = prefs.getString(tokenStorageKey);
   if (token == null) return;
@@ -93,6 +103,7 @@ class SmsService {
   void startListening() {
     _telephony.listenIncomingSms(
       onNewMessage: (SmsMessage message) {
+        if (!_isSendable(message)) return;
         ApiClient.instance.post('/ingestion/sms', _toPayload(message)).catchError((_) {
           // Ignore failures here too — same reasoning as the background handler.
           return null;
@@ -110,11 +121,16 @@ class SmsService {
     final prefs = await SharedPreferences.getInstance();
     if (prefs.getBool(_backfillDoneKey) == true) return;
 
-    final messages = await _telephony.getInboxSms(
+    final messages = (await _telephony.getInboxSms(
       columns: [SmsColumn.ADDRESS, SmsColumn.BODY, SmsColumn.DATE],
       sortOrder: [OrderBy(SmsColumn.DATE, sort: Sort.DESC)],
-    );
+    ))
+        .where(_isSendable)
+        .toList();
 
+    // Only flagged as done once every batch has landed. It used to be set
+    // regardless, so a first run that failed was never retried and the
+    // whole history was lost with it.
     const batchSize = 100;
     for (var i = 0; i < messages.length; i += batchSize) {
       final batch = messages.sublist(i, i + batchSize > messages.length ? messages.length : i + batchSize);
@@ -154,15 +170,16 @@ class SmsService {
           .greaterThan((since - const Duration(minutes: 5).inMilliseconds).toString()),
       sortOrder: [OrderBy(SmsColumn.DATE, sort: Sort.DESC)],
     );
+    final sendable = messages.where(_isSendable).toList();
 
     var created = 0;
     var duplicates = 0;
     var ignored = 0;
 
     const batchSize = 100;
-    for (var i = 0; i < messages.length; i += batchSize) {
-      final end = i + batchSize > messages.length ? messages.length : i + batchSize;
-      final counts = await _postBatch(messages.sublist(i, end));
+    for (var i = 0; i < sendable.length; i += batchSize) {
+      final end = i + batchSize > sendable.length ? sendable.length : i + batchSize;
+      final counts = await _postBatch(sendable.sublist(i, end));
       created += counts.created;
       duplicates += counts.duplicates;
       ignored += counts.ignored;
@@ -173,7 +190,7 @@ class SmsService {
     await prefs.setInt(_lastSyncKey, DateTime.now().millisecondsSinceEpoch);
 
     return SmsSyncResult(
-      scanned: messages.length,
+      scanned: sendable.length,
       created: created,
       duplicates: duplicates,
       ignored: ignored,
