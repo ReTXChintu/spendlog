@@ -177,6 +177,19 @@ const categoryRuleSchema = new Schema<CategoryRuleDoc>(
 
 export const CategoryRule = model<CategoryRuleDoc>("CategoryRule", categoryRuleSchema);
 
+/**
+ * One message that reported this transaction. The same payment usually
+ * arrives twice — an SMS, then a bank email a few minutes later — and both
+ * are kept so the row can say what it was seen by, and so an over-eager
+ * merge can be taken apart again.
+ */
+export interface TransactionSourceEntry {
+  source: TransactionSource;
+  sourceRef?: string | null;
+  rawText?: string | null;
+  receivedAt: Date;
+}
+
 export interface TransactionDoc {
   _id: Types.ObjectId;
   userId: Types.ObjectId;
@@ -194,6 +207,12 @@ export interface TransactionDoc {
   isTransfer: boolean;
   pending: boolean;
   occurredAt: Date;
+  /// Every message that reported this transaction, in the order they
+  /// arrived. The top-level source/rawText/sourceRef mirror the first.
+  sources: TransactionSourceEntry[];
+  /// Whole transactions absorbed by a manual merge, kept verbatim so
+  /// unmerging restores them exactly rather than reconstructing a guess.
+  mergedFrom: Record<string, unknown>[];
   /// How much of amountMinor counts as money actually spent or received,
   /// and why it differs. Maintained by the hooks below, never set by hand.
   countedAmountMinor: number;
@@ -204,6 +223,21 @@ export interface TransactionDoc {
   createdAt: Date;
   updatedAt: Date;
 }
+
+const transactionSourceSchema = new Schema<TransactionSourceEntry>(
+  {
+    source: { type: String, enum: TRANSACTION_SOURCES, required: true },
+    sourceRef: { type: String, default: null },
+    rawText: { type: String, default: null },
+    receivedAt: { type: Date, required: true },
+  },
+  { _id: false }
+);
+
+// Absorbed transactions are kept verbatim, so the shape is deliberately
+// open: strict:false stores whatever fields the row happened to have,
+// which is what makes an unmerge exact rather than a reconstruction.
+const mergedSnapshotSchema = new Schema({}, { _id: false, strict: false });
 
 const transactionSchema = new Schema<TransactionDoc>(
   {
@@ -223,6 +257,8 @@ const transactionSchema = new Schema<TransactionDoc>(
     pending: { type: Boolean, default: false },
     occurredAt: { type: Date, required: true },
     editedAt: { type: Date, default: null },
+    sources: { type: [transactionSourceSchema], default: [] },
+    mergedFrom: { type: [mergedSnapshotSchema], default: [] },
     countedAmountMinor: { type: Number, default: 0 },
     countedReason: { type: String, enum: COUNTED_REASONS, default: "FULL" },
   },
@@ -235,6 +271,18 @@ const transactionSchema = new Schema<TransactionDoc>(
 // document. Any new write path has to go through one of these.
 transactionSchema.pre("save", function (next) {
   Object.assign(this, resolveCountedAmount(this));
+
+  // A row written before it had a sources list, or created by hand, still
+  // needs one entry so the clients have a single shape to read.
+  if (this.sources.length === 0) {
+    this.sources.push({
+      source: this.source,
+      sourceRef: this.sourceRef ?? null,
+      rawText: this.rawText ?? null,
+      receivedAt: this.createdAt ?? this.occurredAt,
+    });
+  }
+
   next();
 });
 

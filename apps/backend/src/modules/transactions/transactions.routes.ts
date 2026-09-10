@@ -3,7 +3,8 @@ import { FilterQuery } from "mongoose";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
-import { Account, Transaction, TransactionDoc } from "../../models";
+import { Account, Transaction, TransactionDoc, TransactionSourceEntry } from "../../models";
+import { ingestRawMessage } from "../../parsing/ingest";
 import { TRANSACTION_TYPES } from "../../types";
 
 export const transactionsRouter = Router();
@@ -249,3 +250,122 @@ transactionsRouter.delete("/:id", validObjectIdParam("id"), async (req, res) => 
 
   res.status(204).end();
 });
+
+const OBJECT_ID = /^[0-9a-fA-F]{24}$/;
+
+const mergeSchema = z.object({
+  /** The transactions to absorb. They stop existing on their own. */
+  sourceIds: z.array(z.string().regex(OBJECT_ID)).min(1).max(10),
+});
+
+/** Whether two source entries describe the same message. */
+function isSameMessage(a: TransactionSourceEntry, b: TransactionSourceEntry): boolean {
+  if (a.sourceRef && b.sourceRef) return a.sourceRef === b.sourceRef;
+  return a.source === b.source && new Date(a.receivedAt).getTime() === new Date(b.receivedAt).getTime();
+}
+
+// POST /transactions/:id/merge — for the same payment recorded twice when
+// automatic dedup didn't spot it: the bank's email quoted a different
+// amount because it included a fee, or arrived outside the time window.
+transactionsRouter.post("/:id/merge", validObjectIdParam("id"), async (req, res) => {
+  const parsed = mergeSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  if (parsed.data.sourceIds.includes(req.params.id)) {
+    return res.status(400).json({ error: "A transaction cannot be merged into itself" });
+  }
+
+  const userId = currentUserId(req);
+  const target = await Transaction.findOne({ _id: req.params.id, userId });
+  if (!target) return res.status(404).json({ error: "Not found" });
+
+  const sources = await Transaction.find({ _id: { $in: parsed.data.sourceIds }, userId });
+  if (sources.length !== parsed.data.sourceIds.length) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  for (const source of sources) {
+    for (const entry of source.sources) {
+      if (!target.sources.some((existing) => isSameMessage(existing, entry))) {
+        target.sources.push(entry);
+      }
+    }
+
+    // Gaps only. Whatever the surviving row already says is the answer,
+    // and it can be corrected by hand afterwards either way.
+    if (!target.merchant && source.merchant) target.merchant = source.merchant;
+    if (!target.accountId && source.accountId) target.accountId = source.accountId;
+    if (!target.categoryId && source.categoryId) target.categoryId = source.categoryId;
+    if (!target.note && source.note) target.note = source.note;
+
+    // Verbatim, so unmerging restores the row rather than approximating it.
+    target.mergedFrom.push(source.toObject() as unknown as Record<string, unknown>);
+    await source.deleteOne();
+  }
+
+  await target.save();
+  await target.populate(["category", "account"]);
+
+  res.json(target);
+});
+
+// POST /transactions/:id/unmerge — splits a row back into the separate
+// transactions it was made from.
+//
+// Two kinds of merge end up here. A manual one left a verbatim snapshot,
+// which is restored as it was. Automatic dedup never stored the second
+// message as a row at all, so those are rebuilt from the message text —
+// which is the case that matters, since dedup pairing two genuinely
+// different payments of the same amount is exactly why this exists.
+transactionsRouter.post("/:id/unmerge", validObjectIdParam("id"), async (req, res) => {
+  const userId = currentUserId(req);
+  const target = await Transaction.findOne({ _id: req.params.id, userId });
+  if (!target) return res.status(404).json({ error: "Not found" });
+
+  if (target.sources.length < 2 && target.mergedFrom.length === 0) {
+    return res.status(400).json({ error: "This transaction was only ever reported once" });
+  }
+
+  const snapshots = target.mergedFrom as Record<string, unknown>[];
+  const restored: unknown[] = [];
+
+  // Anything a snapshot accounted for leaves with it.
+  const claimed = new Set<string>();
+  for (const snapshot of snapshots) {
+    const entries = (snapshot.sources as TransactionSourceEntry[] | undefined) ?? [];
+    for (const entry of entries) claimed.add(sourceKey(entry));
+
+    const { _id, ...rest } = snapshot;
+    const recreated = await Transaction.create({ ...rest, _id, userId });
+    restored.push(recreated);
+  }
+
+  // The first entry is what the surviving row keeps; every other one that
+  // no snapshot claimed becomes a transaction of its own.
+  const [primary, ...others] = target.sources;
+  for (const entry of others) {
+    if (claimed.has(sourceKey(entry))) continue;
+    if (!entry.rawText) continue;
+
+    const result = await ingestRawMessage({
+      userId,
+      rawText: entry.rawText,
+      source: entry.source,
+      // Deliberately dropped: reusing it would let dedup find the row this
+      // message was just split out of and merge it straight back in.
+      sourceRef: null,
+      receivedAt: new Date(entry.receivedAt),
+    });
+    if (result.transaction) restored.push(result.transaction);
+  }
+
+  target.sources = primary ? [primary] : [];
+  target.mergedFrom = [];
+  await target.save();
+  await target.populate(["category", "account"]);
+
+  res.json({ transaction: target, restoredCount: restored.length });
+});
+
+function sourceKey(entry: TransactionSourceEntry): string {
+  return entry.sourceRef ?? `${entry.source}:${new Date(entry.receivedAt).getTime()}`;
+}

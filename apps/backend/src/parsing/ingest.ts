@@ -11,6 +11,15 @@ export interface IngestResult {
   transaction: HydratedDocument<TransactionDoc> | null;
 }
 
+/** Whether two source entries describe the same message. */
+function isSameMessage(
+  a: { source: string; sourceRef?: string | null; receivedAt: Date },
+  b: { source: string; sourceRef?: string | null; receivedAt: Date }
+): boolean {
+  if (a.sourceRef && b.sourceRef) return a.sourceRef === b.sourceRef;
+  return a.source === b.source && a.receivedAt.getTime() === b.receivedAt.getTime();
+}
+
 /**
  * Single entry point for turning a raw SMS or email snippet into a stored,
  * categorized transaction. Used by both the SMS ingestion endpoint (mobile
@@ -40,6 +49,40 @@ export async function ingestRawMessage(params: {
     sourceRef: params.sourceRef,
   });
   if (duplicate) {
+    // The second message is kept rather than thrown away. It is evidence
+    // the transaction really happened, it is what lets the row show it was
+    // seen twice, and a bank email routinely names the merchant better
+    // than the SMS that arrived first.
+    const entry = {
+      source: params.source,
+      sourceRef: params.sourceRef,
+      rawText: params.rawText,
+      receivedAt: params.receivedAt,
+    };
+
+    const alreadyKnown = duplicate.sources.some((existing) => isSameMessage(existing, entry));
+    if (!alreadyKnown) {
+      duplicate.sources.push(entry);
+
+      // Only ever fills gaps, and only while nobody has corrected the row
+      // by hand. A person's answer outranks a second parse of the same
+      // event, and a value already parsed is not necessarily worse than
+      // the one arriving now.
+      if (!duplicate.editedAt) {
+        if (!duplicate.merchant && parsed.merchant) duplicate.merchant = parsed.merchant;
+        if (!duplicate.accountId && accountId) duplicate.accountId = accountId;
+        if (!duplicate.categoryId) {
+          duplicate.categoryId = await categorizeTransaction({
+            userId: params.userId,
+            merchant: duplicate.merchant ?? null,
+            rawText: params.rawText,
+          });
+        }
+      }
+
+      await duplicate.save();
+    }
+
     return { status: "duplicate", transaction: duplicate };
   }
 
@@ -61,6 +104,14 @@ export async function ingestRawMessage(params: {
     source: params.source,
     sourceRef: params.sourceRef,
     occurredAt,
+    sources: [
+      {
+        source: params.source,
+        sourceRef: params.sourceRef,
+        rawText: params.rawText,
+        receivedAt: params.receivedAt,
+      },
+    ],
   });
 
   await detectSelfTransfer(transaction);
