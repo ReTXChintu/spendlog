@@ -22,7 +22,7 @@ val hasReleaseKeystore =
     !releaseStorePath.isNullOrBlank() && file(releaseStorePath).exists()
 
 android {
-    namespace = "com.example.spendlog"
+    namespace = "io.github.retxchintu.spendlog"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -32,7 +32,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.spendlog"
+        applicationId = "io.github.retxchintu.spendlog"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         // Uses the version code from pubspec.yaml, which scripts/stamp-version.js

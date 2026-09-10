@@ -33,6 +33,9 @@ apps/mobile-app/.flutter-plugins-dependencies
 apps/mobile-app/build/
 apps/mobile-app/.packages
 apps/mobile-app/android/local.properties
+apps/mobile-app/android/.gradle/
+# Kotlin 2.x build daemon state, written next to the Gradle project.
+apps/mobile-app/android/.kotlin/
 apps/mobile-app/**/generated_plugin_registrant.dart
 
 # Editors / OS

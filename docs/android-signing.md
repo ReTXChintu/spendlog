@@ -49,8 +49,8 @@ in the same project as the existing web client:
 
 **Create credentials → OAuth client ID → Android**
 
-- **Package name** — the `applicationId` in
-  `apps/mobile-app/android/app/build.gradle.kts`
+- **Package name** — `io.github.retxchintu.spendlog` (the `applicationId`
+  in `apps/mobile-app/android/app/build.gradle.kts`)
 - **SHA-1 certificate fingerprint** — from step 2
 
 No client id from this goes into the app. Its only job is to tell Google
