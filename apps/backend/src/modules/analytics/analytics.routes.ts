@@ -123,3 +123,55 @@ analyticsRouter.get("/trend", async (req, res) => {
 
   res.json(months.map((month) => byMonth.get(month)!));
 });
+
+// GET /analytics/owed — the running balance with everyone the user splits
+// bills with.
+//
+// Deliberately a pool rather than a ledger of who owes what. Splitwise
+// nets across many bills, months and people, so insisting each settlement
+// be matched to specific splits would be laborious and still wrong. A
+// single figure to eyeball against the Splitwise app is honest about its
+// own precision, and any drift is itself worth seeing.
+analyticsRouter.get("/owed", async (req, res) => {
+  const userId = currentUserId(req);
+
+  const [lent, settled] = await Promise.all([
+    // What was paid on someone else's behalf: the part of a split bill
+    // that was never the user's own spending.
+    Transaction.aggregate<{ _id: null; amountMinor: number; count: number }>([
+      { $match: { userId, "split.myShareMinor": { $ne: null }, type: "DEBIT" } },
+      {
+        $group: {
+          _id: null,
+          amountMinor: { $sum: { $subtract: ["$amountMinor", "$split.myShareMinor"] } },
+          count: { $sum: 1 },
+        },
+      },
+    ]),
+    Transaction.aggregate<{ _id: string; amountMinor: number }>([
+      { $match: { userId, isSettlement: true } },
+      { $group: { _id: "$type", amountMinor: { $sum: "$amountMinor" } } },
+    ]),
+  ]);
+
+  const lentMinor = lent[0]?.amountMinor ?? 0;
+  // Money in settles what was owed to the user; money out settles what the
+  // user owed, which moves the balance the other way.
+  const receivedMinor = settled.find((s) => s._id === "CREDIT")?.amountMinor ?? 0;
+  const paidMinor = settled.find((s) => s._id === "DEBIT")?.amountMinor ?? 0;
+
+  const splits = await Transaction.find({ userId, "split.myShareMinor": { $ne: null }, type: "DEBIT" })
+    .sort({ occurredAt: -1 })
+    .limit(50)
+    .populate("category")
+    .populate("account");
+
+  res.json({
+    balanceMinor: lentMinor - receivedMinor + paidMinor,
+    lentMinor,
+    settledInMinor: receivedMinor,
+    settledOutMinor: paidMinor,
+    splitCount: lent[0]?.count ?? 0,
+    splits,
+  });
+});

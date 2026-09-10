@@ -169,6 +169,16 @@ const createTransactionSchema = z.object({
   accountId: z.string().nullable().optional(),
   occurredAt: z.coerce.date(),
   isTransfer: z.boolean().optional(),
+  // Zero is meaningful: someone else's bill paid from the user's card, all
+  // of which is owed back. null clears the split entirely.
+  split: z
+    .object({
+      myShareMinor: z.number().int().nonnegative(),
+      groupLabel: z.string().max(60).nullable().optional(),
+    })
+    .nullable()
+    .optional(),
+  isSettlement: z.boolean().optional(),
 });
 
 // POST /transactions — manual entry (cash spends, or anything the auto
@@ -195,6 +205,8 @@ transactionsRouter.post("/", async (req, res) => {
     accountId: parsed.data.accountId ?? null,
     occurredAt: parsed.data.occurredAt,
     isTransfer: parsed.data.isTransfer ?? false,
+    split: parsed.data.split ?? null,
+    isSettlement: parsed.data.isSettlement ?? false,
     source: "MANUAL",
   });
 
@@ -215,6 +227,16 @@ const updateTransactionSchema = z.object({
   accountId: z.string().nullable().optional(),
   occurredAt: z.coerce.date().optional(),
   isTransfer: z.boolean().optional(),
+  // Zero is meaningful: someone else's bill paid from the user's card, all
+  // of which is owed back. null clears the split entirely.
+  split: z
+    .object({
+      myShareMinor: z.number().int().nonnegative(),
+      groupLabel: z.string().max(60).nullable().optional(),
+    })
+    .nullable()
+    .optional(),
+  isSettlement: z.boolean().optional(),
   pending: z.boolean().optional(),
 });
 

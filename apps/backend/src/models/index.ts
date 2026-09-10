@@ -190,6 +190,19 @@ export interface TransactionSourceEntry {
   receivedAt: Date;
 }
 
+/**
+ * A bill where only part of the money was really the user's.
+ *
+ * There is no "who owes what" ledger here on purpose: for most rows "my
+ * share was 400" is the whole story, and Splitwise already tracks the rest
+ * far better than a second half-hearted copy would.
+ */
+export interface TransactionSplit {
+  myShareMinor: number;
+  /** Free text, e.g. "Goa trip", for recognising a run of them later. */
+  groupLabel?: string | null;
+}
+
 export interface TransactionDoc {
   _id: Types.ObjectId;
   userId: Types.ObjectId;
@@ -205,6 +218,13 @@ export interface TransactionDoc {
   sourceRef?: string | null; // provider message id, for dedup + audit trail
   dedupeKey?: string | null;
   isTransfer: boolean;
+  /// Set when only part of this bill was the user's own spending. The rest
+  /// is money owed back, and countedAmountMinor drops to the share.
+  split?: TransactionSplit | null;
+  /// Repaying, or being repaid by, someone the user has split bills with.
+  /// It moves real money but is not spending or income — the original
+  /// split already accounted for it.
+  isSettlement: boolean;
   pending: boolean;
   occurredAt: Date;
   /// Every message that reported this transaction, in the order they
@@ -223,6 +243,14 @@ export interface TransactionDoc {
   createdAt: Date;
   updatedAt: Date;
 }
+
+const transactionSplitSchema = new Schema<TransactionSplit>(
+  {
+    myShareMinor: { type: Number, required: true, min: 0 },
+    groupLabel: { type: String, default: null },
+  },
+  { _id: false }
+);
 
 const transactionSourceSchema = new Schema<TransactionSourceEntry>(
   {
@@ -254,6 +282,8 @@ const transactionSchema = new Schema<TransactionDoc>(
     sourceRef: { type: String, default: null },
     dedupeKey: { type: String, default: null },
     isTransfer: { type: Boolean, default: false },
+    split: { type: transactionSplitSchema, default: null },
+    isSettlement: { type: Boolean, default: false },
     pending: { type: Boolean, default: false },
     occurredAt: { type: Date, required: true },
     editedAt: { type: Date, default: null },
