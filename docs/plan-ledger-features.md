@@ -211,6 +211,8 @@ precision, and drift is itself informative.
 Surfaced on Analytics as "Owed to you: ₹X", with a list of unsettled
 splits behind it.
 
+Settled: pool balance, entered by hand. No API integration for now.
+
 ### Splitwise API — deferred, not designed out
 
 An integration (OAuth, pull expenses, match to transactions) is a project
@@ -257,16 +259,16 @@ like any other row.
 
 ### Interest
 
-Let the user enter **either** the monthly amount (it's on the statement —
-always right, no arithmetic to disagree with) **or** a rate, computing:
+Both, with the entered amount winning. The rate calculator is a
+convenience for when the statement isn't to hand; the figure typed off the
+statement is authoritative, because Indian card EMIs are flat-rate with
+GST on the interest and a computed figure often misses by a few rupees.
+The form offers the calculator, fills the monthly amount from it, and lets
+that be overwritten — an overwritten value is never recomputed.
 
 ```
 monthly = P × r × (1+r)^n / ((1+r)^n − 1)      r = annual / 12 / 100
 ```
-
-Indian card EMIs are usually flat-rate with GST on the interest, so a
-computed figure often misses by a few rupees. The entered amount wins when
-both are present.
 
 Edge cases to handle explicitly: no-cost EMI (discount offsets interest),
 one-off processing fee (a real transaction, counts in full), foreclosure
@@ -283,7 +285,8 @@ one-off processing fee (a real transaction, counts in full), foreclosure
 
 ## Order of work
 
-Only phase 0 is a hard prerequisite, and only for 3 and 4.
+Settled: **0 → 1 → 2 → 3 → 4**. Only phase 0 is a hard prerequisite, and
+only for 3 and 4.
 
 | Phase | What | Depends on | Why here |
 | --- | --- | --- | --- |
