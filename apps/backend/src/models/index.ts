@@ -57,6 +57,13 @@ userSchema.index(
 
 export const User = model<UserDoc>("User", userSchema);
 
+/** How a bank names itself in one message format. */
+export interface AccountAlias {
+  bankName: string;
+  last4?: string | null;
+  accountType: AccountType;
+}
+
 export interface AccountDoc {
   _id: Types.ObjectId;
   userId: Types.ObjectId;
@@ -64,9 +71,32 @@ export interface AccountDoc {
   last4?: string | null;
   accountType: AccountType;
   nickname?: string | null;
+  /// Other {bankName, last4, accountType} tuples that mean this same real
+  /// account. One bank writes "HDFC" in an SMS and "HDFC Bank" in an email,
+  /// which would otherwise be two accounts; merging moves the loser's
+  /// tuple in here so the next message resolves to the survivor instead of
+  /// recreating it.
+  aliases: AccountAlias[];
+  issuer?: string | null;
+  cardNetwork?: string | null;
+  creditLimitMinor?: number | null;
+  /// Day of month the card statement is generated, and the day it is due.
+  statementDay?: number | null;
+  dueDay?: number | null;
+  isActive: boolean;
+  color?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
+
+const accountAliasSchema = new Schema<AccountAlias>(
+  {
+    bankName: { type: String, required: true },
+    last4: { type: String, default: null },
+    accountType: { type: String, enum: ACCOUNT_TYPES, required: true },
+  },
+  { _id: false }
+);
 
 const accountSchema = new Schema<AccountDoc>(
   {
@@ -75,6 +105,14 @@ const accountSchema = new Schema<AccountDoc>(
     last4: { type: String, default: null },
     accountType: { type: String, enum: ACCOUNT_TYPES, required: true },
     nickname: { type: String, default: null },
+    aliases: { type: [accountAliasSchema], default: [] },
+    issuer: { type: String, default: null },
+    cardNetwork: { type: String, default: null },
+    creditLimitMinor: { type: Number, default: null },
+    statementDay: { type: Number, default: null, min: 1, max: 31 },
+    dueDay: { type: Number, default: null, min: 1, max: 31 },
+    isActive: { type: Boolean, default: true },
+    color: { type: String, default: null },
   },
   { timestamps: true, ...serialization }
 );
@@ -82,6 +120,10 @@ const accountSchema = new Schema<AccountDoc>(
 // One row per real-world account, so repeated messages resolve to the same
 // Account and self-transfer detection can tell two accounts apart.
 accountSchema.index({ userId: 1, bankName: 1, last4: 1, accountType: 1 }, { unique: true });
+
+// Resolving an incoming message checks the aliases as well as the primary
+// tuple, so that lookup needs an index of its own.
+accountSchema.index({ userId: 1, "aliases.bankName": 1, "aliases.last4": 1, "aliases.accountType": 1 });
 
 export const Account = model<AccountDoc>("Account", accountSchema);
 
