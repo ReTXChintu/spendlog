@@ -8,6 +8,32 @@ import 'api_client.dart';
 
 const String _backfillDoneKey = 'spendlog_sms_backfill_done';
 const String _permissionGrantedKey = 'spendlog_sms_permission_granted';
+const String _lastSyncKey = 'spendlog_sms_last_sync';
+
+/// How far back a manual sync looks when it has nothing better to go on.
+/// Only reached if the stored timestamp is missing, since the first-run
+/// backfill already covers everything older.
+const Duration _defaultSyncWindow = Duration(days: 30);
+
+/// What a manual sync did, so Settings can say something specific rather
+/// than just "done".
+class SmsSyncResult {
+  final int scanned;
+  final int created;
+  final int duplicates;
+  final int ignored;
+
+  const SmsSyncResult({
+    required this.scanned,
+    required this.created,
+    required this.duplicates,
+    required this.ignored,
+  });
+
+  /// Messages that were already known — the normal case when the automatic
+  /// capture is working.
+  bool get foundNothingNew => created == 0;
+}
 
 String _messageId(SmsMessage message) => '${message.address ?? 'unknown'}-${message.date ?? 0}';
 
@@ -96,20 +122,92 @@ class SmsService {
     }
 
     await prefs.setBool(_backfillDoneKey, true);
+    // The whole inbox has just been covered, so a later manual sync only
+    // has to look at what arrives from here on.
+    await prefs.setInt(_lastSyncKey, DateTime.now().millisecondsSinceEpoch);
   }
 
-  Future<void> _postBatch(List<SmsMessage> batch) async {
+  /// When the last manual sync finished, for the Settings card.
+  Future<DateTime?> lastSyncedAt() async {
+    final prefs = await SharedPreferences.getInstance();
+    final millis = prefs.getInt(_lastSyncKey);
+    return millis == null ? null : DateTime.fromMillisecondsSinceEpoch(millis);
+  }
+
+  /// Re-reads recent messages and uploads them, for when the automatic
+  /// capture missed something — the phone was off, the app was killed
+  /// mid-delivery, or the request failed while offline.
+  ///
+  /// Only messages since the last sync are read, so this stays quick on a
+  /// busy inbox. Re-uploading is harmless anyway: the backend dedupes on
+  /// messageId, which is why this can be pressed as often as you like.
+  Future<SmsSyncResult> syncNow() async {
+    final prefs = await SharedPreferences.getInstance();
+    final since = prefs.getInt(_lastSyncKey) ??
+        DateTime.now().subtract(_defaultSyncWindow).millisecondsSinceEpoch;
+
+    final messages = await _telephony.getInboxSms(
+      columns: [SmsColumn.ADDRESS, SmsColumn.BODY, SmsColumn.DATE],
+      // A little overlap rather than an exact boundary, so a message that
+      // arrived during the previous sync cannot fall between two windows.
+      filter: SmsFilter.where(SmsColumn.DATE)
+          .greaterThan((since - const Duration(minutes: 5).inMilliseconds).toString()),
+      sortOrder: [OrderBy(SmsColumn.DATE, sort: Sort.DESC)],
+    );
+
+    var created = 0;
+    var duplicates = 0;
+    var ignored = 0;
+
+    const batchSize = 100;
+    for (var i = 0; i < messages.length; i += batchSize) {
+      final end = i + batchSize > messages.length ? messages.length : i + batchSize;
+      final counts = await _postBatch(messages.sublist(i, end));
+      created += counts.created;
+      duplicates += counts.duplicates;
+      ignored += counts.ignored;
+    }
+
+    // Only recorded on success, so a failed sync re-covers the same window
+    // next time instead of skipping past it.
+    await prefs.setInt(_lastSyncKey, DateTime.now().millisecondsSinceEpoch);
+
+    return SmsSyncResult(
+      scanned: messages.length,
+      created: created,
+      duplicates: duplicates,
+      ignored: ignored,
+    );
+  }
+
+  Future<SmsSyncResult> _postBatch(List<SmsMessage> batch) async {
+    if (batch.isEmpty) {
+      return const SmsSyncResult(scanned: 0, created: 0, duplicates: 0, ignored: 0);
+    }
+
     final payload = batch.map(_toPayload).toList();
     // The generic ApiClient.post only accepts a Map body; batch ingestion
     // needs a raw JSON array, so this hits the endpoint directly.
     final token = await ApiClient.getToken();
-    await http.post(
+    final res = await http.post(
       Uri.parse('$apiBaseUrl/ingestion/sms/batch'),
       headers: {
         'Content-Type': 'application/json',
         if (token != null) 'Authorization': 'Bearer $token',
       },
       body: jsonEncode(payload),
+    );
+
+    if (res.statusCode >= 400) {
+      throw Exception('The server rejected the batch (${res.statusCode}).');
+    }
+
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    return SmsSyncResult(
+      scanned: batch.length,
+      created: body['created'] as int? ?? 0,
+      duplicates: body['duplicates'] as int? ?? 0,
+      ignored: body['ignored'] as int? ?? 0,
     );
   }
 }

@@ -1,4 +1,6 @@
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
+import '../services/sms_service.dart';
 import '../theme.dart';
 import 'analytics_screen.dart';
 import 'settings_screen.dart';
@@ -15,6 +17,23 @@ class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
   static const _titles = ['Transactions', 'Analytics', 'Settings'];
+
+  @override
+  void initState() {
+    super.initState();
+    _resumeSmsCapture();
+  }
+
+  /// The plugin only delivers a foreground SMS to a channel registered in
+  /// the running process, and that registration does not survive a restart.
+  /// Without this, a message arriving while the app was open was dropped —
+  /// and since the backfill runs only once, nothing went back for it.
+  Future<void> _resumeSmsCapture() async {
+    if (!Platform.isAndroid) return;
+    if (await SmsService.instance.hasPermission()) {
+      SmsService.instance.startListening();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

@@ -7,6 +7,7 @@ import '../services/auth_service.dart';
 import '../services/sms_service.dart';
 import '../services/update_service.dart';
 import '../theme.dart';
+import '../utils/format.dart';
 import '../version.dart';
 import 'login_screen.dart';
 import 'permission_screen.dart';
@@ -27,6 +28,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _latestVersion;
   bool _checkingUpdate = false;
 
+  bool _smsSyncing = false;
+  DateTime? _smsLastSynced;
+
   @override
   void initState() {
     super.initState();
@@ -36,7 +40,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _refreshSmsStatus() async {
     final granted = await SmsService.instance.hasPermission();
-    if (mounted) setState(() => _smsGranted = granted);
+    final lastSynced = await SmsService.instance.lastSyncedAt();
+    if (mounted) {
+      setState(() {
+        _smsGranted = granted;
+        _smsLastSynced = lastSynced;
+      });
+    }
+  }
+
+  /// Re-reads recent messages by hand. The automatic capture can miss one —
+  /// the phone was off, the app was killed mid-delivery, the request failed
+  /// offline — and nothing else would ever go back for it.
+  Future<void> _syncSms() async {
+    setState(() => _smsSyncing = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final result = await SmsService.instance.syncNow();
+      await _refreshSmsStatus();
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            result.foundNothingNew
+                ? 'Checked ${result.scanned} messages — nothing new.'
+                : 'Imported ${result.created} '
+                    '${result.created == 1 ? 'transaction' : 'transactions'} '
+                    'from ${result.scanned} messages.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(content: Text("Couldn't sync messages: $e")));
+    } finally {
+      if (mounted) setState(() => _smsSyncing = false);
+    }
   }
 
   bool get _updateAvailable => _latestVersion != null && _latestVersion!.isNotEmpty;
@@ -146,9 +185,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'SMS import',
             subtitle: 'Android only',
             child: _smsGranted
-                ? const _CardBody(
-                    pill: _StatusPill(label: 'Granted', on: true),
-                    text: 'Reading bank and UPI messages as they arrive.',
+                ? _CardBody(
+                    pill: const _StatusPill(label: 'Granted', on: true),
+                    text: 'Reading bank and UPI messages as they arrive.\n'
+                        '${_smsLastSynced != null ? 'Last manual sync ${formatDateTime(_smsLastSynced!)}' : 'No manual sync yet.'}',
+                    actions: [
+                      OutlinedButton(
+                        onPressed: _smsSyncing ? null : _syncSms,
+                        child: Text(_smsSyncing ? 'Syncing…' : 'Sync now'),
+                      ),
+                    ],
                   )
                 : _CardBody(
                     pill: const _StatusPill(label: 'Not granted', on: false),
