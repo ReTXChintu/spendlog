@@ -60,13 +60,28 @@ backend exchanges the returned auth code with that client's secret.
 
 ### 4. Add the CI secrets
 
-`base64 -w0 spendlog-release.jks` (on macOS: `base64 -i spendlog-release.jks`)
-gives the value for the first one. In **Settings → Secrets and variables →
-Actions**:
+The keystore is a binary file, so it travels as base64 on a single line.
+
+```powershell
+# Windows PowerShell — straight onto the clipboard
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD\spendlog-release.jks")) | Set-Clipboard
+```
+
+```bash
+# Linux / Git Bash
+base64 -w0 spendlog-release.jks
+# macOS
+base64 -i spendlog-release.jks
+```
+
+Not `certutil -encode`: it wraps at 64 columns and adds BEGIN/END lines,
+neither of which the workflow can decode.
+
+Then, in **Settings → Secrets and variables → Actions**:
 
 | Secret | Value |
 | --- | --- |
-| `ANDROID_KEYSTORE_BASE64` | the base64 of `spendlog-release.jks` |
+| `ANDROID_KEYSTORE_BASE64` | the base64 from above (CI only — a local build uses `ANDROID_KEYSTORE_PATH` instead) |
 | `ANDROID_KEYSTORE_PASSWORD` | the store password |
 | `ANDROID_KEY_ALIAS` | `spendlog` |
 | `ANDROID_KEY_PASSWORD` | the key password |
