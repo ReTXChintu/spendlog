@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
-import { Account, Category, Transaction, TransactionType } from "../types";
+import { Account, Category, Transaction, TransactionType, accountLabel } from "../types";
 import { Icon } from "./Icon";
 
 /** Splits an ISO instant into the two values the date/time inputs want. */
@@ -224,12 +224,13 @@ export function EditTransactionModal({
               onChange={(e) => setAccountId(e.target.value)}
             >
               <option value="">Not set</option>
-              {accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.bankName}
-                  {account.last4 ? ` ••${account.last4}` : ""}
-                </option>
-              ))}
+              {accounts
+                .filter((account) => account.isActive || account.id === accountId)
+                .map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {accountLabel(account)}
+                  </option>
+                ))}
             </select>
           </div>
 

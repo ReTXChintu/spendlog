@@ -16,19 +16,77 @@ class Category {
       );
 }
 
+/// A spelling of an account that a bank uses in one of its message formats.
+class AccountAlias {
+  final String bankName;
+  final String? last4;
+  final String accountType;
+
+  AccountAlias({required this.bankName, this.last4, required this.accountType});
+
+  factory AccountAlias.fromJson(Map<String, dynamic> json) => AccountAlias(
+        bankName: json['bankName'] as String,
+        last4: json['last4'] as String?,
+        accountType: json['accountType'] as String,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'bankName': bankName,
+        'last4': last4,
+        'accountType': accountType,
+      };
+}
+
 class Account {
   final String id;
   final String bankName;
   final String? last4;
   final String accountType;
+  final String? nickname;
+  final List<AccountAlias> aliases;
+  final String? issuer;
+  final String? cardNetwork;
+  final int? creditLimitMinor;
+  final int? statementDay;
+  final int? dueDay;
+  final bool isActive;
 
-  Account({required this.id, required this.bankName, this.last4, required this.accountType});
+  Account({
+    required this.id,
+    required this.bankName,
+    this.last4,
+    required this.accountType,
+    this.nickname,
+    this.aliases = const [],
+    this.issuer,
+    this.cardNetwork,
+    this.creditLimitMinor,
+    this.statementDay,
+    this.dueDay,
+    this.isActive = true,
+  });
+
+  /// What to call it on screen: the name given to it, else the bank's own.
+  String get label {
+    final name = (nickname?.trim().isNotEmpty ?? false) ? nickname!.trim() : bankName;
+    return last4 != null ? '$name ••$last4' : name;
+  }
 
   factory Account.fromJson(Map<String, dynamic> json) => Account(
         id: json['id'] as String,
         bankName: json['bankName'] as String,
         last4: json['last4'] as String?,
         accountType: json['accountType'] as String,
+        nickname: json['nickname'] as String?,
+        aliases: (json['aliases'] as List<dynamic>? ?? [])
+            .map((a) => AccountAlias.fromJson(a as Map<String, dynamic>))
+            .toList(),
+        issuer: json['issuer'] as String?,
+        cardNetwork: json['cardNetwork'] as String?,
+        creditLimitMinor: json['creditLimitMinor'] as int?,
+        statementDay: json['statementDay'] as int?,
+        dueDay: json['dueDay'] as int?,
+        isActive: json['isActive'] as bool? ?? true,
       );
 }
 

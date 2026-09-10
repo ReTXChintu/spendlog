@@ -6,15 +6,7 @@ import { RawMessageModal } from "../components/RawMessageModal";
 import { TransactionRow } from "../components/TransactionRow";
 import { api } from "../lib/api";
 import { currentMonth, formatDayLabel, formatMoney } from "../lib/format";
-import {
-  Account,
-  AnalyticsSummary,
-  Category,
-  DayGroup,
-  EmailConnectionStatus,
-  Transaction,
-  TransactionType,
-} from "../types";
+import { Account, AnalyticsSummary, Category, DayGroup, EmailConnectionStatus, Transaction, TransactionType, accountLabel } from "../types";
 
 interface ByDayResponse {
   days: DayGroup[];
@@ -250,12 +242,13 @@ export function TransactionsPage() {
               onChange={(e) => changeFilter(setAccountId)(e.target.value)}
             >
               <option value="">All accounts</option>
-              {accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.bankName}
-                  {account.last4 ? ` ••${account.last4}` : ""}
-                </option>
-              ))}
+              {accounts
+                .filter((account) => account.isActive || account.id === accountId)
+                .map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {accountLabel(account)}
+                  </option>
+                ))}
             </select>
           </div>
 

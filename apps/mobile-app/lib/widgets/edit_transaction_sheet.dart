@@ -304,7 +304,7 @@ class _EditSheetState extends State<_EditSheet> {
                     (account) => DropdownMenuItem<String?>(
                       value: account.id,
                       child: Text(
-                        '${account.bankName}${account.last4 != null ? ' ••${account.last4}' : ''}',
+                        account.label,
                       ),
                     ),
                   ),

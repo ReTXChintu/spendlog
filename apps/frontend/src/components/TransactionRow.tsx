@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { formatMoney, formatTime } from "../lib/format";
-import { Category, Transaction } from "../types";
+import { Category, Transaction, accountLabel } from "../types";
 import { CategoryPopover } from "./CategoryPopover";
 import { Icon } from "./Icon";
 import { RememberBanner } from "./RememberBanner";
@@ -39,7 +39,7 @@ export function TransactionRow({
   }
 
   const meta = [
-    account ? `${account.bankName}${account.last4 ? ` ••${account.last4}` : ""}` : null,
+    account ? accountLabel(account) : null,
     account?.accountType === "CARD" ? "Card" : account ? "Bank" : null,
     formatTime(transaction.occurredAt),
   ]

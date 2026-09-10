@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { AccountModal } from "../components/AccountModal";
 import { Icon } from "../components/Icon";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { EmailConnectionStatus } from "../types";
+import { Account, EmailConnectionStatus, accountLabel } from "../types";
 
 export function SettingsPage() {
   const { user, logout } = useAuth();
   const [connections, setConnections] = useState<EmailConnectionStatus[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [apkAvailable, setApkAvailable] = useState<boolean | null>(null);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  // The account being edited; `null` inside the object means "adding one".
+  const [editingAccount, setEditingAccount] = useState<{ account: Account | null } | null>(null);
   const [searchParams] = useSearchParams();
   const gmailStatus = searchParams.get("gmail");
 
@@ -17,7 +21,12 @@ export function SettingsPage() {
     api.get<EmailConnectionStatus[]>("/ingestion/email/status").then(setConnections).catch(() => setConnections([]));
   }, []);
 
+  const reloadAccounts = useCallback(() => {
+    api.get<Account[]>("/accounts").then(setAccounts).catch(() => setAccounts([]));
+  }, []);
+
   useEffect(reload, [reload, gmailStatus]);
+  useEffect(reloadAccounts, [reloadAccounts]);
 
   // The APK is published by CI, so a fresh deployment may not have one yet.
   useEffect(() => {
@@ -189,6 +198,61 @@ export function SettingsPage() {
         <div className="card set-card">
           <div className="set-card-head">
             <div className="set-card-icon" style={{ background: "var(--brand-50)" }}>
+              <Icon name="ic-wallet" />
+            </div>
+            <div>
+              <h4>Accounts and cards</h4>
+              <p className="set-card-sub">
+                {accounts.length === 0
+                  ? "None yet"
+                  : `${accounts.length} ${accounts.length === 1 ? "account" : "accounts"}`}
+              </p>
+            </div>
+          </div>
+
+          {accounts.length === 0 ? (
+            <p className="desc">
+              These appear on their own the first time a bank texts you. Add one by hand for anything that
+              doesn't — cash, or an account that never sends alerts.
+            </p>
+          ) : (
+            <div className="account-list">
+              {accounts.map((account) => (
+                <button
+                  key={account.id}
+                  className={`account-row${account.isActive ? "" : " is-closed"}`}
+                  onClick={() => setEditingAccount({ account })}
+                >
+                  <span className="account-badge">
+                    <Icon name={account.accountType === "BANK" ? "ic-bank" : "ic-wallet"} />
+                  </span>
+                  <span className="account-row-main">
+                    <span className="account-row-name">{accountLabel(account)}</span>
+                    <span className="account-row-sub">
+                      {account.nickname ? `${account.bankName} · ` : ""}
+                      {account.aliases.length > 0
+                        ? `also ${account.aliases.map((a) => a.bankName).join(", ")}`
+                        : account.isActive
+                          ? "Detected from your messages"
+                          : "Closed"}
+                    </span>
+                  </span>
+                  <span className="account-row-type">{account.accountType}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="set-card-actions">
+            <button className="btn btn-sm" onClick={() => setEditingAccount({ account: null })}>
+              Add an account
+            </button>
+          </div>
+        </div>
+
+        <div className="card set-card">
+          <div className="set-card-head">
+            <div className="set-card-icon" style={{ background: "var(--brand-50)" }}>
               <Icon name="ic-info" />
             </div>
             <div>
@@ -202,6 +266,18 @@ export function SettingsPage() {
           </p>
         </div>
       </div>
+
+      {editingAccount && (
+        <AccountModal
+          account={editingAccount.account}
+          accounts={accounts}
+          onSaved={() => {
+            setEditingAccount(null);
+            reloadAccounts();
+          }}
+          onClose={() => setEditingAccount(null)}
+        />
+      )}
     </section>
   );
 }

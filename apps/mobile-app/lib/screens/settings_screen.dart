@@ -9,6 +9,7 @@ import '../services/update_service.dart';
 import '../theme.dart';
 import '../utils/format.dart';
 import '../version.dart';
+import 'accounts_screen.dart';
 import 'login_screen.dart';
 import 'permission_screen.dart';
 
@@ -139,6 +140,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (granted == true) _refreshSmsStatus();
   }
 
+  Future<void> _openAccounts() async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AccountsScreen()));
+  }
+
   Future<void> _signOut() async {
     await AuthService.instance.signOut();
     if (!mounted) return;
@@ -216,6 +221,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   'still import from Gmail.',
             ),
           ),
+        const SizedBox(height: 14),
+        _SettingsCard(
+          icon: Icons.account_balance_outlined,
+          title: 'Accounts and cards',
+          subtitle: 'Where the money moves',
+          child: _CardBody(
+            text: 'Name your accounts, merge the duplicates a bank creates by spelling itself two ways, '
+                'and add anything that never sends a message.',
+            actions: [
+              OutlinedButton(onPressed: _openAccounts, child: const Text('Manage accounts')),
+            ],
+          ),
+        ),
         const SizedBox(height: 14),
         _SettingsCard(
           icon: Icons.lock_outline,

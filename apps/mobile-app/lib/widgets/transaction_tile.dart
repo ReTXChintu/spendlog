@@ -27,10 +27,7 @@ class TransactionTile extends StatelessWidget {
   String get _meta {
     final account = transaction.account;
     final parts = <String>[
-      if (account != null)
-        '${account.bankName}${account.last4 != null ? ' ••${account.last4}' : ''}'
-      else
-        transaction.source,
+      if (account != null) account.label else transaction.source,
       formatTime(transaction.occurredAt),
     ];
     return parts.join(' · ');

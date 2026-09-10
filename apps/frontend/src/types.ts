@@ -9,12 +9,35 @@ export interface Category {
   isSystem: boolean;
 }
 
+export type AccountType = "BANK" | "CARD" | "UPI";
+
+/** A spelling of an account that a bank uses in one of its message formats. */
+export interface AccountAlias {
+  bankName: string;
+  last4: string | null;
+  accountType: AccountType;
+}
+
 export interface Account {
   id: string;
   bankName: string;
   last4: string | null;
-  accountType: "BANK" | "CARD" | "UPI";
+  accountType: AccountType;
   nickname: string | null;
+  aliases: AccountAlias[];
+  issuer: string | null;
+  cardNetwork: string | null;
+  creditLimitMinor: number | null;
+  statementDay: number | null;
+  dueDay: number | null;
+  isActive: boolean;
+  color: string | null;
+}
+
+/** What to call an account on screen: the name given to it, else the bank's. */
+export function accountLabel(account: Pick<Account, "bankName" | "last4" | "nickname">): string {
+  const name = account.nickname?.trim() || account.bankName;
+  return account.last4 ? `${name} ••${account.last4}` : name;
 }
 
 export interface Transaction {
