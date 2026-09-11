@@ -35,6 +35,7 @@ export function EditTransactionModal({
   onDeleted,
   onClose,
   onConvertToEmi,
+  onMarkRefund,
 }: {
   /** null means "create a new one". */
   transaction: Transaction | null;
@@ -45,6 +46,8 @@ export function EditTransactionModal({
   onClose: () => void;
   /** Opens the EMI form for this purchase. */
   onConvertToEmi?: (transaction: Transaction) => void;
+  /** Opens the refund picker for this credit. */
+  onMarkRefund?: (transaction: Transaction) => void;
 }) {
   const isNew = transaction === null;
   const initial = transaction ? toIstParts(transaction.occurredAt) : toIstParts(new Date().toISOString());
@@ -376,6 +379,11 @@ export function EditTransactionModal({
               disabled={saving}
             >
               {confirmDelete ? "Really delete?" : "Delete"}
+            </button>
+          )}
+          {!isNew && onMarkRefund && type === "CREDIT" && (
+            <button className="btn btn-sm btn-ghost" onClick={() => onMarkRefund(transaction)} disabled={saving}>
+              {transaction.refundOfId ? "Change refund link" : "It's a refund"}
             </button>
           )}
           {!isNew && onConvertToEmi && type === "DEBIT" && !transaction.emiPlanId && (

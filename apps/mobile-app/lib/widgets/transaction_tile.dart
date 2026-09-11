@@ -142,6 +142,8 @@ class TransactionTile extends StatelessWidget {
                   ],
                 ),
                 if (isTransfer ||
+                    transaction.refundOfId != null ||
+                    transaction.refundedMinor > 0 ||
                     transaction.emiRole != null ||
                     transaction.split != null ||
                     transaction.isSettlement ||
@@ -155,6 +157,19 @@ class TransactionTile extends StatelessWidget {
                           label: 'Not counted',
                           background: context.c.chipNeutral,
                           foreground: context.c.transfer,
+                        ),
+                      if (transaction.refundOfId != null)
+                        _Badge(
+                          label: 'Refund · not income',
+                          background: context.c.credit50,
+                          foreground: context.c.credit,
+                        ),
+                      if (transaction.refundedMinor > 0)
+                        _Badge(
+                          label: '${formatMoney(transaction.refundedMinor)} refunded · '
+                              '${formatMoney(transaction.lostMinor)} lost',
+                          background: context.c.credit50,
+                          foreground: context.c.credit,
                         ),
                       if (transaction.emiRole == 'PARENT')
                         _Badge(

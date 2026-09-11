@@ -97,6 +97,10 @@ export interface Transaction {
   note: string | null;
   rawText: string | null;
   source: TransactionSource;
+  /** On a credit: the purchase it gives money back from. */
+  refundOfId: string | null;
+  /** On a purchase: how much of it has since come back. */
+  refundedMinor: number;
   emiPlanId: string | null;
   emiRole: EmiRole | null;
   isTransfer: boolean;

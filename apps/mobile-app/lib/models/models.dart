@@ -136,6 +136,10 @@ class Transaction {
   /// user never typed can be checked.
   final String? rawText;
   final String source; // SMS | EMAIL | MANUAL
+  /// On a credit: the purchase it gives money back from.
+  final String? refundOfId;
+  /// On a purchase: how much of it has since come back.
+  final int refundedMinor;
   final String? emiPlanId;
   /// "PARENT" on the purchase converted to an EMI, "INSTALMENT" on each
   /// monthly payment.
@@ -162,6 +166,8 @@ class Transaction {
     this.note,
     this.rawText,
     required this.source,
+    this.refundOfId,
+    this.refundedMinor = 0,
     this.emiPlanId,
     this.emiRole,
     required this.isTransfer,
@@ -188,6 +194,10 @@ class Transaction {
 
   bool get wasReportedTwice => sources.length > 1;
 
+  /// What a refunded purchase actually cost: the tax and fees that never
+  /// came back.
+  int get lostMinor => refundedMinor > 0 ? (amountMinor - refundedMinor).clamp(0, amountMinor) : 0;
+
   factory Transaction.fromJson(Map<String, dynamic> json) => Transaction(
         id: json['id'] as String,
         amountMinor: json['amountMinor'] as int,
@@ -197,6 +207,8 @@ class Transaction {
         note: json['note'] as String?,
         rawText: json['rawText'] as String?,
         source: json['source'] as String,
+        refundOfId: json['refundOfId'] as String?,
+        refundedMinor: json['refundedMinor'] as int? ?? 0,
         emiPlanId: json['emiPlanId'] as String?,
         emiRole: json['emiRole'] as String?,
         isTransfer: json['isTransfer'] as bool? ?? false,

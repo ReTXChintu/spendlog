@@ -4,6 +4,7 @@ import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/format.dart';
 import 'emi_sheet.dart';
+import 'refund_sheet.dart';
 
 /// Full manual edit, and the same form used to add a transaction by hand.
 ///
@@ -461,6 +462,17 @@ class _EditSheetState extends State<_EditSheet> {
                         : () => _confirmDelete ? _delete() : setState(() => _confirmDelete = true),
                     style: TextButton.styleFrom(foregroundColor: c.debit),
                     child: Text(_confirmDelete ? 'Really delete?' : 'Delete'),
+                  ),
+                if (!_isNew && widget.transaction!.type == 'CREDIT')
+                  TextButton(
+                    onPressed: _saving
+                        ? null
+                        : () async {
+                            final navigator = Navigator.of(context);
+                            final linked = await showRefundSheet(context, refund: widget.transaction!);
+                            if (linked == true) navigator.pop(true);
+                          },
+                    child: Text(widget.transaction!.refundOfId != null ? 'Refund of…' : "It's a refund"),
                   ),
                 if (!_isNew &&
                     widget.transaction!.type == 'DEBIT' &&

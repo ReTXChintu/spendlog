@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { EditTransactionModal } from "../components/EditTransactionModal";
 import { EmiModal } from "../components/EmiModal";
+import { RefundModal } from "../components/RefundModal";
 import { Icon } from "../components/Icon";
 import { LedgerSkeleton, StateBlock } from "../components/States";
 import { RawMessageModal } from "../components/RawMessageModal";
@@ -37,6 +38,7 @@ export function TransactionsPage() {
 
   const [rawFor, setRawFor] = useState<Transaction | null>(null);
   const [emiFor, setEmiFor] = useState<Transaction | null>(null);
+  const [refundFor, setRefundFor] = useState<Transaction | null>(null);
   // Rows picked for merging. Empty means selection mode is off.
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selecting, setSelecting] = useState(false);
@@ -489,10 +491,25 @@ export function TransactionsPage() {
             setEditing(null);
             setEmiFor(transaction);
           }}
+          onMarkRefund={(transaction) => {
+            setEditing(null);
+            setRefundFor(transaction);
+          }}
           onClose={() => {
             setEditing(null);
             setAdding(false);
           }}
+        />
+      )}
+
+      {refundFor && (
+        <RefundModal
+          refund={refundFor}
+          onSaved={() => {
+            setRefundFor(null);
+            reloadAfterEdit();
+          }}
+          onClose={() => setRefundFor(null)}
         />
       )}
 

@@ -484,6 +484,21 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
 
 .badge-split{background:var(--brand-50);color:var(--brand-dark)}
 .badge-emi{background:var(--brand-50);color:var(--brand-dark)}
+.badge-refund{background:var(--credit-50);color:var(--credit)}
+.badge-refunded{background:var(--credit-50);color:var(--credit)}
+
+.refund-list{display:flex;flex-direction:column;gap:6px;margin:14px 0 4px 0;max-height:280px;overflow-y:auto}
+.refund-option{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:10px 12px;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md)}
+.refund-option:hover{border-color:var(--line-strong)}
+.refund-option.is-picked{border-color:var(--brand);background:var(--brand-50)}
+.refund-option-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.refund-option-name{font-size:13.4px;font-weight:700;color:var(--ink)}
+.refund-option-sub{font-size:11.8px;color:var(--muted)}
+.refund-option-amount{font-size:13.4px;font-weight:700;color:var(--ink)}
+.refund-summary{display:flex;gap:22px;flex-wrap:wrap;margin-top:14px;padding:14px 16px;
+  background:var(--credit-50);border-radius:var(--radius-md)}
+.refund-summary>div{display:flex;flex-direction:column;gap:3px}
 
 .link-button{background:none;border:none;padding:0;font:inherit;color:var(--brand);
   text-decoration:underline;cursor:pointer}

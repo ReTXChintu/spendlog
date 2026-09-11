@@ -113,6 +113,23 @@ export function TransactionRow({
                 </span>
               </div>
             )}
+            {transaction.refundOfId && (
+              <div className="row-badges">
+                <span className="badge badge-refund">Refund · not income</span>
+              </div>
+            )}
+            {transaction.refundedMinor > 0 && (
+              <div className="row-badges">
+                <span className="badge badge-refunded">
+                  {formatMoney(transaction.refundedMinor, transaction.currency)} refunded ·{" "}
+                  {formatMoney(
+                    Math.max(0, transaction.amountMinor - transaction.refundedMinor),
+                    transaction.currency
+                  )}{" "}
+                  lost
+                </span>
+              </div>
+            )}
             {transaction.emiRole === "PARENT" && (
               <div className="row-badges">
                 <span className="badge badge-emi">On EMI · not counted here</span>
