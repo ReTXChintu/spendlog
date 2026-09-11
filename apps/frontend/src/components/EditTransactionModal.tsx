@@ -69,6 +69,9 @@ export function EditTransactionModal({
   );
   const [groupLabel, setGroupLabel] = useState(transaction?.split?.groupLabel ?? "");
   const [isSettlement, setIsSettlement] = useState(transaction?.isSettlement ?? false);
+  // On a trip, an expense is everyone's unless it says otherwise. The only
+  // narrowing worth a control is "this one was just mine".
+  const [tripJustMine, setTripJustMine] = useState((transaction?.tripShareWith?.length ?? 0) > 0);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -128,6 +131,8 @@ export function EditTransactionModal({
       occurredAt: fromIstParts(date, time),
       isTransfer,
       isSettlement,
+      // Narrowed to the payer alone, or widened back to everyone on the trip.
+      ...(transaction?.tripId ? { tripShareWith: tripJustMine ? [transaction.userId] : null } : {}),
       split: isSplit ? { myShareMinor: Math.round(Number.parseFloat(myShare || "0") * 100), groupLabel: groupLabel.trim() || null } : null,
     };
 
@@ -353,6 +358,21 @@ export function EditTransactionModal({
                 </p>
               </div>
             </>
+          )}
+
+          {transaction?.trip && (
+            <div className="form-row form-row-wide">
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={tripJustMine}
+                  onChange={(e) => setTripJustMine(e.target.checked)}
+                />
+                <span>
+                  On {transaction.trip.name}, this one was just mine — leave it out of who owes whom
+                </span>
+              </label>
+            </div>
           )}
 
           <div className="form-row form-row-wide">

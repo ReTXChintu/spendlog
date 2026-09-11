@@ -26,6 +26,7 @@ class _TripsScreenState extends State<TripsScreen> {
 
   String? _openId;
   TripSummary? _summary;
+  TripSettlement? _settlement;
 
   @override
   void initState() {
@@ -51,17 +52,25 @@ class _TripsScreenState extends State<TripsScreen> {
       setState(() {
         _openId = null;
         _summary = null;
+        _settlement = null;
       });
       return;
     }
     setState(() {
       _openId = trip.id;
       _summary = null;
+      _settlement = null;
     });
     try {
-      final result = await ApiClient.instance.get('/trips/${trip.id}/summary') as Map<String, dynamic>;
+      final results = await Future.wait([
+        ApiClient.instance.get('/trips/${trip.id}/summary'),
+        ApiClient.instance.get('/trips/${trip.id}/settlement'),
+      ]);
       if (mounted && _openId == trip.id) {
-        setState(() => _summary = TripSummary.fromJson(result));
+        setState(() {
+          _summary = TripSummary.fromJson(results[0] as Map<String, dynamic>);
+          _settlement = TripSettlement.fromJson(results[1] as Map<String, dynamic>);
+        });
       }
     } catch (_) {
       // The row stays open with its headline figures.
@@ -204,6 +213,7 @@ class _TripsScreenState extends State<TripsScreen> {
                   trip: trip,
                   isOpen: _openId == trip.id,
                   summary: _openId == trip.id ? _summary : null,
+                  settlement: _openId == trip.id ? _settlement : null,
                   busy: _busy,
                   onTap: () => _open(trip),
                   onMembers: () => _openMembers(trip),
@@ -304,6 +314,7 @@ class _TripCard extends StatelessWidget {
   final Trip trip;
   final bool isOpen;
   final TripSummary? summary;
+  final TripSettlement? settlement;
   final bool busy;
   final VoidCallback onTap;
   final VoidCallback onMembers;
@@ -314,6 +325,7 @@ class _TripCard extends StatelessWidget {
     required this.trip,
     required this.isOpen,
     required this.summary,
+    required this.settlement,
     required this.busy,
     required this.onTap,
     required this.onMembers,
@@ -470,6 +482,62 @@ class _TripCard extends StatelessWidget {
                                 ],
                               ),
                             ),
+                        ],
+                        if (settlement != null && settlement!.balances.length > 1) ...[
+                          const SizedBox(height: 12),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            decoration: BoxDecoration(
+                              color: c.credit50,
+                              borderRadius: BorderRadius.circular(T.rMd),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'SETTLING UP',
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.5,
+                                    color: c.muted,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                if (settlement!.transfers.isEmpty)
+                                  Text(
+                                    'Everyone is square — nobody owes anybody anything.',
+                                    style: TextStyle(fontSize: 12.8, color: c.muted),
+                                  )
+                                else
+                                  for (final transfer in settlement!.transfers)
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 5),
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              '${transfer.fromName} → ${transfer.toName}',
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(fontSize: 13, color: c.ink),
+                                            ),
+                                          ),
+                                          Text(
+                                            formatMoney(transfer.amountMinor),
+                                            style: kNum.copyWith(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w700,
+                                              color: c.ink,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                              ],
+                            ),
+                          ),
                         ],
                         const SizedBox(height: 10),
                         Row(

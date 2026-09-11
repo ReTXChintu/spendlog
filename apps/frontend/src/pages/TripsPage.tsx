@@ -3,7 +3,7 @@ import { Icon } from "../components/Icon";
 import { StateBlock } from "../components/States";
 import { api } from "../lib/api";
 import { formatDayLabel, formatMoney, formatMoneyShort } from "../lib/format";
-import { Trip, TripMember, TripSummary } from "../types";
+import { Trip, TripMember, TripSettlement, TripSummary } from "../types";
 
 /** The trip detail, where members are resolved to people. */
 type TripDetail = Trip & { members: TripMember[] };
@@ -20,6 +20,7 @@ export function TripsPage() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [summary, setSummary] = useState<TripSummary | null>(null);
   const [detail, setDetail] = useState<TripDetail | null>(null);
+  const [settlement, setSettlement] = useState<TripSettlement | null>(null);
   const [name, setName] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -39,6 +40,7 @@ export function TripsPage() {
     if (!openId) {
       setSummary(null);
       setDetail(null);
+      setSettlement(null);
       return;
     }
     api
@@ -49,6 +51,10 @@ export function TripsPage() {
       .get<TripDetail>(`/trips/${openId}`)
       .then(setDetail)
       .catch(() => setDetail(null));
+    api
+      .get<TripSettlement>(`/trips/${openId}/settlement`)
+      .then(setSettlement)
+      .catch(() => setSettlement(null));
   }, [openId, trips]);
 
   const active = trips?.find((trip) => trip.isActive) ?? null;
@@ -232,6 +238,31 @@ export function TripsPage() {
                           <span className="num">{formatMoneyShort(entry.amountMinor)}</span>
                         </div>
                       ))}
+                    </div>
+                  )}
+
+                  {settlement && settlement.balances.length > 1 && (
+                    <div className="trip-settle">
+                      <div className="trip-settle-title">Settling up</div>
+                      {settlement.transfers.length === 0 ? (
+                        <div className="trip-square">
+                          Everyone is square — nobody owes anybody anything.
+                        </div>
+                      ) : (
+                        settlement.transfers.map((transfer) => (
+                          <div
+                            className="trip-transfer"
+                            key={`${transfer.fromUserId}-${transfer.toUserId}`}
+                          >
+                            <span>{transfer.fromName}</span>
+                            <Icon name="ic-arrow-right" />
+                            <span>{transfer.toName}</span>
+                            <span className="trip-transfer-amount">
+                              {formatMoney(transfer.amountMinor)}
+                            </span>
+                          </div>
+                        ))
+                      )}
                     </div>
                   )}
 

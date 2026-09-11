@@ -149,9 +149,13 @@ class Transaction {
   /// user never typed can be checked.
   final String? rawText;
   final String source; // SMS | EMAIL | MANUAL
+  /// Who this belongs to — the payer, on a shared trip.
+  final String? userId;
   /// The trip this was spent on, if any.
   final String? tripId;
   final String? tripName;
+  /// Who a trip expense was for. null means everyone on the trip.
+  final List<String>? tripShareWith;
   /// On a credit: how much of it belongs to which earlier purchases. One
   /// credit often settles several cancelled orders at once.
   final List<RefundAllocation> refundOf;
@@ -183,8 +187,10 @@ class Transaction {
     this.note,
     this.rawText,
     required this.source,
+    this.userId,
     this.tripId,
     this.tripName,
+    this.tripShareWith,
     this.refundOf = const [],
     this.refundedMinor = 0,
     this.emiPlanId,
@@ -226,7 +232,9 @@ class Transaction {
         note: json['note'] as String?,
         rawText: json['rawText'] as String?,
         source: json['source'] as String,
+        userId: json['userId'] is String ? json['userId'] as String : null,
         tripId: json['tripId'] as String?,
+        tripShareWith: (json['tripShareWith'] as List<dynamic>?)?.cast<String>(),
         tripName: (json['trip'] as Map<String, dynamic>?)?['name'] as String?,
         refundOf: (json['refundOf'] as List<dynamic>? ?? [])
             .map((a) => RefundAllocation.fromJson(a as Map<String, dynamic>))
@@ -411,6 +419,58 @@ class TripMemberSpend {
         userId: json['userId'] as String,
         name: json['name'] as String? ?? 'Someone',
         spentMinor: json['spentMinor'] as int? ?? 0,
+      );
+}
+
+/// Who owes whom at the end of a trip, and the payments that square it.
+class TripSettlement {
+  final List<TripBalance> balances;
+  final List<TripTransfer> transfers;
+
+  TripSettlement({required this.balances, required this.transfers});
+
+  factory TripSettlement.fromJson(Map<String, dynamic> json) => TripSettlement(
+        balances: (json['balances'] as List<dynamic>? ?? [])
+            .map((b) => TripBalance.fromJson(b as Map<String, dynamic>))
+            .toList(),
+        transfers: (json['transfers'] as List<dynamic>? ?? [])
+            .map((t) => TripTransfer.fromJson(t as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+class TripBalance {
+  final String userId;
+  final String name;
+  final int paidMinor;
+  final int netMinor;
+
+  TripBalance({
+    required this.userId,
+    required this.name,
+    required this.paidMinor,
+    required this.netMinor,
+  });
+
+  factory TripBalance.fromJson(Map<String, dynamic> json) => TripBalance(
+        userId: json['userId'] as String,
+        name: json['name'] as String? ?? 'Someone',
+        paidMinor: json['paidMinor'] as int? ?? 0,
+        netMinor: json['netMinor'] as int? ?? 0,
+      );
+}
+
+class TripTransfer {
+  final String fromName;
+  final String toName;
+  final int amountMinor;
+
+  TripTransfer({required this.fromName, required this.toName, required this.amountMinor});
+
+  factory TripTransfer.fromJson(Map<String, dynamic> json) => TripTransfer(
+        fromName: json['fromName'] as String? ?? 'Someone',
+        toName: json['toName'] as String? ?? 'Someone',
+        amountMinor: json['amountMinor'] as int? ?? 0,
       );
 }
 

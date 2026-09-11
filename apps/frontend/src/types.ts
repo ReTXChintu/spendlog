@@ -119,8 +119,27 @@ export interface TripSummary {
   byCategory: { categoryId: string | null; name: string; amountMinor: number }[];
 }
 
+export interface TripSettlement {
+  balances: {
+    userId: string;
+    name: string;
+    paidMinor: number;
+    shareMinor: number;
+    netMinor: number;
+  }[];
+  transfers: {
+    fromUserId: string;
+    toUserId: string;
+    fromName: string;
+    toName: string;
+    amountMinor: number;
+  }[];
+}
+
 export interface Transaction {
   id: string;
+  /** Who this belongs to — the payer, on a shared trip. */
+  userId: string;
   amountMinor: number;
   currency: string;
   type: TransactionType;
@@ -135,6 +154,8 @@ export interface Transaction {
   /** The trip this was spent on, if any. */
   tripId: string | null;
   trip: { id: string; name: string } | null;
+  /** Who a trip expense was for. null means everyone on the trip. */
+  tripShareWith: string[] | null;
   emiPlanId: string | null;
   emiRole: EmiRole | null;
   isTransfer: boolean;

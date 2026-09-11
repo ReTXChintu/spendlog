@@ -63,6 +63,9 @@ class _EditSheetState extends State<_EditSheet> {
   late bool _isTransfer;
   late bool _isSplit;
   late bool _isSettlement;
+  /// On a trip, an expense is everyone's unless it says otherwise. The only
+  /// narrowing worth a control is "this one was just mine".
+  late bool _tripJustMine;
   late final TextEditingController _myShare;
   late final TextEditingController _groupLabel;
 
@@ -100,6 +103,7 @@ class _EditSheetState extends State<_EditSheet> {
     _isTransfer = t?.isTransfer ?? false;
     _isSplit = t?.split != null;
     _isSettlement = t?.isSettlement ?? false;
+    _tripJustMine = (t?.tripShareWith?.isNotEmpty ?? false);
     _myShare = TextEditingController(
       text: t?.split != null ? (t!.split!.myShareMinor / 100).toStringAsFixed(2) : '',
     );
@@ -170,6 +174,9 @@ class _EditSheetState extends State<_EditSheet> {
       'occurredAt': fromIstWallClock(_occurredAt).toIso8601String(),
       'isTransfer': _isTransfer,
       'isSettlement': _isSettlement,
+      // Narrowed to the payer alone, or widened back to everyone on the trip.
+      if (widget.transaction?.tripId != null)
+        'tripShareWith': _tripJustMine ? [widget.transaction!.userId] : null,
       'split': _isSplit
           ? {
               'myShareMinor': ((double.tryParse(_myShare.text.trim()) ?? 0) * 100).round(),
@@ -434,6 +441,20 @@ class _EditSheetState extends State<_EditSheet> {
               Text(_owedHint, style: TextStyle(fontSize: 12, color: c.muted, height: 1.45)),
               const SizedBox(height: 6),
             ],
+
+            if (widget.transaction?.tripName != null)
+              CheckboxListTile(
+                value: _tripJustMine,
+                onChanged: (value) => setState(() => _tripJustMine = value ?? false),
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                dense: true,
+                title: Text(
+                  'On ${widget.transaction!.tripName}, this one was just mine — leave it out of '
+                  'who owes whom',
+                  style: TextStyle(fontSize: 12.8, color: c.ink70),
+                ),
+              ),
 
             CheckboxListTile(
               value: _isSettlement,

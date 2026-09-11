@@ -523,6 +523,16 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
 .trip-person{display:flex;align-items:center;justify-content:space-between;gap:10px;
   font-size:12.8px;color:var(--ink-70);padding:8px 0;border-bottom:1px solid var(--line)}
 .trip-person:last-child{border-bottom:none}
+.trip-settle{margin-top:14px;padding:14px 16px;background:var(--credit-50);
+  border-radius:var(--radius-md)}
+.trip-settle-title{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--muted);margin-bottom:10px}
+.trip-transfer{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink);
+  padding:5px 0}
+.trip-transfer svg{width:14px;height:14px;color:var(--muted);flex-shrink:0}
+.trip-transfer-amount{margin-left:auto;font-family:var(--font-mono);font-weight:700}
+.trip-square{font-size:12.8px;color:var(--muted)}
+
 .trip-join-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:18px}
 .trip-join-row .filter-input{width:140px;font-family:var(--font-mono);letter-spacing:2px;
   text-transform:uppercase}
