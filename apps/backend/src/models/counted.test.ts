@@ -41,8 +41,13 @@ describe("resolveCountedAmount", () => {
   });
 
   it("counts the purchase behind an EMI as nothing, since the instalments count", () => {
-    const result = resolveCountedAmount({ amountMinor: 3600000, emiPlanId: "plan-1" });
+    const result = resolveCountedAmount({ amountMinor: 3600000, emiRole: "PARENT" });
     assert.deepEqual(result, { countedAmountMinor: 0, countedReason: "EMI_PARENT" });
+  });
+
+  it("counts an EMI instalment in full, since that is the actual spending", () => {
+    const result = resolveCountedAmount({ amountMinor: 320000, emiRole: "INSTALMENT" });
+    assert.deepEqual(result, { countedAmountMinor: 320000, countedReason: "FULL" });
   });
 
   it("counts a manually excluded transaction as nothing", () => {
@@ -63,7 +68,7 @@ describe("resolveCountedAmount", () => {
     it("treats a split EMI purchase as an EMI purchase", () => {
       const result = resolveCountedAmount({
         amountMinor: 3600000,
-        emiPlanId: "plan-1",
+        emiRole: "PARENT",
         split: { myShareMinor: 1800000 },
       });
       assert.equal(result.countedReason, "EMI_PARENT");

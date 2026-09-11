@@ -3,6 +3,7 @@ import { Transaction, TransactionDoc } from "../models";
 import { TransactionSource } from "../types";
 import { resolveAccount } from "./accounts";
 import { categorizeTransaction } from "./categorizer";
+import { matchEmiInstalment } from "../modules/emi/emi.matching";
 import { findDuplicate, detectSelfTransfer } from "./dedupe";
 import { parseTransactionText } from "./parser";
 
@@ -115,6 +116,9 @@ export async function ingestRawMessage(params: {
   });
 
   await detectSelfTransfer(transaction);
+  // A monthly EMI debit looks like any other payment, so the schedule is
+  // ticked off here rather than waiting for someone to do it by hand.
+  await matchEmiInstalment(transaction);
 
   return { status: "created", transaction };
 }

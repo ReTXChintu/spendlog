@@ -2,11 +2,17 @@ import { Schema, Types, model } from "mongoose";
 import {
   ACCOUNT_TYPES,
   COUNTED_REASONS,
+  EMI_INSTALMENT_STATUSES,
+  EMI_PLAN_STATUSES,
+  EMI_ROLES,
   RULE_MATCH_TYPES,
   TRANSACTION_SOURCES,
   TRANSACTION_TYPES,
   AccountType,
   CountedReason,
+  EmiInstalmentStatus,
+  EmiPlanStatus,
+  EmiRole,
   RuleMatchType,
   TransactionSource,
   TransactionType,
@@ -217,6 +223,11 @@ export interface TransactionDoc {
   source: TransactionSource;
   sourceRef?: string | null; // provider message id, for dedup + audit trail
   dedupeKey?: string | null;
+  /// The plan this belongs to, once a purchase has been converted to an
+  /// EMI: the purchase itself as PARENT, each monthly payment as
+  /// INSTALMENT. Only the parent is kept out of the totals.
+  emiPlanId?: Types.ObjectId | null;
+  emiRole?: EmiRole | null;
   isTransfer: boolean;
   /// Set when only part of this bill was the user's own spending. The rest
   /// is money owed back, and countedAmountMinor drops to the share.
@@ -281,6 +292,8 @@ const transactionSchema = new Schema<TransactionDoc>(
     source: { type: String, enum: TRANSACTION_SOURCES, required: true },
     sourceRef: { type: String, default: null },
     dedupeKey: { type: String, default: null },
+    emiPlanId: { type: Schema.Types.ObjectId, ref: "EmiPlan", default: null },
+    emiRole: { type: String, enum: EMI_ROLES, default: null },
     isTransfer: { type: Boolean, default: false },
     split: { type: transactionSplitSchema, default: null },
     isSettlement: { type: Boolean, default: false },
@@ -384,3 +397,87 @@ const emailConnectionSchema = new Schema<EmailConnectionDoc>(
 emailConnectionSchema.index({ userId: 1, email: 1 }, { unique: true });
 
 export const EmailConnection = model<EmailConnectionDoc>("EmailConnection", emailConnectionSchema);
+
+export interface EmiPlanDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  /// The purchase that was converted. Kept so cancelling a plan can put it
+  /// back to counting in full.
+  sourceTransactionId: Types.ObjectId;
+  accountId?: Types.ObjectId | null;
+  label?: string | null;
+  principalMinor: number;
+  months: number;
+  /// What is actually billed each month. Entered from the statement where
+  /// possible, since a computed figure rarely matches to the rupee.
+  monthlyAmountMinor: number;
+  totalPayableMinor: number;
+  interestRatePctAnnual?: number | null;
+  /// Charged once, up front. A real transaction of its own, so it is not
+  /// part of totalPayable.
+  processingFeeMinor?: number | null;
+  startDate: Date;
+  status: EmiPlanStatus;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const emiPlanSchema = new Schema<EmiPlanDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    sourceTransactionId: { type: Schema.Types.ObjectId, ref: "Transaction", required: true },
+    accountId: { type: Schema.Types.ObjectId, ref: "Account", default: null },
+    label: { type: String, default: null },
+    principalMinor: { type: Number, required: true, min: 1 },
+    months: { type: Number, required: true, min: 1, max: 120 },
+    monthlyAmountMinor: { type: Number, required: true, min: 1 },
+    totalPayableMinor: { type: Number, required: true, min: 1 },
+    interestRatePctAnnual: { type: Number, default: null, min: 0 },
+    processingFeeMinor: { type: Number, default: null, min: 0 },
+    startDate: { type: Date, required: true },
+    status: { type: String, enum: EMI_PLAN_STATUSES, default: "ACTIVE" },
+  },
+  { timestamps: true, ...serialization }
+);
+
+// One plan per purchase: converting the same transaction twice would
+// double-count the whole thing.
+emiPlanSchema.index({ sourceTransactionId: 1 }, { unique: true });
+
+export const EmiPlan = model<EmiPlanDoc>("EmiPlan", emiPlanSchema);
+
+export interface EmiInstalmentDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  planId: Types.ObjectId;
+  /// 1-based, so "3 of 12" reads straight off it.
+  seq: number;
+  dueDate: Date;
+  amountMinor: number;
+  status: EmiInstalmentStatus;
+  /// The real debit, once one has arrived and been matched to it.
+  transactionId?: Types.ObjectId | null;
+  paidAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const emiInstalmentSchema = new Schema<EmiInstalmentDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    planId: { type: Schema.Types.ObjectId, ref: "EmiPlan", required: true, index: true },
+    seq: { type: Number, required: true, min: 1 },
+    dueDate: { type: Date, required: true },
+    amountMinor: { type: Number, required: true, min: 0 },
+    status: { type: String, enum: EMI_INSTALMENT_STATUSES, default: "DUE" },
+    transactionId: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
+    paidAt: { type: Date, default: null },
+  },
+  { timestamps: true, ...serialization }
+);
+
+emiInstalmentSchema.index({ planId: 1, seq: 1 }, { unique: true });
+// Matching an incoming debit looks for what is still owed, soonest first.
+emiInstalmentSchema.index({ userId: 1, status: 1, dueDate: 1 });
+
+export const EmiInstalment = model<EmiInstalmentDoc>("EmiInstalment", emiInstalmentSchema);

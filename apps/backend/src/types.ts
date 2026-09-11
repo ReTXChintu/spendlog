@@ -19,6 +19,18 @@ export const COUNTED_REASONS = [
 ] as const;
 export type CountedReason = (typeof COUNTED_REASONS)[number];
 
+export const EMI_PLAN_STATUSES = ["ACTIVE", "CLOSED", "CANCELLED"] as const;
+export type EmiPlanStatus = (typeof EMI_PLAN_STATUSES)[number];
+
+export const EMI_INSTALMENT_STATUSES = ["DUE", "PAID", "SKIPPED"] as const;
+export type EmiInstalmentStatus = (typeof EMI_INSTALMENT_STATUSES)[number];
+
+// Whether a transaction is the purchase that was converted into an EMI, or
+// one of the monthly payments. Only the parent is kept out of the totals —
+// the payments are the spending.
+export const EMI_ROLES = ["PARENT", "INSTALMENT"] as const;
+export type EmiRole = (typeof EMI_ROLES)[number];
+
 export const RULE_MATCH_TYPES = ["MERCHANT_CONTAINS", "KEYWORD", "EXACT"] as const;
 export type RuleMatchType = (typeof RULE_MATCH_TYPES)[number];
 

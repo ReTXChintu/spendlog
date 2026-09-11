@@ -9,6 +9,7 @@ import { accountsRouter } from "./modules/accounts/accounts.routes";
 import { authRouter } from "./modules/auth/auth.routes";
 import { categoriesRouter } from "./modules/categories/categories.routes";
 import { analyticsRouter } from "./modules/analytics/analytics.routes";
+import { emiRouter } from "./modules/emi/emi.routes";
 import { emailRouter } from "./modules/ingestion/email.routes";
 import { smsRouter } from "./modules/ingestion/sms.routes";
 import { transactionsRouter } from "./modules/transactions/transactions.routes";
@@ -38,6 +39,7 @@ app.use("/transactions", transactionsRouter);
 app.use("/ingestion/sms", smsRouter);
 app.use("/ingestion/email", emailRouter);
 app.use("/analytics", analyticsRouter);
+app.use("/emi", emiRouter);
 
 app.use((_req, res) => res.status(404).json({ error: "Not found" }));
 

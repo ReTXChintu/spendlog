@@ -16,8 +16,12 @@ export interface CountedInput {
   isTransfer?: boolean | null;
   isSettlement?: boolean | null;
   excludeFromTotals?: boolean | null;
-  /** Set on the original purchase once it has been converted to an EMI. */
-  emiPlanId?: unknown;
+  /**
+   * "PARENT" on the purchase that was converted to an EMI, "INSTALMENT" on
+   * each monthly payment. The distinction is the whole point: zeroing both
+   * would lose the spending entirely, and counting both would book it twice.
+   */
+  emiRole?: string | null;
   split?: { myShareMinor?: number | null } | null;
 }
 
@@ -45,7 +49,7 @@ export function resolveCountedAmount(transaction: CountedInput): CountedAmount {
 
   // The instalments count as they are paid, so counting the purchase too
   // would book the whole amount twice.
-  if (transaction.emiPlanId) {
+  if (transaction.emiRole === "PARENT") {
     return { countedAmountMinor: 0, countedReason: "EMI_PARENT" };
   }
 
