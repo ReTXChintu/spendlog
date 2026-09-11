@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "seed": "tsx src/seed.ts",
     "backfill:counted": "tsx scripts/backfill-counted.ts",
+    "fix:sms-times": "tsx scripts/fix-sms-times.ts",
     "test": "node scripts/run-tests.js"
   },
   "dependencies": {

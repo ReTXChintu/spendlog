@@ -4,13 +4,21 @@ import { Account, Category, Transaction, TransactionType, accountLabel } from ".
 import { Icon } from "./Icon";
 
 /** Splits an ISO instant into the two values the date/time inputs want. */
-function toLocalParts(iso: string): { date: string; time: string } {
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return {
-    date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
-    time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
-  };
+/**
+ * The date and time pickers work in IST, not the browser's timezone.
+ *
+ * Typing "11 Sep, 7:21pm" has to mean that in India however the laptop is
+ * set, or editing a transaction abroad would silently move it.
+ */
+const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
+
+function toIstParts(iso: string): { date: string; time: string } {
+  const shifted = new Date(new Date(iso).getTime() + IST_OFFSET_MS).toISOString();
+  return { date: shifted.slice(0, 10), time: shifted.slice(11, 16) };
+}
+
+function fromIstParts(date: string, time: string): string {
+  return new Date(`${date}T${time}:00.000+05:30`).toISOString();
 }
 
 /**
@@ -39,7 +47,7 @@ export function EditTransactionModal({
   onConvertToEmi?: (transaction: Transaction) => void;
 }) {
   const isNew = transaction === null;
-  const initial = transaction ? toLocalParts(transaction.occurredAt) : toLocalParts(new Date().toISOString());
+  const initial = transaction ? toIstParts(transaction.occurredAt) : toIstParts(new Date().toISOString());
 
   const [amount, setAmount] = useState(
     transaction ? (transaction.amountMinor / 100).toFixed(2) : ""
@@ -114,7 +122,7 @@ export function EditTransactionModal({
       note: note.trim() || null,
       categoryId: categoryId || null,
       accountId: accountId || null,
-      occurredAt: new Date(`${date}T${time}`).toISOString(),
+      occurredAt: fromIstParts(date, time),
       isTransfer,
       isSettlement,
       split: isSplit ? { myShareMinor: Math.round(Number.parseFloat(myShare || "0") * 100), groupLabel: groupLabel.trim() || null } : null,

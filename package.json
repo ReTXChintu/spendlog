@@ -17,6 +17,7 @@
     "build:frontend": "npm run build --workspace apps/frontend",
     "seed": "npm run seed --workspace apps/backend",
     "backfill:counted": "npm run backfill:counted --workspace apps/backend",
+    "fix:sms-times": "npm run fix:sms-times --workspace apps/backend --",
     "test": "npm run test --workspace apps/backend",
     "version:current": "node -p \"require('./package.json').version\"",
     "release": "release-it",

@@ -3,16 +3,16 @@ import { Types } from "mongoose";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { Transaction } from "../../models";
+import { IST_OFFSET, istMonthEnd, istMonthStart } from "../../time";
 
 export const analyticsRouter = Router();
 analyticsRouter.use(requireAuth);
 
+// A month runs from midnight IST on the 1st to midnight IST on the 1st of
+// the next — so a payment at 00:30 on 1 September belongs to September,
+// which by the UTC calendar it would not.
 function monthRange(month: string): { start: Date; end: Date } {
-  const [year, mon] = month.split("-").map(Number);
-  return {
-    start: new Date(Date.UTC(year, mon - 1, 1)),
-    end: new Date(Date.UTC(year, mon, 1)),
-  };
+  return { start: istMonthStart(month), end: istMonthEnd(month) };
 }
 
 const summarySchema = z.object({
@@ -105,7 +105,7 @@ analyticsRouter.get("/trend", async (req, res) => {
     {
       $group: {
         _id: {
-          month: { $dateToString: { format: "%Y-%m", date: "$occurredAt", timezone: "UTC" } },
+          month: { $dateToString: { format: "%Y-%m", date: "$occurredAt", timezone: IST_OFFSET } },
           type: "$type",
         },
         amountMinor: { $sum: "$countedAmountMinor" },

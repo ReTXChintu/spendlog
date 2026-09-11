@@ -5,14 +5,19 @@ import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
 import { Account, Transaction, TransactionDoc, TransactionSourceEntry } from "../../models";
 import { ingestRawMessage } from "../../parsing/ingest";
+import { IST_OFFSET, istDayEnd, istDayKey, istDayStart } from "../../time";
 import { TRANSACTION_TYPES } from "../../types";
 
 export const transactionsRouter = Router();
 transactionsRouter.use(requireAuth);
 
+const IST_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
 const listQuerySchema = z.object({
-  from: z.coerce.date().optional(),
-  to: z.coerce.date().optional(),
+  // Bare calendar days, read as IST: "to=2026-09-11" means up to the end
+  // of the 11th as lived in India, not as UTC would have it.
+  from: z.string().regex(IST_DAY).optional(),
+  to: z.string().regex(IST_DAY).optional(),
   categoryId: z.string().optional(),
   accountId: z.string().optional(),
   type: z.enum(TRANSACTION_TYPES).optional(),
@@ -41,9 +46,9 @@ function buildFilter(
 
   if (filters.from || filters.to) {
     filter.occurredAt = {
-      ...(filters.from ? { $gte: filters.from } : {}),
+      ...(filters.from ? { $gte: istDayStart(filters.from) } : {}),
       // A bare date means the whole of that day, not midnight at its start.
-      ...(filters.to ? { $lte: new Date(filters.to.getTime() + 24 * 60 * 60 * 1000 - 1) } : {}),
+      ...(filters.to ? { $lte: istDayEnd(filters.to) } : {}),
     };
   }
 
@@ -101,7 +106,7 @@ transactionsRouter.get("/by-day", async (req, res) => {
     { $match: filter },
     {
       $group: {
-        _id: { $dateToString: { format: "%Y-%m-%d", date: "$occurredAt" } },
+        _id: { $dateToString: { format: "%Y-%m-%d", date: "$occurredAt", timezone: IST_OFFSET } },
         earliest: { $min: "$occurredAt" },
       },
     },
@@ -125,7 +130,7 @@ transactionsRouter.get("/by-day", async (req, res) => {
 
   const grouped = new Map<string, typeof transactions>();
   for (const tx of transactions) {
-    const dayKey = tx.occurredAt.toISOString().slice(0, 10);
+    const dayKey = istDayKey(tx.occurredAt);
     const bucket = grouped.get(dayKey);
     if (bucket) bucket.push(tx);
     else grouped.set(dayKey, [tx]);

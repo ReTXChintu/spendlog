@@ -92,7 +92,10 @@ class _EditSheetState extends State<_EditSheet> {
     _type = t?.type ?? 'DEBIT';
     _categoryId = t?.category?.id;
     _accountId = t?.account?.id;
-    _occurredAt = t?.occurredAt ?? DateTime.now();
+    // Held as IST wall-clock while the pickers are open: choosing
+    // "11 Sep, 7:21pm" must mean that in India whatever the phone's clock
+    // is set to. Converted back to a real instant on save.
+    _occurredAt = istWallClock(t?.occurredAt ?? DateTime.now());
     _isTransfer = t?.isTransfer ?? false;
     _isSplit = t?.split != null;
     _isSettlement = t?.isSettlement ?? false;
@@ -163,7 +166,7 @@ class _EditSheetState extends State<_EditSheet> {
       'note': _note.text.trim().isEmpty ? null : _note.text.trim(),
       'categoryId': _categoryId,
       'accountId': _accountId,
-      'occurredAt': _occurredAt.toUtc().toIso8601String(),
+      'occurredAt': fromIstWallClock(_occurredAt).toIso8601String(),
       'isTransfer': _isTransfer,
       'isSettlement': _isSettlement,
       'split': _isSplit
