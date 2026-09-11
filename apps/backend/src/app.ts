@@ -13,6 +13,7 @@ import { emiRouter } from "./modules/emi/emi.routes";
 import { emailRouter } from "./modules/ingestion/email.routes";
 import { smsRouter } from "./modules/ingestion/sms.routes";
 import { transactionsRouter } from "./modules/transactions/transactions.routes";
+import { tripsRouter } from "./modules/trips/trips.routes";
 import { APP_VERSION } from "./version";
 
 export const app = express();
@@ -40,6 +41,7 @@ app.use("/ingestion/sms", smsRouter);
 app.use("/ingestion/email", emailRouter);
 app.use("/analytics", analyticsRouter);
 app.use("/emi", emiRouter);
+app.use("/trips", tripsRouter);
 
 app.use((_req, res) => res.status(404).json({ error: "Not found" }));
 

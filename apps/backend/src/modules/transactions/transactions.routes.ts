@@ -5,6 +5,7 @@ import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
 import { Account, Transaction, TransactionDoc, TransactionSourceEntry } from "../../models";
 import { ingestRawMessage } from "../../parsing/ingest";
+import { tripForOccurredAt } from "../trips/trips.service";
 import { IST_OFFSET, istDayEnd, istDayKey, istDayStart } from "../../time";
 import { TRANSACTION_TYPES } from "../../types";
 
@@ -211,6 +212,7 @@ transactionsRouter.post("/", async (req, res) => {
     categoryId: parsed.data.categoryId ?? null,
     accountId: parsed.data.accountId ?? null,
     occurredAt: parsed.data.occurredAt,
+    tripId: await tripForOccurredAt(currentUserId(req), parsed.data.occurredAt),
     isTransfer: parsed.data.isTransfer ?? false,
     split: parsed.data.split ?? null,
     isSettlement: parsed.data.isSettlement ?? false,
@@ -244,6 +246,8 @@ const updateTransactionSchema = z.object({
     .nullable()
     .optional(),
   isSettlement: z.boolean().optional(),
+  // null takes it off whatever trip it was on.
+  tripId: z.string().regex(OBJECT_ID).nullable().optional(),
   pending: z.boolean().optional(),
 });
 

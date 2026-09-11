@@ -223,6 +223,9 @@ export interface TransactionDoc {
   source: TransactionSource;
   sourceRef?: string | null; // provider message id, for dedup + audit trail
   dedupeKey?: string | null;
+  /// The trip this was spent on, if any. Purely a label: it never touches
+  /// countedAmountMinor, because a meal on holiday is still a meal.
+  tripId?: Types.ObjectId | null;
   /// The plan this belongs to, once a purchase has been converted to an
   /// EMI: the purchase itself as PARENT, each monthly payment as
   /// INSTALMENT. Only the parent is kept out of the totals.
@@ -312,6 +315,7 @@ const transactionSchema = new Schema<TransactionDoc>(
     source: { type: String, enum: TRANSACTION_SOURCES, required: true },
     sourceRef: { type: String, default: null },
     dedupeKey: { type: String, default: null },
+    tripId: { type: Schema.Types.ObjectId, ref: "Trip", default: null },
     refundOf: { type: [refundAllocationSchema], default: [] },
     refundedMinor: { type: Number, default: 0, min: 0 },
     emiPlanId: { type: Schema.Types.ObjectId, ref: "EmiPlan", default: null },
@@ -374,6 +378,9 @@ transactionSchema.index({ sourceRef: 1 });
 // Totting up what has come back against a purchase, and finding the
 // refunds to unlink when one is deleted.
 transactionSchema.index({ "refundOf.transactionId": 1 });
+// A trip's totals read every member's transactions, so this is not scoped
+// by user the way the other indexes are.
+transactionSchema.index({ tripId: 1, occurredAt: -1 });
 
 // Exposed as `category`/`account` (alongside the raw `categoryId`/`accountId`)
 // so populated responses keep the shape the clients already expect.
@@ -506,3 +513,59 @@ emiInstalmentSchema.index({ planId: 1, seq: 1 }, { unique: true });
 emiInstalmentSchema.index({ userId: 1, status: 1, dueDate: 1 });
 
 export const EmiInstalment = model<EmiInstalmentDoc>("EmiInstalment", emiInstalmentSchema);
+
+export interface TripMember {
+  userId: Types.ObjectId;
+  joinedAt: Date;
+}
+
+export interface TripDoc {
+  _id: Types.ObjectId;
+  ownerId: Types.ObjectId;
+  name: string;
+  /// Everything spent between these belongs to the trip. endedAt is null
+  /// while it is still running.
+  startedAt: Date;
+  endedAt?: Date | null;
+  /// Everyone who can see it and add to it. The owner is always the first.
+  members: TripMember[];
+  /// Shared out of band — read out, or scanned as a QR code — so that
+  /// joining needs no email address and no link handling.
+  joinCode: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const tripMemberSchema = new Schema<TripMember>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    joinedAt: { type: Date, default: () => new Date() },
+  },
+  { _id: false }
+);
+
+const tripSchema = new Schema<TripDoc>(
+  {
+    ownerId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    name: { type: String, required: true },
+    startedAt: { type: Date, required: true },
+    endedAt: { type: Date, default: null },
+    members: { type: [tripMemberSchema], default: [] },
+    joinCode: { type: String, required: true },
+  },
+  { timestamps: true, ...serialization }
+);
+
+tripSchema.index({ joinCode: 1 }, { unique: true });
+// Membership is what authorises reading a trip, so it is looked up by it.
+tripSchema.index({ "members.userId": 1 });
+
+// One running trip at a time: "trip mode" is a switch, and two of them on
+// at once would leave every payment ambiguous. A partial index rather than
+// sparse, because endedAt is present-and-null rather than absent.
+tripSchema.index(
+  { ownerId: 1, endedAt: 1 },
+  { unique: true, partialFilterExpression: { endedAt: null } }
+);
+
+export const Trip = model<TripDoc>("Trip", tripSchema);

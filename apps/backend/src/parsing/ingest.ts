@@ -4,6 +4,7 @@ import { TransactionSource } from "../types";
 import { resolveAccount } from "./accounts";
 import { categorizeTransaction } from "./categorizer";
 import { matchEmiInstalment } from "../modules/emi/emi.matching";
+import { tripForOccurredAt } from "../modules/trips/trips.service";
 import { findDuplicate, detectSelfTransfer } from "./dedupe";
 import { parseTransactionText } from "./parser";
 
@@ -93,10 +94,16 @@ export async function ingestRawMessage(params: {
     rawText: params.rawText,
   });
 
+  // Which holiday, if any, this was spent on. Decided by when the money
+  // moved rather than when the message arrived, so a late SMS still lands
+  // on the right trip.
+  const tripId = await tripForOccurredAt(params.userId, occurredAt);
+
   const transaction = await Transaction.create({
     userId: params.userId,
     accountId,
     categoryId,
+    tripId,
     amountMinor: parsed.amountMinor,
     currency: parsed.currency,
     type: parsed.type,
