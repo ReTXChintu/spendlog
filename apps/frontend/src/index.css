@@ -512,7 +512,21 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
 .trip-detail .emi-preview{margin-top:14px}
 .trip-breakdown{margin-top:14px;display:flex;flex-direction:column;gap:6px}
 .trip-breakdown-row{display:flex;justify-content:space-between;font-size:12.8px;color:var(--ink-70)}
-.trip-actions{display:flex;align-items:center;gap:8px;margin-top:16px}
+.trip-actions{display:flex;align-items:center;gap:8px;margin-top:16px;flex-wrap:wrap}
+
+.trip-code-box{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:14px;
+  padding:14px 16px;background:var(--brand-50);border-radius:var(--radius-md)}
+.trip-code{font-family:var(--font-mono);font-size:24px;font-weight:800;letter-spacing:4px;
+  color:var(--ink)}
+.trip-code-note{flex:1;min-width:200px;font-size:12px;color:var(--muted);line-height:1.5}
+.trip-people{display:flex;flex-direction:column;gap:6px;margin-top:12px}
+.trip-person{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  font-size:12.8px;color:var(--ink-70);padding:8px 0;border-bottom:1px solid var(--line)}
+.trip-person:last-child{border-bottom:none}
+.trip-join-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+.trip-join-row .filter-input{width:140px;font-family:var(--font-mono);letter-spacing:2px;
+  text-transform:uppercase}
+
 .badge-refunded{background:var(--credit-50);color:var(--credit)}
 
 .refund-list{display:flex;flex-direction:column;gap:6px;margin:14px 0 4px 0;max-height:280px;overflow-y:auto}

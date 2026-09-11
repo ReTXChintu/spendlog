@@ -4,6 +4,8 @@ import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/format.dart';
 import '../widgets/state_block.dart';
+import 'join_trip_screen.dart';
+import 'trip_members_screen.dart';
 
 /// Trips: a holiday totalled on its own.
 ///
@@ -102,6 +104,25 @@ class _TripsScreenState extends State<TripsScreen> {
     });
   }
 
+  Future<void> _joinTrip() async {
+    final joined = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const JoinTripScreen()),
+    );
+    if (joined == null || !mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Joined $joined.')));
+    await _load();
+  }
+
+  Future<void> _openMembers(Trip trip) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => TripMembersScreen(tripId: trip.id, tripName: trip.name),
+      ),
+    );
+    await _load();
+  }
+
   Future<void> _startTrip() async {
     final name = await showDialog<String>(
       context: context,
@@ -144,6 +165,7 @@ class _TripsScreenState extends State<TripsScreen> {
               active: active,
               busy: _busy,
               onStart: _startTrip,
+              onJoin: _joinTrip,
               onEnd: active == null
                   ? null
                   : () => _run(
@@ -184,6 +206,7 @@ class _TripsScreenState extends State<TripsScreen> {
                   summary: _openId == trip.id ? _summary : null,
                   busy: _busy,
                   onTap: () => _open(trip),
+                  onMembers: () => _openMembers(trip),
                   onRescan: () => _rescan(trip),
                   onDelete: () => _run(
                     () => ApiClient.instance.delete('/trips/${trip.id}'),
@@ -202,12 +225,14 @@ class _TripModeCard extends StatelessWidget {
   final bool busy;
   final VoidCallback onStart;
   final VoidCallback? onEnd;
+  final VoidCallback onJoin;
 
   const _TripModeCard({
     required this.active,
     required this.busy,
     required this.onStart,
     required this.onEnd,
+    required this.onJoin,
   });
 
   @override
@@ -252,11 +277,22 @@ class _TripModeCard extends StatelessWidget {
               style: TextStyle(fontSize: 12.5, height: 1.45, color: c.muted),
             ),
           const SizedBox(height: 14),
-          SizedBox(
-            width: double.infinity,
-            child: running
-                ? FilledButton(onPressed: busy ? null : onEnd, child: const Text('End trip'))
-                : FilledButton(onPressed: busy ? null : onStart, child: const Text('Start a trip')),
+          Row(
+            children: [
+              Expanded(
+                child: running
+                    ? FilledButton(onPressed: busy ? null : onEnd, child: const Text('End trip'))
+                    : FilledButton(
+                        onPressed: busy ? null : onStart,
+                        child: const Text('Start a trip'),
+                      ),
+              ),
+              const SizedBox(width: 10),
+              OutlinedButton(
+                onPressed: busy ? null : onJoin,
+                child: const Text('Join one'),
+              ),
+            ],
           ),
         ],
       ),
@@ -270,6 +306,7 @@ class _TripCard extends StatelessWidget {
   final TripSummary? summary;
   final bool busy;
   final VoidCallback onTap;
+  final VoidCallback onMembers;
   final VoidCallback onRescan;
   final VoidCallback onDelete;
 
@@ -279,6 +316,7 @@ class _TripCard extends StatelessWidget {
     required this.summary,
     required this.busy,
     required this.onTap,
+    required this.onMembers,
     required this.onRescan,
     required this.onDelete,
   });
@@ -392,6 +430,29 @@ class _TripCard extends StatelessWidget {
                             ],
                           ),
                         ),
+                        if (summary!.byMember.length > 1) ...[
+                          const SizedBox(height: 12),
+                          for (final member in summary!.byMember)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 6),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text('${member.name} paid',
+                                      style: TextStyle(fontSize: 12.8, color: c.ink70)),
+                                  Text(
+                                    formatMoneyShort(member.spentMinor),
+                                    style: kNum.copyWith(
+                                      fontSize: 12.8,
+                                      fontWeight: FontWeight.w700,
+                                      color: c.ink70,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          Divider(color: c.line, height: 18),
+                        ],
                         if (summary!.byCategory.isNotEmpty) ...[
                           const SizedBox(height: 12),
                           for (final entry in summary!.byCategory)
@@ -414,9 +475,14 @@ class _TripCard extends StatelessWidget {
                         Row(
                           children: [
                             TextButton.icon(
+                              onPressed: busy ? null : onMembers,
+                              icon: const Icon(Icons.group_outlined, size: 16),
+                              label: const Text('People'),
+                            ),
+                            TextButton.icon(
                               onPressed: busy ? null : onRescan,
                               icon: const Icon(Icons.sync, size: 15),
-                              label: const Text('Re-scan those dates'),
+                              label: const Text('Re-scan'),
                             ),
                             const Spacer(),
                             TextButton(

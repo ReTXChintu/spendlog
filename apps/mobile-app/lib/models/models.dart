@@ -372,6 +372,7 @@ class TripSummary {
   final int dayCount;
   final int perDayMinor;
   final List<CategorySpend> byCategory;
+  final List<TripMemberSpend> byMember;
 
   TripSummary({
     required this.trip,
@@ -380,6 +381,7 @@ class TripSummary {
     required this.dayCount,
     required this.perDayMinor,
     required this.byCategory,
+    required this.byMember,
   });
 
   factory TripSummary.fromJson(Map<String, dynamic> json) => TripSummary(
@@ -391,6 +393,24 @@ class TripSummary {
         byCategory: (json['byCategory'] as List<dynamic>? ?? [])
             .map((c) => CategorySpend.fromJson(c as Map<String, dynamic>))
             .toList(),
+        byMember: (json['byMember'] as List<dynamic>? ?? [])
+            .map((m) => TripMemberSpend.fromJson(m as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+/// What one person on a trip paid for.
+class TripMemberSpend {
+  final String userId;
+  final String name;
+  final int spentMinor;
+
+  TripMemberSpend({required this.userId, required this.name, required this.spentMinor});
+
+  factory TripMemberSpend.fromJson(Map<String, dynamic> json) => TripMemberSpend(
+        userId: json['userId'] as String,
+        name: json['name'] as String? ?? 'Someone',
+        spentMinor: json['spentMinor'] as int? ?? 0,
       );
 }
 

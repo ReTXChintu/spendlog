@@ -4,6 +4,9 @@
     <uses-permission android:name="android.permission.RECEIVE_SMS"/>
     <uses-permission android:name="android.permission.READ_SMS"/>
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Scanning a trip's join code. Asked for only when the scanner is
+         opened, never at startup. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
 
     <application
         android:label="SpendLog"

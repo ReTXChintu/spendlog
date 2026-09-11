@@ -3,7 +3,10 @@ import { Icon } from "../components/Icon";
 import { StateBlock } from "../components/States";
 import { api } from "../lib/api";
 import { formatDayLabel, formatMoney, formatMoneyShort } from "../lib/format";
-import { Trip, TripSummary } from "../types";
+import { Trip, TripMember, TripSummary } from "../types";
+
+/** The trip detail, where members are resolved to people. */
+type TripDetail = Trip & { members: TripMember[] };
 
 /**
  * Trips: a holiday totalled on its own.
@@ -16,7 +19,9 @@ export function TripsPage() {
   const [trips, setTrips] = useState<Trip[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [summary, setSummary] = useState<TripSummary | null>(null);
+  const [detail, setDetail] = useState<TripDetail | null>(null);
   const [name, setName] = useState("");
+  const [joinCode, setJoinCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -33,12 +38,17 @@ export function TripsPage() {
   useEffect(() => {
     if (!openId) {
       setSummary(null);
+      setDetail(null);
       return;
     }
     api
       .get<TripSummary>(`/trips/${openId}/summary`)
       .then(setSummary)
       .catch(() => setSummary(null));
+    api
+      .get<TripDetail>(`/trips/${openId}`)
+      .then(setDetail)
+      .catch(() => setDetail(null));
   }, [openId, trips]);
 
   const active = trips?.find((trip) => trip.isActive) ?? null;
@@ -56,6 +66,19 @@ export function TripsPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function joinTrip() {
+    run(
+      () => api.post<Trip>("/trips/join", { code: joinCode.trim() }),
+      (trip) => {
+        setJoinCode("");
+        setNotice(
+          `Joined "${trip.name}". It shares from now on — anything you spent before stays yours ` +
+            "until you add it with Re-scan."
+        );
+      }
+    );
   }
 
   function start() {
@@ -127,6 +150,20 @@ export function TripsPage() {
         )}
       </div>
 
+      <div className="trip-join-row">
+        <span className="field-hint">Someone shared a code with you?</span>
+        <input
+          className="filter-input"
+          placeholder="Join code"
+          value={joinCode}
+          onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+          onKeyDown={(e) => e.key === "Enter" && joinTrip()}
+        />
+        <button className="btn btn-sm" disabled={busy || !joinCode.trim()} onClick={joinTrip}>
+          Join
+        </button>
+      </div>
+
       {error && <div className="merge-error">{error}</div>}
       {notice && <p className="field-hint">{notice}</p>}
 
@@ -176,6 +213,17 @@ export function TripsPage() {
                     </div>
                   </div>
 
+                  {summary.byMember.length > 1 && (
+                    <div className="trip-people">
+                      {summary.byMember.map((entry) => (
+                        <div className="trip-person" key={entry.userId}>
+                          <span>{entry.name ?? "Someone"} paid</span>
+                          <span className="num">{formatMoney(entry.spentMinor)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {summary.byCategory.length > 0 && (
                     <div className="trip-breakdown">
                       {summary.byCategory.map((entry) => (
@@ -185,6 +233,60 @@ export function TripsPage() {
                         </div>
                       ))}
                     </div>
+                  )}
+
+                  {detail && detail.id === trip.id && (
+                    <>
+                      <div className="trip-code-box">
+                        <span className="trip-code">{detail.joinCode}</span>
+                        <span className="trip-code-note">
+                          Read this out, or show the QR from the phone app, to add someone. They see
+                          what was spent on this trip and nothing else of yours.
+                        </span>
+                        <button
+                          className="btn btn-sm btn-ghost"
+                          disabled={busy}
+                          onClick={() =>
+                            run(
+                              () => api.post<{ joinCode: string }>(`/trips/${trip.id}/rotate-code`),
+                              () => {
+                                setDetail(null);
+                                setNotice("New code. The old one no longer works.");
+                              }
+                            )
+                          }
+                        >
+                          New code
+                        </button>
+                      </div>
+
+                      <div className="trip-people">
+                        {detail.members.map((member) => (
+                          <div className="trip-person" key={member.userId}>
+                            <span>{member.name ?? "Someone"}</span>
+                            {member.isOwner ? (
+                              <span className="field-hint">Started it</span>
+                            ) : (
+                              <button
+                                className="btn btn-sm btn-ghost btn-danger-text"
+                                disabled={busy}
+                                onClick={() =>
+                                  run(
+                                    () => api.delete(`/trips/${trip.id}/members/${member.userId}`),
+                                    () => {
+                                      setDetail(null);
+                                      setNotice("Removed. What they spent stays on the trip.");
+                                    }
+                                  )
+                                }
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </>
                   )}
 
                   <div className="trip-actions">

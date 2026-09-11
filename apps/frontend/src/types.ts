@@ -91,6 +91,9 @@ export interface EmiUpcoming {
 export interface TripMember {
   userId: string;
   joinedAt: string;
+  /** Present on the trip detail, where members are resolved to people. */
+  name?: string;
+  isOwner?: boolean;
 }
 
 export interface Trip {
