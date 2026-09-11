@@ -44,6 +44,15 @@ accountsRouter.post("/", async (req, res) => {
   const userId = currentUserId(req);
   const { bankName, last4 = null, accountType } = parsed.data;
 
+  // One cash account is enough; a second would only split the same pocket
+  // in two.
+  if (accountType === "CASH") {
+    const existing = await Account.findOne({ userId, accountType: "CASH" });
+    if (existing) {
+      return res.status(409).json({ error: "You already have a cash account", accountId: existing.id });
+    }
+  }
+
   // The same real account added twice would break self-transfer detection,
   // which relies on one row per account.
   const clash = await Account.findOne({
@@ -81,6 +90,15 @@ accountsRouter.delete("/:id", validObjectIdParam("id"), async (req, res) => {
   const userId = currentUserId(req);
   const account = await Account.findOne({ _id: req.params.id, userId });
   if (!account) return res.status(404).json({ error: "Not found" });
+
+  // Cash is a fixture, not something the user added — every account needs
+  // somewhere to put a payment that came out of a pocket. Closing it hides
+  // it from the pickers without losing what was already filed under it.
+  if (account.accountType === "CASH") {
+    return res.status(400).json({
+      error: "Cash can't be deleted. Mark it closed instead if you never use it.",
+    });
+  }
 
   const inUse = await Transaction.countDocuments({ userId, accountId: account._id });
   if (inUse > 0 && req.query.unassign !== "true") {

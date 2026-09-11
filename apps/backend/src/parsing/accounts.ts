@@ -54,3 +54,30 @@ async function findByTuple(
 function isDuplicateKeyError(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { code?: number }).code === 11000;
 }
+
+/** The name the cash account is given, and matched on. */
+export const CASH_ACCOUNT_NAME = "Cash";
+
+/**
+ * Makes sure the user has somewhere to file the money that leaves their
+ * pocket rather than an account.
+ *
+ * Called on every sign-in rather than only at creation, so an account that
+ * predates this gets one too. Idempotent, and never matched by
+ * resolveAccount: parsing only ever yields BANK, CARD or UPI.
+ */
+export async function ensureCashAccount(userId: Types.ObjectId): Promise<void> {
+  await Account.findOneAndUpdate(
+    { userId, accountType: "CASH" },
+    {
+      $setOnInsert: {
+        userId,
+        accountType: "CASH",
+        bankName: CASH_ACCOUNT_NAME,
+        last4: null,
+        nickname: CASH_ACCOUNT_NAME,
+      },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+}

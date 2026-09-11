@@ -7,6 +7,7 @@ const ACCOUNT_TYPES: { value: AccountType; label: string }[] = [
   { value: "BANK", label: "Bank" },
   { value: "CARD", label: "Card" },
   { value: "UPI", label: "UPI" },
+  { value: "CASH", label: "Cash" },
 ];
 
 /**
@@ -130,6 +131,9 @@ export function AccountModal({
 
   const others = accounts.filter((a) => a.id !== account?.id);
   const isCard = accountType === "CARD";
+  // Cash has no issuer and no last four digits; asking for them would only
+  // invite a wrong answer.
+  const isCash = accountType === "CASH";
 
   return (
     <div
@@ -174,15 +178,28 @@ export function AccountModal({
             </select>
           </label>
 
-          <label className="field">
-            <span>Bank name</span>
-            <input value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="HDFC Bank" />
-          </label>
+          {!isCash && (
+            <>
+              <label className="field">
+                <span>Bank name</span>
+                <input
+                  value={bankName}
+                  onChange={(e) => setBankName(e.target.value)}
+                  placeholder="HDFC Bank"
+                />
+              </label>
 
-          <label className="field">
-            <span>Last digits</span>
-            <input value={last4} onChange={(e) => setLast4(e.target.value)} placeholder="1377" inputMode="numeric" />
-          </label>
+              <label className="field">
+                <span>Last digits</span>
+                <input
+                  value={last4}
+                  onChange={(e) => setLast4(e.target.value)}
+                  placeholder="1377"
+                  inputMode="numeric"
+                />
+              </label>
+            </>
+          )}
 
           {isCard && (
             <>

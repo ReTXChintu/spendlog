@@ -232,9 +232,11 @@ export function SettingsPage() {
                       {account.nickname ? `${account.bankName} · ` : ""}
                       {account.aliases.length > 0
                         ? `also ${account.aliases.map((a) => a.bankName).join(", ")}`
-                        : account.isActive
-                          ? "Detected from your messages"
-                          : "Closed"}
+                        : !account.isActive
+                          ? "Closed"
+                          : account.accountType === "CASH"
+                            ? "For anything paid out of pocket"
+                            : "Detected from your messages"}
                     </span>
                   </span>
                   <span className="account-row-type">{account.accountType}</span>

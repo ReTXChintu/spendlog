@@ -122,6 +122,7 @@ class _AccountCard extends StatelessWidget {
       return 'Also ${account.aliases.map((a) => a.bankName).join(', ')}';
     }
     if (!account.isActive) return 'Closed';
+    if (account.accountType == 'CASH') return 'For anything paid out of pocket';
     if (account.nickname?.trim().isNotEmpty ?? false) return account.bankName;
     return 'Detected from your messages';
   }
@@ -149,7 +150,11 @@ class _AccountCard extends StatelessWidget {
                 height: 34,
                 decoration: BoxDecoration(color: c.brand50, borderRadius: BorderRadius.circular(9)),
                 child: Icon(
-                  account.accountType == 'BANK' ? Icons.account_balance : Icons.credit_card,
+                  switch (account.accountType) {
+                    'BANK' => Icons.account_balance,
+                    'CASH' => Icons.payments_outlined,
+                    _ => Icons.credit_card,
+                  },
                   size: 17,
                   color: c.brandDark,
                 ),

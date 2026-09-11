@@ -3,7 +3,7 @@ import { after, before, beforeEach, describe, it } from "node:test";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import mongoose, { Types } from "mongoose";
 import { Account, User } from "../models";
-import { resolveAccount } from "./accounts";
+import { ensureCashAccount, resolveAccount } from "./accounts";
 
 let mongod: MongoMemoryServer;
 
@@ -101,8 +101,65 @@ describe("resolveAccount", () => {
     assert.equal(new Set(ids.map((id) => id?.toString())).size, 1);
   });
 
+  it("never resolves a message onto the cash account", async () => {
+    const userId = await makeUser();
+    await ensureCashAccount(userId);
+
+    // Parsing only ever yields BANK, CARD or UPI, but a bank literally
+    // called "Cash" must still not land on the user's pocket.
+    const resolved = await resolveAccount(userId, {
+      bankName: "Cash",
+      last4: null,
+      accountType: "BANK",
+    });
+
+    const cash = await Account.findOne({ userId, accountType: "CASH" }).orFail();
+    assert.notEqual(resolved?.toString(), cash._id.toString());
+  });
+
   it("returns nothing when the message revealed no account", async () => {
     const userId = await makeUser();
     assert.equal(await resolveAccount(userId, null), null);
+  });
+});
+
+describe("ensureCashAccount", () => {
+  it("gives a user somewhere to file money from their pocket", async () => {
+    const userId = await makeUser();
+    await ensureCashAccount(userId);
+
+    const cash = await Account.findOne({ userId, accountType: "CASH" }).orFail();
+    assert.equal(cash.bankName, "Cash");
+    assert.equal(cash.last4, null);
+  });
+
+  it("makes only one however many times it runs", async () => {
+    // It is called on every sign-in, not only at creation, so that an
+    // account predating the feature gets one too.
+    const userId = await makeUser();
+    await ensureCashAccount(userId);
+    await ensureCashAccount(userId);
+    await ensureCashAccount(userId);
+
+    assert.equal(await Account.countDocuments({ userId, accountType: "CASH" }), 1);
+  });
+
+  it("leaves a renamed cash account alone", async () => {
+    const userId = await makeUser();
+    await ensureCashAccount(userId);
+    await Account.updateOne({ userId, accountType: "CASH" }, { $set: { nickname: "Wallet" } });
+
+    await ensureCashAccount(userId);
+
+    const cash = await Account.findOne({ userId, accountType: "CASH" }).orFail();
+    assert.equal(cash.nickname, "Wallet");
+  });
+
+  it("keeps one user's cash separate from another's", async () => {
+    const [a, b] = await Promise.all([makeUser(), makeUser()]);
+    await ensureCashAccount(a);
+    await ensureCashAccount(b);
+
+    assert.equal(await Account.countDocuments({ accountType: "CASH" }), 2);
   });
 });

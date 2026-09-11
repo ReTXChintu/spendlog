@@ -7,6 +7,7 @@ const _types = [
   ('BANK', 'Bank'),
   ('CARD', 'Card'),
   ('UPI', 'UPI'),
+  ('CASH', 'Cash'),
 ];
 
 /// Add or edit one account, and merge away the duplicates a bank creates by
@@ -92,7 +93,9 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
   }
 
   Future<void> _save() async {
-    final bankName = _bankName.text.trim();
+    final bankName = _type == 'CASH' && _bankName.text.trim().isEmpty
+        ? 'Cash'
+        : _bankName.text.trim();
     if (bankName.isEmpty) {
       setState(() => _error = 'The bank or card issuer needs a name.');
       return;
@@ -240,9 +243,11 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
             ),
             const SizedBox(height: 14),
 
-            _Field(label: 'Bank name', controller: _bankName, hint: 'HDFC Bank'),
-            const SizedBox(height: 14),
-            _Field(label: 'Last digits', controller: _last4, hint: '1377', numeric: true),
+            if (_type != 'CASH') ...[
+              _Field(label: 'Bank name', controller: _bankName, hint: 'HDFC Bank'),
+              const SizedBox(height: 14),
+              _Field(label: 'Last digits', controller: _last4, hint: '1377', numeric: true),
+            ],
 
             if (_type == 'CARD') ...[
               const SizedBox(height: 14),

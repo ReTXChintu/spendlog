@@ -9,7 +9,7 @@ export interface Category {
   isSystem: boolean;
 }
 
-export type AccountType = "BANK" | "CARD" | "UPI";
+export type AccountType = "BANK" | "CARD" | "UPI" | "CASH";
 
 /** A spelling of an account that a bank uses in one of its message formats. */
 export interface AccountAlias {

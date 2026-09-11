@@ -5,6 +5,7 @@ import { z } from "zod";
 import { env } from "../../env";
 import { requireAuth, signSessionToken } from "../../middleware/auth";
 import { User } from "../../models";
+import { ensureCashAccount } from "../../parsing/accounts";
 import {
   buildConsentUrl,
   exchangeCode,
@@ -139,11 +140,16 @@ export const googleCallbackHandler: RequestHandler = async (req, res) => {
 authRouter.get("/google/callback", googleCallbackHandler);
 
 async function upsertUser(payload: TokenPayload) {
-  return User.findOneAndUpdate(
+  const user = await User.findOneAndUpdate(
     { email: payload.email },
     { $set: { googleId: payload.sub, name: payload.name ?? null } },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   ).orFail();
+
+  // Somewhere to file a cash payment, which no message will ever announce.
+  await ensureCashAccount(user._id);
+
+  return user;
 }
 
 const mobileLoginSchema = z.object({

@@ -4,7 +4,11 @@ export type TransactionType = (typeof TRANSACTION_TYPES)[number];
 export const TRANSACTION_SOURCES = ["SMS", "EMAIL", "MANUAL"] as const;
 export type TransactionSource = (typeof TRANSACTION_SOURCES)[number];
 
-export const ACCOUNT_TYPES = ["BANK", "CARD", "UPI"] as const;
+// CASH is never detected from a message — no bank announces it — so it
+// exists only to be chosen by hand. Keeping it an account type rather
+// than a flag means filters, the ledger and trip totals treat it like
+// any other without having to know about it.
+export const ACCOUNT_TYPES = ["BANK", "CARD", "UPI", "CASH"] as const;
 export type AccountType = (typeof ACCOUNT_TYPES)[number];
 
 // Why a transaction's counted amount differs from the amount the bank
