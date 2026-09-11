@@ -4,7 +4,7 @@ import { Icon } from "../components/Icon";
 import { StateBlock } from "../components/States";
 import { api } from "../lib/api";
 import { currentMonth, formatMoney, formatMoneyShort, formatMonthLabel, shiftMonth } from "../lib/format";
-import { AnalyticsSummary, Category, OwedSummary, TrendPoint } from "../types";
+import { AnalyticsSummary, Category, EmiPlan, OwedSummary, TrendPoint } from "../types";
 
 const TREND_MAX_HEIGHT = 110;
 
@@ -15,6 +15,7 @@ export function AnalyticsPage() {
   const [trend, setTrend] = useState<TrendPoint[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [owed, setOwed] = useState<OwedSummary | null>(null);
+  const [plans, setPlans] = useState<EmiPlan[]>([]);
 
   useEffect(() => {
     api.get<AnalyticsSummary>(`/analytics/summary?month=${month}`).then(setSummary);
@@ -25,6 +26,7 @@ export function AnalyticsPage() {
     api.get<Category[]>("/categories").then(setCategories);
     // Not month-scoped: what people owe each other does not reset in January.
     api.get<OwedSummary>("/analytics/owed").then(setOwed).catch(() => setOwed(null));
+    api.get<EmiPlan[]>("/emi").then(setPlans).catch(() => setPlans([]));
   }, []);
 
   const colorFor = (categoryId: string | null) =>
@@ -36,6 +38,11 @@ export function AnalyticsPage() {
   const monthsWithData = trend.filter((p) => p.spendMinor > 0 || p.incomeMinor > 0).length;
 
   const hasData = summary !== null && summary.transactionCount > 0;
+
+  const activePlans = plans.filter((plan) => plan.status === "ACTIVE");
+  // What is still owed across every running plan — money already committed,
+  // whatever this month's spending happens to look like.
+  const committedMinor = activePlans.reduce((sum, plan) => sum + plan.remainingMinor, 0);
 
   return (
     <section className="screen">
@@ -70,6 +77,33 @@ export function AnalyticsPage() {
       ) : (
         <div className="layout-2">
           <div>
+            {activePlans.length > 0 && (
+              <div className="section-block">
+                <h3>EMIs</h3>
+                <p className="section-sub">
+                  {formatMoney(committedMinor)} still to pay across{" "}
+                  {activePlans.length === 1 ? "one plan" : `${activePlans.length} plans`}.
+                </p>
+                {activePlans.map((plan) => {
+                  const pct = Math.round((plan.paidCount / plan.months) * 100);
+                  return (
+                    <div className="emi-row" key={plan.id}>
+                      <div className="emi-row-main">
+                        <div className="emi-row-name">{plan.label ?? "EMI"}</div>
+                        <div className="emi-row-sub">
+                          {formatMoney(plan.monthlyAmountMinor)} a month · {plan.paidCount} of {plan.months}{" "}
+                          paid · {formatMoneyShort(plan.remainingMinor)} left
+                        </div>
+                        <div className="emi-progress">
+                          <div className="emi-progress-fill" style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {owed && owed.splitCount > 0 && (
               <div className="section-block">
                 <h3>Split bills</h3>

@@ -20,6 +20,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   List<Map<String, dynamic>> _trend = [];
   List<Category> _categories = [];
   OwedSummary? _owed;
+  List<EmiPlan> _plans = [];
 
   @override
   void initState() {
@@ -41,12 +42,17 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       ApiClient.instance.get('/categories'),
       // Not month-scoped: what people owe each other does not reset in January.
       ApiClient.instance.get('/analytics/owed'),
+      ApiClient.instance.get('/emi'),
     ]);
     if (!mounted) return;
     setState(() {
       _trend = (results[0] as List<dynamic>).cast<Map<String, dynamic>>();
       _categories = (results[1] as List<dynamic>).map((c) => Category.fromJson(c as Map<String, dynamic>)).toList();
       _owed = OwedSummary.fromJson(results[2] as Map<String, dynamic>);
+      _plans = (results[3] as List<dynamic>)
+          .map((p) => EmiPlan.fromJson(p as Map<String, dynamic>))
+          .where((p) => p.status == 'ACTIVE')
+          .toList();
     });
   }
 
@@ -94,6 +100,17 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                             _Tile(label: 'Received', value: formatMoney(summary.totalIncomeMinor), color: context.c.credit),
                           ],
                         ),
+                        if (_plans.isNotEmpty) ...[
+                          const SizedBox(height: 26),
+                          _SectionTitle(
+                            title: 'EMIs',
+                            sub: '${formatMoney(_plans.fold<int>(0, (sum, p) => sum + p.remainingMinor))} '
+                                'still to pay across '
+                                '${_plans.length == 1 ? 'one plan' : '${_plans.length} plans'}.',
+                          ),
+                          const SizedBox(height: 14),
+                          for (final plan in _plans) _EmiRow(plan: plan),
+                        ],
                         if (_owed != null && _owed!.splitCount > 0) ...[
                           const SizedBox(height: 26),
                           const _SectionTitle(
@@ -473,6 +490,46 @@ class _OwedStat extends StatelessWidget {
           style: kNum.copyWith(fontSize: 11.5, fontWeight: FontWeight.w700, color: context.c.ink70),
         ),
       ],
+    );
+  }
+}
+
+class _EmiRow extends StatelessWidget {
+  final EmiPlan plan;
+  const _EmiRow({required this.plan});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final fraction = plan.months == 0 ? 0.0 : plan.paidCount / plan.months;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            plan.label ?? 'EMI',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.4, color: c.ink),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '${formatMoney(plan.monthlyAmountMinor)} a month · ${plan.paidCount} of ${plan.months} paid '
+            '· ${formatMoneyShort(plan.remainingMinor)} left',
+            style: TextStyle(fontSize: 11.8, color: c.muted),
+          ),
+          const SizedBox(height: 7),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              value: fraction.clamp(0.0, 1.0),
+              minHeight: 5,
+              backgroundColor: c.track,
+              valueColor: AlwaysStoppedAnimation<Color>(c.brand),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

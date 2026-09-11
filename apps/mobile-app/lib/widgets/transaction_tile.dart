@@ -142,6 +142,7 @@ class TransactionTile extends StatelessWidget {
                   ],
                 ),
                 if (isTransfer ||
+                    transaction.emiRole != null ||
                     transaction.split != null ||
                     transaction.isSettlement ||
                     transaction.editedAt != null) ...[
@@ -154,6 +155,18 @@ class TransactionTile extends StatelessWidget {
                           label: 'Not counted',
                           background: context.c.chipNeutral,
                           foreground: context.c.transfer,
+                        ),
+                      if (transaction.emiRole == 'PARENT')
+                        _Badge(
+                          label: 'On EMI · not counted here',
+                          background: context.c.brand50,
+                          foreground: context.c.brandDark,
+                        ),
+                      if (transaction.emiRole == 'INSTALMENT')
+                        _Badge(
+                          label: 'EMI payment',
+                          background: context.c.brand50,
+                          foreground: context.c.brandDark,
                         ),
                       if (transaction.split != null)
                         _Badge(

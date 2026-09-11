@@ -3,6 +3,7 @@ import '../models/models.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/format.dart';
+import 'emi_sheet.dart';
 
 /// Full manual edit, and the same form used to add a transaction by hand.
 ///
@@ -457,6 +458,21 @@ class _EditSheetState extends State<_EditSheet> {
                         : () => _confirmDelete ? _delete() : setState(() => _confirmDelete = true),
                     style: TextButton.styleFrom(foregroundColor: c.debit),
                     child: Text(_confirmDelete ? 'Really delete?' : 'Delete'),
+                  ),
+                if (!_isNew &&
+                    widget.transaction!.type == 'DEBIT' &&
+                    widget.transaction!.emiPlanId == null)
+                  TextButton(
+                    onPressed: _saving
+                        ? null
+                        : () async {
+                            // Captured before the await: after it, this
+                            // sheet's own context may be gone.
+                            final navigator = Navigator.of(context);
+                            final created = await showEmiSheet(context, transaction: widget.transaction!);
+                            if (created == true) navigator.pop(true);
+                          },
+                    child: const Text('EMI'),
                   ),
                 if (!_isNew && widget.transaction!.wasReportedTwice)
                   TextButton(

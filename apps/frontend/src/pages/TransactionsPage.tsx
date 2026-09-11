@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { EditTransactionModal } from "../components/EditTransactionModal";
+import { EmiModal } from "../components/EmiModal";
 import { Icon } from "../components/Icon";
 import { LedgerSkeleton, StateBlock } from "../components/States";
 import { RawMessageModal } from "../components/RawMessageModal";
@@ -35,6 +36,7 @@ export function TransactionsPage() {
   const [syncing, setSyncing] = useState(false);
 
   const [rawFor, setRawFor] = useState<Transaction | null>(null);
+  const [emiFor, setEmiFor] = useState<Transaction | null>(null);
   // Rows picked for merging. Empty means selection mode is off.
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selecting, setSelecting] = useState(false);
@@ -483,10 +485,25 @@ export function TransactionsPage() {
           accounts={accounts}
           onSaved={reloadAfterEdit}
           onDeleted={reloadAfterEdit}
+          onConvertToEmi={(transaction) => {
+            setEditing(null);
+            setEmiFor(transaction);
+          }}
           onClose={() => {
             setEditing(null);
             setAdding(false);
           }}
+        />
+      )}
+
+      {emiFor && (
+        <EmiModal
+          transaction={emiFor}
+          onSaved={() => {
+            setEmiFor(null);
+            reloadAfterEdit();
+          }}
+          onClose={() => setEmiFor(null)}
         />
       )}
     </section>

@@ -136,6 +136,10 @@ class Transaction {
   /// user never typed can be checked.
   final String? rawText;
   final String source; // SMS | EMAIL | MANUAL
+  final String? emiPlanId;
+  /// "PARENT" on the purchase converted to an EMI, "INSTALMENT" on each
+  /// monthly payment.
+  final String? emiRole;
   final bool isTransfer;
   final TransactionSplit? split;
   final bool isSettlement;
@@ -158,6 +162,8 @@ class Transaction {
     this.note,
     this.rawText,
     required this.source,
+    this.emiPlanId,
+    this.emiRole,
     required this.isTransfer,
     this.split,
     this.isSettlement = false,
@@ -191,6 +197,8 @@ class Transaction {
         note: json['note'] as String?,
         rawText: json['rawText'] as String?,
         source: json['source'] as String,
+        emiPlanId: json['emiPlanId'] as String?,
+        emiRole: json['emiRole'] as String?,
         isTransfer: json['isTransfer'] as bool? ?? false,
         split: json['split'] != null
             ? TransactionSplit.fromJson(json['split'] as Map<String, dynamic>)
@@ -286,6 +294,42 @@ class OwedSummary {
         settledInMinor: json['settledInMinor'] as int? ?? 0,
         settledOutMinor: json['settledOutMinor'] as int? ?? 0,
         splitCount: json['splitCount'] as int? ?? 0,
+      );
+}
+
+class EmiPlan {
+  final String id;
+  final String? label;
+  final int principalMinor;
+  final int months;
+  final int monthlyAmountMinor;
+  final int totalPayableMinor;
+  final int paidCount;
+  final int remainingMinor;
+  final String status;
+
+  EmiPlan({
+    required this.id,
+    this.label,
+    required this.principalMinor,
+    required this.months,
+    required this.monthlyAmountMinor,
+    required this.totalPayableMinor,
+    required this.paidCount,
+    required this.remainingMinor,
+    required this.status,
+  });
+
+  factory EmiPlan.fromJson(Map<String, dynamic> json) => EmiPlan(
+        id: json['id'] as String,
+        label: json['label'] as String?,
+        principalMinor: json['principalMinor'] as int,
+        months: json['months'] as int,
+        monthlyAmountMinor: json['monthlyAmountMinor'] as int,
+        totalPayableMinor: json['totalPayableMinor'] as int,
+        paidCount: json['paidCount'] as int? ?? 0,
+        remainingMinor: json['remainingMinor'] as int? ?? 0,
+        status: json['status'] as String? ?? 'ACTIVE',
       );
 }
 

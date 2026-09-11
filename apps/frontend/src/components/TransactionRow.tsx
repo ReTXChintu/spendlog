@@ -113,6 +113,16 @@ export function TransactionRow({
                 </span>
               </div>
             )}
+            {transaction.emiRole === "PARENT" && (
+              <div className="row-badges">
+                <span className="badge badge-emi">On EMI · not counted here</span>
+              </div>
+            )}
+            {transaction.emiRole === "INSTALMENT" && (
+              <div className="row-badges">
+                <span className="badge badge-emi">EMI payment</span>
+              </div>
+            )}
             {transaction.split && (
               <div className="row-badges">
                 <span className="badge badge-split">

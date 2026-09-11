@@ -26,6 +26,7 @@ export function EditTransactionModal({
   onSaved,
   onDeleted,
   onClose,
+  onConvertToEmi,
 }: {
   /** null means "create a new one". */
   transaction: Transaction | null;
@@ -34,6 +35,8 @@ export function EditTransactionModal({
   onSaved: (saved: Transaction) => void;
   onDeleted?: (id: string) => void;
   onClose: () => void;
+  /** Opens the EMI form for this purchase. */
+  onConvertToEmi?: (transaction: Transaction) => void;
 }) {
   const isNew = transaction === null;
   const initial = transaction ? toLocalParts(transaction.occurredAt) : toLocalParts(new Date().toISOString());
@@ -365,6 +368,15 @@ export function EditTransactionModal({
               disabled={saving}
             >
               {confirmDelete ? "Really delete?" : "Delete"}
+            </button>
+          )}
+          {!isNew && onConvertToEmi && type === "DEBIT" && !transaction.emiPlanId && (
+            <button
+              className="btn btn-sm btn-ghost"
+              onClick={() => onConvertToEmi(transaction)}
+              disabled={saving}
+            >
+              Convert to EMI
             </button>
           )}
           {mergedCount > 1 && (

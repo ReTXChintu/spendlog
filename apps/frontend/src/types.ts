@@ -54,6 +54,40 @@ export interface TransactionSplit {
   groupLabel: string | null;
 }
 
+export type EmiRole = "PARENT" | "INSTALMENT";
+
+export interface EmiInstalment {
+  id: string;
+  planId: string;
+  seq: number;
+  dueDate: string;
+  amountMinor: number;
+  status: "DUE" | "PAID" | "SKIPPED";
+  transactionId: string | null;
+}
+
+export interface EmiPlan {
+  id: string;
+  label: string | null;
+  principalMinor: number;
+  months: number;
+  monthlyAmountMinor: number;
+  totalPayableMinor: number;
+  interestRatePctAnnual: number | null;
+  processingFeeMinor: number | null;
+  startDate: string;
+  status: "ACTIVE" | "CLOSED" | "CANCELLED";
+  instalments: EmiInstalment[];
+  paidCount: number;
+  paidMinor: number;
+  remainingMinor: number;
+}
+
+export interface EmiUpcoming {
+  totalMinor: number;
+  instalments: (EmiInstalment & { planId: EmiPlan })[];
+}
+
 export interface Transaction {
   id: string;
   amountMinor: number;
@@ -63,6 +97,8 @@ export interface Transaction {
   note: string | null;
   rawText: string | null;
   source: TransactionSource;
+  emiPlanId: string | null;
+  emiRole: EmiRole | null;
   isTransfer: boolean;
   split: TransactionSplit | null;
   isSettlement: boolean;
