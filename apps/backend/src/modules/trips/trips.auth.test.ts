@@ -122,6 +122,13 @@ describe("a trip is unreachable by someone who was never invited", () => {
     assert.equal((await call(`/trips/${trip.id}/transactions`, stranger.token)).status, 404);
   });
 
+  it("refuses its settlement", async () => {
+    const [owner, stranger] = await Promise.all([makeUser(), makeUser()]);
+    const trip = await makeTrip(owner.id);
+
+    assert.equal((await call(`/trips/${trip.id}/settlement`, stranger.token)).status, 404);
+  });
+
   it("refuses to re-scan it", async () => {
     const [owner, stranger] = await Promise.all([makeUser(), makeUser()]);
     const trip = await makeTrip(owner.id);
@@ -400,5 +407,112 @@ describe("rotating the join code", () => {
     assert.equal(withOldCode.status, 404);
 
     assert.equal((await call(`/trips/${trip.id}/summary`, friend.token)).status, 200);
+  });
+});
+
+describe("settling a shared trip end to end", () => {
+  async function tripWithFriend() {
+    const [owner, friend] = await Promise.all([makeUser(), makeUser()]);
+    const trip = await makeTrip(owner.id);
+    await call("/trips/join", friend.token, {
+      method: "POST",
+      body: JSON.stringify({ code: "GOA123" }),
+    });
+    return { owner, friend, trip };
+  }
+
+  function spend(
+    userId: Types.ObjectId,
+    tripId: Types.ObjectId,
+    amountMinor: number,
+    tripShareWith?: Types.ObjectId[]
+  ) {
+    return Transaction.create({
+      userId,
+      tripId,
+      tripShareWith: tripShareWith ?? null,
+      amountMinor,
+      currency: "INR",
+      type: "DEBIT",
+      source: "MANUAL",
+      occurredAt: new Date("2026-10-03T12:00:00Z"),
+    });
+  }
+
+  it("asks the one who paid less to square up", async () => {
+    const { owner, friend, trip } = await tripWithFriend();
+    await spend(owner.id, trip._id, 100000);
+
+    const settlement = await json<{
+      balances: { userId: string; netMinor: number; name: string }[];
+      transfers: { fromUserId: string; toUserId: string; amountMinor: number }[];
+    }>(await call(`/trips/${trip.id}/settlement`, friend.token));
+
+    assert.equal(settlement.transfers.length, 1);
+    assert.equal(settlement.transfers[0].fromUserId, friend.id.toString());
+    assert.equal(settlement.transfers[0].toUserId, owner.id.toString());
+    assert.equal(settlement.transfers[0].amountMinor, 50000);
+  });
+
+  it("leaves a personal expense out of it", async () => {
+    const { owner, friend, trip } = await tripWithFriend();
+    // Bought for themselves, on a trip with two people.
+    await spend(owner.id, trip._id, 100000, [owner.id]);
+
+    const settlement = await json<{ transfers: unknown[] }>(
+      await call(`/trips/${trip.id}/settlement`, owner.token)
+    );
+
+    assert.deepEqual(settlement.transfers, []);
+  });
+
+  it("nets two people off against each other", async () => {
+    const { owner, friend, trip } = await tripWithFriend();
+    await spend(owner.id, trip._id, 100000);
+    await spend(friend.id, trip._id, 60000);
+
+    const settlement = await json<{
+      transfers: { fromUserId: string; amountMinor: number }[];
+    }>(await call(`/trips/${trip.id}/settlement`, owner.token));
+
+    assert.equal(settlement.transfers.length, 1);
+    assert.equal(settlement.transfers[0].fromUserId, friend.id.toString());
+    assert.equal(settlement.transfers[0].amountMinor, 20000, "half the difference, not the whole");
+  });
+
+  it("settles what a split bill really cost, not its face value", async () => {
+    // Dinner shared with someone outside the trip: only the user's half
+    // was ever trip spending.
+    const { owner, friend, trip } = await tripWithFriend();
+    await Transaction.create({
+      userId: owner.id,
+      tripId: trip._id,
+      amountMinor: 200000,
+      split: { myShareMinor: 100000 },
+      currency: "INR",
+      type: "DEBIT",
+      source: "MANUAL",
+      occurredAt: new Date("2026-10-03T12:00:00Z"),
+    });
+
+    const settlement = await json<{ transfers: { amountMinor: number }[] }>(
+      await call(`/trips/${trip.id}/settlement`, friend.token)
+    );
+
+    assert.equal(settlement.transfers[0].amountMinor, 50000);
+  });
+
+  it("names everyone, including whoever has left", async () => {
+    const { owner, friend, trip } = await tripWithFriend();
+    await spend(friend.id, trip._id, 100000);
+    await call(`/trips/${trip.id}/leave`, friend.token, { method: "POST" });
+
+    const settlement = await json<{ balances: { userId: string; name: string }[] }>(
+      await call(`/trips/${trip.id}/settlement`, owner.token)
+    );
+
+    const theirs = settlement.balances.find((b) => b.userId === friend.id.toString());
+    assert.ok(theirs, "the person who left is still in the arithmetic");
+    assert.notEqual(theirs.name, "Someone", "and is still named");
   });
 });

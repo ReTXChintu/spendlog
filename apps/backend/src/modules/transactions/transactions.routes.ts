@@ -248,6 +248,8 @@ const updateTransactionSchema = z.object({
   isSettlement: z.boolean().optional(),
   // null takes it off whatever trip it was on.
   tripId: z.string().regex(OBJECT_ID).nullable().optional(),
+  // null means everyone on the trip; a list narrows it.
+  tripShareWith: z.array(z.string().regex(OBJECT_ID)).max(20).nullable().optional(),
   pending: z.boolean().optional(),
 });
 

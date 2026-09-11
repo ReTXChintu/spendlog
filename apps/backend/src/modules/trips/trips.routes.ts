@@ -6,6 +6,7 @@ import { validObjectIdParam } from "../../middleware/validate";
 import { Transaction, Trip, TripDoc, User } from "../../models";
 import { istDayKey } from "../../time";
 import { generateJoinCode } from "./trips.service";
+import { computeBalances, settle } from "./trips.settlement";
 
 export const tripsRouter = Router();
 tripsRouter.use(requireAuth);
@@ -353,3 +354,56 @@ tripsRouter.delete(
     res.status(204).end();
   }
 );
+
+// GET /trips/:id/settlement — who owes whom, and the payments that square
+// it off.
+//
+// Every expense is shared by everyone on the trip unless it says
+// otherwise, which is the common case and saves marking each one up. The
+// figures come from countedAmountMinor, so a refunded hotel and a bill
+// split with somebody outside the trip both behave without this knowing
+// anything about refunds or splits.
+tripsRouter.get("/:id/settlement", validObjectIdParam("id"), async (req, res) => {
+  const trip = await assertTripMember(req.params.id, currentUserId(req));
+  if (!trip) return res.status(404).json({ error: "Not found" });
+
+  const memberIds = trip.members.map((member) => member.userId.toString());
+
+  const transactions = await Transaction.find({
+    tripId: trip._id,
+    type: "DEBIT",
+    countedAmountMinor: { $gt: 0 },
+  }).select("userId countedAmountMinor tripShareWith");
+
+  const expenses = transactions.map((transaction) => ({
+    payerId: transaction.userId.toString(),
+    amountMinor: transaction.countedAmountMinor,
+    sharerIds: transaction.tripShareWith?.length
+      ? transaction.tripShareWith.map((id) => id.toString())
+      : memberIds,
+  }));
+
+  const balances = computeBalances(expenses);
+  const transfers = settle(balances);
+
+  // Anyone who has left still appears in the arithmetic, so their name has
+  // to be resolvable too.
+  const involved = new Set([...balances.map((b) => b.userId), ...memberIds]);
+  const users = await User.find({ _id: { $in: [...involved] } })
+    .select("name email")
+    .lean();
+
+  const nameFor = (userId: string) => {
+    const user = users.find((candidate) => candidate._id.toString() === userId);
+    return user?.name ?? user?.email ?? "Someone";
+  };
+
+  res.json({
+    balances: balances.map((balance) => ({ ...balance, name: nameFor(balance.userId) })),
+    transfers: transfers.map((transfer) => ({
+      ...transfer,
+      fromName: nameFor(transfer.fromUserId),
+      toName: nameFor(transfer.toUserId),
+    })),
+  });
+});

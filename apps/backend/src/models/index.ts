@@ -226,6 +226,10 @@ export interface TransactionDoc {
   /// The trip this was spent on, if any. Purely a label: it never touches
   /// countedAmountMinor, because a meal on holiday is still a meal.
   tripId?: Types.ObjectId | null;
+  /// Who a trip expense was for. null means everyone on the trip, which is
+  /// the usual answer; a list narrows it, and a list of just the payer is
+  /// how a souvenir stays out of everyone else's arithmetic.
+  tripShareWith?: Types.ObjectId[] | null;
   /// The plan this belongs to, once a purchase has been converted to an
   /// EMI: the purchase itself as PARENT, each monthly payment as
   /// INSTALMENT. Only the parent is kept out of the totals.
@@ -316,6 +320,7 @@ const transactionSchema = new Schema<TransactionDoc>(
     sourceRef: { type: String, default: null },
     dedupeKey: { type: String, default: null },
     tripId: { type: Schema.Types.ObjectId, ref: "Trip", default: null },
+    tripShareWith: { type: [Schema.Types.ObjectId], default: null },
     refundOf: { type: [refundAllocationSchema], default: [] },
     refundedMinor: { type: Number, default: 0, min: 0 },
     emiPlanId: { type: Schema.Types.ObjectId, ref: "EmiPlan", default: null },
