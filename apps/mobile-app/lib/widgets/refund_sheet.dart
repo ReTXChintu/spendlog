@@ -4,11 +4,12 @@ import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/format.dart';
 
-/// Points a credit at the payment it gives money back from.
+/// Says which purchases a credit gives money back from, and how much of it
+/// belongs to each.
 ///
-/// Refunds are rarely whole — tax, delivery and cancellation fees usually
-/// stay gone — so the purchase keeps whatever did not come back as its real
-/// cost, rather than vanishing from the month entirely.
+/// One credit routinely settles several cancelled orders at once, and it is
+/// rarely the whole of what was paid — tax, delivery and cancellation fees
+/// usually stay gone. What is left on each purchase is its real cost.
 Future<bool?> showRefundSheet(BuildContext context, {required Transaction refund}) {
   return showModalBottomSheet<bool>(
     context: context,
@@ -31,14 +32,19 @@ class _RefundSheet extends StatefulWidget {
 
 class _RefundSheetState extends State<_RefundSheet> {
   List<Transaction>? _candidates;
-  String? _picked;
+
+  /// How much of the credit goes to each purchase, by purchase id.
+  final Map<String, int> _picked = {};
+
   bool _saving = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _picked = widget.refund.refundOfId;
+    for (final allocation in widget.refund.refundOf) {
+      _picked[allocation.transactionId] = allocation.amountMinor;
+    }
     _load();
   }
 
@@ -55,14 +61,39 @@ class _RefundSheetState extends State<_RefundSheet> {
     }
   }
 
-  Future<void> _save(String? purchaseId) async {
+  int get _allocated => _picked.values.fold(0, (sum, amount) => sum + amount);
+
+  int get _unallocated => widget.refund.amountMinor - _allocated;
+
+  /// What never came back across everything ticked: the tax and delivery
+  /// on each order that the refund did not cover.
+  int get _lost => (_candidates ?? [])
+      .where((candidate) => _picked.containsKey(candidate.id))
+      .fold(0, (sum, c) => sum + (c.amountMinor - _picked[c.id]!).clamp(0, c.amountMinor));
+
+  /// Ticking a purchase claims as much of what is left of the credit as
+  /// that purchase could account for — its whole cost, or whatever remains
+  /// of the credit when that is less.
+  void _toggle(Transaction candidate) {
+    setState(() {
+      if (_picked.containsKey(candidate.id)) {
+        _picked.remove(candidate.id);
+        return;
+      }
+      final remaining = widget.refund.amountMinor - _allocated;
+      if (remaining <= 0) return;
+      _picked[candidate.id] = candidate.amountMinor < remaining ? candidate.amountMinor : remaining;
+    });
+  }
+
+  Future<void> _save(List<Map<String, dynamic>> allocations) async {
     setState(() {
       _saving = true;
       _error = null;
     });
     try {
       await ApiClient.instance
-          .post('/transactions/${widget.refund.id}/refund-of', {'purchaseId': purchaseId});
+          .post('/transactions/${widget.refund.id}/refund-of', {'allocations': allocations});
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       setState(() {
@@ -75,10 +106,6 @@ class _RefundSheetState extends State<_RefundSheet> {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final chosen = _candidates?.where((t) => t.id == _picked).firstOrNull;
-    final lost = chosen == null
-        ? 0
-        : (chosen.amountMinor - widget.refund.amountMinor).clamp(0, chosen.amountMinor);
 
     return SafeArea(
       child: Padding(
@@ -102,11 +129,10 @@ class _RefundSheetState extends State<_RefundSheet> {
             const SizedBox(height: 4),
             Text(
               '${widget.refund.merchant ?? 'This credit'} · '
-              '${formatMoney(widget.refund.amountMinor)} back',
+              '${formatMoney(widget.refund.amountMinor)} back · pick as many as it covers',
               style: TextStyle(fontSize: 12.5, color: c.muted),
             ),
             const SizedBox(height: 14),
-
             if (_candidates == null)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 24),
@@ -116,7 +142,7 @@ class _RefundSheetState extends State<_RefundSheet> {
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 child: Text(
-                  'No payment within the last six months is large enough to have produced this refund.',
+                  'No payment in the six months before this credit to match it against.',
                   style: TextStyle(fontSize: 12.5, height: 1.45, color: c.muted),
                 ),
               )
@@ -128,9 +154,9 @@ class _RefundSheetState extends State<_RefundSheet> {
                   itemCount: _candidates!.length,
                   itemBuilder: (context, i) {
                     final candidate = _candidates![i];
-                    final isPicked = candidate.id == _picked;
+                    final isPicked = _picked.containsKey(candidate.id);
                     return GestureDetector(
-                      onTap: () => setState(() => _picked = candidate.id),
+                      onTap: () => _toggle(candidate),
                       child: Container(
                         margin: const EdgeInsets.only(bottom: 6),
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -141,6 +167,12 @@ class _RefundSheetState extends State<_RefundSheet> {
                         ),
                         child: Row(
                           children: [
+                            Icon(
+                              isPicked ? Icons.check_circle : Icons.circle_outlined,
+                              size: 18,
+                              color: isPicked ? c.brand : c.mutedLight,
+                            ),
+                            const SizedBox(width: 10),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -166,11 +198,13 @@ class _RefundSheetState extends State<_RefundSheet> {
                             ),
                             const SizedBox(width: 10),
                             Text(
-                              formatMoney(candidate.amountMinor),
+                              isPicked
+                                  ? formatMoney(_picked[candidate.id]!)
+                                  : formatMoney(candidate.amountMinor),
                               style: kNum.copyWith(
                                 fontWeight: FontWeight.w700,
                                 fontSize: 13.4,
-                                color: c.ink,
+                                color: isPicked ? c.brandDark : c.ink,
                               ),
                             ),
                           ],
@@ -180,8 +214,7 @@ class _RefundSheetState extends State<_RefundSheet> {
                   },
                 ),
               ),
-
-            if (chosen != null) ...[
+            if (_picked.isNotEmpty) ...[
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -189,31 +222,35 @@ class _RefundSheetState extends State<_RefundSheet> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    _Stat(label: 'Paid', value: formatMoneyShort(chosen.amountMinor)),
-                    _Stat(label: 'Coming back', value: formatMoneyShort(widget.refund.amountMinor)),
-                    _Stat(label: 'Never came back', value: formatMoneyShort(lost)),
+                    _Stat(
+                      label: _picked.length == 1 ? 'Covering 1' : 'Covering ${_picked.length}',
+                      value: formatMoneyShort(_allocated),
+                    ),
+                    _Stat(label: 'Never came back', value: formatMoneyShort(_lost)),
+                    _Stat(
+                      label: _unallocated < 0 ? 'Over' : 'Left as income',
+                      value: formatMoneyShort(_unallocated.abs()),
+                    ),
                   ],
                 ),
               ),
             ],
-
             const SizedBox(height: 12),
             Text(
-              'The credit stops counting as income, and the purchase costs whatever did not come back.',
+              'Whatever is allocated stops counting as income, and each purchase costs whatever did '
+              'not come back.',
               style: TextStyle(fontSize: 11.8, height: 1.45, color: c.mutedLight),
             ),
-
             if (_error != null) ...[
               const SizedBox(height: 12),
               Text(_error!, style: TextStyle(fontSize: 12.5, color: c.debit)),
             ],
-
             const SizedBox(height: 16),
             Row(
               children: [
-                if (widget.refund.refundOfId != null)
+                if (widget.refund.refundOf.isNotEmpty)
                   TextButton(
-                    onPressed: _saving ? null : () => _save(null),
+                    onPressed: _saving ? null : () => _save([]),
                     child: const Text('Not a refund'),
                   ),
                 const Spacer(),
@@ -223,7 +260,12 @@ class _RefundSheetState extends State<_RefundSheet> {
                 ),
                 const SizedBox(width: 8),
                 FilledButton(
-                  onPressed: _saving || _picked == null ? null : () => _save(_picked),
+                  onPressed: _saving || _picked.isEmpty || _unallocated < 0
+                      ? null
+                      : () => _save([
+                            for (final entry in _picked.entries)
+                              {'transactionId': entry.key, 'amountMinor': entry.value},
+                          ]),
                   child: Text(_saving ? 'Saving…' : 'Link refund'),
                 ),
               ],

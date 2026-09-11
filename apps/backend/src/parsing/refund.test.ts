@@ -43,8 +43,21 @@ function purchase(userId: Types.ObjectId, amountMinor: number, overrides: Record
 
 describe("the counted rule for refunds", () => {
   it("counts a refund credit as nothing, since it is not income", () => {
-    const result = resolveCountedAmount({ amountMinor: 85000, refundOfId: "purchase-1" });
+    const result = resolveCountedAmount({
+      amountMinor: 85000,
+      refundOf: [{ amountMinor: 85000 }],
+    });
     assert.deepEqual(result, { countedAmountMinor: 0, countedReason: "REFUND" });
+  });
+
+  it("still counts the part of a credit that was not a refund", () => {
+    // ₹1,000 in, of which ₹800 settles two cancelled orders. The rest is
+    // ordinary income and should say so.
+    const result = resolveCountedAmount({
+      amountMinor: 100000,
+      refundOf: [{ amountMinor: 50000 }, { amountMinor: 30000 }],
+    });
+    assert.deepEqual(result, { countedAmountMinor: 20000, countedReason: "REFUND" });
   });
 
   it("leaves a purchase costing what was not given back", () => {
@@ -81,18 +94,31 @@ describe("the counted rule for refunds", () => {
 
 describe("linking a refund to its purchase", () => {
   /** What POST /transactions/:id/refund-of does, applied directly. */
-  async function link(refundId: Types.ObjectId, purchaseId: Types.ObjectId | null, userId: Types.ObjectId) {
+  async function link(
+    refundId: Types.ObjectId,
+    allocations: { transactionId: Types.ObjectId; amountMinor: number }[],
+    userId: Types.ObjectId
+  ) {
     const refund = await Transaction.findById(refundId).orFail();
-    const previous = refund.refundOfId;
-    refund.refundOfId = purchaseId;
+    const previous = refund.refundOf.map((a) => a.transactionId);
+    refund.refundOf = allocations;
     await refund.save();
 
-    for (const target of [previous, purchaseId]) {
-      if (!target) continue;
-      const purchaseDoc = await Transaction.findOne({ _id: target, userId });
+    const touched = new Set(
+      [...previous, ...allocations.map((a) => a.transactionId)].map(String)
+    );
+    for (const id of touched) {
+      const purchaseDoc = await Transaction.findOne({ _id: id, userId });
       if (!purchaseDoc) continue;
-      const refunds = await Transaction.find({ userId, refundOfId: purchaseDoc._id });
-      purchaseDoc.refundedMinor = refunds.reduce((sum, r) => sum + r.amountMinor, 0);
+      const credits = await Transaction.find({ userId, "refundOf.transactionId": purchaseDoc._id });
+      purchaseDoc.refundedMinor = credits.reduce(
+        (sum, credit) =>
+          sum +
+          credit.refundOf
+            .filter((a) => a.transactionId.equals(purchaseDoc._id))
+            .reduce((inner, a) => inner + a.amountMinor, 0),
+        0
+      );
       await purchaseDoc.save();
     }
   }
@@ -114,7 +140,7 @@ describe("linking a refund to its purchase", () => {
     const bought = await purchase(userId, 100000);
     const back = await credit(userId, 85000);
 
-    await link(back._id, bought._id, userId);
+    await link(back._id, [{ transactionId: bought._id, amountMinor: back.amountMinor }], userId);
 
     const stored = await Transaction.findById(bought._id).orFail();
     assert.equal(stored.refundedMinor, 85000);
@@ -132,7 +158,7 @@ describe("linking a refund to its purchase", () => {
     // An order returned in two parcels, refunded separately.
     for (const amount of [40000, 45000]) {
       const back = await credit(userId, amount);
-      await link(back._id, bought._id, userId);
+      await link(back._id, [{ transactionId: bought._id, amountMinor: back.amountMinor }], userId);
     }
 
     const stored = await Transaction.findById(bought._id).orFail();
@@ -145,8 +171,8 @@ describe("linking a refund to its purchase", () => {
     const bought = await purchase(userId, 100000);
     const back = await credit(userId, 85000);
 
-    await link(back._id, bought._id, userId);
-    await link(back._id, null, userId);
+    await link(back._id, [{ transactionId: bought._id, amountMinor: back.amountMinor }], userId);
+    await link(back._id, [], userId);
 
     const stored = await Transaction.findById(bought._id).orFail();
     assert.equal(stored.refundedMinor, 0);
@@ -159,18 +185,45 @@ describe("linking a refund to its purchase", () => {
     const [first, second] = await Promise.all([purchase(userId, 100000), purchase(userId, 90000)]);
     const back = await credit(userId, 50000);
 
-    await link(back._id, first._id, userId);
-    await link(back._id, second._id, userId);
+    await link(back._id, [{ transactionId: first._id, amountMinor: 50000 }], userId);
+    await link(back._id, [{ transactionId: second._id, amountMinor: 50000 }], userId);
 
     assert.equal((await Transaction.findById(first._id).orFail()).refundedMinor, 0);
     assert.equal((await Transaction.findById(second._id).orFail()).refundedMinor, 50000);
+  });
+
+  it("spreads one credit across several purchases", async () => {
+    const userId = await makeUser();
+    const [a, b, c] = await Promise.all([
+      purchase(userId, 40000),
+      purchase(userId, 30000),
+      purchase(userId, 25000),
+    ]);
+    // Three orders cancelled together, refunded as one credit — and short
+    // of the full ₹950, because the delivery on each was kept.
+    const back = await credit(userId, 85000);
+
+    await link(
+      back._id,
+      [
+        { transactionId: a._id, amountMinor: 35000 },
+        { transactionId: b._id, amountMinor: 27000 },
+        { transactionId: c._id, amountMinor: 23000 },
+      ],
+      userId
+    );
+
+    assert.equal((await Transaction.findById(a._id).orFail()).countedAmountMinor, 5000);
+    assert.equal((await Transaction.findById(b._id).orFail()).countedAmountMinor, 3000);
+    assert.equal((await Transaction.findById(c._id).orFail()).countedAmountMinor, 2000);
+    assert.equal((await Transaction.findById(back._id).orFail()).countedAmountMinor, 0);
   });
 
   it("keeps a refunded purchase out of the month's spending beyond its real cost", async () => {
     const userId = await makeUser();
     const bought = await purchase(userId, 100000);
     const back = await credit(userId, 85000);
-    await link(back._id, bought._id, userId);
+    await link(back._id, [{ transactionId: bought._id, amountMinor: back.amountMinor }], userId);
 
     const [totals] = await Transaction.aggregate<{ spend: number; income: number }>([
       { $match: { userId } },

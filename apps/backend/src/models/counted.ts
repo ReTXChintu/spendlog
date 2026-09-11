@@ -23,8 +23,12 @@ export interface CountedInput {
    */
   emiRole?: string | null;
   split?: { myShareMinor?: number | null } | null;
-  /** Set on a credit that gives back money from an earlier purchase. */
-  refundOfId?: unknown;
+  /**
+   * On a credit: how much of it gives back money from which earlier
+   * purchases. One credit often settles several cancelled orders at once,
+   * and it can be partly a refund and partly ordinary income.
+   */
+  refundOf?: { amountMinor?: number | null }[] | null;
   /** On a purchase: how much of it has since come back as refunds. */
   refundedMinor?: number | null;
 }
@@ -63,11 +67,21 @@ export function resolveCountedAmount(transaction: CountedInput): CountedAmount {
     return { countedAmountMinor: 0, countedReason: "SETTLEMENT" };
   }
 
-  // A refund is not income. It reduces what the original purchase cost,
+  // Money given back is not income. It reduces what the purchase cost,
   // which is handled on that purchase rather than by inventing earnings
-  // here — see refundedMinor on the transaction it points at.
-  if (transaction.refundOfId) {
-    return { countedAmountMinor: 0, countedReason: "REFUND" };
+  // here — see refundedMinor on the ones it points at.
+  //
+  // Only the allocated part, though: a credit can be ₹1,000 of which ₹800
+  // settles two cancelled orders, and the remaining ₹200 really is income.
+  const allocated = (transaction.refundOf ?? []).reduce(
+    (sum, entry) => sum + (entry.amountMinor ?? 0),
+    0
+  );
+  if (allocated > 0) {
+    return {
+      countedAmountMinor: Math.max(0, transaction.amountMinor - allocated),
+      countedReason: "REFUND",
+    };
   }
 
   const rawShare = transaction.split?.myShareMinor;

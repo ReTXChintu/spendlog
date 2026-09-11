@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { FilterQuery } from "mongoose";
+import { FilterQuery, Types } from "mongoose";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
@@ -275,10 +275,16 @@ transactionsRouter.delete("/:id", validObjectIdParam("id"), async (req, res) => 
   const deleted = await Transaction.findOneAndDelete({ _id: req.params.id, userId });
   if (!deleted) return res.status(404).json({ error: "Not found" });
 
-  // Deleting a refund puts the purchase back to costing what it did, and
-  // deleting a purchase leaves its refunds pointing at nothing.
-  if (deleted.refundOfId) await syncRefundTotal(deleted.refundOfId, userId);
-  await Transaction.updateMany({ userId, refundOfId: deleted._id }, { $set: { refundOfId: null } });
+  // Deleting a refund puts the purchases it covered back to costing what
+  // they did; deleting a purchase releases the refunds pointing at it
+  // rather than leaving them aimed at nothing.
+  for (const allocation of deleted.refundOf) {
+    await syncRefundTotal(allocation.transactionId, userId);
+  }
+  await Transaction.updateMany(
+    { userId, "refundOf.transactionId": deleted._id },
+    { $pull: { refundOf: { transactionId: deleted._id } } }
+  );
 
   res.status(204).end();
 });
@@ -292,22 +298,39 @@ async function syncRefundTotal(purchaseId: unknown, userId: unknown): Promise<vo
   const purchase = await Transaction.findOne({ _id: purchaseId, userId });
   if (!purchase) return;
 
-  const refunds = await Transaction.find({ userId, refundOfId: purchase._id });
-  purchase.refundedMinor = refunds.reduce((sum, refund) => sum + refund.amountMinor, 0);
+  const credits = await Transaction.find({ userId, "refundOf.transactionId": purchase._id });
+  purchase.refundedMinor = credits.reduce(
+    (sum, credit) =>
+      sum +
+      credit.refundOf
+        .filter((allocation) => allocation.transactionId.equals(purchase._id))
+        .reduce((inner, allocation) => inner + allocation.amountMinor, 0),
+    0
+  );
   await purchase.save();
 }
 
 const refundOfSchema = z.object({
-  /** The purchase this credit gives money back from. null unlinks it. */
-  purchaseId: z.string().regex(OBJECT_ID).nullable(),
+  /**
+   * How much of this credit belongs to which purchases. An empty list
+   * unlinks it entirely — it goes back to being ordinary income.
+   */
+  allocations: z
+    .array(
+      z.object({
+        transactionId: z.string().regex(OBJECT_ID),
+        amountMinor: z.number().int().positive(),
+      })
+    )
+    .max(20),
 });
 
-// POST /transactions/:id/refund-of — marks a credit as money coming back
-// from an earlier purchase.
+// POST /transactions/:id/refund-of — says which purchases this credit
+// gives money back from, and how much of it belongs to each.
 //
-// The credit stops counting as income, and the purchase drops to what it
-// actually cost. A refund is rarely the full amount — taxes and delivery
-// usually stay gone — and what is left is the real loss on the purchase.
+// One credit routinely settles several cancelled orders at once, and it is
+// not always wholly a refund, so the allocated part stops counting as
+// income while any remainder still does.
 transactionsRouter.post("/:id/refund-of", validObjectIdParam("id"), async (req, res) => {
   const parsed = refundOfSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
@@ -316,36 +339,47 @@ transactionsRouter.post("/:id/refund-of", validObjectIdParam("id"), async (req, 
   const refund = await Transaction.findOne({ _id: req.params.id, userId });
   if (!refund) return res.status(404).json({ error: "Not found" });
 
-  const previous = refund.refundOfId;
+  const { allocations } = parsed.data;
 
-  if (parsed.data.purchaseId === null) {
-    refund.refundOfId = null;
-    await refund.save();
-    if (previous) await syncRefundTotal(previous, userId);
-    await refund.populate(["category", "account"]);
-    return res.json(refund);
+  if (allocations.length > 0) {
+    if (refund.type !== "CREDIT") {
+      return res.status(400).json({ error: "Only money coming in can be a refund" });
+    }
+    if (allocations.some((a) => a.transactionId === req.params.id)) {
+      return res.status(400).json({ error: "A transaction cannot be a refund of itself" });
+    }
+
+    const ids = allocations.map((a) => a.transactionId);
+    if (new Set(ids).size !== ids.length) {
+      return res.status(400).json({ error: "Each purchase can only appear once" });
+    }
+
+    // More cannot come back than went out.
+    const total = allocations.reduce((sum, a) => sum + a.amountMinor, 0);
+    if (total > refund.amountMinor) {
+      return res.status(400).json({ error: "That allocates more than the credit is worth" });
+    }
+
+    const purchases = await Transaction.find({ _id: { $in: ids }, userId, type: "DEBIT" });
+    if (purchases.length !== ids.length) {
+      return res.status(400).json({ error: "A refund has to come from your own payments" });
+    }
   }
 
-  if (refund.type !== "CREDIT") {
-    return res.status(400).json({ error: "Only money coming in can be a refund" });
-  }
-  if (parsed.data.purchaseId === req.params.id) {
-    return res.status(400).json({ error: "A transaction cannot be a refund of itself" });
-  }
+  // Purchases this credit used to cover, so any it no longer covers get
+  // their cost back.
+  const previous = refund.refundOf.map((allocation) => allocation.transactionId);
 
-  const purchase = await Transaction.findOne({ _id: parsed.data.purchaseId, userId });
-  if (!purchase) return res.status(404).json({ error: "Not found" });
-  if (purchase.type !== "DEBIT") {
-    return res.status(400).json({ error: "A refund has to come from a payment" });
-  }
-
-  refund.refundOfId = purchase._id;
+  refund.refundOf = allocations.map((allocation) => ({
+    transactionId: new Types.ObjectId(allocation.transactionId),
+    amountMinor: allocation.amountMinor,
+  }));
   await refund.save();
 
-  if (previous && String(previous) !== String(purchase._id)) {
-    await syncRefundTotal(previous, userId);
+  const touched = new Set([...previous, ...refund.refundOf.map((a) => a.transactionId)].map(String));
+  for (const purchaseId of touched) {
+    await syncRefundTotal(new Types.ObjectId(purchaseId), userId);
   }
-  await syncRefundTotal(purchase._id, userId);
 
   await refund.populate(["category", "account"]);
   res.json(refund);
@@ -363,9 +397,9 @@ transactionsRouter.get("/:id/refund-candidates", validObjectIdParam("id"), async
   const candidates = await Transaction.find({
     userId,
     type: "DEBIT",
-    // A refund cannot give back more than was paid, and it cannot predate
-    // the purchase it came from.
-    amountMinor: { $gte: refund.amountMinor },
+    // Deliberately no lower bound on the amount: one credit settling three
+    // cancelled orders is larger than any of them, which is the whole
+    // point. A refund still cannot predate the purchase it came from.
     occurredAt: { $lte: refund.occurredAt, $gte: new Date(refund.occurredAt.getTime() - sixMonths) },
   })
     .sort({ occurredAt: -1 })

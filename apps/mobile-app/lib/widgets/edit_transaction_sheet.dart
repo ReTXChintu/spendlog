@@ -472,7 +472,7 @@ class _EditSheetState extends State<_EditSheet> {
                             final linked = await showRefundSheet(context, refund: widget.transaction!);
                             if (linked == true) navigator.pop(true);
                           },
-                    child: Text(widget.transaction!.refundOfId != null ? 'Refund of…' : "It's a refund"),
+                    child: Text(widget.transaction!.refundOf.isNotEmpty ? 'Refund of…' : "It's a refund"),
                   ),
                 if (!_isNew &&
                     widget.transaction!.type == 'DEBIT' &&

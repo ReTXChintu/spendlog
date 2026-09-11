@@ -97,8 +97,8 @@ export interface Transaction {
   note: string | null;
   rawText: string | null;
   source: TransactionSource;
-  /** On a credit: the purchase it gives money back from. */
-  refundOfId: string | null;
+  /** On a credit: how much of it belongs to which earlier purchases. */
+  refundOf: { transactionId: string; amountMinor: number }[];
   /** On a purchase: how much of it has since come back. */
   refundedMinor: number;
   emiPlanId: string | null;

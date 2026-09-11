@@ -383,7 +383,7 @@ export function EditTransactionModal({
           )}
           {!isNew && onMarkRefund && type === "CREDIT" && (
             <button className="btn btn-sm btn-ghost" onClick={() => onMarkRefund(transaction)} disabled={saving}>
-              {transaction.refundOfId ? "Change refund link" : "It's a refund"}
+              {transaction.refundOf.length > 0 ? "Change refund link" : "It's a refund"}
             </button>
           )}
           {!isNew && onConvertToEmi && type === "DEBIT" && !transaction.emiPlanId && (

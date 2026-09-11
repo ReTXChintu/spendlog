@@ -496,6 +496,9 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
 .refund-option-name{font-size:13.4px;font-weight:700;color:var(--ink)}
 .refund-option-sub{font-size:11.8px;color:var(--muted)}
 .refund-option-amount{font-size:13.4px;font-weight:700;color:var(--ink)}
+.refund-option-input{width:110px;flex-shrink:0}
+.refund-option-input input{width:100%;padding-left:24px;font-size:13px}
+.refund-option{cursor:pointer}
 .refund-summary{display:flex;gap:22px;flex-wrap:wrap;margin-top:14px;padding:14px 16px;
   background:var(--credit-50);border-radius:var(--radius-md)}
 .refund-summary>div{display:flex;flex-direction:column;gap:3px}

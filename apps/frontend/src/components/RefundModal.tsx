@@ -1,15 +1,19 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
-import { formatMoney, formatDayLabel } from "../lib/format";
+import { formatDayLabel, formatMoney } from "../lib/format";
 import { Transaction } from "../types";
 import { Icon } from "./Icon";
 
+/** How much of the credit is going to each purchase, by purchase id. */
+type Allocations = Record<string, number>;
+
 /**
- * Points a credit at the payment it gives money back from.
+ * Says which purchases a credit gives money back from, and how much of it
+ * belongs to each.
  *
- * Refunds are rarely whole — tax, delivery and cancellation fees usually
- * stay gone — so the purchase keeps whatever did not come back as its real
- * cost, rather than disappearing from the month entirely.
+ * One credit routinely settles several cancelled orders at once, and it is
+ * rarely the whole of what was paid — tax, delivery and cancellation fees
+ * usually stay gone. What is left on each purchase is its real cost.
  */
 export function RefundModal({
   refund,
@@ -21,7 +25,9 @@ export function RefundModal({
   onClose: () => void;
 }) {
   const [candidates, setCandidates] = useState<Transaction[] | null>(null);
-  const [picked, setPicked] = useState<string | null>(refund.refundOfId);
+  const [picked, setPicked] = useState<Allocations>(() =>
+    Object.fromEntries(refund.refundOf.map((a) => [a.transactionId, a.amountMinor]))
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,11 +46,11 @@ export function RefundModal({
       .catch(() => setCandidates([]));
   }, [refund.id]);
 
-  async function save(purchaseId: string | null) {
+  async function save(allocations: { transactionId: string; amountMinor: number }[]) {
     setSaving(true);
     setError(null);
     try {
-      await api.post(`/transactions/${refund.id}/refund-of`, { purchaseId });
+      await api.post(`/transactions/${refund.id}/refund-of`, { allocations });
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't link that refund.");
@@ -52,8 +58,38 @@ export function RefundModal({
     }
   }
 
-  const chosen = candidates?.find((c) => c.id === picked);
-  const lossMinor = chosen ? Math.max(0, chosen.amountMinor - refund.amountMinor) : 0;
+  const chosenIds = Object.keys(picked);
+  const allocatedMinor = Object.values(picked).reduce((sum, amount) => sum + amount, 0);
+  const unallocatedMinor = refund.amountMinor - allocatedMinor;
+
+  // What never came back across everything ticked: the tax and delivery on
+  // each order that the refund did not cover.
+  const lostMinor = (candidates ?? [])
+    .filter((candidate) => candidate.id in picked)
+    .reduce((sum, candidate) => sum + Math.max(0, candidate.amountMinor - picked[candidate.id]), 0);
+
+  /**
+   * Ticking a purchase claims as much of what is left of the credit as that
+   * purchase could account for — its whole cost, or whatever remains of the
+   * credit when that is less.
+   */
+  function toggle(candidate: Transaction) {
+    setPicked((current) => {
+      if (candidate.id in current) {
+        const next = { ...current };
+        delete next[candidate.id];
+        return next;
+      }
+      const remaining = refund.amountMinor - Object.values(current).reduce((s, a) => s + a, 0);
+      if (remaining <= 0) return current;
+      return { ...current, [candidate.id]: Math.min(candidate.amountMinor, remaining) };
+    });
+  }
+
+  function setAmount(id: string, rupees: string) {
+    const parsed = Math.round(Number.parseFloat(rupees || "0") * 100);
+    setPicked((current) => ({ ...current, [id]: Number.isFinite(parsed) ? Math.max(0, parsed) : 0 }));
+  }
 
   return (
     <div
@@ -70,67 +106,86 @@ export function RefundModal({
         <div className="modal-sub">
           <Icon name="ic-updown" />
           <span>
-            {refund.merchant ?? "This credit"} · {formatMoney(refund.amountMinor)} back
+            {refund.merchant ?? "This credit"} · {formatMoney(refund.amountMinor)} back · pick as many
+            purchases as it covers
           </span>
         </div>
 
         {candidates === null ? (
           <p className="field-hint">Looking for payments it could have come from…</p>
         ) : candidates.length === 0 ? (
-          <p className="field-hint">
-            No payment within the last six months is large enough to have produced this refund.
-          </p>
+          <p className="field-hint">No payment in the six months before this credit to match it against.</p>
         ) : (
           <div className="refund-list">
-            {candidates.map((candidate) => (
-              <button
-                key={candidate.id}
-                className={`refund-option${picked === candidate.id ? " is-picked" : ""}`}
-                onClick={() => setPicked(candidate.id)}
-              >
-                <span className="refund-option-main">
-                  <span className="refund-option-name">{candidate.merchant ?? "Unknown"}</span>
-                  <span className="refund-option-sub">
-                    {formatDayLabel(candidate.occurredAt.slice(0, 10))}
-                    {candidate.account ? ` · ${candidate.account.bankName}` : ""}
-                    {candidate.refundedMinor > 0
-                      ? ` · ${formatMoney(candidate.refundedMinor)} already back`
-                      : ""}
+            {candidates.map((candidate) => {
+              const isPicked = candidate.id in picked;
+              return (
+                <div
+                  key={candidate.id}
+                  className={`refund-option${isPicked ? " is-picked" : ""}`}
+                  onClick={() => toggle(candidate)}
+                >
+                  <input type="checkbox" checked={isPicked} readOnly tabIndex={-1} />
+                  <span className="refund-option-main">
+                    <span className="refund-option-name">{candidate.merchant ?? "Unknown"}</span>
+                    <span className="refund-option-sub">
+                      {formatDayLabel(candidate.occurredAt.slice(0, 10))}
+                      {candidate.account ? ` · ${candidate.account.bankName}` : ""}
+                      {candidate.refundedMinor > 0
+                        ? ` · ${formatMoney(candidate.refundedMinor)} already back`
+                        : ""}
+                    </span>
                   </span>
-                </span>
-                <span className="refund-option-amount num">{formatMoney(candidate.amountMinor)}</span>
-              </button>
-            ))}
+                  {isPicked ? (
+                    <span className="amount-input refund-option-input" onClick={(e) => e.stopPropagation()}>
+                      <span className="prefix">₹</span>
+                      <input
+                        inputMode="decimal"
+                        value={(picked[candidate.id] / 100).toFixed(2)}
+                        onChange={(e) => setAmount(candidate.id, e.target.value)}
+                      />
+                    </span>
+                  ) : (
+                    <span className="refund-option-amount num">{formatMoney(candidate.amountMinor)}</span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 
-        {chosen && (
+        {chosenIds.length > 0 && (
           <div className="refund-summary">
             <div>
-              <span className="emi-preview-label">Paid</span>
-              <span className="emi-preview-value num">{formatMoney(chosen.amountMinor)}</span>
-            </div>
-            <div>
-              <span className="emi-preview-label">Coming back</span>
-              <span className="emi-preview-value num">{formatMoney(refund.amountMinor)}</span>
+              <span className="emi-preview-label">
+                Covering {chosenIds.length === 1 ? "1 purchase" : `${chosenIds.length} purchases`}
+              </span>
+              <span className="emi-preview-value num">{formatMoney(allocatedMinor)}</span>
             </div>
             <div>
               <span className="emi-preview-label">Never came back</span>
-              <span className="emi-preview-value num">{formatMoney(lossMinor)}</span>
+              <span className="emi-preview-value num">{formatMoney(lostMinor)}</span>
+            </div>
+            <div>
+              <span className="emi-preview-label">
+                {unallocatedMinor < 0 ? "More than the credit" : "Left counting as income"}
+              </span>
+              <span className="emi-preview-value num">{formatMoney(Math.abs(unallocatedMinor))}</span>
             </div>
           </div>
         )}
 
         <div className="modal-footnote">
           <Icon name="ic-info" />
-          The credit stops counting as income, and the purchase costs whatever did not come back.
+          Whatever is allocated stops counting as income, and each purchase costs whatever did not come
+          back.
         </div>
 
         {error && <p className="form-error">{error}</p>}
 
         <div className="modal-actions">
-          {refund.refundOfId && (
-            <button className="btn btn-sm btn-ghost" onClick={() => save(null)} disabled={saving}>
+          {refund.refundOf.length > 0 && (
+            <button className="btn btn-sm btn-ghost" onClick={() => save([])} disabled={saving}>
               Not a refund
             </button>
           )}
@@ -140,8 +195,8 @@ export function RefundModal({
           </button>
           <button
             className="btn btn-sm btn-primary"
-            onClick={() => save(picked)}
-            disabled={saving || !picked}
+            onClick={() => save(chosenIds.map((id) => ({ transactionId: id, amountMinor: picked[id] })))}
+            disabled={saving || chosenIds.length === 0 || unallocatedMinor < 0}
           >
             {saving ? "Saving…" : "Link refund"}
           </button>

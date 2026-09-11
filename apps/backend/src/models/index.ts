@@ -228,10 +228,10 @@ export interface TransactionDoc {
   /// INSTALMENT. Only the parent is kept out of the totals.
   emiPlanId?: Types.ObjectId | null;
   emiRole?: EmiRole | null;
-  /// On a credit that gives money back: the purchase it came from. The
-  /// credit itself counts as nothing — it is not income — and instead
-  /// reduces what that purchase cost.
-  refundOfId?: Types.ObjectId | null;
+  /// On a credit that gives money back: how much of it belongs to which
+  /// earlier purchases. A single credit often settles several cancelled
+  /// orders, and only the allocated part stops counting as income.
+  refundOf: RefundAllocation[];
   /// On a purchase: how much of it has since come back. Kept in step by
   /// the refund endpoints rather than set by hand.
   refundedMinor: number;
@@ -261,6 +261,19 @@ export interface TransactionDoc {
   createdAt: Date;
   updatedAt: Date;
 }
+
+export interface RefundAllocation {
+  transactionId: Types.ObjectId;
+  amountMinor: number;
+}
+
+const refundAllocationSchema = new Schema<RefundAllocation>(
+  {
+    transactionId: { type: Schema.Types.ObjectId, ref: "Transaction", required: true },
+    amountMinor: { type: Number, required: true, min: 0 },
+  },
+  { _id: false }
+);
 
 const transactionSplitSchema = new Schema<TransactionSplit>(
   {
@@ -299,7 +312,7 @@ const transactionSchema = new Schema<TransactionDoc>(
     source: { type: String, enum: TRANSACTION_SOURCES, required: true },
     sourceRef: { type: String, default: null },
     dedupeKey: { type: String, default: null },
-    refundOfId: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
+    refundOf: { type: [refundAllocationSchema], default: [] },
     refundedMinor: { type: Number, default: 0, min: 0 },
     emiPlanId: { type: Schema.Types.ObjectId, ref: "EmiPlan", default: null },
     emiRole: { type: String, enum: EMI_ROLES, default: null },
@@ -360,7 +373,7 @@ transactionSchema.index({ userId: 1, dedupeKey: 1 });
 transactionSchema.index({ sourceRef: 1 });
 // Totting up what has come back against a purchase, and finding the
 // refunds to unlink when one is deleted.
-transactionSchema.index({ refundOfId: 1 });
+transactionSchema.index({ "refundOf.transactionId": 1 });
 
 // Exposed as `category`/`account` (alongside the raw `categoryId`/`accountId`)
 // so populated responses keep the shape the clients already expect.

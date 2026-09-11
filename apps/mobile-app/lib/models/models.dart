@@ -125,6 +125,19 @@ class TransactionSplit {
       );
 }
 
+/// Part of a credit, attributed to the purchase it gives money back from.
+class RefundAllocation {
+  final String transactionId;
+  final int amountMinor;
+
+  RefundAllocation({required this.transactionId, required this.amountMinor});
+
+  factory RefundAllocation.fromJson(Map<String, dynamic> json) => RefundAllocation(
+        transactionId: json['transactionId'] as String,
+        amountMinor: json['amountMinor'] as int,
+      );
+}
+
 class Transaction {
   final String id;
   final int amountMinor;
@@ -136,8 +149,9 @@ class Transaction {
   /// user never typed can be checked.
   final String? rawText;
   final String source; // SMS | EMAIL | MANUAL
-  /// On a credit: the purchase it gives money back from.
-  final String? refundOfId;
+  /// On a credit: how much of it belongs to which earlier purchases. One
+  /// credit often settles several cancelled orders at once.
+  final List<RefundAllocation> refundOf;
   /// On a purchase: how much of it has since come back.
   final int refundedMinor;
   final String? emiPlanId;
@@ -166,7 +180,7 @@ class Transaction {
     this.note,
     this.rawText,
     required this.source,
-    this.refundOfId,
+    this.refundOf = const [],
     this.refundedMinor = 0,
     this.emiPlanId,
     this.emiRole,
@@ -207,7 +221,9 @@ class Transaction {
         note: json['note'] as String?,
         rawText: json['rawText'] as String?,
         source: json['source'] as String,
-        refundOfId: json['refundOfId'] as String?,
+        refundOf: (json['refundOf'] as List<dynamic>? ?? [])
+            .map((a) => RefundAllocation.fromJson(a as Map<String, dynamic>))
+            .toList(),
         refundedMinor: json['refundedMinor'] as int? ?? 0,
         emiPlanId: json['emiPlanId'] as String?,
         emiRole: json['emiRole'] as String?,
