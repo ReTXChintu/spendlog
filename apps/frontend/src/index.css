@@ -485,6 +485,34 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
 .badge-split{background:var(--brand-50);color:var(--brand-dark)}
 .badge-emi{background:var(--brand-50);color:var(--brand-dark)}
 .badge-refund{background:var(--credit-50);color:var(--credit)}
+.badge-trip{background:var(--brand-50);color:var(--brand-dark)}
+
+.trip-start{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:16px 18px;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md);margin-bottom:18px}
+.trip-start-main{flex:1;min-width:220px}
+.trip-start-label{font-size:11.5px;font-weight:700;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.04em}
+.trip-start-name{font-size:17px;font-weight:800;color:var(--ink);margin-top:3px}
+.trip-start-sub{font-size:12.5px;color:var(--muted);margin-top:3px}
+.trip-start .filter-input{width:200px}
+
+.trip-list{display:flex;flex-direction:column;gap:10px}
+.trip-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md);
+  overflow:hidden}
+.trip-card.is-active{border-color:var(--brand)}
+.trip-card-head{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:14px 16px}
+.trip-card-head svg{width:15px;height:15px;color:var(--muted);flex-shrink:0}
+.trip-card-main{flex:1;min-width:0}
+.trip-card-name{display:flex;align-items:center;gap:8px;font-size:14.5px;font-weight:800;color:var(--ink)}
+.trip-live{font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  background:var(--brand-50);color:var(--brand-dark);padding:2px 7px;border-radius:100px}
+.trip-card-sub{display:block;font-size:12px;color:var(--muted);margin-top:3px}
+.trip-card-total{font-size:15px;font-weight:800;color:var(--ink)}
+.trip-detail{padding:0 16px 16px 16px;border-top:1px solid var(--line)}
+.trip-detail .emi-preview{margin-top:14px}
+.trip-breakdown{margin-top:14px;display:flex;flex-direction:column;gap:6px}
+.trip-breakdown-row{display:flex;justify-content:space-between;font-size:12.8px;color:var(--ink-70)}
+.trip-actions{display:flex;align-items:center;gap:8px;margin-top:16px}
 .badge-refunded{background:var(--credit-50);color:var(--credit)}
 
 .refund-list{display:flex;flex-direction:column;gap:6px;margin:14px 0 4px 0;max-height:280px;overflow-y:auto}

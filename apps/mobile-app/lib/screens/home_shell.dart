@@ -5,6 +5,7 @@ import '../theme.dart';
 import 'analytics_screen.dart';
 import 'settings_screen.dart';
 import 'transactions_screen.dart';
+import 'trips_screen.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -16,7 +17,7 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
-  static const _titles = ['Transactions', 'Analytics', 'Settings'];
+  static const _titles = ['Transactions', 'Trips', 'Analytics', 'Settings'];
 
   @override
   void initState() {
@@ -38,7 +39,8 @@ class _HomeShellState extends State<HomeShell> {
   @override
   Widget build(BuildContext context) {
     final screens = [
-      TransactionsScreen(onOpenSettings: () => setState(() => _index = 2)),
+      TransactionsScreen(onOpenSettings: () => setState(() => _index = 3)),
+      const TripsScreen(),
       const AnalyticsScreen(),
       const SettingsScreen(),
     ];
@@ -69,6 +71,11 @@ class _HomeShellState extends State<HomeShell> {
             icon: Icon(Icons.receipt_long_outlined),
             selectedIcon: Icon(Icons.receipt_long),
             label: 'Transactions',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.luggage_outlined),
+            selectedIcon: Icon(Icons.luggage),
+            label: 'Trips',
           ),
           NavigationDestination(
             icon: Icon(Icons.trending_up_outlined),

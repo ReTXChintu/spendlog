@@ -142,6 +142,7 @@ class TransactionTile extends StatelessWidget {
                   ],
                 ),
                 if (isTransfer ||
+                    transaction.tripName != null ||
                     transaction.refundOf.isNotEmpty ||
                     transaction.refundedMinor > 0 ||
                     transaction.emiRole != null ||
@@ -157,6 +158,12 @@ class TransactionTile extends StatelessWidget {
                           label: 'Not counted',
                           background: context.c.chipNeutral,
                           foreground: context.c.transfer,
+                        ),
+                      if (transaction.tripName != null)
+                        _Badge(
+                          label: transaction.tripName!,
+                          background: context.c.brand50,
+                          foreground: context.c.brandDark,
                         ),
                       if (transaction.refundOf.isNotEmpty)
                         _Badge(

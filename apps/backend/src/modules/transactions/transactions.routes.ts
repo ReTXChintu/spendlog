@@ -72,7 +72,7 @@ transactionsRouter.get("/", async (req, res) => {
   const [items, total] = await Promise.all([
     Transaction.find(filter)
       .populate("category")
-      .populate("account")
+      .populate("account").populate("trip")
       .sort({ occurredAt: -1 })
       .skip((parsed.data.page - 1) * parsed.data.pageSize)
       .limit(parsed.data.pageSize),
@@ -128,7 +128,7 @@ transactionsRouter.get("/by-day", async (req, res) => {
   const oldest = page[page.length - 1].earliest;
   const transactions = await Transaction.find({ ...filter, occurredAt: { ...(filter.occurredAt as object), $gte: oldest } })
     .populate("category")
-    .populate("account")
+    .populate("account").populate("trip")
     .sort({ occurredAt: -1 });
 
   const grouped = new Map<string, typeof transactions>();
@@ -158,7 +158,7 @@ transactionsRouter.get("/by-day", async (req, res) => {
 transactionsRouter.get("/:id", validObjectIdParam("id"), async (req, res) => {
   const tx = await Transaction.findOne({ _id: req.params.id, userId: currentUserId(req) })
     .populate("category")
-    .populate("account");
+    .populate("account").populate("trip");
   if (!tx) return res.status(404).json({ error: "Not found" });
 
   res.json(tx);
@@ -219,7 +219,7 @@ transactionsRouter.post("/", async (req, res) => {
     source: "MANUAL",
   });
 
-  const tx = await Transaction.findById(created._id).populate("category").populate("account");
+  const tx = await Transaction.findById(created._id).populate("category").populate("account").populate("trip");
   res.status(201).json(tx);
 });
 
@@ -268,7 +268,7 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
     { new: true }
   )
     .populate("category")
-    .populate("account");
+    .populate("account").populate("trip");
   if (!updated) return res.status(404).json({ error: "Not found" });
 
   res.json(updated);
@@ -409,7 +409,7 @@ transactionsRouter.get("/:id/refund-candidates", validObjectIdParam("id"), async
     .sort({ occurredAt: -1 })
     .limit(40)
     .populate("category")
-    .populate("account");
+    .populate("account").populate("trip");
 
   // An exact-amount match on the same card is almost always the one.
   const ranked = [...candidates].sort((a, b) => score(b) - score(a));

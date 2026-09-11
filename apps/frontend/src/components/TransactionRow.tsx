@@ -113,6 +113,11 @@ export function TransactionRow({
                 </span>
               </div>
             )}
+            {transaction.trip && (
+              <div className="row-badges">
+                <span className="badge badge-trip">{transaction.trip.name}</span>
+              </div>
+            )}
             {transaction.refundOf.length > 0 && (
               <div className="row-badges">
                 <span className="badge badge-refund">Refund · not income</span>

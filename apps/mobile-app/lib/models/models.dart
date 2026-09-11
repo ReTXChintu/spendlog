@@ -149,6 +149,9 @@ class Transaction {
   /// user never typed can be checked.
   final String? rawText;
   final String source; // SMS | EMAIL | MANUAL
+  /// The trip this was spent on, if any.
+  final String? tripId;
+  final String? tripName;
   /// On a credit: how much of it belongs to which earlier purchases. One
   /// credit often settles several cancelled orders at once.
   final List<RefundAllocation> refundOf;
@@ -180,6 +183,8 @@ class Transaction {
     this.note,
     this.rawText,
     required this.source,
+    this.tripId,
+    this.tripName,
     this.refundOf = const [],
     this.refundedMinor = 0,
     this.emiPlanId,
@@ -221,6 +226,8 @@ class Transaction {
         note: json['note'] as String?,
         rawText: json['rawText'] as String?,
         source: json['source'] as String,
+        tripId: json['tripId'] as String?,
+        tripName: (json['trip'] as Map<String, dynamic>?)?['name'] as String?,
         refundOf: (json['refundOf'] as List<dynamic>? ?? [])
             .map((a) => RefundAllocation.fromJson(a as Map<String, dynamic>))
             .toList(),
@@ -322,6 +329,68 @@ class OwedSummary {
         settledInMinor: json['settledInMinor'] as int? ?? 0,
         settledOutMinor: json['settledOutMinor'] as int? ?? 0,
         splitCount: json['splitCount'] as int? ?? 0,
+      );
+}
+
+class Trip {
+  final String id;
+  final String name;
+  final DateTime startedAt;
+  final DateTime? endedAt;
+  final String joinCode;
+  final bool isActive;
+  final int totalMinor;
+  final int transactionCount;
+
+  Trip({
+    required this.id,
+    required this.name,
+    required this.startedAt,
+    this.endedAt,
+    required this.joinCode,
+    required this.isActive,
+    this.totalMinor = 0,
+    this.transactionCount = 0,
+  });
+
+  factory Trip.fromJson(Map<String, dynamic> json) => Trip(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        startedAt: DateTime.parse(json['startedAt'] as String),
+        endedAt: json['endedAt'] != null ? DateTime.parse(json['endedAt'] as String) : null,
+        joinCode: json['joinCode'] as String? ?? '',
+        isActive: json['isActive'] as bool? ?? (json['endedAt'] == null),
+        totalMinor: json['totalMinor'] as int? ?? 0,
+        transactionCount: json['transactionCount'] as int? ?? 0,
+      );
+}
+
+class TripSummary {
+  final Trip trip;
+  final int totalMinor;
+  final int transactionCount;
+  final int dayCount;
+  final int perDayMinor;
+  final List<CategorySpend> byCategory;
+
+  TripSummary({
+    required this.trip,
+    required this.totalMinor,
+    required this.transactionCount,
+    required this.dayCount,
+    required this.perDayMinor,
+    required this.byCategory,
+  });
+
+  factory TripSummary.fromJson(Map<String, dynamic> json) => TripSummary(
+        trip: Trip.fromJson(json['trip'] as Map<String, dynamic>),
+        totalMinor: json['totalMinor'] as int? ?? 0,
+        transactionCount: json['transactionCount'] as int? ?? 0,
+        dayCount: json['dayCount'] as int? ?? 0,
+        perDayMinor: json['perDayMinor'] as int? ?? 0,
+        byCategory: (json['byCategory'] as List<dynamic>? ?? [])
+            .map((c) => CategorySpend.fromJson(c as Map<String, dynamic>))
+            .toList(),
       );
 }
 

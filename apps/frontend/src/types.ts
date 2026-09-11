@@ -88,6 +88,34 @@ export interface EmiUpcoming {
   instalments: (EmiInstalment & { planId: EmiPlan })[];
 }
 
+export interface TripMember {
+  userId: string;
+  joinedAt: string;
+}
+
+export interface Trip {
+  id: string;
+  name: string;
+  ownerId: string;
+  startedAt: string;
+  endedAt: string | null;
+  members: TripMember[];
+  joinCode: string;
+  isActive: boolean;
+  totalMinor: number;
+  transactionCount: number;
+}
+
+export interface TripSummary {
+  trip: Trip;
+  totalMinor: number;
+  transactionCount: number;
+  dayCount: number;
+  perDayMinor: number;
+  byMember: { userId: string; name: string | null; spentMinor: number; count: number }[];
+  byCategory: { categoryId: string | null; name: string; amountMinor: number }[];
+}
+
 export interface Transaction {
   id: string;
   amountMinor: number;
@@ -101,6 +129,9 @@ export interface Transaction {
   refundOf: { transactionId: string; amountMinor: number }[];
   /** On a purchase: how much of it has since come back. */
   refundedMinor: number;
+  /** The trip this was spent on, if any. */
+  tripId: string | null;
+  trip: { id: string; name: string } | null;
   emiPlanId: string | null;
   emiRole: EmiRole | null;
   isTransfer: boolean;

@@ -5,6 +5,7 @@ import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { AuthCallbackPage } from "./pages/AuthCallbackPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { TripsPage } from "./pages/TripsPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
 
 export default function App() {
@@ -22,6 +23,7 @@ export default function App() {
         <Route path="/" element={<TransactionsPage />} />
         {/* The ledger used to be split across two pages; keep the old path working. */}
         <Route path="/transactions" element={<Navigate to="/" replace />} />
+        <Route path="/trips" element={<TripsPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>

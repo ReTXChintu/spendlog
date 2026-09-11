@@ -398,6 +398,15 @@ transactionSchema.virtual("account", {
   justOne: true,
 });
 
+// So a row can say which holiday it belongs to without the client having
+// to hold a separate list of trips.
+transactionSchema.virtual("trip", {
+  ref: "Trip",
+  localField: "tripId",
+  foreignField: "_id",
+  justOne: true,
+});
+
 export const Transaction = model<TransactionDoc>("Transaction", transactionSchema);
 
 export interface EmailConnectionDoc {
