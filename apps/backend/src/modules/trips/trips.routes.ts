@@ -3,7 +3,7 @@ import { Types } from "mongoose";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
-import { Transaction, Trip, TripDoc } from "../../models";
+import { Transaction, Trip, TripDoc, User } from "../../models";
 import { istDayKey } from "../../time";
 import { generateJoinCode } from "./trips.service";
 
@@ -246,3 +246,110 @@ tripsRouter.get("/:id/transactions", validObjectIdParam("id"), async (req, res) 
 
   res.json(transactions);
 });
+
+// GET /trips/:id — the trip and who is on it.
+tripsRouter.get("/:id", validObjectIdParam("id"), async (req, res) => {
+  const trip = await assertTripMember(req.params.id, currentUserId(req));
+  if (!trip) return res.status(404).json({ error: "Not found" });
+
+  const users = await User.find({ _id: { $in: trip.members.map((m) => m.userId) } })
+    .select("name email")
+    .lean();
+
+  res.json({
+    ...trip.toJSON(),
+    isActive: trip.endedAt === null,
+    members: trip.members.map((member) => {
+      const user = users.find((u) => u._id.equals(member.userId));
+      return {
+        userId: member.userId,
+        joinedAt: member.joinedAt,
+        name: user?.name ?? user?.email ?? "Someone",
+        isOwner: trip.ownerId.equals(member.userId),
+      };
+    }),
+  });
+});
+
+const joinSchema = z.object({
+  code: z.string().min(4).max(12),
+});
+
+// POST /trips/join — the other half of a code read out or scanned.
+//
+// Joining shares the trip from this moment on. It deliberately does not
+// reach back and hand over what was already spent: someone joining on day
+// three has agreed to share a holiday, not to publish the week before it.
+// Their earlier payments can still be added on purpose, through re-scan.
+tripsRouter.post("/join", async (req, res) => {
+  const parsed = joinSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const userId = currentUserId(req);
+  const trip = await Trip.findOne({ joinCode: parsed.data.code.trim().toUpperCase() });
+  if (!trip) return res.status(404).json({ error: "No trip with that code" });
+
+  if (trip.members.some((member) => member.userId.equals(userId))) {
+    return res.json({ ...trip.toJSON(), isActive: trip.endedAt === null, alreadyJoined: true });
+  }
+
+  trip.members.push({ userId, joinedAt: new Date() });
+  await trip.save();
+
+  res.json({ ...trip.toJSON(), isActive: trip.endedAt === null, alreadyJoined: false });
+});
+
+// POST /trips/:id/rotate-code — for a code that has ended up somewhere it
+// should not have. Everyone already on the trip stays on it.
+tripsRouter.post("/:id/rotate-code", validObjectIdParam("id"), async (req, res) => {
+  const trip = await Trip.findOne({ _id: req.params.id, ownerId: currentUserId(req) });
+  if (!trip) return res.status(404).json({ error: "Not found" });
+
+  trip.joinCode = generateJoinCode();
+  await trip.save();
+
+  res.json({ joinCode: trip.joinCode });
+});
+
+// POST /trips/:id/leave — stop seeing a trip someone else is running.
+//
+// What they spent stays on the trip: the total should not quietly drop
+// because a person walked away from it. The owner cannot leave, since
+// somebody has to be able to end or delete it.
+tripsRouter.post("/:id/leave", validObjectIdParam("id"), async (req, res) => {
+  const userId = currentUserId(req);
+  const trip = await assertTripMember(req.params.id, userId);
+  if (!trip) return res.status(404).json({ error: "Not found" });
+
+  if (trip.ownerId.equals(userId)) {
+    return res.status(400).json({ error: "You started this trip. End or delete it instead." });
+  }
+
+  trip.members = trip.members.filter((member) => !member.userId.equals(userId));
+  await trip.save();
+
+  res.status(204).end();
+});
+
+// DELETE /trips/:id/members/:userId — the owner removing someone.
+tripsRouter.delete(
+  "/:id/members/:memberId",
+  validObjectIdParam("id"),
+  validObjectIdParam("memberId"),
+  async (req, res) => {
+    const userId = currentUserId(req);
+    const trip = await Trip.findOne({ _id: req.params.id, ownerId: userId });
+    if (!trip) return res.status(404).json({ error: "Not found" });
+
+    if (trip.ownerId.equals(new Types.ObjectId(req.params.memberId))) {
+      return res.status(400).json({ error: "The owner cannot be removed from their own trip" });
+    }
+
+    trip.members = trip.members.filter(
+      (member) => !member.userId.equals(new Types.ObjectId(req.params.memberId))
+    );
+    await trip.save();
+
+    res.status(204).end();
+  }
+);

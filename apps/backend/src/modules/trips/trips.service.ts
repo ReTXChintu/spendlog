@@ -15,7 +15,10 @@ export async function tripForOccurredAt(
   occurredAt: Date
 ): Promise<Types.ObjectId | null> {
   const trip = await Trip.findOne({
-    "members.userId": userId,
+    // Only from the point this person joined. Someone who joins on day
+    // three is sharing the trip from then on, not handing over the
+    // spending they did before it — that stays theirs to add on purpose.
+    members: { $elemMatch: { userId, joinedAt: { $lte: occurredAt } } },
     startedAt: { $lte: occurredAt },
     $or: [{ endedAt: null }, { endedAt: { $gte: occurredAt } }],
   })
