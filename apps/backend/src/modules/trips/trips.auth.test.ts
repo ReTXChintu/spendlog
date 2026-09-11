@@ -64,6 +64,11 @@ async function makeUser() {
   return { id: user._id, token: signToken({ id: user._id.toString(), email }) };
 }
 
+/** fetch's json() is `unknown`; these responses have a known shape. */
+async function json<T>(response: Response): Promise<T> {
+  return (await response.json()) as T;
+}
+
 function call(path: string, token: string, init: RequestInit = {}) {
   return fetch(`${baseUrl}${path}`, {
     ...init,
@@ -253,7 +258,9 @@ describe("joining with a code", () => {
 
     assert.equal((await Transaction.findById(earlier._id).orFail()).tripId, null);
 
-    const summary = await (await call(`/trips/${trip.id}/summary`, owner.token)).json();
+    const summary = await json<{ totalMinor: number }>(
+      await call(`/trips/${trip.id}/summary`, owner.token)
+    );
     assert.equal(summary.totalMinor, 0);
   });
 
@@ -276,7 +283,9 @@ describe("joining with a code", () => {
     });
     await call(`/trips/${trip.id}/rescan`, friend.token, { method: "POST" });
 
-    const summary = await (await call(`/trips/${trip.id}/summary`, owner.token)).json();
+    const summary = await json<{ totalMinor: number }>(
+      await call(`/trips/${trip.id}/summary`, owner.token)
+    );
     assert.equal(summary.totalMinor, 50000);
   });
 
@@ -338,7 +347,9 @@ describe("leaving and being removed", () => {
 
     await call(`/trips/${trip.id}/leave`, friend.token, { method: "POST" });
 
-    const summary = await (await call(`/trips/${trip.id}/summary`, owner.token)).json();
+    const summary = await json<{ totalMinor: number }>(
+      await call(`/trips/${trip.id}/summary`, owner.token)
+    );
     assert.equal(summary.totalMinor, 50000);
   });
 
@@ -379,7 +390,7 @@ describe("rotating the join code", () => {
     });
 
     const rotated = await call(`/trips/${trip.id}/rotate-code`, owner.token, { method: "POST" });
-    const { joinCode } = await rotated.json();
+    const { joinCode } = await json<{ joinCode: string }>(rotated);
     assert.notEqual(joinCode, "GOA123");
 
     const withOldCode = await call("/trips/join", stranger.token, {
