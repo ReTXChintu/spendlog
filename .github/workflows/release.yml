@@ -211,12 +211,19 @@ jobs:
           set -e
           cd $APP_DIR
 
-          # Checks out the released tag rather than pulling a branch, so
-          # the server runs exactly what was released even if main has
-          # moved on. Detached HEAD is expected here.
+          # Moves main to the released tag rather than pulling whatever is
+          # at the head of the branch, so the server runs exactly what was
+          # released even if main has since moved on — while still sitting
+          # on main afterwards, which is where anyone looking expects to
+          # find it.
+          #
+          # -B resets the branch rather than refusing because it exists.
+          # This is a deploy checkout, so having main point at the released
+          # commit is the whole idea; a later `git pull` fast-forwards it.
           git fetch --tags --force origin
-          git checkout --detach '$TAG'
+          git checkout -B main '$TAG'
           git --no-pager log -1 --oneline
+          git --no-pager status --short --branch
 
           # Node is installed with nvm, which only reaches PATH through an
           # interactive shell's profile — and a command sent over SSH runs

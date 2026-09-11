@@ -131,7 +131,7 @@ To check what it would do without doing it: `npm run release:dry`.
 3. Prints the APK's certificate SHA-1 in the log
 4. Attaches the APK to the GitHub release
 5. Copies the APK to the VPS at `apps/frontend/public/SpendLog.apk`
-6. Checks that tag out on the VPS, `npm ci`, `npm run build`, restarts PM2
+6. Moves `main` to that tag on the VPS, `npm ci`, `npm run build`, restarts PM2
 7. Prints the deployed version
 
 Watch it with `gh run watch`, or the Actions tab.
@@ -207,15 +207,14 @@ Certificates last 90 days and renew at 30 days remaining.
 
 ### Working on the server by hand
 
-The deploy checks out a **tag**, so the repo there sits on a detached HEAD.
-That is deliberate — it runs exactly what was released. `git pull` will not
-work; to get back onto the branch:
+The repo there stays on `main`, but `main` is moved to the released tag
+rather than to whatever is at the head of the branch — so the server runs
+exactly what was released, even if main has since moved on.
 
-```bash
-git checkout main && git pull --ff-only
-```
-
-Then let the next release put it back on a tag.
+That means `git status` will often say *behind origin/main*, which is
+correct and not a problem: those commits have not been released yet. A
+`git pull --ff-only` fast-forwards to them if you really want the
+unreleased code, and the next release puts it back on a tag.
 
 ### What will eventually need attention
 
