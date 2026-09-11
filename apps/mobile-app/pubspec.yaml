@@ -1,7 +1,7 @@
 name: spendlog
 description: SpendLog — auto-imports transactions from SMS and Gmail.
 publish_to: "none"
-version: 0.1.7+7
+version: 0.1.8+8
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
