@@ -15,6 +15,8 @@ export const COUNTED_REASONS = [
   "SETTLEMENT",
   "SPLIT",
   "EMI_PARENT",
+  "REFUND",
+  "REFUNDED",
   "EXCLUDED",
 ] as const;
 export type CountedReason = (typeof COUNTED_REASONS)[number];

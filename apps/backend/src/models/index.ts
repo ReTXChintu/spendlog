@@ -228,6 +228,13 @@ export interface TransactionDoc {
   /// INSTALMENT. Only the parent is kept out of the totals.
   emiPlanId?: Types.ObjectId | null;
   emiRole?: EmiRole | null;
+  /// On a credit that gives money back: the purchase it came from. The
+  /// credit itself counts as nothing — it is not income — and instead
+  /// reduces what that purchase cost.
+  refundOfId?: Types.ObjectId | null;
+  /// On a purchase: how much of it has since come back. Kept in step by
+  /// the refund endpoints rather than set by hand.
+  refundedMinor: number;
   isTransfer: boolean;
   /// Set when only part of this bill was the user's own spending. The rest
   /// is money owed back, and countedAmountMinor drops to the share.
@@ -292,6 +299,8 @@ const transactionSchema = new Schema<TransactionDoc>(
     source: { type: String, enum: TRANSACTION_SOURCES, required: true },
     sourceRef: { type: String, default: null },
     dedupeKey: { type: String, default: null },
+    refundOfId: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
+    refundedMinor: { type: Number, default: 0, min: 0 },
     emiPlanId: { type: Schema.Types.ObjectId, ref: "EmiPlan", default: null },
     emiRole: { type: String, enum: EMI_ROLES, default: null },
     isTransfer: { type: Boolean, default: false },
@@ -349,6 +358,9 @@ transactionSchema.pre("findOneAndUpdate", async function (next) {
 transactionSchema.index({ userId: 1, occurredAt: -1 });
 transactionSchema.index({ userId: 1, dedupeKey: 1 });
 transactionSchema.index({ sourceRef: 1 });
+// Totting up what has come back against a purchase, and finding the
+// refunds to unlink when one is deleted.
+transactionSchema.index({ refundOfId: 1 });
 
 // Exposed as `category`/`account` (alongside the raw `categoryId`/`accountId`)
 // so populated responses keep the shape the clients already expect.

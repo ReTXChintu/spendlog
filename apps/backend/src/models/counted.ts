@@ -23,6 +23,10 @@ export interface CountedInput {
    */
   emiRole?: string | null;
   split?: { myShareMinor?: number | null } | null;
+  /** Set on a credit that gives back money from an earlier purchase. */
+  refundOfId?: unknown;
+  /** On a purchase: how much of it has since come back as refunds. */
+  refundedMinor?: number | null;
 }
 
 export interface CountedAmount {
@@ -59,12 +63,30 @@ export function resolveCountedAmount(transaction: CountedInput): CountedAmount {
     return { countedAmountMinor: 0, countedReason: "SETTLEMENT" };
   }
 
-  const share = transaction.split?.myShareMinor;
-  if (typeof share === "number") {
-    // Clamped because a share larger than the bill would otherwise inflate
-    // the total beyond what actually left the account.
-    const bounded = Math.max(0, Math.min(share, transaction.amountMinor));
-    return { countedAmountMinor: bounded, countedReason: "SPLIT" };
+  // A refund is not income. It reduces what the original purchase cost,
+  // which is handled on that purchase rather than by inventing earnings
+  // here — see refundedMinor on the transaction it points at.
+  if (transaction.refundOfId) {
+    return { countedAmountMinor: 0, countedReason: "REFUND" };
+  }
+
+  const rawShare = transaction.split?.myShareMinor;
+  // Clamped because a share larger than the bill would otherwise inflate
+  // the total beyond what actually left the account.
+  const share =
+    typeof rawShare === "number" ? Math.max(0, Math.min(rawShare, transaction.amountMinor)) : null;
+
+  // What a purchase really cost is what was paid less what came back. A
+  // refund is rarely the whole amount — taxes and fees usually stay gone —
+  // and the remainder is the true cost, not the sticker price.
+  const refunded = transaction.refundedMinor ?? 0;
+  if (refunded > 0) {
+    const base = share ?? transaction.amountMinor;
+    return { countedAmountMinor: Math.max(0, base - refunded), countedReason: "REFUNDED" };
+  }
+
+  if (share !== null) {
+    return { countedAmountMinor: share, countedReason: "SPLIT" };
   }
 
   if (transaction.excludeFromTotals) {

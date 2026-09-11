@@ -26,6 +26,8 @@ const listQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(200).default(50),
 });
 
+const OBJECT_ID = /^[0-9a-fA-F]{24}$/;
+
 /** Escapes regex metacharacters so a search term can't alter the pattern. */
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -269,16 +271,120 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
 });
 
 transactionsRouter.delete("/:id", validObjectIdParam("id"), async (req, res) => {
-  const deleted = await Transaction.findOneAndDelete({
-    _id: req.params.id,
-    userId: currentUserId(req),
-  });
+  const userId = currentUserId(req);
+  const deleted = await Transaction.findOneAndDelete({ _id: req.params.id, userId });
   if (!deleted) return res.status(404).json({ error: "Not found" });
+
+  // Deleting a refund puts the purchase back to costing what it did, and
+  // deleting a purchase leaves its refunds pointing at nothing.
+  if (deleted.refundOfId) await syncRefundTotal(deleted.refundOfId, userId);
+  await Transaction.updateMany({ userId, refundOfId: deleted._id }, { $set: { refundOfId: null } });
 
   res.status(204).end();
 });
 
-const OBJECT_ID = /^[0-9a-fA-F]{24}$/;
+/**
+ * Recomputes what has come back against a purchase, and saves it so the
+ * counted-amount hook runs: the purchase then costs what was paid less
+ * what was refunded.
+ */
+async function syncRefundTotal(purchaseId: unknown, userId: unknown): Promise<void> {
+  const purchase = await Transaction.findOne({ _id: purchaseId, userId });
+  if (!purchase) return;
+
+  const refunds = await Transaction.find({ userId, refundOfId: purchase._id });
+  purchase.refundedMinor = refunds.reduce((sum, refund) => sum + refund.amountMinor, 0);
+  await purchase.save();
+}
+
+const refundOfSchema = z.object({
+  /** The purchase this credit gives money back from. null unlinks it. */
+  purchaseId: z.string().regex(OBJECT_ID).nullable(),
+});
+
+// POST /transactions/:id/refund-of — marks a credit as money coming back
+// from an earlier purchase.
+//
+// The credit stops counting as income, and the purchase drops to what it
+// actually cost. A refund is rarely the full amount — taxes and delivery
+// usually stay gone — and what is left is the real loss on the purchase.
+transactionsRouter.post("/:id/refund-of", validObjectIdParam("id"), async (req, res) => {
+  const parsed = refundOfSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const userId = currentUserId(req);
+  const refund = await Transaction.findOne({ _id: req.params.id, userId });
+  if (!refund) return res.status(404).json({ error: "Not found" });
+
+  const previous = refund.refundOfId;
+
+  if (parsed.data.purchaseId === null) {
+    refund.refundOfId = null;
+    await refund.save();
+    if (previous) await syncRefundTotal(previous, userId);
+    await refund.populate(["category", "account"]);
+    return res.json(refund);
+  }
+
+  if (refund.type !== "CREDIT") {
+    return res.status(400).json({ error: "Only money coming in can be a refund" });
+  }
+  if (parsed.data.purchaseId === req.params.id) {
+    return res.status(400).json({ error: "A transaction cannot be a refund of itself" });
+  }
+
+  const purchase = await Transaction.findOne({ _id: parsed.data.purchaseId, userId });
+  if (!purchase) return res.status(404).json({ error: "Not found" });
+  if (purchase.type !== "DEBIT") {
+    return res.status(400).json({ error: "A refund has to come from a payment" });
+  }
+
+  refund.refundOfId = purchase._id;
+  await refund.save();
+
+  if (previous && String(previous) !== String(purchase._id)) {
+    await syncRefundTotal(previous, userId);
+  }
+  await syncRefundTotal(purchase._id, userId);
+
+  await refund.populate(["category", "account"]);
+  res.json(refund);
+});
+
+// GET /transactions/:id/refund-candidates — payments this credit could be
+// giving money back from: same account where known, no more than six
+// months earlier, and at least as large as the credit.
+transactionsRouter.get("/:id/refund-candidates", validObjectIdParam("id"), async (req, res) => {
+  const userId = currentUserId(req);
+  const refund = await Transaction.findOne({ _id: req.params.id, userId });
+  if (!refund) return res.status(404).json({ error: "Not found" });
+
+  const sixMonths = 183 * 24 * 60 * 60 * 1000;
+  const candidates = await Transaction.find({
+    userId,
+    type: "DEBIT",
+    // A refund cannot give back more than was paid, and it cannot predate
+    // the purchase it came from.
+    amountMinor: { $gte: refund.amountMinor },
+    occurredAt: { $lte: refund.occurredAt, $gte: new Date(refund.occurredAt.getTime() - sixMonths) },
+  })
+    .sort({ occurredAt: -1 })
+    .limit(40)
+    .populate("category")
+    .populate("account");
+
+  // An exact-amount match on the same card is almost always the one.
+  const ranked = [...candidates].sort((a, b) => score(b) - score(a));
+  function score(transaction: (typeof candidates)[number]): number {
+    let points = 0;
+    if (transaction.amountMinor === refund!.amountMinor) points += 2;
+    if (refund!.accountId && String(transaction.accountId) === String(refund!.accountId)) points += 1;
+    if (refund!.merchant && transaction.merchant === refund!.merchant) points += 2;
+    return points;
+  }
+
+  res.json(ranked);
+});
 
 const mergeSchema = z.object({
   /** The transactions to absorb. They stop existing on their own. */
