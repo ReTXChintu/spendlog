@@ -126,11 +126,15 @@ Everything outside `/trips` keeps the existing rule untouched. The risk
 here is not subtle bugs but a blunt one — a leak — so it is worth keeping
 the exception to one helper, in one file, used by a handful of endpoints.
 
-**Joining.** The owner shares a code; the invitee enters it. No email is
-sent, nothing is looked up by address, and a code can be rotated if it goes
-somewhere it should not. Inviting by email address would mean either
-sending mail or exposing "does this person have an account", and neither
-earns its keep for a holiday with four people on it.
+**Joining.** The owner shares a code; the invitee enters it, or scans it as
+a QR code from the owner's screen. The QR carries the code and nothing
+else, and the scanner lives in the phone app only — no deep links, no URL
+handling, no second way in to keep correct.
+
+No email is sent and nothing is looked up by address. Inviting by email
+would mean either sending mail or answering "does this person have an
+account", and neither earns its keep for a holiday with four people on it.
+A code can be rotated if it ends up somewhere it should not.
 
 **What members see of each other.** A trip's transactions, and nothing
 else: amount, merchant, date, and who paid. That is the point of the
@@ -159,10 +163,40 @@ outside it, because `countedAmountMinor` is what a trip sums. A bill split
 with a stranger on the trip counts the user's share; a cancelled hotel
 booking counts what did not come back.
 
-**Not doing:** who owes whom at the end of the trip. Splitwise is already
-in the picture for that, and the existing owed-to-you pool covers the part
-that touches this ledger. A second, half-built settlement engine inside
-trips would compete with it and lose.
+### Settling up within the trip
+
+Each expense is shared by everyone on the trip unless it says otherwise:
+
+```ts
+Transaction.tripShare = "ALL" | [userId, ...]
+```
+
+A souvenir bought for yourself is marked as shared with just you, and
+drops out of everyone else's arithmetic without leaving the trip total.
+
+Balances use `countedAmountMinor`, the same figure every other total in the
+app uses, so a refunded hotel and a bill split with someone outside the
+trip both behave without trips knowing anything about refunds or splits:
+
+```
+for each expense: each sharer owes counted / sharerCount to whoever paid
+net(member) = paid − owed
+```
+
+Transfers are then the usual greedy pairing of the largest creditor with
+the largest debtor, which settles N people in at most N−1 payments rather
+than everyone paying everyone.
+
+```
+GET /trips/:id/settlement
+  balances:  [{ userId, name, paidMinor, shareMinor, netMinor }]
+  transfers: [{ fromUserId, toUserId, amountMinor }]
+```
+
+This overlaps with Splitwise, which is already in the picture. It is worth
+building anyway because the ledger already knows what was spent and by
+whom — the part Splitwise makes you type in by hand — so the marginal cost
+is the arithmetic rather than the data entry.
 
 ---
 
@@ -173,7 +207,8 @@ trips would compete with it and lose.
 | 1 | Refund allocations, plus the migration | Self-contained; also unblocks §3 |
 | 2 | Cash account and `CASH` type | A few lines, and trips want it |
 | 3 | Trips for one person: model, stamping, re-scan, totals, UI | The whole feature minus sharing |
-| 4 | Members: join codes, `assertTripMember`, per-member totals | The part that needs care |
+| 4 | Members: join codes, QR, `assertTripMember`, per-member totals | The part that needs care |
+| 5 | Shares and settlement: who owes whom, and the transfers to fix it | Needs members to exist before it means anything |
 
 Doing 3 before 4 means the tagging and totals are already proven when the
 authorisation change lands, so a bug at that point is unambiguous.
@@ -191,3 +226,6 @@ authorisation change lands, so a bug at that point is unambiguous.
 - **A non-member gets nothing from every trip endpoint**, checked one by
   one rather than in aggregate
 - A member sees the trip's transactions and none of the owner's others
+- Settlement balances to zero, whatever the spending looks like
+- A personal expense inside a trip moves nobody else's balance
+- Three people, one payer: two transfers, not three
