@@ -96,8 +96,15 @@ class TransactionsScreenState extends State<TransactionsScreen> {
     }
   }
 
-  Future<void> load() async {
-    setState(() => _days = null);
+  /// Fetches the ledger.
+  ///
+  /// [keepVisible] refreshes in place, leaving the rows on screen until the
+  /// new ones arrive. Blanking the list first collapses it to a spinner, and
+  /// the scroll position goes with it — so editing a payment from the 1st
+  /// would land you back at today's rows every time. Changing a filter still
+  /// blanks it, because there the view really is starting over.
+  Future<void> load({bool keepVisible = false}) async {
+    if (!keepVisible) setState(() => _days = null);
     try {
       final result = await ApiClient.instance.get('/transactions/by-day?${_filterQuery()}') as Map<String, dynamic>;
       if (!mounted) return;
@@ -136,7 +143,8 @@ class TransactionsScreenState extends State<TransactionsScreen> {
     }
   }
 
-  Future<void> _refreshAll() => Future.wait([load(), _loadContext()]);
+  Future<void> _refreshAll({bool keepVisible = false}) =>
+      Future.wait([load(keepVisible: keepVisible), _loadContext()]);
 
   void _search(String value) {
     _debounce?.cancel();
@@ -204,7 +212,7 @@ class TransactionsScreenState extends State<TransactionsScreen> {
     try {
       await ApiClient.instance.post('/transactions/$targetId/merge', {'sourceIds': sourceIds});
       _stopSelecting();
-      await _refreshAll();
+      await _refreshAll(keepVisible: true);
       messenger.showSnackBar(
         SnackBar(content: Text('Merged ${sourceIds.length + 1} rows into one.')),
       );
@@ -226,7 +234,7 @@ class TransactionsScreenState extends State<TransactionsScreen> {
     );
     // An edit can move the amount, the date or the direction, so the day
     // totals and the grouping have to come back from the server.
-    if (changed == true) await _refreshAll();
+    if (changed == true) await _refreshAll(keepVisible: true);
   }
 
   bool get _filtersActive => _query.isNotEmpty || _categoryId != null || _direction.isNotEmpty;

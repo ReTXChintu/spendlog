@@ -71,8 +71,18 @@ export function TransactionsPage() {
     return params;
   }, [debouncedSearch, categoryId, accountId, direction, from, to]);
 
-  const load = useCallback(async () => {
-    setDays(null);
+  /**
+   * Fetches the ledger.
+   *
+   * `keepVisible` refreshes in place, leaving the rows on screen until the
+   * new ones arrive. Blanking the list first collapses the page to nothing,
+   * at which point the browser clamps the scroll position to the top — so
+   * editing a payment from the 1st would land you back at the 15th's rows
+   * every time. Changing a filter still blanks it, because there the view
+   * really is starting over.
+   */
+  const load = useCallback(async (options?: { keepVisible?: boolean }) => {
+    if (!options?.keepVisible) setDays(null);
     const params = new URLSearchParams(filterQuery);
     params.set("days", String(DAYS_PER_PAGE));
     try {
@@ -132,7 +142,7 @@ export function TransactionsPage() {
     setSyncing(true);
     try {
       await api.post("/ingestion/email/sync");
-      await Promise.all([load(), loadContext()]);
+      await Promise.all([load({ keepVisible: true }), loadContext()]);
     } catch {
       // Nothing to do — the ledger on screen is still valid.
     } finally {
@@ -154,7 +164,7 @@ export function TransactionsPage() {
   // An edit can change the amount, the date or the direction, so the day
   // totals and grouping have to be recomputed from the server.
   const reloadAfterEdit = () => {
-    load();
+    load({ keepVisible: true });
     loadContext();
   };
 
@@ -354,7 +364,7 @@ export function TransactionsPage() {
               title="Couldn't load your transactions"
               body="The connection to SpendLog's server failed. Your data is safe — this is just a connection problem. Check your internet and try again."
               actions={
-                <button className="btn btn-primary" onClick={load}>
+                <button className="btn btn-primary" onClick={() => load()}>
                   <Icon name="ic-sync" /> Retry
                 </button>
               }
