@@ -9,6 +9,8 @@ import { accountsRouter } from "./modules/accounts/accounts.routes";
 import { authRouter } from "./modules/auth/auth.routes";
 import { categoriesRouter } from "./modules/categories/categories.routes";
 import { analyticsRouter } from "./modules/analytics/analytics.routes";
+import { budgetRouter } from "./modules/budget/budget.routes";
+import { cardsRouter } from "./modules/cards/cards.routes";
 import { emiRouter } from "./modules/emi/emi.routes";
 import { presetsRouter } from "./modules/presets/presets.routes";
 import { emailRouter } from "./modules/ingestion/email.routes";
@@ -44,6 +46,8 @@ app.use("/analytics", analyticsRouter);
 app.use("/emi", emiRouter);
 app.use("/trips", tripsRouter);
 app.use("/merchant-presets", presetsRouter);
+app.use("/cards", cardsRouter);
+app.use("/budget", budgetRouter);
 
 app.use((_req, res) => res.status(404).json({ error: "Not found" }));
 

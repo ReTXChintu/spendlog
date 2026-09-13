@@ -27,6 +27,7 @@ const accountFields = {
   issuer: z.string().max(80).nullable().optional(),
   cardNetwork: z.string().max(40).nullable().optional(),
   creditLimitMinor: z.number().int().nonnegative().nullable().optional(),
+  spendLimitMinor: z.number().int().nonnegative().nullable().optional(),
   statementDay: z.number().int().min(1).max(31).nullable().optional(),
   dueDay: z.number().int().min(1).max(31).nullable().optional(),
   isActive: z.boolean().optional(),

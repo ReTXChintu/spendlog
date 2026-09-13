@@ -37,6 +37,9 @@ export type EmiInstalmentStatus = (typeof EMI_INSTALMENT_STATUSES)[number];
 export const EMI_ROLES = ["PARENT", "INSTALMENT"] as const;
 export type EmiRole = (typeof EMI_ROLES)[number];
 
+export const COMMITMENT_KINDS = ["RENT", "SIP", "INSURANCE", "LOAN", "OTHER"] as const;
+export type CommitmentKind = (typeof COMMITMENT_KINDS)[number];
+
 export const RULE_MATCH_TYPES = ["MERCHANT_CONTAINS", "KEYWORD", "EXACT"] as const;
 export type RuleMatchType = (typeof RULE_MATCH_TYPES)[number];
 

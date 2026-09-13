@@ -1,6 +1,7 @@
 import { Schema, Types, model } from "mongoose";
 import {
   ACCOUNT_TYPES,
+  COMMITMENT_KINDS,
   COUNTED_REASONS,
   EMI_INSTALMENT_STATUSES,
   EMI_PLAN_STATUSES,
@@ -9,6 +10,7 @@ import {
   TRANSACTION_SOURCES,
   TRANSACTION_TYPES,
   AccountType,
+  CommitmentKind,
   CountedReason,
   EmiInstalmentStatus,
   EmiPlanStatus,
@@ -39,6 +41,11 @@ export interface UserDoc {
   email: string;
   name?: string | null;
   googleId?: string | null;
+  /// What lands each month, and when. Together these define the period the
+  /// spending pace is measured over: salary day to salary day, because the
+  /// money arrives and then gets spent.
+  salaryAmountMinor?: number | null;
+  salaryDay?: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -48,6 +55,8 @@ const userSchema = new Schema<UserDoc>(
     email: { type: String, required: true, unique: true },
     name: { type: String, default: null },
     googleId: { type: String, default: null },
+    salaryAmountMinor: { type: Number, default: null, min: 0 },
+    salaryDay: { type: Number, default: null, min: 1, max: 31 },
   },
   { timestamps: true, ...serialization }
 );
@@ -86,6 +95,9 @@ export interface AccountDoc {
   issuer?: string | null;
   cardNetwork?: string | null;
   creditLimitMinor?: number | null;
+  /// What the user allows themselves on this card in a billing cycle, as
+  /// distinct from creditLimitMinor, which is what the bank allows.
+  spendLimitMinor?: number | null;
   /// Day of month the card statement is generated, and the day it is due.
   statementDay?: number | null;
   dueDay?: number | null;
@@ -115,6 +127,7 @@ const accountSchema = new Schema<AccountDoc>(
     issuer: { type: String, default: null },
     cardNetwork: { type: String, default: null },
     creditLimitMinor: { type: Number, default: null },
+    spendLimitMinor: { type: Number, default: null, min: 0 },
     statementDay: { type: Number, default: null, min: 1, max: 31 },
     dueDay: { type: Number, default: null, min: 1, max: 31 },
     isActive: { type: Boolean, default: true },
@@ -623,3 +636,40 @@ merchantPresetSchema.virtual("category", {
 });
 
 export const MerchantPreset = model<MerchantPresetDoc>("MerchantPreset", merchantPresetSchema);
+
+export interface FixedCommitmentDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  name: string;
+  amountMinor: number;
+  dayOfMonth: number;
+  kind: CommitmentKind;
+  isActive: boolean;
+  /// The period this was last ticked off for, as that period's start date
+  /// in YYYY-MM-DD. Equal to the current period's start means it is paid.
+  ///
+  /// Ticked by hand rather than matched to a transaction, which is a
+  /// deliberate choice with a cost: a commitment paid but not ticked is
+  /// counted twice. Hence the list living where it will be seen.
+  paidForPeriod?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const fixedCommitmentSchema = new Schema<FixedCommitmentDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    name: { type: String, required: true, trim: true },
+    amountMinor: { type: Number, required: true, min: 0 },
+    dayOfMonth: { type: Number, required: true, min: 1, max: 31 },
+    kind: { type: String, enum: COMMITMENT_KINDS, default: "OTHER" },
+    isActive: { type: Boolean, default: true },
+    paidForPeriod: { type: String, default: null },
+  },
+  { timestamps: true, ...serialization }
+);
+
+export const FixedCommitment = model<FixedCommitmentDoc>(
+  "FixedCommitment",
+  fixedCommitmentSchema
+);
