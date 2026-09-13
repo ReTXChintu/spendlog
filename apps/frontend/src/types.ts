@@ -136,6 +136,15 @@ export interface TripSettlement {
   }[];
 }
 
+/** A shortcut for entering a payment by hand: a name and its usual category. */
+export interface MerchantPreset {
+  id: string;
+  merchant: string;
+  categoryId: string | null;
+  category: Category | null;
+  useCount: number;
+}
+
 export interface Transaction {
   id: string;
   /** Who this belongs to — the payer, on a shared trip. */

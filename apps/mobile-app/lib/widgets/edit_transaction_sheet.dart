@@ -69,6 +69,8 @@ class _EditSheetState extends State<_EditSheet> {
   late final TextEditingController _myShare;
   late final TextEditingController _groupLabel;
 
+  List<MerchantPreset> _presets = [];
+
   bool _saving = false;
   bool _confirmDelete = false;
   String? _error;
@@ -104,10 +106,49 @@ class _EditSheetState extends State<_EditSheet> {
     _isSplit = t?.split != null;
     _isSettlement = t?.isSettlement ?? false;
     _tripJustMine = (t?.tripShareWith?.isNotEmpty ?? false);
+    _loadPresets();
     _myShare = TextEditingController(
       text: t?.split != null ? (t!.split!.myShareMinor / 100).toStringAsFixed(2) : '',
     );
     _groupLabel = TextEditingController(text: t?.split?.groupLabel ?? '');
+  }
+
+  Future<void> _loadPresets() async {
+    try {
+      final result = await ApiClient.instance.get('/merchant-presets') as List<dynamic>;
+      if (!mounted) return;
+      setState(() => _presets =
+          result.map((p) => MerchantPreset.fromJson(p as Map<String, dynamic>)).toList());
+    } catch (_) {
+      // The form works without shortcuts.
+    }
+  }
+
+  /// Fills the name and its usual category in one go.
+  void _applyPreset(MerchantPreset preset) {
+    setState(() {
+      _merchant.text = preset.merchant;
+      if (preset.categoryId != null) _categoryId = preset.categoryId;
+    });
+    // Ordering only: a shortcut must not wait on a round trip.
+    ApiClient.instance.post('/merchant-presets/${preset.id}/used').catchError((_) => null);
+  }
+
+  Future<void> _savePreset() async {
+    final name = _merchant.text.trim();
+    if (name.isEmpty) return;
+    try {
+      await ApiClient.instance
+          .post('/merchant-presets', {'merchant': name, 'categoryId': _categoryId});
+      await _loadPresets();
+    } catch (_) {
+      // A shortcut that failed to save is not worth interrupting the edit.
+    }
+  }
+
+  void _removePreset(MerchantPreset preset) {
+    setState(() => _presets = _presets.where((p) => p.id != preset.id).toList());
+    ApiClient.instance.delete('/merchant-presets/${preset.id}').catchError((_) => null);
   }
 
   @override
@@ -296,10 +337,50 @@ class _EditSheetState extends State<_EditSheet> {
               label: 'Merchant',
               child: TextField(
                 controller: _merchant,
+                onChanged: (_) => setState(() {}),
                 style: TextStyle(color: c.ink),
                 decoration: _inputDecoration(context, hint: 'Who was paid'),
               ),
             ),
+
+            // Shortcuts, small and quiet: a convenience rather than the
+            // main way to fill the form in.
+            if (_presets.isNotEmpty || _merchant.text.trim().isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  for (final preset in _presets)
+                    _PresetChip(
+                      preset: preset,
+                      isCurrent:
+                          preset.merchant.toLowerCase() == _merchant.text.trim().toLowerCase(),
+                      onTap: () => _applyPreset(preset),
+                      onRemove: () => _removePreset(preset),
+                    ),
+                  if (_merchant.text.trim().isNotEmpty &&
+                      !_presets.any((p) =>
+                          p.merchant.toLowerCase() == _merchant.text.trim().toLowerCase()))
+                    GestureDetector(
+                      onTap: _savePreset,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                        child: Text(
+                          'Save as a shortcut',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: c.brand,
+                            decoration: TextDecoration.underline,
+                            decorationColor: c.brand,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
 
             _Field(
               label: 'When',
@@ -610,6 +691,64 @@ class _Segment extends StatelessWidget {
               color: on ? c.brandDark : c.ink70,
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PresetChip extends StatelessWidget {
+  final MerchantPreset preset;
+  final bool isCurrent;
+  final VoidCallback onTap;
+  final VoidCallback onRemove;
+
+  const _PresetChip({
+    required this.preset,
+    required this.isCurrent,
+    required this.onTap,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+
+    return GestureDetector(
+      onTap: onTap,
+      // Removing is deliberately the long press: the tap has to stay the
+      // thing you do fifty times, not the one you undo.
+      onLongPress: onRemove,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: isCurrent ? c.brand50 : c.surface,
+          border: Border.all(color: isCurrent ? c.brand : c.lineStrong),
+          borderRadius: BorderRadius.circular(100),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (preset.category?.color != null) ...[
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  color: parseHexColor(preset.category!.color),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 6),
+            ],
+            Text(
+              preset.merchant,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: isCurrent ? c.brandDark : c.ink70,
+              ),
+            ),
+          ],
         ),
       ),
     );

@@ -340,6 +340,25 @@ class OwedSummary {
       );
 }
 
+/// A shortcut for entering a payment by hand: a name and its usual category.
+class MerchantPreset {
+  final String id;
+  final String merchant;
+  final String? categoryId;
+  final Category? category;
+
+  MerchantPreset({required this.id, required this.merchant, this.categoryId, this.category});
+
+  factory MerchantPreset.fromJson(Map<String, dynamic> json) => MerchantPreset(
+        id: json['id'] as String,
+        merchant: json['merchant'] as String,
+        categoryId: json['categoryId'] as String?,
+        category: json['category'] != null
+            ? Category.fromJson(json['category'] as Map<String, dynamic>)
+            : null,
+      );
+}
+
 class Trip {
   final String id;
   final String name;

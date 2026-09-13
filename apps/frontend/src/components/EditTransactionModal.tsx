@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
-import { Account, Category, Transaction, TransactionType, accountLabel } from "../types";
+import { Account, Category, MerchantPreset, Transaction, TransactionType, accountLabel } from "../types";
 import { Icon } from "./Icon";
 
 /** Splits an ISO instant into the two values the date/time inputs want. */
@@ -76,6 +76,7 @@ export function EditTransactionModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [presets, setPresets] = useState<MerchantPreset[]>([]);
 
   // More than one message means this row was merged, whether automatically
   // or by hand — and either can be wrong, so both can be taken apart.
@@ -88,6 +89,44 @@ export function EditTransactionModal({
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
+
+  useEffect(() => {
+    api
+      .get<MerchantPreset[]>("/merchant-presets")
+      .then(setPresets)
+      .catch(() => setPresets([]));
+  }, []);
+
+  /** Fills the name and its usual category in one go. */
+  function applyPreset(preset: MerchantPreset) {
+    setMerchant(preset.merchant);
+    if (preset.categoryId) setCategoryId(preset.categoryId);
+    // Ordering only: a shortcut must not wait on a round trip.
+    api.post(`/merchant-presets/${preset.id}/used`).catch(() => undefined);
+  }
+
+  async function savePreset() {
+    const name = merchant.trim();
+    if (!name) return;
+    try {
+      await api.post<MerchantPreset>("/merchant-presets", {
+        merchant: name,
+        categoryId: categoryId || null,
+      });
+      setPresets(await api.get<MerchantPreset[]>("/merchant-presets"));
+    } catch {
+      // A shortcut that failed to save is not worth interrupting the edit.
+    }
+  }
+
+  async function removePreset(preset: MerchantPreset) {
+    setPresets((current) => current.filter((p) => p.id !== preset.id));
+    api.delete(`/merchant-presets/${preset.id}`).catch(() => undefined);
+  }
+
+  const currentIsSaved = presets.some(
+    (preset) => preset.merchant.toLowerCase() === merchant.trim().toLowerCase()
+  );
 
   // Says what the split will do, in the same terms the balance uses.
   const shareMinor = Math.round(Number.parseFloat(myShare || "0") * 100);
@@ -228,6 +267,44 @@ export function EditTransactionModal({
               value={merchant}
               onChange={(e) => setMerchant(e.target.value)}
             />
+
+            <div className="preset-row">
+              {presets.map((preset) => {
+                const isCurrent =
+                  preset.merchant.toLowerCase() === merchant.trim().toLowerCase();
+                return (
+                  <span
+                    key={preset.id}
+                    className={`preset-chip${isCurrent ? " is-current" : ""}`}
+                    onClick={() => applyPreset(preset)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => e.key === "Enter" && applyPreset(preset)}
+                  >
+                    {preset.category?.color && (
+                      <span className="preset-dot" style={{ background: preset.category.color }} />
+                    )}
+                    {preset.merchant}
+                    <button
+                      className="preset-remove"
+                      title={`Forget ${preset.merchant}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removePreset(preset);
+                      }}
+                    >
+                      ×
+                    </button>
+                  </span>
+                );
+              })}
+
+              {merchant.trim() && !currentIsSaved && (
+                <button className="preset-save" onClick={savePreset} type="button">
+                  Save “{merchant.trim()}” as a shortcut
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="form-row">

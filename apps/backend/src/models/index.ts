@@ -583,3 +583,43 @@ tripSchema.index(
 );
 
 export const Trip = model<TripDoc>("Trip", tripSchema);
+
+export interface MerchantPresetDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  /// What to put in the merchant field.
+  merchant: string;
+  /// The category that usually goes with it. Optional: a preset can just
+  /// save the typing.
+  categoryId?: Types.ObjectId | null;
+  /// Used to put the ones reached for most at the front, which is the
+  /// difference between a useful row of shortcuts and a wall of them.
+  useCount: number;
+  lastUsedAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const merchantPresetSchema = new Schema<MerchantPresetDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    merchant: { type: String, required: true, trim: true },
+    categoryId: { type: Schema.Types.ObjectId, ref: "Category", default: null },
+    useCount: { type: Number, default: 0, min: 0 },
+    lastUsedAt: { type: Date, default: null },
+  },
+  { timestamps: true, ...serialization }
+);
+
+// One preset per merchant: a second would only be a slower way to pick the
+// same thing.
+merchantPresetSchema.index({ userId: 1, merchant: 1 }, { unique: true });
+
+merchantPresetSchema.virtual("category", {
+  ref: "Category",
+  localField: "categoryId",
+  foreignField: "_id",
+  justOne: true,
+});
+
+export const MerchantPreset = model<MerchantPresetDoc>("MerchantPreset", merchantPresetSchema);
