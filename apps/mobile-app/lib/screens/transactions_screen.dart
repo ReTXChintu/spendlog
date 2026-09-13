@@ -4,6 +4,7 @@ import '../models/models.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/format.dart';
+import '../widgets/card_strip.dart';
 import '../widgets/edit_transaction_sheet.dart';
 import '../widgets/state_block.dart';
 import '../widgets/transaction_tile.dart';
@@ -38,6 +39,9 @@ class TransactionsScreenState extends State<TransactionsScreen> {
   AnalyticsSummary? _summary;
   bool _hasGmail = false;
   bool _error = false;
+
+  List<CardStatus> _cards = [];
+  BudgetPace? _pace;
 
   String _query = '';
   String? _categoryId;
@@ -93,6 +97,24 @@ class TransactionsScreenState extends State<TransactionsScreen> {
       });
     } catch (_) {
       // The ledger still works without the rollup and the chips.
+    }
+
+    // Card cycles and the spending pace, for the strip above the list.
+    // Both are advisory, so neither stops the ledger loading.
+    try {
+      final extras = await Future.wait([
+        ApiClient.instance.get('/cards'),
+        ApiClient.instance.get('/budget/pace'),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _cards = (extras[0] as List<dynamic>)
+            .map((c) => CardStatus.fromJson(c as Map<String, dynamic>))
+            .toList();
+        _pace = BudgetPace.fromJson(extras[1] as Map<String, dynamic>);
+      });
+    } catch (_) {
+      // Advisory only.
     }
   }
 
@@ -349,6 +371,7 @@ class TransactionsScreenState extends State<TransactionsScreen> {
             ),
           ),
           const SizedBox(height: 6),
+          CardStrip(cards: _cards, pace: _pace),
           Expanded(child: _buildBody(uncategorized)),
         ],
       ),

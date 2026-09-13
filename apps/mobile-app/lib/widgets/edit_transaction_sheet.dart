@@ -70,12 +70,24 @@ class _EditSheetState extends State<_EditSheet> {
   late final TextEditingController _groupLabel;
 
   List<MerchantPreset> _presets = [];
+  List<CardStatus> _cards = [];
 
   bool _saving = false;
   bool _confirmDelete = false;
   String? _error;
 
   bool get _isNew => widget.transaction == null;
+
+  /// The card this is going on, when it is near or past its own limit.
+  CardStatus? get _cardWarning {
+    if (_accountId == null) return null;
+    for (final card in _cards) {
+      if (card.accountId == _accountId && (card.state == 'over' || card.state == 'close')) {
+        return card;
+      }
+    }
+    return null;
+  }
 
   /// Says what the split will do, in the same terms the balance uses.
   String get _owedHint {
@@ -107,10 +119,22 @@ class _EditSheetState extends State<_EditSheet> {
     _isSettlement = t?.isSettlement ?? false;
     _tripJustMine = (t?.tripShareWith?.isNotEmpty ?? false);
     _loadPresets();
+    _loadCards();
     _myShare = TextEditingController(
       text: t?.split != null ? (t!.split!.myShareMinor / 100).toStringAsFixed(2) : '',
     );
     _groupLabel = TextEditingController(text: t?.split?.groupLabel ?? '');
+  }
+
+  Future<void> _loadCards() async {
+    try {
+      final result = await ApiClient.instance.get('/cards') as List<dynamic>;
+      if (!mounted) return;
+      setState(() =>
+          _cards = result.map((c) => CardStatus.fromJson(c as Map<String, dynamic>)).toList());
+    } catch (_) {
+      // Advisory only.
+    }
   }
 
   Future<void> _loadPresets() async {
@@ -458,6 +482,44 @@ class _EditSheetState extends State<_EditSheet> {
                 decoration: _inputDecoration(context, hint: 'Optional'),
               ),
             ),
+
+            if (_cardWarning != null) ...[
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                decoration: BoxDecoration(
+                  color: _cardWarning!.state == 'over' ? c.debit50 : c.warnBg,
+                  borderRadius: BorderRadius.circular(T.rMd),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.error_outline,
+                      size: 15,
+                      color: _cardWarning!.state == 'over' ? c.debit : c.warn,
+                    ),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: Text(
+                        _cardWarning!.state == 'over'
+                            ? '${_cardWarning!.name} is already past its limit for this billing '
+                                'cycle.'
+                            : '${_cardWarning!.name} has '
+                                '${formatMoney(_cardWarning!.remainingMinor ?? 0)} left of its '
+                                'limit this cycle.',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          height: 1.45,
+                          color: _cardWarning!.state == 'over' ? c.debit : c.warn,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
 
             CheckboxListTile(
               value: _isTransfer,

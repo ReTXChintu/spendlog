@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
-import { Account, Category, MerchantPreset, Transaction, TransactionType, accountLabel } from "../types";
+import { formatMoney } from "../lib/format";
+import { Account, CardStatus, Category, MerchantPreset, Transaction, TransactionType, accountLabel } from "../types";
 import { Icon } from "./Icon";
 
 /** Splits an ISO instant into the two values the date/time inputs want. */
@@ -77,6 +78,7 @@ export function EditTransactionModal({
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [presets, setPresets] = useState<MerchantPreset[]>([]);
+  const [cards, setCards] = useState<CardStatus[]>([]);
 
   // More than one message means this row was merged, whether automatically
   // or by hand — and either can be wrong, so both can be taken apart.
@@ -95,6 +97,10 @@ export function EditTransactionModal({
       .get<MerchantPreset[]>("/merchant-presets")
       .then(setPresets)
       .catch(() => setPresets([]));
+    api
+      .get<CardStatus[]>("/cards")
+      .then(setCards)
+      .catch(() => setCards([]));
   }, []);
 
   /** Fills the name and its usual category in one go. */
@@ -136,6 +142,14 @@ export function EditTransactionModal({
     owedBackMinor > 0
       ? `₹${(owedBackMinor / 100).toFixed(2)} counts as owed back to you, not as spending.`
       : "All of it counts as your own spending.";
+
+  // Said before the payment is filed rather than after: the point of a
+  // limit is to change the next decision, not to report on the last one.
+  const cardForThis = cards.find((card) => card.accountId === accountId);
+  const cardWarning =
+    cardForThis && (cardForThis.state === "over" || cardForThis.state === "close")
+      ? cardForThis
+      : null;
 
   async function unmerge() {
     if (!transaction) return;
@@ -375,6 +389,26 @@ export function EditTransactionModal({
               onChange={(e) => setNote(e.target.value)}
             />
           </div>
+
+          {cardWarning && (
+            <div className="form-row form-row-wide">
+              <div className={`card-strip-row is-${cardWarning.state}`}>
+                <Icon name="ic-alert" />
+                <span>
+                  {cardWarning.state === "over" ? (
+                    <>
+                      <b>{cardWarning.name}</b> is already past its limit for this billing cycle.
+                    </>
+                  ) : (
+                    <>
+                      <b>{cardWarning.name}</b> has {formatMoney(cardWarning.remainingMinor ?? 0)}{" "}
+                      left of its limit this cycle.
+                    </>
+                  )}
+                </span>
+              </div>
+            </div>
+          )}
 
           <div className="form-row form-row-wide">
             <label className="checkbox-row">

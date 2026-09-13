@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { BudgetBlock } from "../components/BudgetBlock";
 import { Icon } from "../components/Icon";
 import { StateBlock } from "../components/States";
 import { api } from "../lib/api";
@@ -77,6 +78,8 @@ export function AnalyticsPage() {
       ) : (
         <div className="layout-2">
           <div>
+            <BudgetBlock />
+
             {activePlans.length > 0 && (
               <div className="section-block">
                 <h3>EMIs</h3>

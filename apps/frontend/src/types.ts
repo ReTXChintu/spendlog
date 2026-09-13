@@ -28,6 +28,7 @@ export interface Account {
   issuer: string | null;
   cardNetwork: string | null;
   creditLimitMinor: number | null;
+  spendLimitMinor: number | null;
   statementDay: number | null;
   dueDay: number | null;
   isActive: boolean;
@@ -144,6 +145,55 @@ export interface MerchantPreset {
   category: Category | null;
   useCount: number;
 }
+
+export type CardState = "ok" | "close" | "over" | "unset";
+
+/** A card, with where it is in its cycle and what is left of its limit. */
+export interface CardStatus {
+  accountId: string;
+  name: string;
+  last4: string | null;
+  statementOn: string | null;
+  dueOn: string | null;
+  floatDays: number | null;
+  spentMinor: number;
+  limitMinor: number | null;
+  remainingMinor: number | null;
+  state: CardState;
+}
+
+export interface FixedCommitment {
+  id: string;
+  name: string;
+  amountMinor: number;
+  dayOfMonth: number;
+  kind: "RENT" | "SIP" | "INSURANCE" | "LOAN" | "OTHER";
+  isActive: boolean;
+  isPaid?: boolean;
+}
+
+export interface BudgetProfile {
+  salaryAmountMinor: number | null;
+  salaryDay: number | null;
+}
+
+export type BudgetPace =
+  | { configured: false }
+  | {
+      configured: true;
+      periodStart: string;
+      periodEnd: string;
+      daysLeft: number;
+      daysElapsed: number;
+      salaryMinor: number;
+      commitmentsRemainingMinor: number;
+      spentMinor: number;
+      remainingMinor: number;
+      perDayMinor: number;
+      recentPerDayMinor: number;
+      state: "ok" | "watch" | "over";
+      commitments: FixedCommitment[];
+    };
 
 export interface Transaction {
   id: string;

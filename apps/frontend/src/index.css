@@ -497,6 +497,38 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
 .preset-save{font-size:11.5px;color:var(--brand);background:none;border:none;padding:4px 2px;
   text-decoration:underline}
 
+/* One line above the ledger, quiet unless something needs saying. */
+.card-strip{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.card-strip-row{display:flex;align-items:flex-start;gap:9px;padding:9px 12px;font-size:12.8px;
+  line-height:1.45;border-radius:var(--radius-md)}
+.card-strip-row svg{width:15px;height:15px;flex-shrink:0;margin-top:1px}
+.card-strip-row.is-tip{background:var(--brand-50);color:var(--brand-dark)}
+.card-strip-row.is-close{background:var(--warn-bg);color:var(--warn)}
+.card-strip-row.is-over{background:var(--debit-50);color:var(--debit)}
+
+/* The budget block on Analytics. */
+.budget-setup{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-top:12px}
+.budget-setup .filter-input{width:150px}
+.budget-headline{display:flex;gap:26px;flex-wrap:wrap;margin-top:14px;padding:14px 16px;
+  background:var(--brand-50);border-radius:var(--radius-md)}
+.budget-headline.is-watch{background:var(--warn-bg)}
+.budget-headline.is-over{background:var(--debit-50)}
+.budget-headline>div{display:flex;flex-direction:column;gap:3px}
+.budget-figure{font-family:var(--font-mono);font-size:19px;font-weight:800;color:var(--ink)}
+.budget-verdict{display:flex;align-items:flex-start;gap:8px;margin:10px 0 0 0;font-size:12.5px;
+  line-height:1.5;color:var(--ink-70)}
+.budget-verdict svg{width:15px;height:15px;flex-shrink:0;margin-top:1px}
+.budget-bar{height:7px;border-radius:4px;background:var(--track);overflow:hidden;margin-top:14px}
+.budget-bar-fill{height:100%;background:var(--brand)}
+.budget-legend{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);
+  margin-top:5px}
+.budget-commitments{margin-top:18px}
+.budget-commitment{display:flex;align-items:center;gap:9px;padding:7px 0;font-size:12.8px;
+  color:var(--ink-70);border-bottom:1px solid var(--line)}
+.budget-commitment:last-of-type{border-bottom:none}
+.budget-commitment>span:first-of-type{flex:1}
+.budget-commitment .is-paid{text-decoration:line-through;color:var(--muted-light)}
+
 .badge-split{background:var(--brand-50);color:var(--brand-dark)}
 .badge-emi{background:var(--brand-50);color:var(--brand-dark)}
 .badge-refund{background:var(--credit-50);color:var(--credit)}

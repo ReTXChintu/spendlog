@@ -47,6 +47,7 @@ class Account {
   final String? issuer;
   final String? cardNetwork;
   final int? creditLimitMinor;
+  final int? spendLimitMinor;
   final int? statementDay;
   final int? dueDay;
   final bool isActive;
@@ -61,6 +62,7 @@ class Account {
     this.issuer,
     this.cardNetwork,
     this.creditLimitMinor,
+    this.spendLimitMinor,
     this.statementDay,
     this.dueDay,
     this.isActive = true,
@@ -84,6 +86,7 @@ class Account {
         issuer: json['issuer'] as String?,
         cardNetwork: json['cardNetwork'] as String?,
         creditLimitMinor: json['creditLimitMinor'] as int?,
+        spendLimitMinor: json['spendLimitMinor'] as int?,
         statementDay: json['statementDay'] as int?,
         dueDay: json['dueDay'] as int?,
         isActive: json['isActive'] as bool? ?? true,
@@ -357,6 +360,117 @@ class MerchantPreset {
             ? Category.fromJson(json['category'] as Map<String, dynamic>)
             : null,
       );
+}
+
+/// A card, with where it is in its cycle and what is left of its limit.
+class CardStatus {
+  final String accountId;
+  final String name;
+  final DateTime? statementOn;
+  final DateTime? dueOn;
+  final int? floatDays;
+  final int spentMinor;
+  final int? limitMinor;
+  final int? remainingMinor;
+  /// "ok" | "close" | "over" | "unset"
+  final String state;
+
+  CardStatus({
+    required this.accountId,
+    required this.name,
+    this.statementOn,
+    this.dueOn,
+    this.floatDays,
+    required this.spentMinor,
+    this.limitMinor,
+    this.remainingMinor,
+    required this.state,
+  });
+
+  factory CardStatus.fromJson(Map<String, dynamic> json) => CardStatus(
+        accountId: json['accountId'] as String,
+        name: json['name'] as String,
+        statementOn:
+            json['statementOn'] != null ? DateTime.parse(json['statementOn'] as String) : null,
+        dueOn: json['dueOn'] != null ? DateTime.parse(json['dueOn'] as String) : null,
+        floatDays: json['floatDays'] as int?,
+        spentMinor: json['spentMinor'] as int? ?? 0,
+        limitMinor: json['limitMinor'] as int?,
+        remainingMinor: json['remainingMinor'] as int?,
+        state: json['state'] as String? ?? 'unset',
+      );
+}
+
+class FixedCommitment {
+  final String id;
+  final String name;
+  final int amountMinor;
+  final int dayOfMonth;
+  final bool isPaid;
+
+  FixedCommitment({
+    required this.id,
+    required this.name,
+    required this.amountMinor,
+    required this.dayOfMonth,
+    required this.isPaid,
+  });
+
+  factory FixedCommitment.fromJson(Map<String, dynamic> json) => FixedCommitment(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        amountMinor: json['amountMinor'] as int,
+        dayOfMonth: json['dayOfMonth'] as int,
+        isPaid: json['isPaid'] as bool? ?? false,
+      );
+}
+
+/// How fast money is going out against how fast it can. A pace, not a
+/// judgement about whether a bill can be paid — SpendLog has never known
+/// an account balance.
+class BudgetPace {
+  final bool configured;
+  final int daysLeft;
+  final int salaryMinor;
+  final int commitmentsRemainingMinor;
+  final int spentMinor;
+  final int remainingMinor;
+  final int perDayMinor;
+  final int recentPerDayMinor;
+  /// "ok" | "watch" | "over"
+  final String state;
+  final List<FixedCommitment> commitments;
+
+  BudgetPace({
+    required this.configured,
+    this.daysLeft = 0,
+    this.salaryMinor = 0,
+    this.commitmentsRemainingMinor = 0,
+    this.spentMinor = 0,
+    this.remainingMinor = 0,
+    this.perDayMinor = 0,
+    this.recentPerDayMinor = 0,
+    this.state = 'ok',
+    this.commitments = const [],
+  });
+
+  factory BudgetPace.fromJson(Map<String, dynamic> json) {
+    if (json['configured'] != true) return BudgetPace(configured: false);
+    return BudgetPace(
+      configured: true,
+      daysLeft: json['daysLeft'] as int? ?? 0,
+      salaryMinor: json['salaryMinor'] as int? ?? 0,
+      commitmentsRemainingMinor: json['commitmentsRemainingMinor'] as int? ?? 0,
+      spentMinor: json['spentMinor'] as int? ?? 0,
+      remainingMinor: json['remainingMinor'] as int? ?? 0,
+      perDayMinor: json['perDayMinor'] as int? ?? 0,
+      recentPerDayMinor: json['recentPerDayMinor'] as int? ?? 0,
+      state: json['state'] as String? ?? 'ok',
+      commitments: (json['commitments'] as List<dynamic>? ?? [])
+          .map((c) => FixedCommitment.fromJson(c as Map<String, dynamic>))
+          .toList(),
+    );
+  }
 }
 
 class Trip {

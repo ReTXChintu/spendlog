@@ -3,6 +3,7 @@ import '../models/models.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/format.dart';
+import '../widgets/budget_block.dart';
 import '../widgets/state_block.dart';
 
 class AnalyticsScreen extends StatefulWidget {
@@ -100,6 +101,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                             _Tile(label: 'Received', value: formatMoney(summary.totalIncomeMinor), color: context.c.credit),
                           ],
                         ),
+                        const SizedBox(height: 26),
+                        const BudgetBlock(),
                         if (_plans.isNotEmpty) ...[
                           const SizedBox(height: 26),
                           _SectionTitle(

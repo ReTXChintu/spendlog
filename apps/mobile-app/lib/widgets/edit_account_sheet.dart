@@ -48,6 +48,7 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
   late final TextEditingController _last4;
   late final TextEditingController _cardNetwork;
   late final TextEditingController _creditLimit;
+  late final TextEditingController _spendLimit;
   late final TextEditingController _statementDay;
   late final TextEditingController _dueDay;
 
@@ -72,6 +73,9 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
     _creditLimit = TextEditingController(
       text: a?.creditLimitMinor != null ? (a!.creditLimitMinor! ~/ 100).toString() : '',
     );
+    _spendLimit = TextEditingController(
+      text: a?.spendLimitMinor != null ? (a!.spendLimitMinor! ~/ 100).toString() : '',
+    );
     _statementDay = TextEditingController(text: a?.statementDay?.toString() ?? '');
     _dueDay = TextEditingController(text: a?.dueDay?.toString() ?? '');
     _type = a?.accountType ?? 'BANK';
@@ -80,7 +84,16 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
 
   @override
   void dispose() {
-    for (final c in [_nickname, _bankName, _last4, _cardNetwork, _creditLimit, _statementDay, _dueDay]) {
+    for (final c in [
+      _nickname,
+      _bankName,
+      _last4,
+      _cardNetwork,
+      _creditLimit,
+      _spendLimit,
+      _statementDay,
+      _dueDay,
+    ]) {
       c.dispose();
     }
     super.dispose();
@@ -119,6 +132,7 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
       'accountType': _type,
       'cardNetwork': _cardNetwork.text.trim().isEmpty ? null : _cardNetwork.text.trim(),
       'creditLimitMinor': limit == null ? null : limit * 100,
+      'spendLimitMinor': _intOrNull(_spendLimit) == null ? null : _intOrNull(_spendLimit)! * 100,
       'statementDay': _intOrNull(_statementDay),
       'dueDay': _intOrNull(_dueDay),
       'isActive': _isActive,
@@ -254,6 +268,13 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
               _Field(label: 'Network', controller: _cardNetwork, hint: 'Visa, Mastercard, RuPay'),
               const SizedBox(height: 14),
               _Field(label: 'Credit limit (₹)', controller: _creditLimit, hint: '200000', numeric: true),
+              const SizedBox(height: 14),
+              _Field(
+                label: 'My limit a cycle (₹)',
+                controller: _spendLimit,
+                hint: '30000',
+                numeric: true,
+              ),
               const SizedBox(height: 14),
               Row(
                 children: [

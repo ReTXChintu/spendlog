@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { EditTransactionModal } from "../components/EditTransactionModal";
+import { CardStrip } from "../components/CardStrip";
 import { EmiModal } from "../components/EmiModal";
 import { RefundModal } from "../components/RefundModal";
 import { Icon } from "../components/Icon";
@@ -8,7 +9,18 @@ import { RawMessageModal } from "../components/RawMessageModal";
 import { TransactionRow } from "../components/TransactionRow";
 import { api } from "../lib/api";
 import { currentMonth, formatDayLabel, formatMoney } from "../lib/format";
-import { Account, AnalyticsSummary, Category, DayGroup, EmailConnectionStatus, Transaction, TransactionType, accountLabel } from "../types";
+import {
+  Account,
+  AnalyticsSummary,
+  BudgetPace,
+  CardStatus,
+  Category,
+  DayGroup,
+  EmailConnectionStatus,
+  Transaction,
+  TransactionType,
+  accountLabel,
+} from "../types";
 
 interface ByDayResponse {
   days: DayGroup[];
@@ -39,6 +51,8 @@ export function TransactionsPage() {
   const [rawFor, setRawFor] = useState<Transaction | null>(null);
   const [emiFor, setEmiFor] = useState<Transaction | null>(null);
   const [refundFor, setRefundFor] = useState<Transaction | null>(null);
+  const [cards, setCards] = useState<CardStatus[]>([]);
+  const [pace, setPace] = useState<BudgetPace | null>(null);
   // Rows picked for merging. Empty means selection mode is off.
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selecting, setSelecting] = useState(false);
@@ -115,6 +129,20 @@ export function TransactionsPage() {
       setHasGmail(emails.length > 0);
     } catch {
       // The ledger still works without the rail populated.
+    }
+
+    // Card cycles and the spending pace: the strip above the list. Both
+    // are advisory, so neither is allowed to stop the ledger loading.
+    try {
+      const [cardStatus, budgetPace] = await Promise.all([
+        api.get<CardStatus[]>("/cards"),
+        api.get<BudgetPace>("/budget/pace"),
+      ]);
+      setCards(cardStatus);
+      setPace(budgetPace);
+    } catch {
+      setCards([]);
+      setPace(null);
     }
   }, []);
 
@@ -254,6 +282,8 @@ export function TransactionsPage() {
           )}
         </div>
       </div>
+
+      <CardStrip cards={cards} pace={pace} />
 
       <div className="layout-ledger">
         <div className="filters-panel">

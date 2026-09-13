@@ -41,6 +41,9 @@ export function AccountModal({
   const [creditLimit, setCreditLimit] = useState(
     account?.creditLimitMinor != null ? (account.creditLimitMinor / 100).toFixed(0) : ""
   );
+  const [spendLimit, setSpendLimit] = useState(
+    account?.spendLimitMinor != null ? (account.spendLimitMinor / 100).toFixed(0) : ""
+  );
   const [statementDay, setStatementDay] = useState(account?.statementDay?.toString() ?? "");
   const [dueDay, setDueDay] = useState(account?.dueDay?.toString() ?? "");
   const [isActive, setIsActive] = useState(account?.isActive ?? true);
@@ -86,6 +89,10 @@ export function AccountModal({
       issuer: issuer.trim() || null,
       cardNetwork: cardNetwork.trim() || null,
       creditLimitMinor: limit === null ? null : limit * 100,
+      spendLimitMinor: (() => {
+        const own = numberOrNull(spendLimit);
+        return own === null ? null : own * 100;
+      })(),
       statementDay: numberOrNull(statementDay),
       dueDay: numberOrNull(dueDay),
       isActive,
@@ -218,6 +225,16 @@ export function AccountModal({
                   value={creditLimit}
                   onChange={(e) => setCreditLimit(e.target.value)}
                   placeholder="200000"
+                  inputMode="numeric"
+                />
+              </label>
+
+              <label className="field">
+                <span>My limit a cycle (₹)</span>
+                <input
+                  value={spendLimit}
+                  onChange={(e) => setSpendLimit(e.target.value)}
+                  placeholder="30000"
                   inputMode="numeric"
                 />
               </label>
