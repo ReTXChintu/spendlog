@@ -31,6 +31,7 @@ function summarise(statement: import("../../models").CardStatementDoc) {
     problem: statement.problem ?? null,
     subject: statement.subject ?? null,
     fileName: statement.fileName ?? null,
+    issuer: statement.issuer ?? null,
     statementDate: statement.statementDate,
     dueDate: statement.dueDate,
     periodStart: statement.periodStart,
@@ -137,6 +138,42 @@ statementsRouter.post("/:id/reconcile", validObjectIdParam("id"), async (req, re
 statementsRouter.delete("/:id/added", validObjectIdParam("id"), async (req, res) => {
   const removed = await unpickStatement(currentUserId(req), new Types.ObjectId(req.params.id));
   res.json({ removed });
+});
+
+const assignSchema = z.object({
+  accountId: z.string().regex(/^[0-9a-fA-F]{24}$/, "Not a card id"),
+});
+
+// PATCH /statements/:id - say by hand which card this statement is for.
+//
+// Needed because not every issuer prints the card number on the page the
+// transactions are on. Reconciles straight away, since being unable to say
+// which card it was is the only thing that was stopping it.
+statementsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
+  const parsed = assignSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+  const userId = currentUserId(req);
+  const statement = await CardStatement.findOne({ _id: req.params.id, userId });
+  if (!statement) return res.status(404).json({ error: "Not found" });
+
+  // Moving an already-reconciled statement would leave the rows it added
+  // sitting on the old card, so the rows have to come back first.
+  if (statement.reconciledAt) {
+    return res.status(409).json({
+      error: "This statement has already been read. Undo what it added first, then move it.",
+    });
+  }
+
+  const card = await Account.findOne({ _id: parsed.data.accountId, userId });
+  if (!card) return res.status(404).json({ error: "No such card" });
+
+  statement.accountId = card._id;
+  statement.status = statement.lines.length > 0 ? "PARSED" : statement.status;
+  statement.problem = null;
+  await statement.save();
+
+  res.json(await reconcileStatement(statement));
 });
 
 const passwordSchema = z.object({

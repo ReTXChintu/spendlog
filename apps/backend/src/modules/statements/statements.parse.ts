@@ -1,6 +1,7 @@
 import { TransactionType } from "../../types";
 import { istDayStart } from "../../time";
-import { classifyStatementLine } from "./statements.classify";
+import { classifyStatementLine, creditByDescription } from "./statements.classify";
+import { readerFor, StatementReader } from "./statements.issuers";
 import { StatementLineKind } from "../../types";
 
 /**
@@ -22,6 +23,9 @@ export interface ParsedStatementLine {
 }
 
 export interface ParsedStatement {
+  /// Which reader read it, so an unrecognised layout is visible rather
+  /// than silently producing a short list of lines.
+  issuer: string;
   lines: ParsedStatementLine[];
   last4: string | null;
   statementDate: Date | null;
@@ -92,10 +96,8 @@ function buildDate(day: number, month: number, year: number): Date | null {
   return istDayStart(`${fullYear}-${pad(month + 1)}-${pad(day)}`);
 }
 
-// 1,240.00 / 1240 / 1,24,000.50 — Indian grouping included.
+// 1,240.00 / 1240 / 1,24,000.50 - Indian grouping included.
 const AMOUNT_RE = /(\d{1,3}(?:,\d{2,3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/;
-// Credits are marked, not signed: "1,240.00 Cr", "1,240.00 CR", "(1,240.00)".
-const CREDIT_MARKER_RE = /\b(cr|credit)\b\.?\s*$/i;
 
 export function parseAmountToMinor(raw: string): number | null {
   const cleaned = raw.replace(/,/g, "").trim();
@@ -104,42 +106,29 @@ export function parseAmountToMinor(raw: string): number | null {
 }
 
 /**
- * A row is a transaction when it starts with a date and ends with an
- * amount. Anchoring at both ends is what keeps prose out: a sentence about
- * a reward programme may contain a number, but it does not begin with a
- * date and end with one.
+ * One row, read by whichever reader recognised the document.
+ *
+ * Where the reader could not say which way the money went - Jupiter prints
+ * a refund in a different colour and colour is not in the text - the words
+ * decide, and anything they do not clearly mark as coming back is treated
+ * as a debit.
  */
-export function parseStatementRow(row: string, fallbackYear?: number): ParsedStatementLine | null {
-  const leading = row.match(/^(\d{1,2}[\s/\-.][\w]{2,9}[\s/\-.]?\d{0,4})\s+(.*)$/);
-  if (!leading) return null;
+export function parseStatementRow(
+  row: string,
+  reader: StatementReader,
+  fallbackYear?: number
+): ParsedStatementLine | null {
+  const raw = reader.row(row);
+  if (!raw) return null;
 
-  const date = parseStatementDate(leading[1], fallbackYear);
+  const date = parseStatementDate(raw.date, fallbackYear);
   if (!date) return null;
 
-  let rest = leading[2].trim();
-  if (!rest) return null;
+  const amountMinor = parseAmountToMinor(raw.amount);
+  if (!raw.description || amountMinor === null || amountMinor <= 0) return null;
 
-  // Some issuers print a second date column - the posting date next to the
-  // transaction date. The first is the one that matters; drop the second
-  // so it cannot be mistaken for part of the merchant's name.
-  const secondDate = rest.match(/^(\d{1,2}[\s/\-.][\w]{2,9}[\s/\-.]?\d{0,4})\s+(.+)$/);
-  if (secondDate && parseStatementDate(secondDate[1], fallbackYear)) rest = secondDate[2].trim();
-
-  const isCredit = CREDIT_MARKER_RE.test(rest) || /^\(.*\)$/.test(rest.split(/\s+/).at(-1) ?? "");
-  const withoutMarker = rest.replace(CREDIT_MARKER_RE, "").trim();
-
-  // The amount is the last number on the row. Searching from the end keeps
-  // digits inside a merchant's name - "SHELL 1234 BANGALORE" - from winning.
-  const trailing = withoutMarker.match(new RegExp(`^(.*?)\\s*\\(?${AMOUNT_RE.source}\\)?$`));
-  if (!trailing) return null;
-
-  const description = trailing[1].replace(/[\s.,;:\-]+$/, "").trim();
-  const amountMinor = parseAmountToMinor(trailing[2]);
-
-  if (!description || amountMinor === null || amountMinor <= 0) return null;
-
-  const type: TransactionType = isCredit ? "CREDIT" : "DEBIT";
-  return { date, description, amountMinor, type, kind: classifyStatementLine(description, type) };
+  const type: TransactionType = raw.credit ?? creditByDescription(raw.description) ? "CREDIT" : "DEBIT";
+  return { date, description: raw.description, amountMinor, type, kind: classifyStatementLine(raw.description, type) };
 }
 
 /** A labelled figure from the summary block, e.g. "Total Dues 47,850.25". */
@@ -190,11 +179,13 @@ export function findCardLast4(rows: string[]): string | null {
  * alone, so nothing here is allowed to fail the whole parse.
  */
 export function parseStatementRows(rows: string[]): ParsedStatement {
+  const reader = readerFor(rows);
+
   const statementDate =
-    findLabelledDate(rows, /statement\s*(?:date|generated\s*on)/i) ?? findLabelledDate(rows, /\bstatement\b/i);
+    findLabelledDate(rows, /statement\s*(?:date|generated\s*on)/i) ?? findLabelledDate(rows, /statement/i);
 
   const dueDate =
-    findLabelledDate(rows, /(?:payment\s*)?due\s*date/i) ?? findLabelledDate(rows, /\bpay\s*by\b/i);
+    findLabelledDate(rows, /(?:payment\s*)?due\s*date/i) ?? findLabelledDate(rows, /pay\s*by/i);
 
   // The year the lines belong to, for issuers that print "02 Sep" with no
   // year on each row. A cycle can straddle new year, which the reconciler
@@ -203,13 +194,26 @@ export function parseStatementRows(rows: string[]): ParsedStatement {
 
   const lines: ParsedStatementLine[] = [];
   for (const row of rows) {
-    const line = parseStatementRow(row, fallbackYear);
-    if (line) lines.push(line);
+    const line = parseStatementRow(row, reader, fallbackYear);
+    if (line) {
+      lines.push(line);
+      continue;
+    }
+
+    // A merchant name too long for its column wraps, leaving its tail on a
+    // line of its own. Joined back on, because a name cut in half matches
+    // nothing and reads as a mistake.
+    const previous = lines[lines.length - 1];
+    if (previous && reader.continuation?.(row)) {
+      previous.description = `${previous.description} ${row.trim()}`.replace(/\s+/g, " ");
+      previous.kind = classifyStatementLine(previous.description, previous.type);
+    }
   }
 
   const dated = lines.map((line) => line.date.getTime());
 
   return {
+    issuer: reader.name,
     lines,
     last4: findCardLast4(rows),
     statementDate,

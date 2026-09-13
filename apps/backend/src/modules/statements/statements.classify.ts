@@ -73,6 +73,9 @@ export function classifyStatementLine(description: string, type: TransactionType
   if (type === "CREDIT") {
     if (PAYMENT_RE.test(description)) return "PAYMENT";
     if (REVERSAL_RE.test(description)) return "REVERSAL";
+    // A charge given back: "Fuel Surcharges ... 4.27 Cr" is the waiver of
+    // a fee, not a payment against the bill.
+    if (FEE_RE.test(description)) return "REVERSAL";
     // An unexplained credit on a card is far more often the bill being
     // paid than money coming back, and treating it as a payment only
     // means it is left alone.
@@ -81,6 +84,22 @@ export function classifyStatementLine(description: string, type: TransactionType
 
   if (FEE_RE.test(description)) return "FEE";
   return "SPEND";
+}
+
+/**
+ * Whether the words alone say this was money coming back.
+ *
+ * For the issuers that mark a credit only by printing it in a different
+ * colour - Jupiter does - this is the whole of the evidence, because colour
+ * is not in a PDF's text stream.
+ *
+ * Deliberately narrow. Everything not clearly marked as coming back is
+ * treated as a debit, which is the recoverable mistake: a credit read as a
+ * debit overstates spending on one row, while a debit read as a credit
+ * quietly removes real spending from the totals.
+ */
+export function creditByDescription(description: string): boolean {
+  return PAYMENT_RE.test(description) || REVERSAL_RE.test(description);
 }
 
 /** Whether a line of this kind may become a transaction. */

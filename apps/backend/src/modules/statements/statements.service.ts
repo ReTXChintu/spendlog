@@ -232,6 +232,7 @@ async function readOneStatement(params: {
         accountId: card?._id ?? null,
         subject: params.subject,
         fileName: params.attachment.fileName,
+        issuer: parsed.issuer,
         status: card ? "PARSED" : "UNIDENTIFIED",
         problem: card
           ? null

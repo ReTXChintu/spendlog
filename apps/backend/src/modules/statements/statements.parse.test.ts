@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 import { istDayKey } from "../../time";
 import { classifyStatementLine, countsAsStatementSpend, isLedgerWorthy } from "./statements.classify";
 import { extractStatementRows, StatementLockedError } from "./statements.pdf";
+import { readers } from "./statements.issuers";
 import { parseStatementDate, parseStatementRow, parseStatementRows } from "./statements.parse";
 
 const FIXTURES = path.join(__dirname, "fixtures");
@@ -37,7 +38,7 @@ describe("parseStatementDate", () => {
 
 describe("parseStatementRow", () => {
   it("reads a date, a description and an amount", () => {
-    const line = parseStatementRow("18/08/2026 AMZNIN MUMBAI IN 1,240.00")!;
+    const line = parseStatementRow("18/08/2026 AMZNIN MUMBAI IN 1,240.00", readers.generic)!;
     assert.equal(line.description, "AMZNIN MUMBAI IN");
     assert.equal(line.amountMinor, 124000);
     assert.equal(line.type, "DEBIT");
@@ -45,25 +46,25 @@ describe("parseStatementRow", () => {
   });
 
   it("treats a Cr marker as the credit it is", () => {
-    const line = parseStatementRow("22/08/2026 PAYMENT RECEIVED - THANK YOU 25,000.00 Cr")!;
+    const line = parseStatementRow("22/08/2026 PAYMENT RECEIVED - THANK YOU 25,000.00 Cr", readers.generic)!;
     assert.equal(line.type, "CREDIT");
     assert.equal(line.kind, "PAYMENT");
   });
 
   it("keeps digits inside a merchant's name out of the amount", () => {
     // The amount is taken from the end of the row for exactly this case.
-    const line = parseStatementRow("05/09/2026 SHELL 1234 BANGALORE 890.10")!;
+    const line = parseStatementRow("05/09/2026 SHELL 1234 BANGALORE 890.10", readers.generic)!;
     assert.equal(line.description, "SHELL 1234 BANGALORE");
     assert.equal(line.amountMinor, 89010);
   });
 
   it("drops a second date column without eating the merchant", () => {
-    const line = parseStatementRow("18/08/2026 20/08/2026 AMZNIN MUMBAI IN 1,240.00")!;
+    const line = parseStatementRow("18/08/2026 20/08/2026 AMZNIN MUMBAI IN 1,240.00", readers.generic)!;
     assert.equal(line.description, "AMZNIN MUMBAI IN");
   });
 
   it("reads Indian digit grouping", () => {
-    assert.equal(parseStatementRow("01/09/2026 CAR INSURANCE 1,24,000.50")!.amountMinor, 12400050);
+    assert.equal(parseStatementRow("01/09/2026 CAR INSURANCE 1,24,000.50", readers.generic)!.amountMinor, 12400050);
   });
 
   it("ignores anything that is not a dated row ending in an amount", () => {
@@ -73,7 +74,7 @@ describe("parseStatementRow", () => {
       "Card No: 4854 XXXX XXXX 1377",
       "18/08/2026",
     ]) {
-      assert.equal(parseStatementRow(row), null, row);
+      assert.equal(parseStatementRow(row, readers.generic), null, row);
     }
   });
 });

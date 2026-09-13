@@ -197,14 +197,53 @@ the same line again.
 
 ---
 
+## The issuers
+
+Four real statements, four layouts, and between them three date formats,
+three ways of writing an amount, and two extra columns sitting between the
+description and the figure. Each reader is registered by name and chosen
+from the document's own headers; the generic one is the fallback.
+
+| Card | What defeats a generic reader |
+|---|---|
+| **ICICI** Amazon Pay | An eleven-digit serial number between the date and the description, and a reward-points column between the description and the amount — so the last number on the row is not the amount until the points are accounted for. Long merchant names wrap onto a second line. Credits carry a trailing `CR`. |
+| **HDFC** IOCL, Tata Neu | A time attached to the date by a pipe: `03/08/2026\| 10:30`. Credits carry a *leading* `+` rather than a trailing `Cr`. Rows converted to instalments carry an `EMI` badge that extracts as a word in front of the merchant. |
+| **Jupiter** on CSB | The timestamp wraps mid-way, leaving `28 am` alone on the next line and the hour with a dangling colon. Amounts are written `Rs. 1,489`, sometimes without decimals. |
+
+Jupiter is the one that forced a change to the design. **It does not mark
+credits in the text at all** — a refund is printed in a different colour,
+and colour is not in a PDF's text stream. So a reader may now decline to
+say the direction, and the words decide: `Repayment - Thank You` and
+`REFUND` are unambiguous, which is what makes that safe.
+
+The rule stays deliberately narrow. Anything not clearly marked as coming
+back is treated as a debit, because that is the recoverable mistake — a
+credit read as a debit overstates one row, while a debit read as a credit
+quietly removes real spending from the totals.
+
+One consequence of ICICI's `Fuel Surcharges ... 4.27 CR`: a credit whose
+description names a fee is a fee being given back, not a payment against
+the bill.
+
+### Checking a layout before trusting it
+
+```
+npm run statements:preview -- path/to/statement.pdf [password]
+npm run statements:preview -- path/to/statement.pdf [password] --rows
+```
+
+Reads the PDF, prints the table it made of it, and writes nothing
+anywhere. `--rows` prints the raw extracted text instead, which is what to
+look at when too few lines come out — it shows what the reader was given,
+and usually shows the column that moved.
+
+---
+
 ## Phases
 
-1. **The engine.** Model, encryption, PDF extraction, the generic line
-   reader, classification, matching, reconciliation, the API. Tested
-   against fixtures.
-2. **The issuers.** Per-bank readers fitted to real statements.
+1. ~~**The engine.**~~ Model, encryption, PDF extraction, classification,
+   matching, reconciliation, the API.
+2. ~~**The issuers.**~~ Readers for ICICI, HDFC and Jupiter, written from
+   real statements and tested against their exact row text.
 3. **The screens.** A reconciliation view on web, and the statement list on
    the phone where the reminders already are.
-
-Phase 1 is independent of any particular bank's layout, which is why it
-comes first.

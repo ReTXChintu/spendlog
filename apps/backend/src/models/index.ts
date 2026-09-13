@@ -752,6 +752,10 @@ export interface CardStatementDoc {
   sourceRef: string;
   subject?: string | null;
   fileName?: string | null;
+  /// Which reader read it. Worth storing: "generic" against a bank that
+  /// has its own reader means the layout changed, and a short list of
+  /// lines is the symptom either way.
+  issuer?: string | null;
   status: StatementStatus;
   /// Why it could not be read, in words meant for the person who has to
   /// fix it rather than for a log.
@@ -780,6 +784,7 @@ const cardStatementSchema = new Schema<CardStatementDoc>(
     sourceRef: { type: String, required: true },
     subject: { type: String, default: null },
     fileName: { type: String, default: null },
+    issuer: { type: String, default: null },
     status: { type: String, enum: STATEMENT_STATUSES, required: true },
     problem: { type: String, default: null },
     periodStart: { type: Date, default: null },
