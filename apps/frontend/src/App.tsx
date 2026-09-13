@@ -1,8 +1,10 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { RequireAuth } from "./components/RequireAuth";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { AuthCallbackPage } from "./pages/AuthCallbackPage";
+import { DashboardPage } from "./pages/DashboardPage";
+import { PerksPage } from "./pages/PerksPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TripsPage } from "./pages/TripsPage";
@@ -20,9 +22,11 @@ export default function App() {
           </RequireAuth>
         }
       >
-        <Route path="/" element={<TransactionsPage />} />
-        {/* The ledger used to be split across two pages; keep the old path working. */}
-        <Route path="/transactions" element={<Navigate to="/" replace />} />
+        {/* The dashboard is what you land on: what needs knowing now. The
+            ledger keeps its own path rather than sharing the root. */}
+        <Route path="/" element={<DashboardPage />} />
+        <Route path="/transactions" element={<TransactionsPage />} />
+        <Route path="/perks" element={<PerksPage />} />
         <Route path="/trips" element={<TripsPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/settings" element={<SettingsPage />} />

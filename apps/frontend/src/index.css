@@ -630,3 +630,136 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
 .badge-edited{background:var(--brand-50);color:var(--brand-dark)}
 .badge-merged{background:var(--brand-50);color:var(--brand-dark)}
 .load-more{display:flex;justify-content:center;margin:6px 0 10px 0}
+
+/* ---------------------------------------------------------- settings tabs */
+/* The icon tile used to take its colour from an inline style repeated on
+   every card. Setting it once here is one fewer thing to remember. */
+.set-card-icon{background:var(--brand-50);color:var(--brand)}
+.set-card-wide{grid-column:1 / -1}
+.set-warn{display:flex;align-items:flex-start;gap:8px;color:var(--warn)}
+.set-warn svg{width:15px;height:15px;flex-shrink:0;margin-top:2px}
+
+.tabs{display:flex;gap:4px;margin-bottom:22px;border-bottom:1px solid var(--line);
+  overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{display:inline-flex;align-items:center;gap:7px;padding:10px 14px;font-size:13.5px;
+  font-weight:600;color:var(--muted);border:none;background:none;white-space:nowrap;
+  border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab svg{width:15px;height:15px}
+.tab:hover{color:var(--ink-70)}
+.tab.on{color:var(--brand);border-bottom-color:var(--brand)}
+
+/* A segmented control, for a choice between two or three views. */
+.seg{display:inline-flex;background:var(--track);border-radius:var(--radius-sm);padding:3px;gap:2px}
+.seg button{padding:7px 13px;font-size:13px;font-weight:600;border:none;background:none;
+  color:var(--muted);border-radius:calc(var(--radius-sm) - 2px)}
+.seg button.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.seg-sm button{padding:5px 10px;font-size:12px}
+
+/* ------------------------------------------------------------- dashboard */
+/* Nothing renders when there is nothing to do: a row that is always on
+   screen stops being read, and then so does the real one. */
+.todo-strip{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:24px}
+.todo-chip{display:inline-flex;align-items:center;gap:8px;padding:9px 13px;font-size:13px;
+  font-weight:600;border-radius:var(--radius-sm);background:var(--brand-50);
+  color:var(--brand-dark);text-decoration:none}
+.todo-chip svg{width:15px;height:15px;flex-shrink:0}
+.todo-chip svg:last-child{width:13px;height:13px;opacity:.6}
+.todo-chip:hover{background:var(--brand-100)}
+.todo-chip.is-urgent{background:var(--warn-bg);color:var(--warn)}
+
+.month-headline{display:flex;align-items:baseline;flex-wrap:wrap;gap:14px}
+.month-figure{font-size:30px;font-weight:800;letter-spacing:-.02em}
+.month-delta{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--muted)}
+.month-delta svg{width:14px;height:14px}
+.month-delta.is-up{color:var(--debit)}
+.month-delta.is-down{color:var(--credit)}
+.month-link{font-size:13px;font-weight:600;color:var(--brand);margin-left:auto}
+
+/* Which card to reach for, one answer per network. */
+.pick-block{display:flex;flex-direction:column;gap:10px}
+.pick-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.pick-tile{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md);padding:14px}
+.pick-tile.is-best{border-color:var(--brand);background:var(--brand-50)}
+.pick-network{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;
+  letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.pick-flag{font-size:9.5px;padding:2px 6px;border-radius:100px;background:var(--brand);
+  color:var(--on-brand);letter-spacing:.03em}
+.pick-name{font-size:14.5px;font-weight:700;margin-top:6px}
+.pick-float{font-size:19px;font-weight:800;margin-top:4px}
+.pick-float span{font-size:12px;font-weight:600;color:var(--muted)}
+.pick-warn{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--warn);margin-top:6px}
+.pick-warn svg{width:13px;height:13px}
+.pick-note,.pick-empty{font-size:12.5px;color:var(--muted);line-height:1.5}
+.pick-note a,.pick-empty a{color:var(--brand);font-weight:600}
+
+.rail-card{padding:16px 18px}
+.rail-figure{font-size:21px;font-weight:800}
+.rail-figure.credit{color:var(--credit)}
+.rail-figure.debit{color:var(--debit)}
+.rail-sub{font-size:12px;color:var(--muted);margin-top:3px;line-height:1.45}
+.rail-row{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:7px 0;font-size:13px;color:var(--ink);text-decoration:none;border-top:1px solid var(--line)}
+.rail-row:first-of-type{border-top:none}
+.rail-badge{font-size:11px;font-weight:700;color:var(--muted);white-space:nowrap}
+.rail-badge.is-urgent{color:var(--debit)}
+
+/* ----------------------------------------------------------------- perks */
+.ask-bar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px}
+.ask-field{flex:1;min-width:220px;display:flex;align-items:center;gap:10px;padding:0 14px;
+  background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--radius-sm)}
+.ask-field svg{width:17px;height:17px;color:var(--muted-light);flex-shrink:0}
+.ask-input{flex:1;border:none;background:none;padding:13px 0;font-size:15px;color:var(--ink);outline:none}
+.ask-amount{max-width:150px}
+
+.answer{border:1px solid var(--line);border-radius:var(--radius-md);background:var(--surface);overflow:hidden}
+.answer-verdict{padding:14px 16px;font-size:14.5px;font-weight:700;background:var(--brand-50);color:var(--brand-dark)}
+.answer-row{display:flex;align-items:center;gap:12px;padding:13px 16px;border-top:1px solid var(--line)}
+.answer-row.is-coupon{background:var(--paper)}
+.answer-main{flex:1;min-width:0}
+.answer-title{font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.answer-card{font-size:12px;font-weight:600;color:var(--muted)}
+.answer-reach{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  padding:2px 7px;border-radius:100px;background:var(--track);color:var(--muted)}
+.answer-sub{font-size:12.5px;color:var(--ink-70);line-height:1.5;margin-top:3px}
+.answer-code{font-family:var(--font-mono);font-size:13px;font-weight:700;padding:6px 10px;
+  border-radius:var(--radius-sm);background:var(--track);letter-spacing:.05em;white-space:nowrap}
+.answer-float{display:flex;align-items:center;gap:9px;padding:12px 16px;font-size:12.8px;
+  color:var(--muted);border-top:1px solid var(--line)}
+.answer-float svg{width:15px;height:15px;flex-shrink:0}
+
+.perk-list{display:flex;flex-direction:column;gap:8px}
+.perk-row{display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--surface);
+  border:1px solid var(--line);border-radius:var(--radius-md)}
+.perk-row.is-dead{opacity:.5}
+.perk-kind{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  padding:4px 8px;border-radius:100px;white-space:nowrap;flex-shrink:0}
+.perk-kind.is-coupon{background:var(--credit-50);color:var(--credit)}
+.perk-kind.is-offer{background:var(--brand-50);color:var(--brand-dark)}
+.perk-main{flex:1;min-width:0}
+.perk-title{font-size:13.8px;font-weight:700;display:flex;align-items:center;gap:8px}
+.perk-worth{font-family:var(--font-mono);font-size:12.5px;color:var(--brand)}
+.perk-sub{font-size:12px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.perk-actions{display:flex;gap:2px;flex-shrink:0}
+
+/* ------------------------------------------------------ month comparison */
+.compare-headline{display:flex;gap:26px;flex-wrap:wrap;padding:14px 16px;border-radius:var(--radius-md);
+  background:var(--paper);margin-bottom:18px}
+.compare-headline.is-up{background:var(--debit-50)}
+.compare-headline.is-down{background:var(--credit-50)}
+.compare-headline>div{display:flex;flex-direction:column;gap:3px}
+.compare-list{display:flex;flex-direction:column;gap:11px}
+.compare-row{display:grid;grid-template-columns:150px 1fr 110px;align-items:center;gap:12px}
+.compare-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.compare-track{height:11px;background:var(--track);border-radius:6px;overflow:hidden}
+.compare-bar{height:100%;border-radius:6px;min-width:2px}
+.compare-bar.is-up{background:var(--debit)}
+.compare-bar.is-down{background:var(--credit)}
+.compare-val{text-align:right;font-family:var(--font-mono);font-weight:700;font-size:13px}
+.compare-flat{color:var(--muted);font-weight:500;font-size:12px}
+
+@media (max-width:900px){
+  .settings-grid{grid-template-columns:1fr}
+  .compare-row,.hbar-row{grid-template-columns:110px 1fr 92px}
+  .month-link{margin-left:0}
+}

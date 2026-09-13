@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
-import { Account, AccountType, accountLabel } from "../types";
+import { Account, AccountType, CardNetwork, NETWORK_LABELS, accountLabel } from "../types";
 import { Icon } from "./Icon";
 
 const ACCOUNT_TYPES: { value: AccountType; label: string }[] = [
@@ -47,6 +47,8 @@ export function AccountModal({
   const [statementDay, setStatementDay] = useState(account?.statementDay?.toString() ?? "");
   const [dueDay, setDueDay] = useState(account?.dueDay?.toString() ?? "");
   const [isActive, setIsActive] = useState(account?.isActive ?? true);
+  // Never pre-filled: the stored value is not readable, by design.
+  const [statementPassword, setStatementPassword] = useState("");
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -87,7 +89,9 @@ export function AccountModal({
       last4: last4.trim() || null,
       accountType,
       issuer: issuer.trim() || null,
-      cardNetwork: cardNetwork.trim() || null,
+      // Stored in the canonical spelling, so every screen reading it back
+      // gets the same word whatever was typed before the picker existed.
+      cardNetwork: normaliseNetwork(cardNetwork) || null,
       creditLimitMinor: limit === null ? null : limit * 100,
       spendLimitMinor: (() => {
         const own = numberOrNull(spendLimit);
@@ -99,8 +103,17 @@ export function AccountModal({
     };
 
     try {
-      if (isNew) await api.post("/accounts", body);
-      else await api.patch(`/accounts/${account.id}`, body);
+      const saved = isNew
+        ? await api.post<Account>("/accounts", body)
+        : await api.patch<Account>(`/accounts/${account.id}`, body);
+
+      // Sent separately because it is encrypted before it is stored and
+      // never comes back out, so it cannot travel with the rest of the
+      // account the way an ordinary field would.
+      if (statementPassword.trim()) {
+        await api.put(`/statements/password/${saved.id}`, { password: statementPassword.trim() });
+      }
+
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't save that account.");
@@ -212,11 +225,18 @@ export function AccountModal({
             <>
               <label className="field">
                 <span>Network</span>
-                <input
-                  value={cardNetwork}
-                  onChange={(e) => setCardNetwork(e.target.value)}
-                  placeholder="Visa, Mastercard, RuPay"
-                />
+                <select value={normaliseNetwork(cardNetwork)} onChange={(e) => setCardNetwork(e.target.value)}>
+                  <option value="">Not set</option>
+                  {(Object.keys(NETWORK_LABELS) as CardNetwork[]).map((network) => (
+                    <option key={network} value={network}>
+                      {NETWORK_LABELS[network]}
+                    </option>
+                  ))}
+                </select>
+                <span className="field-hint">
+                  Decides which card is suggested where. A RuPay credit card pays over UPI; a Visa one
+                  does not.
+                </span>
               </label>
 
               <label className="field">
@@ -237,6 +257,22 @@ export function AccountModal({
                   placeholder="30000"
                   inputMode="numeric"
                 />
+              </label>
+
+              <label className="field field-wide">
+                <span>Statement password</span>
+                <input
+                  type="password"
+                  value={statementPassword}
+                  onChange={(e) => setStatementPassword(e.target.value)}
+                  placeholder={account?.hasStatementPassword ? "•••••••• (set)" : "Opens the PDF this card emails"}
+                  autoComplete="off"
+                />
+                <span className="field-hint">
+                  Stored encrypted and never sent back to this page. Issuers build it from a date of birth,
+                  so it usually unlocks more than this one card's statements — {" "}
+                  {account?.hasStatementPassword ? "leave blank to keep it, or type a new one." : "worth knowing before you save it."}
+                </span>
               </label>
 
               <label className="field">
@@ -322,4 +358,19 @@ export function AccountModal({
       </div>
     </div>
   );
+}
+
+/**
+ * Whatever was stored, as one of the networks the picker offers.
+ *
+ * An account created before the picker existed may hold free text like
+ * "rupay" or "Master", which would otherwise leave the select showing
+ * "Not set" and quietly wipe the value on the next save.
+ */
+function normaliseNetwork(raw: string): string {
+  const folded = raw.trim().toUpperCase().replace(/[\s-]+/g, "");
+  if (folded === "MASTER" || folded === "MC") return "MASTERCARD";
+  if (folded === "AMERICANEXPRESS") return "AMEX";
+  if (folded === "DINERSCLUB") return "DINERS";
+  return folded in NETWORK_LABELS ? folded : "";
 }

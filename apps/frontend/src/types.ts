@@ -1,5 +1,5 @@
 export type TransactionType = "DEBIT" | "CREDIT";
-export type TransactionSource = "SMS" | "EMAIL" | "MANUAL";
+export type TransactionSource = "SMS" | "EMAIL" | "MANUAL" | "STATEMENT";
 
 export interface Category {
   id: string;
@@ -33,6 +33,9 @@ export interface Account {
   dueDay: number | null;
   isActive: boolean;
   color: string | null;
+  /// Whether a statement password is stored. The value itself never leaves
+  /// the server, so this is all a client can know about it.
+  hasStatementPassword?: boolean;
 }
 
 /** What to call an account on screen: the name given to it, else the bank's. */
@@ -146,6 +149,17 @@ export interface MerchantPreset {
   useCount: number;
 }
 
+export type CardNetwork = "RUPAY" | "VISA" | "MASTERCARD" | "AMEX" | "DINERS";
+
+/** What each network is called on screen. */
+export const NETWORK_LABELS: Record<CardNetwork, string> = {
+  RUPAY: "RuPay",
+  VISA: "Visa",
+  MASTERCARD: "Mastercard",
+  AMEX: "Amex",
+  DINERS: "Diners",
+};
+
 export type CardState = "ok" | "close" | "over" | "unset";
 
 /** A card, with where it is in its cycle and what is left of its limit. */
@@ -153,6 +167,7 @@ export interface CardStatus {
   accountId: string;
   name: string;
   last4: string | null;
+  network: CardNetwork | null;
   statementOn: string | null;
   dueOn: string | null;
   floatDays: number | null;
@@ -271,4 +286,104 @@ export interface User {
   id: string;
   email: string;
   name: string | null;
+}
+
+/**
+ * Which card to reach for, one answer per network.
+ *
+ * Networks matter at a till rather than in the ledger: a RuPay credit card
+ * pays over UPI and a Visa one does not.
+ */
+export interface CardPicks {
+  best: CardStatus | null;
+  byNetwork: { network: CardNetwork; card: CardStatus }[];
+  unknownNetwork: CardStatus[];
+}
+
+export type PerkKind = "CARD_OFFER" | "COUPON";
+
+export interface Perk {
+  id: string;
+  kind: PerkKind;
+  title: string;
+  accountId: string | Account | null;
+  merchants: string[];
+  categoryId: string | Category | null;
+  percent: number | null;
+  flatMinor: number | null;
+  maxDiscountMinor: number | null;
+  minSpendMinor: number | null;
+  startsOn: string | null;
+  expiresOn: string | null;
+  code: string | null;
+  usedAt: string | null;
+  isActive: boolean;
+  notes: string | null;
+  /** Added by the list and the dashboard, not stored. */
+  isLive?: boolean;
+  daysLeft?: number | null;
+}
+
+export type PerkReach = "MERCHANT" | "CATEGORY" | "ANYWHERE";
+
+export interface PerkMatch extends Perk {
+  reach: PerkReach;
+  /** Null until there is an amount to apply a percentage to. */
+  valueMinor: number | null;
+  card: CardStatus | null;
+}
+
+export interface PerkLookup {
+  query: string;
+  matches: PerkMatch[];
+  bestForFloat: CardStatus | null;
+  /** Only set when it is a different card from the one the offer names. */
+  floatAlternative: CardStatus | null;
+  verdict: string;
+}
+
+export interface MerchantSpend {
+  merchant: string;
+  amountMinor: number;
+  count: number;
+}
+
+export interface MonthComparison {
+  month: string;
+  previousMonthLabel: string;
+  totalSpendMinor: number;
+  previousSpendMinor: number;
+  changeMinor: number;
+  categories: {
+    categoryId: string | null;
+    name: string;
+    amountMinor: number;
+    previousMinor: number;
+    changeMinor: number;
+  }[];
+}
+
+export interface MonthSoFar {
+  month: string;
+  dayOfMonth: number;
+  spentMinor: number;
+  previousMinor: number;
+  changeMinor: number;
+}
+
+/** Everything the landing screen needs, in one request. */
+export interface DashboardData {
+  today: string;
+  pace: BudgetPace;
+  cards: CardStatus[];
+  picks: CardPicks;
+  needsCategory: { yesterday: number; month: number };
+  emis: { count: number; monthlyMinor: number; remainingMinor: number; plans: EmiPlan[] };
+  owed: { balanceMinor: number };
+  expiringPerks: Perk[];
+  statements: {
+    stuckCount: number;
+    stuck: { id: string; status: string; problem: string | null; subject: string | null }[];
+  };
+  monthSoFar: MonthSoFar;
 }

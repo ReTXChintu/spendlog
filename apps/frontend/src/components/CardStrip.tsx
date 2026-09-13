@@ -3,22 +3,20 @@ import { BudgetPace, CardStatus } from "../types";
 import { Icon } from "./Icon";
 
 /**
- * A single line above the ledger: which card to reach for today, and
- * anything that needs saying before the next payment rather than after it.
+ * Anything that needs saying before the next payment rather than after it.
+ *
+ * Only warnings. Which card to reach for is a decision, so it lives on the
+ * dashboard with the other decisions — two screens answering the same
+ * question in different words is worse than either answer.
  *
  * Deliberately quiet when there is nothing wrong. A warning that is always
  * on screen stops being read, and then so does the real one.
  */
 export function CardStrip({ cards, pace }: { cards: CardStatus[]; pace: BudgetPace | null }) {
   const warnings = cards.filter((card) => card.state === "over" || card.state === "close");
-  const best = cards.find((card) => card.state !== "over" && card.floatDays !== null);
-  const runnerUp = cards.find(
-    (card) => card !== best && card.state !== "over" && card.floatDays !== null
-  );
-
   const paceWarning = pace?.configured && pace.state !== "ok" ? pace : null;
 
-  if (warnings.length === 0 && !best && !paceWarning) return null;
+  if (warnings.length === 0 && !paceWarning) return null;
 
   return (
     <div className="card-strip">
@@ -56,16 +54,6 @@ export function CardStrip({ cards, pace }: { cards: CardStatus[]; pace: BudgetPa
         </div>
       )}
 
-      {best?.floatDays != null && (
-        <div className="card-strip-row is-tip">
-          <Icon name="ic-wallet" />
-          <span>
-            Paying by card today? <b>{best.name}</b> gives {best.floatDays} days before it has to be
-            paid
-            {runnerUp?.floatDays != null && `, against ${runnerUp.floatDays} on ${runnerUp.name}`}.
-          </span>
-        </div>
-      )}
     </div>
   );
 }

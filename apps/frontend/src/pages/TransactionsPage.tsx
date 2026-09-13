@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { EditTransactionModal } from "../components/EditTransactionModal";
 import { CardStrip } from "../components/CardStrip";
 import { EmiModal } from "../components/EmiModal";
@@ -31,11 +32,15 @@ interface ByDayResponse {
 const DAYS_PER_PAGE = 30;
 
 /**
- * The ledger — the app's main screen. Browsing by day and searching used to
- * be two pages showing the same list; they're one now, with the filters
- * narrowing the same day-grouped view.
+ * The ledger. Browsing by day and searching used to be two pages showing
+ * the same list; they're one now, with the filters narrowing the same
+ * day-grouped view.
  */
 export function TransactionsPage() {
+  // The dashboard links here with a filter already chosen, so the job it
+  // was nagging about is the first thing on screen rather than something
+  // to go and find.
+  const [searchParams] = useSearchParams();
   const [days, setDays] = useState<DayGroup[] | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [nextBefore, setNextBefore] = useState<string | null>(null);
@@ -63,7 +68,7 @@ export function TransactionsPage() {
 
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [categoryId, setCategoryId] = useState("");
+  const [categoryId, setCategoryId] = useState(searchParams.get("category") ?? "");
   const [accountId, setAccountId] = useState("");
   const [direction, setDirection] = useState<TransactionType | "">("");
   const [from, setFrom] = useState("");

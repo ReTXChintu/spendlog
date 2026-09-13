@@ -1,49 +1,61 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { BudgetBlock } from "../components/BudgetBlock";
 import { Icon } from "../components/Icon";
 import { StateBlock } from "../components/States";
 import { api } from "../lib/api";
 import { currentMonth, formatMoney, formatMoneyShort, formatMonthLabel, shiftMonth } from "../lib/format";
-import { AnalyticsSummary, Category, EmiPlan, OwedSummary, TrendPoint } from "../types";
+import {
+  AnalyticsSummary,
+  Category,
+  MerchantSpend,
+  MonthComparison,
+  TrendPoint,
+} from "../types";
 
 const TREND_MAX_HEIGHT = 110;
 
+type View = "categories" | "merchants" | "compare";
+
+/**
+ * What happened.
+ *
+ * Only that. The spending pace, the card limits, the EMIs and the split
+ * balances all moved to the dashboard, because each of them is something
+ * you might act on before closing the app — and this page had become a
+ * dumping ground for anything with a number in it.
+ */
 export function AnalyticsPage() {
   const navigate = useNavigate();
   const [month, setMonth] = useState(currentMonth());
+  const [view, setView] = useState<View>("categories");
+
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
+  const [merchants, setMerchants] = useState<MerchantSpend[]>([]);
+  const [comparison, setComparison] = useState<MonthComparison | null>(null);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [owed, setOwed] = useState<OwedSummary | null>(null);
-  const [plans, setPlans] = useState<EmiPlan[]>([]);
 
   useEffect(() => {
     api.get<AnalyticsSummary>(`/analytics/summary?month=${month}`).then(setSummary);
+    api.get<MerchantSpend[]>(`/analytics/merchants?month=${month}`).then(setMerchants).catch(() => setMerchants([]));
+    api
+      .get<MonthComparison>(`/analytics/compare?month=${month}`)
+      .then(setComparison)
+      .catch(() => setComparison(null));
   }, [month]);
 
   useEffect(() => {
     api.get<TrendPoint[]>("/analytics/trend?months=6").then(setTrend);
     api.get<Category[]>("/categories").then(setCategories);
-    // Not month-scoped: what people owe each other does not reset in January.
-    api.get<OwedSummary>("/analytics/owed").then(setOwed).catch(() => setOwed(null));
-    api.get<EmiPlan[]>("/emi").then(setPlans).catch(() => setPlans([]));
   }, []);
 
   const colorFor = (categoryId: string | null) =>
-    categoryId ? categories.find((c) => c.id === categoryId)?.color ?? "var(--muted)" : "var(--muted-light)";
+    categoryId ? (categories.find((c) => c.id === categoryId)?.color ?? "var(--muted)") : "var(--muted-light)";
 
   const totalSpend = summary?.totalSpendMinor ?? 0;
-  // Bars scale against the largest single month so the tallest fills the plot.
   const trendMax = Math.max(1, ...trend.flatMap((p) => [p.spendMinor, p.incomeMinor]));
   const monthsWithData = trend.filter((p) => p.spendMinor > 0 || p.incomeMinor > 0).length;
-
   const hasData = summary !== null && summary.transactionCount > 0;
-
-  const activePlans = plans.filter((plan) => plan.status === "ACTIVE");
-  // What is still owed across every running plan — money already committed,
-  // whatever this month's spending happens to look like.
-  const committedMinor = activePlans.reduce((sum, plan) => sum + plan.remainingMinor, 0);
 
   return (
     <section className="screen">
@@ -67,120 +79,173 @@ export function AnalyticsPage() {
       {!hasData ? (
         <StateBlock
           icon="ic-trend"
-          title="Nothing to analyze yet"
+          title="Nothing to analyse yet"
           body="Charts need transactions first. Once a few payments come in from SMS or Gmail, this page fills in on its own — no setup required here."
           actions={
             <button className="btn btn-primary" onClick={() => navigate("/")}>
-              Back to Today
+              Back to the dashboard
             </button>
           }
         />
       ) : (
         <div className="layout-2">
           <div>
-            <BudgetBlock />
+            <div className="seg" style={{ marginBottom: 18 }}>
+              <button className={view === "categories" ? "on" : ""} onClick={() => setView("categories")}>
+                By category
+              </button>
+              <button className={view === "merchants" ? "on" : ""} onClick={() => setView("merchants")}>
+                By merchant
+              </button>
+              <button className={view === "compare" ? "on" : ""} onClick={() => setView("compare")}>
+                Against last month
+              </button>
+            </div>
 
-            {activePlans.length > 0 && (
+            {view === "categories" && (
               <div className="section-block">
-                <h3>EMIs</h3>
+                <h3>Spend by category</h3>
                 <p className="section-sub">
-                  {formatMoney(committedMinor)} still to pay across{" "}
-                  {activePlans.length === 1 ? "one plan" : `${activePlans.length} plans`}.
+                  Transfers, settlements and the part of a split bill that wasn't yours are excluded from
+                  every figure below.
                 </p>
-                {activePlans.map((plan) => {
-                  const pct = Math.round((plan.paidCount / plan.months) * 100);
-                  return (
-                    <div className="emi-row" key={plan.id}>
-                      <div className="emi-row-main">
-                        <div className="emi-row-name">{plan.label ?? "EMI"}</div>
-                        <div className="emi-row-sub">
-                          {formatMoney(plan.monthlyAmountMinor)} a month · {plan.paidCount} of {plan.months}{" "}
-                          paid · {formatMoneyShort(plan.remainingMinor)} left
+                <div className="hbars">
+                  {summary!.byCategory.map((entry) => {
+                    const pct = totalSpend > 0 ? Math.round((entry.amountMinor / totalSpend) * 100) : 0;
+                    const color = colorFor(entry.categoryId);
+                    return (
+                      <div className="hbar-row" key={entry.categoryId ?? "none"}>
+                        <div className="hbar-label">
+                          <span
+                            className="hbar-dot"
+                            style={
+                              entry.categoryId === null
+                                ? { background: "transparent", border: "1.5px dashed var(--muted-light)" }
+                                : { background: color }
+                            }
+                          />
+                          {entry.name}
                         </div>
-                        <div className="emi-progress">
-                          <div className="emi-progress-fill" style={{ width: `${pct}%` }} />
+                        <div className="hbar-track">
+                          <div className="hbar-fill" style={{ width: `${pct}%`, background: color }} />
+                        </div>
+                        <div className="hbar-val num">
+                          {formatMoneyShort(entry.amountMinor)}
+                          <span className="hbar-pct">{pct}%</span>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {owed && owed.splitCount > 0 && (
-              <div className="section-block">
-                <h3>Split bills</h3>
-                <p className="section-sub">
-                  Across all time, not just this month — what people owe each other doesn't reset in January.
-                </p>
-                <div className="owed-card">
-                  <div
-                    className={`owed-figure ${owed.balanceMinor >= 0 ? "is-positive" : "is-negative"}`}
-                  >
-                    {formatMoney(Math.abs(owed.balanceMinor))}
-                  </div>
-                  <div className="section-sub">
-                    {owed.balanceMinor > 0
-                      ? "owed to you"
-                      : owed.balanceMinor < 0
-                        ? "you owe"
-                        : "all settled up"}
-                  </div>
-                  <div className="owed-breakdown">
-                    <span>
-                      Paid for others <b>{formatMoneyShort(owed.lentMinor)}</b>
-                    </span>
-                    <span>
-                      Paid back to you <b>{formatMoneyShort(owed.settledInMinor)}</b>
-                    </span>
-                    <span>
-                      You paid back <b>{formatMoneyShort(owed.settledOutMinor)}</b>
-                    </span>
-                  </div>
-                  <p className="field-hint" style={{ marginTop: 10 }}>
-                    Compare this with Splitwise. It counts every bill you marked as split, so a gap
-                    usually means one of them needs its share correcting.
-                  </p>
+                    );
+                  })}
                 </div>
               </div>
             )}
 
-            <div className="section-block">
-              <h3>Spend by category</h3>
-              <p className="section-sub">
-                Transfers, settlements and the part of a split bill that wasn't yours are excluded from
-                every figure below.
-              </p>
-              <div className="hbars">
-                {summary!.byCategory.map((entry) => {
-                  const pct = totalSpend > 0 ? Math.round((entry.amountMinor / totalSpend) * 100) : 0;
-                  const color = colorFor(entry.categoryId);
-                  const isUncategorized = entry.categoryId === null;
-                  return (
-                    <div className="hbar-row" key={entry.categoryId ?? "none"}>
-                      <div className="hbar-label">
-                        <span
-                          className="hbar-dot"
-                          style={
-                            isUncategorized
-                              ? { background: "transparent", border: "1.5px dashed var(--muted-light)" }
-                              : { background: color }
-                          }
-                        />
-                        {entry.name}
-                      </div>
-                      <div className="hbar-track">
-                        <div className="hbar-fill" style={{ width: `${pct}%`, background: color }} />
-                      </div>
-                      <div className="hbar-val num">
-                        {formatMoneyShort(entry.amountMinor)}
-                        <span className="hbar-pct">{pct}%</span>
-                      </div>
-                    </div>
-                  );
-                })}
+            {view === "merchants" && (
+              <div className="section-block">
+                <h3>Spend by merchant</h3>
+                <p className="section-sub">
+                  Where the money actually went. "Food" is not a thing to cut back on; ordering from one
+                  delivery app eleven times is.
+                </p>
+                {merchants.length === 0 ? (
+                  <p className="desc">
+                    Nothing this month has a merchant name on it yet. They arrive with the message, or you
+                    can add one when editing a payment.
+                  </p>
+                ) : (
+                  <div className="hbars">
+                    {merchants.map((entry) => {
+                      const pct =
+                        merchants[0].amountMinor > 0
+                          ? Math.round((entry.amountMinor / merchants[0].amountMinor) * 100)
+                          : 0;
+                      return (
+                        <div className="hbar-row" key={entry.merchant}>
+                          <div className="hbar-label" title={entry.merchant}>
+                            {entry.merchant}
+                          </div>
+                          <div className="hbar-track">
+                            <div
+                              className="hbar-fill"
+                              style={{ width: `${pct}%`, background: "var(--brand)" }}
+                            />
+                          </div>
+                          <div className="hbar-val num">
+                            {formatMoneyShort(entry.amountMinor)}
+                            <span className="hbar-pct">×{entry.count}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            </div>
+            )}
+
+            {view === "compare" && comparison && (
+              <div className="section-block">
+                <h3>Against {formatMonthLabel(comparison.previousMonthLabel)}</h3>
+                <p className="section-sub">
+                  Per category as well as in total — a month that came out level overall can still have
+                  doubled on one thing and halved on another.
+                </p>
+
+                <div className={`compare-headline is-${comparison.changeMinor > 0 ? "up" : "down"}`}>
+                  <div>
+                    <span className="emi-preview-label">This month</span>
+                    <span className="budget-figure num">{formatMoney(comparison.totalSpendMinor)}</span>
+                  </div>
+                  <div>
+                    <span className="emi-preview-label">Last month</span>
+                    <span className="budget-figure num">{formatMoney(comparison.previousSpendMinor)}</span>
+                  </div>
+                  <div>
+                    <span className="emi-preview-label">Change</span>
+                    <span className="budget-figure num">
+                      {comparison.changeMinor > 0 ? "+" : ""}
+                      {formatMoney(comparison.changeMinor)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="compare-list">
+                  {comparison.categories.map((entry) => {
+                    const biggest = Math.max(
+                      1,
+                      ...comparison.categories.map((c) => Math.abs(c.changeMinor))
+                    );
+                    const width = Math.round((Math.abs(entry.changeMinor) / biggest) * 100);
+                    const up = entry.changeMinor > 0;
+
+                    return (
+                      <div className="compare-row" key={entry.categoryId ?? "none"}>
+                        <div className="compare-name">{entry.name}</div>
+                        <div className="compare-track">
+                          <div className={`compare-bar${up ? " is-up" : " is-down"}`} style={{ width: `${width}%` }} />
+                        </div>
+                        <div className="compare-val num">
+                          {entry.changeMinor === 0 ? (
+                            <span className="compare-flat">no change</span>
+                          ) : (
+                            <>
+                              {up ? "+" : "−"}
+                              {formatMoneyShort(Math.abs(entry.changeMinor))}
+                            </>
+                          )}
+                          <span className="hbar-pct">
+                            {entry.previousMinor === 0
+                              ? "new"
+                              : entry.amountMinor === 0
+                                ? "stopped"
+                                : formatMoneyShort(entry.amountMinor)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="section-block">
               <h3>Last 6 months</h3>
@@ -230,16 +295,6 @@ export function AnalyticsPage() {
                   <span className="legend-dot" style={{ background: "var(--credit)" }} />
                   Income
                 </span>
-                <span>
-                  <span
-                    className="legend-dot"
-                    style={{
-                      background:
-                        "repeating-linear-gradient(135deg,#E7E7E2,#E7E7E2 3px,#EFEFEA 3px,#EFEFEA 6px)",
-                    }}
-                  />
-                  No data yet
-                </span>
               </div>
             </div>
           </div>
@@ -258,6 +313,14 @@ export function AnalyticsPage() {
                 <div className="label">Transactions</div>
                 <div className="value num">{summary!.transactionCount}</div>
               </div>
+              {merchants.length > 0 && (
+                <div className="stat-tile">
+                  <div className="label">Most spent at</div>
+                  <div className="value num" style={{ fontSize: 15 }}>
+                    {merchants[0].merchant}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
