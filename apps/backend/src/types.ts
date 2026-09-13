@@ -1,7 +1,10 @@
 export const TRANSACTION_TYPES = ["DEBIT", "CREDIT"] as const;
 export type TransactionType = (typeof TRANSACTION_TYPES)[number];
 
-export const TRANSACTION_SOURCES = ["SMS", "EMAIL", "MANUAL"] as const;
+// STATEMENT is its own source rather than a flavour of EMAIL: a row that
+// came from a statement was never announced by the bank at the time, which
+// is worth showing and worth being able to filter on.
+export const TRANSACTION_SOURCES = ["SMS", "EMAIL", "MANUAL", "STATEMENT"] as const;
 export type TransactionSource = (typeof TRANSACTION_SOURCES)[number];
 
 // CASH is never detected from a message — no bank announces it — so it
@@ -39,6 +42,27 @@ export type EmiRole = (typeof EMI_ROLES)[number];
 
 export const COMMITMENT_KINDS = ["RENT", "SIP", "INSURANCE", "LOAN", "OTHER"] as const;
 export type CommitmentKind = (typeof COMMITMENT_KINDS)[number];
+
+// What a row on a credit card statement actually is. Only SPEND and FEE
+// may ever become a transaction; the rest exist so that the ones that must
+// not be added have somewhere to be put. See modules/statements/classify.ts.
+export const STATEMENT_LINE_KINDS = ["SPEND", "FEE", "PAYMENT", "REVERSAL", "NOISE"] as const;
+export type StatementLineKind = (typeof STATEMENT_LINE_KINDS)[number];
+
+// What reconciling did with a line.
+//   MATCHED   the ledger already had it
+//   ADDED     it did not, so it does now
+//   UNCERTAIN matched, but more than one row fitted and the nearest was taken
+//   SKIPPED   never eligible - a payment, or page furniture
+export const STATEMENT_LINE_RESOLUTIONS = ["MATCHED", "ADDED", "UNCERTAIN", "SKIPPED"] as const;
+export type StatementLineResolution = (typeof STATEMENT_LINE_RESOLUTIONS)[number];
+
+//   PARSED       read, and reconciled
+//   LOCKED       password missing or wrong
+//   UNIDENTIFIED read, but no card in the app matches it
+//   UNREADABLE   opened, but no transaction table could be found in it
+export const STATEMENT_STATUSES = ["PARSED", "LOCKED", "UNIDENTIFIED", "UNREADABLE"] as const;
+export type StatementStatus = (typeof STATEMENT_STATUSES)[number];
 
 export const RULE_MATCH_TYPES = ["MERCHANT_CONTAINS", "KEYWORD", "EXACT"] as const;
 export type RuleMatchType = (typeof RULE_MATCH_TYPES)[number];

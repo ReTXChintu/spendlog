@@ -15,6 +15,7 @@ import { emiRouter } from "./modules/emi/emi.routes";
 import { presetsRouter } from "./modules/presets/presets.routes";
 import { emailRouter } from "./modules/ingestion/email.routes";
 import { smsRouter } from "./modules/ingestion/sms.routes";
+import { statementsRouter } from "./modules/statements/statements.routes";
 import { transactionsRouter } from "./modules/transactions/transactions.routes";
 import { tripsRouter } from "./modules/trips/trips.routes";
 import { APP_VERSION } from "./version";
@@ -48,6 +49,7 @@ app.use("/trips", tripsRouter);
 app.use("/merchant-presets", presetsRouter);
 app.use("/cards", cardsRouter);
 app.use("/budget", budgetRouter);
+app.use("/statements", statementsRouter);
 
 app.use((_req, res) => res.status(404).json({ error: "Not found" }));
 

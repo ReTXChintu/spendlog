@@ -7,6 +7,9 @@ import {
   EMI_PLAN_STATUSES,
   EMI_ROLES,
   RULE_MATCH_TYPES,
+  STATEMENT_LINE_KINDS,
+  STATEMENT_LINE_RESOLUTIONS,
+  STATEMENT_STATUSES,
   TRANSACTION_SOURCES,
   TRANSACTION_TYPES,
   AccountType,
@@ -16,6 +19,9 @@ import {
   EmiPlanStatus,
   EmiRole,
   RuleMatchType,
+  StatementLineKind,
+  StatementLineResolution,
+  StatementStatus,
   TransactionSource,
   TransactionType,
 } from "../types";
@@ -101,6 +107,10 @@ export interface AccountDoc {
   /// Day of month the card statement is generated, and the day it is due.
   statementDay?: number | null;
   dueDay?: number | null;
+  /// The password that opens this card's statement PDFs, encrypted. Stored
+  /// rather than asked for each month, so a statement can be read the
+  /// moment it arrives. Never leaves the server.
+  statementPassword?: string | null;
   isActive: boolean;
   color?: string | null;
   createdAt: Date;
@@ -130,10 +140,27 @@ const accountSchema = new Schema<AccountDoc>(
     spendLimitMinor: { type: Number, default: null, min: 0 },
     statementDay: { type: Number, default: null, min: 1, max: 31 },
     dueDay: { type: Number, default: null, min: 1, max: 31 },
+    // AES-256-GCM ciphertext, never the password itself, and never
+    // returned by the API. See modules/statements/statements.crypto.ts.
+    statementPassword: { type: String, default: null },
     isActive: { type: Boolean, default: true },
     color: { type: String, default: null },
   },
-  { timestamps: true, ...serialization }
+  {
+    timestamps: true,
+    ...serialization,
+    toJSON: {
+      ...serialization.toJSON,
+      transform: (doc: unknown, ret: Record<string, unknown>) => {
+        serialization.toJSON.transform(doc, ret);
+        // The ciphertext must not leave the server, even encrypted. What a
+        // client needs is whether a password is set, never the value.
+        ret.hasStatementPassword = Boolean(ret.statementPassword);
+        delete ret.statementPassword;
+        return ret;
+      },
+    },
+  }
 );
 
 // One row per real-world account, so repeated messages resolve to the same
@@ -275,6 +302,11 @@ export interface TransactionDoc {
   /// and why it differs. Maintained by the hooks below, never set by hand.
   countedAmountMinor: number;
   countedReason: CountedReason;
+  /// The statement line this row came from, when it came from one. Both
+  /// the provenance the UI shows and the guard that keeps a second
+  /// reconciliation of the same statement from adding it again.
+  statementId?: Types.ObjectId | null;
+  statementLineId?: Types.ObjectId | null;
   /// Set when a person edited the transaction by hand, so the UI can say so
   /// and automatic passes can leave their corrections alone.
   editedAt?: Date | null;
@@ -348,6 +380,10 @@ const transactionSchema = new Schema<TransactionDoc>(
     mergedFrom: { type: [mergedSnapshotSchema], default: [] },
     countedAmountMinor: { type: Number, default: 0 },
     countedReason: { type: String, enum: COUNTED_REASONS, default: "FULL" },
+    // Where a row came from when no message ever announced it. Also what
+    // stops a second reconciliation of the same statement adding it twice.
+    statementId: { type: Schema.Types.ObjectId, ref: "CardStatement", default: null },
+    statementLineId: { type: Schema.Types.ObjectId, default: null },
   },
   { timestamps: true, ...serialization }
 );
@@ -673,3 +709,97 @@ export const FixedCommitment = model<FixedCommitmentDoc>(
   "FixedCommitment",
   fixedCommitmentSchema
 );
+
+/**
+ * One row of a credit card statement, with what reconciling made of it.
+ *
+ * Kept after the fact rather than thrown away once processed: it is the
+ * only record of why a transaction nobody remembers is in the ledger, and
+ * it is what makes re-reading the same statement a no-op.
+ */
+export interface StatementLine {
+  _id: Types.ObjectId;
+  /// The date the statement prints against the line. That is the posting
+  /// date, which is not always the day the money was spent - see the
+  /// tolerance in statements.reconcile.ts.
+  date: Date;
+  description: string;
+  amountMinor: number;
+  type: TransactionType;
+  kind: StatementLineKind;
+  resolution: StatementLineResolution;
+  transactionId?: Types.ObjectId | null;
+}
+
+const statementLineSchema = new Schema<StatementLine>({
+  date: { type: Date, required: true },
+  description: { type: String, required: true },
+  amountMinor: { type: Number, required: true, min: 0 },
+  type: { type: String, enum: TRANSACTION_TYPES, required: true },
+  kind: { type: String, enum: STATEMENT_LINE_KINDS, required: true },
+  resolution: { type: String, enum: STATEMENT_LINE_RESOLUTIONS, default: "SKIPPED" },
+  transactionId: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
+});
+
+export interface CardStatementDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  /// Null while the statement could not be tied to a card - either it is
+  /// still locked, or the card it belongs to is not in the app.
+  accountId?: Types.ObjectId | null;
+  /// Gmail message id and attachment id together. Unique per user, which
+  /// is what makes a repeated sync cost nothing.
+  sourceRef: string;
+  subject?: string | null;
+  fileName?: string | null;
+  status: StatementStatus;
+  /// Why it could not be read, in words meant for the person who has to
+  /// fix it rather than for a log.
+  problem?: string | null;
+  periodStart?: Date | null;
+  periodEnd?: Date | null;
+  statementDate?: Date | null;
+  dueDate?: Date | null;
+  totalDueMinor?: number | null;
+  minimumDueMinor?: number | null;
+  lines: Types.DocumentArray<StatementLine>;
+  /// Sum of the lines that are real spending, and what the ledger already
+  /// held for the same card and period before this ran. The gap between
+  /// the two is the thing the whole feature exists to find.
+  statementSpendMinor: number;
+  knownSpendMinor: number;
+  reconciledAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const cardStatementSchema = new Schema<CardStatementDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    accountId: { type: Schema.Types.ObjectId, ref: "Account", default: null },
+    sourceRef: { type: String, required: true },
+    subject: { type: String, default: null },
+    fileName: { type: String, default: null },
+    status: { type: String, enum: STATEMENT_STATUSES, required: true },
+    problem: { type: String, default: null },
+    periodStart: { type: Date, default: null },
+    periodEnd: { type: Date, default: null },
+    statementDate: { type: Date, default: null },
+    dueDate: { type: Date, default: null },
+    totalDueMinor: { type: Number, default: null },
+    minimumDueMinor: { type: Number, default: null },
+    lines: { type: [statementLineSchema], default: [] },
+    statementSpendMinor: { type: Number, default: 0 },
+    knownSpendMinor: { type: Number, default: 0 },
+    reconciledAt: { type: Date, default: null },
+  },
+  { timestamps: true, ...serialization }
+);
+
+// One statement per attachment. A sync that runs twice finds this rather
+// than creating a second copy, which is the whole defence against a
+// statement being reconciled - and its missing lines added - more than once.
+cardStatementSchema.index({ userId: 1, sourceRef: 1 }, { unique: true });
+cardStatementSchema.index({ userId: 1, statementDate: -1 });
+
+export const CardStatement = model<CardStatementDoc>("CardStatement", cardStatementSchema);
