@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
+import '../services/reminder_service.dart';
 import '../services/sms_service.dart';
 import '../services/update_service.dart';
 import '../theme.dart';
@@ -32,11 +33,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _smsSyncing = false;
   DateTime? _smsLastSynced;
 
+  bool _dailyReminder = false;
+  bool _nagReminder = false;
+
   @override
   void initState() {
     super.initState();
     _loadConnections();
-    if (Platform.isAndroid) _refreshSmsStatus();
+    if (Platform.isAndroid) {
+      _refreshSmsStatus();
+      _loadReminders();
+    }
+  }
+
+  Future<void> _loadReminders() async {
+    final daily = await ReminderService.instance.dailyEnabled();
+    final nag = await ReminderService.instance.nagEnabled();
+    if (!mounted) return;
+    setState(() {
+      _dailyReminder = daily;
+      _nagReminder = nag;
+    });
+  }
+
+  /// Both switches go through here so a refused permission shows on screen,
+  /// rather than leaving a switch on that can never fire anything.
+  Future<void> _setReminder(bool daily, bool enabled) async {
+    setState(() => daily ? _dailyReminder = enabled : _nagReminder = enabled);
+    final messenger = ScaffoldMessenger.of(context);
+
+    final armed = daily
+        ? await ReminderService.instance.setDailyEnabled(enabled)
+        : await ReminderService.instance.setNagEnabled(enabled);
+
+    if (!mounted || armed == enabled) return;
+    setState(() => daily ? _dailyReminder = false : _nagReminder = false);
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Notifications are turned off for SpendLog in Android settings.')),
+    );
   }
 
   Future<void> _refreshSmsStatus() async {
@@ -221,6 +255,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   'still import from Gmail.',
             ),
           ),
+        if (Platform.isAndroid) ...[
+          const SizedBox(height: 14),
+          _SettingsCard(
+            icon: Icons.notifications_none,
+            title: 'Reminders',
+            subtitle: 'About yesterday',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 12),
+                Text(
+                  'An import gets the amount and the merchant. What it was for is the part only '
+                  'you know, and it is easiest to remember the next morning.',
+                  style: TextStyle(fontSize: 13, height: 1.5, color: context.c.ink70),
+                ),
+                const SizedBox(height: 6),
+                _ToggleRow(
+                  title: 'At midnight',
+                  subtitle: 'One nudge as the day closes.',
+                  value: _dailyReminder,
+                  onChanged: (on) => _setReminder(true, on),
+                ),
+                _ToggleRow(
+                  title: 'Keep reminding',
+                  subtitle: 'From 6am, every half hour, while anything from yesterday is still '
+                      'uncategorised. Stops as soon as none are.',
+                  value: _nagReminder,
+                  onChanged: (on) => _setReminder(false, on),
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 14),
         _SettingsCard(
           icon: Icons.account_balance_outlined,
@@ -384,6 +451,40 @@ class _StatusPill extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// A switch with room for a line explaining what it does — these two need
+/// explaining, since neither one's behaviour is obvious from its name.
+class _ToggleRow extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _ToggleRow({
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SwitchListTile(
+      value: value,
+      onChanged: onChanged,
+      contentPadding: EdgeInsets.zero,
+      dense: true,
+      title: Text(
+        title,
+        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: context.c.ink),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: TextStyle(fontSize: 12, height: 1.4, color: context.c.muted),
       ),
     );
   }

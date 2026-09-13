@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
+import '../services/sms_service.dart';
 import '../theme.dart';
 import '../utils/format.dart';
 import '../widgets/card_strip.dart';
@@ -52,6 +53,7 @@ class TransactionsScreenState extends State<TransactionsScreen> {
   bool _selecting = false;
   final List<String> _selectedIds = [];
   bool _merging = false;
+  bool _syncing = false;
 
   @override
   void initState() {
@@ -165,6 +167,32 @@ class TransactionsScreenState extends State<TransactionsScreen> {
     }
   }
 
+  /// One button for both: the phone's inbox and the connected mailbox.
+  Future<void> _syncEverything() async {
+    setState(() => _syncing = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final result = await SmsService.instance.syncEverything();
+      await _refreshAll(keepVisible: true);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            result.foundNothingNew
+                ? 'Checked messages and email — nothing new.'
+                : 'Imported ${result.created} '
+                    '${result.created == 1 ? 'transaction' : 'transactions'}.',
+          ),
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(e is ApiException ? e.message : "Couldn't sync just now.")),
+      );
+    } finally {
+      if (mounted) setState(() => _syncing = false);
+    }
+  }
+
   Future<void> _refreshAll({bool keepVisible = false}) =>
       Future.wait([load(keepVisible: keepVisible), _loadContext()]);
 
@@ -267,6 +295,28 @@ class TransactionsScreenState extends State<TransactionsScreen> {
         _direction = '';
       });
 
+  Widget _searchField(SpendColors c) => TextField(
+        onChanged: _search,
+        style: TextStyle(color: c.ink),
+        decoration: InputDecoration(
+          hintText: 'Merchant or note',
+          hintStyle: TextStyle(color: c.mutedLight),
+          prefixIcon: Icon(Icons.search, size: 18, color: c.mutedLight),
+          isDense: true,
+          filled: true,
+          fillColor: c.surface,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(T.rSm),
+            borderSide: BorderSide(color: c.lineStrong),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(T.rSm),
+            borderSide: BorderSide(color: c.brand),
+          ),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     final c = context.c;
@@ -316,26 +366,12 @@ class TransactionsScreenState extends State<TransactionsScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-            child: TextField(
-              onChanged: _search,
-              style: TextStyle(color: c.ink),
-              decoration: InputDecoration(
-                hintText: 'Merchant or note',
-                hintStyle: TextStyle(color: c.mutedLight),
-                prefixIcon: Icon(Icons.search, size: 18, color: c.mutedLight),
-                isDense: true,
-                filled: true,
-                fillColor: c.surface,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(T.rSm),
-                  borderSide: BorderSide(color: c.lineStrong),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(T.rSm),
-                  borderSide: BorderSide(color: c.brand),
-                ),
-              ),
+            child: Row(
+              children: [
+                Expanded(child: _searchField(c)),
+                const SizedBox(width: 10),
+                _SyncButton(busy: _syncing, onTap: _syncEverything),
+              ],
             ),
           ),
           SizedBox(
@@ -654,6 +690,39 @@ class _FilterChip extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Scans the inbox and the mailbox together — from the outside it is one
+/// question, "have I missed anything?", so it is one button.
+class _SyncButton extends StatelessWidget {
+  final bool busy;
+  final VoidCallback onTap;
+
+  const _SyncButton({required this.busy, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+
+    return GestureDetector(
+      onTap: busy ? null : onTap,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: c.surface,
+          border: Border.all(color: c.lineStrong),
+          borderRadius: BorderRadius.circular(T.rSm),
+        ),
+        child: busy
+            ? Padding(
+                padding: const EdgeInsets.all(13),
+                child: CircularProgressIndicator(strokeWidth: 2, color: c.muted),
+              )
+            : Icon(Icons.sync, size: 19, color: c.ink70),
       ),
     );
   }

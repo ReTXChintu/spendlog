@@ -155,6 +155,35 @@ transactionsRouter.get("/by-day", async (req, res) => {
   res.json({ days, hasMore, nextBefore: hasMore ? oldest.toISOString() : null });
 });
 
+// GET /transactions/review — how much of a day still needs a human.
+//
+// Small on purpose: a background task on the phone calls this every half
+// hour to decide whether a reminder is worth showing, so it has to be
+// cheap and to answer in one round trip.
+transactionsRouter.get("/review", async (req, res) => {
+  const day = typeof req.query.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.query.day)
+    ? req.query.day
+    : istDayKey(new Date(Date.now() - 24 * 60 * 60 * 1000));
+
+  const userId = currentUserId(req);
+  const window = { $gte: istDayStart(day), $lte: istDayEnd(day) };
+
+  const [total, uncategorized] = await Promise.all([
+    Transaction.countDocuments({ userId, occurredAt: window }),
+    Transaction.countDocuments({
+      userId,
+      occurredAt: window,
+      categoryId: null,
+      // A transfer between your own accounts has nothing to categorise,
+      // and nagging about one would be nagging about nothing.
+      isTransfer: false,
+      countedAmountMinor: { $gt: 0 },
+    }),
+  ]);
+
+  res.json({ day, total, uncategorized });
+});
+
 transactionsRouter.get("/:id", validObjectIdParam("id"), async (req, res) => {
   const tx = await Transaction.findOne({ _id: req.params.id, userId: currentUserId(req) })
     .populate("category")

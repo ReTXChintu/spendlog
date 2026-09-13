@@ -7,6 +7,13 @@
     <!-- Scanning a trip's join code. Asked for only when the scanner is
          opened, never at startup. -->
     <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- The midnight nudge and the follow-ups about yesterday's payments.
+         Android 13 and up asks the user; below that it is granted at install. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- A reminder scheduled for midnight is held by the system alarm
+         clock, which is wiped on reboot. Without this the daily nudge
+         quietly stops the first time the phone restarts. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
 
     <application
         android:label="SpendLog"
@@ -43,6 +50,21 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.provider.Telephony.SMS_RECEIVED"/>
+            </intent-filter>
+        </receiver>
+
+        <!-- Re-arm the scheduled reminder after a reboot or an app update. -->
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
+            android:exported="false"/>
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
             </intent-filter>
         </receiver>
 

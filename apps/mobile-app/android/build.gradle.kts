@@ -19,31 +19,23 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
-// Plugins in the dependency tree target a mix of JVM versions — for
-// example another_telephony compiles Kotlin to 1.8 with Java at 11, while
-// shared_preferences_android uses Java 17 — and Gradle fails any module
-// whose Java and Kotlin targets disagree. Pin both to 17 everywhere so the
-// combination is consistent regardless of what each plugin declares.
-// The Java level comes from each module's `android` extension, so it has
-// to be set there — configuring JavaCompile tasks directly is overridden
-// by AGP. configureEach/withId are lazy, so this must not be wrapped in
-// afterEvaluate: evaluationDependsOn(":app") above has already evaluated
-// these projects by this point.
+// Plugins in the dependency tree target a mix of JVM versions - one
+// compiles Kotlin to 1.8 with Java at 11, another puts both at 17 - and
+// Gradle fails any module whose Java and Kotlin targets disagree.
+//
+// Rather than impose one number on everyone, take whatever Java level the
+// module settled on and give its Kotlin the same one. The lookup happens
+// inside configureEach, which runs once every project has been evaluated,
+// so it reads the value after the plugin's own build script has had its
+// say - an ordering that setting the Java level from here cannot win.
 subprojects {
-    plugins.withId("com.android.library") {
-        extensions.configure<com.android.build.api.dsl.LibraryExtension>("android") {
-            compileOptions {
-                sourceCompatibility = JavaVersion.VERSION_17
-                targetCompatibility = JavaVersion.VERSION_17
-            }
-        }
-    }
-    // Only libraries (the plugin modules) are adjusted — :app is already
-    // evaluated by the time this runs, so its options are finalized. It
-    // sets its own Java level in app/build.gradle.kts.
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+        val java = (project.extensions.findByName("android") as? com.android.build.gradle.BaseExtension)
+            ?.compileOptions
+            ?.targetCompatibility
+            ?.toString()
         compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget(java ?: "17"))
         }
     }
 }

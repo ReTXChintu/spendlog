@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
 import 'services/api_client.dart';
+import 'services/reminder_service.dart';
 import 'services/theme_service.dart';
 import 'services/update_service.dart';
 import 'theme.dart';
@@ -11,6 +12,10 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
   // Loaded before the first frame so a dark-mode user never sees a light flash.
   ThemeService.instance.load();
+  // Wired up on every launch, not only when a reminder is switched on: the
+  // background task that checks yesterday needs a registered callback to
+  // call back into, and it can fire long before anyone opens Settings.
+  ReminderService.instance.init().catchError((_) {});
   runApp(const SpendLogApp());
 }
 

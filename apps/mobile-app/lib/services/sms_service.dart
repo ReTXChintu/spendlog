@@ -143,6 +143,42 @@ class SmsService {
     await prefs.setInt(_lastSyncKey, DateTime.now().millisecondsSinceEpoch);
   }
 
+  /// Scans both at once: the phone's inbox and the connected mailbox.
+  ///
+  /// They are separate mechanisms — one reads the SIM, the other asks the
+  /// server to go to Gmail — but from the outside it is one question:
+  /// "have I missed anything?", so the two counts come back added together.
+  Future<SmsSyncResult> syncEverything() async {
+    var mailCreated = 0;
+    var mailScanned = 0;
+
+    // Email first, and allowed to fail on its own: a mailbox that is not
+    // connected must not stop the inbox being read.
+    try {
+      final response = await ApiClient.instance.post('/ingestion/email/sync');
+      for (final result in (response as Map<String, dynamic>)['results'] as List<dynamic>) {
+        final counts = result as Map<String, dynamic>;
+        mailCreated += counts['created'] as int? ?? 0;
+        mailScanned += counts['scanned'] as int? ?? 0;
+      }
+    } catch (_) {
+      // Not connected, or the token has lapsed. Settings says which.
+    }
+
+    // Reading the inbox without the permission throws, and that would
+    // report the whole sync as failed to someone who only uses email.
+    final sms = await hasPermission()
+        ? await syncNow()
+        : const SmsSyncResult(scanned: 0, created: 0, duplicates: 0, ignored: 0);
+
+    return SmsSyncResult(
+      scanned: sms.scanned + mailScanned,
+      created: sms.created + mailCreated,
+      duplicates: sms.duplicates,
+      ignored: sms.ignored,
+    );
+  }
+
   /// When the last manual sync finished, for the Settings card.
   Future<DateTime?> lastSyncedAt() async {
     final prefs = await SharedPreferences.getInstance();
