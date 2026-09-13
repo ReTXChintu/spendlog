@@ -47,8 +47,8 @@ This one function is what the next three features are made of.
 `Account.spendLimitMinor` — separate from `creditLimitMinor`, which is what
 the bank allows. This is what *you* allow.
 
-The window it applies to is a real fork, and the questions below ask about
-it. Assuming the billing cycle for now:
+Settled: it applies to the **billing cycle**, so the figure matches what
+the bill will actually say.
 
 ```
 GET /accounts/:id/cycle
@@ -115,15 +115,19 @@ salaryDay            15
 ```
 FixedCommitment {
   userId, name, amountMinor, dayOfMonth,
-  kind: "RENT" | "SIP" | "INSURANCE" | "OTHER",
-  isActive
+  kind: "RENT" | "SIP" | "INSURANCE" | "LOAN" | "OTHER",
+  isActive,
+  // The period it was last ticked off for, as that period's start date.
+  // Equal to the current period's start means it is paid.
+  paidForPeriod: string | null,
 }
 ```
 
 ### The period
 
-A salary on the 15th makes the useful month run the 15th to the 14th, not
-the 1st to the 31st. The questions below check that.
+Settled: the period runs **salary day to salary day** — the 15th to the
+14th. The money arrives, then gets spent, so "how much a day is left" has
+a real answer that runs down to zero as the next salary lands.
 
 ### The arithmetic
 
@@ -142,10 +146,14 @@ daysLeft    = days until the next salary
 perDay      = remaining / daysLeft
 ```
 
-A commitment moves from "not yet paid" to "paid" when a transaction
-matching its amount turns up near its day — the same trick the EMI
-instalments already use — with the option to tick it off by hand when no
-message ever arrives.
+Settled: a commitment is ticked off **by hand**, once per period. Nothing
+is matched automatically.
+
+That has a consequence worth being plain about: rent that has been paid
+but not ticked is counted twice — once as a commitment still to come, and
+again as the transaction that actually went out. So the commitments list
+belongs in the budget block itself, with its tick boxes in plain sight,
+rather than buried in settings where forgetting is the default.
 
 Card bill payments have to be excluded from `spent` or they double count.
 They are recognisable: a transfer to a card account. `isTransfer` already
@@ -168,8 +176,16 @@ against something: what you have been spending, and what you can. `over`
 when `remaining` is negative; `watch` when the recent pace would exhaust it
 before the next salary.
 
-Shown as a block on Analytics, and a single line on the ledger when the
-state is not `ok`.
+Settled: all four places.
+
+- A **block on Analytics**, always — salary, commitments with their ticks,
+  spent, and the per-day figure
+- A **line on the ledger** only when a card is near its limit or the pace
+  is over, so it stays worth reading
+- **Which card to use today**, standing on the ledger — useful before a
+  purchase rather than after
+- **In the edit form**, when a payment goes on a card already near or over
+  its limit
 
 ---
 
