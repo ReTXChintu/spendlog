@@ -3,7 +3,6 @@ import '../models/models.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/format.dart';
-import '../widgets/budget_block.dart';
 import '../widgets/state_block.dart';
 
 class AnalyticsScreen extends StatefulWidget {
@@ -20,8 +19,11 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   AnalyticsSummary? _summary;
   List<Map<String, dynamic>> _trend = [];
   List<Category> _categories = [];
-  OwedSummary? _owed;
-  List<EmiPlan> _plans = [];
+  List<MerchantSpend> _merchants = [];
+  MonthComparison? _comparison;
+
+  /// categories | merchants | compare
+  String _view = 'categories';
 
   @override
   void initState() {
@@ -31,29 +33,34 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     _loadRest();
   }
 
+  /// The three things a month can be asked about, fetched together so
+  /// switching between them is instant rather than a spinner each time.
   Future<void> _loadSummary() async {
-    final result = await ApiClient.instance.get('/analytics/summary?month=$_month');
+    final results = await Future.wait([
+      ApiClient.instance.get('/analytics/summary?month=$_month'),
+      ApiClient.instance.get('/analytics/merchants?month=$_month'),
+      ApiClient.instance.get('/analytics/compare?month=$_month'),
+    ]);
     if (!mounted) return;
-    setState(() => _summary = AnalyticsSummary.fromJson(result as Map<String, dynamic>));
+    setState(() {
+      _summary = AnalyticsSummary.fromJson(results[0] as Map<String, dynamic>);
+      _merchants = (results[1] as List<dynamic>)
+          .map((m) => MerchantSpend.fromJson(m as Map<String, dynamic>))
+          .toList();
+      _comparison = MonthComparison.fromJson(results[2] as Map<String, dynamic>);
+    });
   }
 
   Future<void> _loadRest() async {
     final results = await Future.wait([
       ApiClient.instance.get('/analytics/trend?months=6'),
       ApiClient.instance.get('/categories'),
-      // Not month-scoped: what people owe each other does not reset in January.
-      ApiClient.instance.get('/analytics/owed'),
-      ApiClient.instance.get('/emi'),
     ]);
     if (!mounted) return;
     setState(() {
       _trend = (results[0] as List<dynamic>).cast<Map<String, dynamic>>();
-      _categories = (results[1] as List<dynamic>).map((c) => Category.fromJson(c as Map<String, dynamic>)).toList();
-      _owed = OwedSummary.fromJson(results[2] as Map<String, dynamic>);
-      _plans = (results[3] as List<dynamic>)
-          .map((p) => EmiPlan.fromJson(p as Map<String, dynamic>))
-          .where((p) => p.status == 'ACTIVE')
-          .toList();
+      _categories =
+          (results[1] as List<dynamic>).map((c) => Category.fromJson(c as Map<String, dynamic>)).toList();
     });
   }
 
@@ -101,47 +108,67 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                             _Tile(label: 'Received', value: formatMoney(summary.totalIncomeMinor), color: context.c.credit),
                           ],
                         ),
-                        const SizedBox(height: 26),
-                        const BudgetBlock(),
-                        if (_plans.isNotEmpty) ...[
-                          const SizedBox(height: 26),
-                          _SectionTitle(
-                            title: 'EMIs',
-                            sub: '${formatMoney(_plans.fold<int>(0, (sum, p) => sum + p.remainingMinor))} '
-                                'still to pay across '
-                                '${_plans.length == 1 ? 'one plan' : '${_plans.length} plans'}.',
-                          ),
-                          const SizedBox(height: 14),
-                          for (final plan in _plans) _EmiRow(plan: plan),
-                        ],
-                        if (_owed != null && _owed!.splitCount > 0) ...[
-                          const SizedBox(height: 26),
-                          const _SectionTitle(
-                            title: 'Split bills',
-                            sub: 'Across all time, not just this month.',
-                          ),
-                          const SizedBox(height: 14),
-                          _OwedCard(owed: _owed!),
-                        ],
-                        const SizedBox(height: 26),
-                        const _SectionTitle(
-                          title: 'Spend by category',
-                          sub: "Transfers, settlements and the part of a split bill that wasn't yours "
-                              'are excluded.',
+                        const SizedBox(height: 22),
+                        SegmentedButton<String>(
+                          segments: const [
+                            ButtonSegment(value: 'categories', label: Text('Category')),
+                            ButtonSegment(value: 'merchants', label: Text('Merchant')),
+                            ButtonSegment(value: 'compare', label: Text('vs last')),
+                          ],
+                          selected: {_view},
+                          showSelectedIcon: false,
+                          onSelectionChanged: (selection) => setState(() => _view = selection.first),
                         ),
-                        const SizedBox(height: 14),
-                        ...summary.byCategory.map((entry) {
-                          final pct = summary.totalSpendMinor == 0
-                              ? 0.0
-                              : entry.amountMinor / summary.totalSpendMinor;
-                          return _CategoryBar(
-                            name: entry.name,
-                            amountMinor: entry.amountMinor,
-                            fraction: pct,
-                            color: _colorFor(entry.categoryId),
-                            dashed: entry.categoryId == null,
-                          );
-                        }),
+                        const SizedBox(height: 22),
+
+                        if (_view == 'categories') ...[
+                          const _SectionTitle(
+                            title: 'Spend by category',
+                            sub: "Transfers, settlements and the part of a split bill that wasn't yours "
+                                'are excluded.',
+                          ),
+                          const SizedBox(height: 14),
+                          ...summary.byCategory.map((entry) {
+                            final pct = summary.totalSpendMinor == 0
+                                ? 0.0
+                                : entry.amountMinor / summary.totalSpendMinor;
+                            return _CategoryBar(
+                              name: entry.name,
+                              amountMinor: entry.amountMinor,
+                              fraction: pct,
+                              color: _colorFor(entry.categoryId),
+                              dashed: entry.categoryId == null,
+                            );
+                          }),
+                        ],
+
+                        if (_view == 'merchants') ...[
+                          const _SectionTitle(
+                            title: 'Spend by merchant',
+                            sub: 'Where the money actually went. "Food" is not a thing to cut back on; '
+                                'ordering from one app eleven times is.',
+                          ),
+                          const SizedBox(height: 14),
+                          if (_merchants.isEmpty)
+                            Text(
+                              'Nothing this month has a merchant name on it yet.',
+                              style: TextStyle(fontSize: 12.8, color: context.c.muted),
+                            )
+                          else
+                            ..._merchants.map((entry) => _CategoryBar(
+                                  name: entry.merchant,
+                                  amountMinor: entry.amountMinor,
+                                  fraction: _merchants.first.amountMinor == 0
+                                      ? 0.0
+                                      : entry.amountMinor / _merchants.first.amountMinor,
+                                  color: context.c.brand,
+                                  trailing: '×${entry.count}',
+                                )),
+                        ],
+
+                        if (_view == 'compare' && _comparison != null)
+                          _Comparison(comparison: _comparison!),
+
                         const SizedBox(height: 30),
                         const _SectionTitle(title: 'Last 6 months', sub: 'Spending and income side by side.'),
                         const SizedBox(height: 16),
@@ -252,12 +279,17 @@ class _CategoryBar extends StatelessWidget {
   final Color color;
   final bool dashed;
 
+  /// What follows the amount. A share of the month for a category; how many
+  /// times it was paid, for a merchant.
+  final String? trailing;
+
   const _CategoryBar({
     required this.name,
     required this.amountMinor,
     required this.fraction,
     required this.color,
-    required this.dashed,
+    this.dashed = false,
+    this.trailing,
   });
 
   @override
@@ -269,16 +301,18 @@ class _CategoryBar extends StatelessWidget {
         children: [
           Row(
             children: [
-              Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(
-                  color: dashed ? Colors.transparent : color,
-                  border: dashed ? Border.all(color: context.c.mutedLight, width: 1.5) : null,
-                  borderRadius: BorderRadius.circular(3),
+              if (trailing == null) ...[
+                Container(
+                  width: 9,
+                  height: 9,
+                  decoration: BoxDecoration(
+                    color: dashed ? Colors.transparent : color,
+                    border: dashed ? Border.all(color: context.c.mutedLight, width: 1.5) : null,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
+                const SizedBox(width: 8),
+              ],
               Expanded(
                 child: Text(
                   name,
@@ -290,7 +324,7 @@ class _CategoryBar extends StatelessWidget {
               Text(formatMoneyShort(amountMinor),
                   style: kNum.copyWith(fontSize: 13, fontWeight: FontWeight.w700, color: context.c.ink)),
               const SizedBox(width: 5),
-              Text('${(fraction * 100).round()}%',
+              Text(trailing ?? '${(fraction * 100).round()}%',
                   style: TextStyle(fontSize: 11.5, color: context.c.muted)),
             ],
           ),
@@ -421,118 +455,139 @@ class _LegendDot extends StatelessWidget {
   }
 }
 
-class _OwedCard extends StatelessWidget {
-  final OwedSummary owed;
-  const _OwedCard({required this.owed});
+/// This month against the one before, per category as well as in total.
+///
+/// A month that came out level overall can still have doubled on one thing
+/// and halved on another, and that is the version worth reading. Sorted by
+/// how much each moved rather than how big it is, because the biggest
+/// change is the thing to look at first.
+class _Comparison extends StatelessWidget {
+  final MonthComparison comparison;
+
+  const _Comparison({required this.comparison});
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final positive = owed.balanceMinor >= 0;
-    final caption = owed.balanceMinor > 0
-        ? 'owed to you'
-        : owed.balanceMinor < 0
-            ? 'you owe'
-            : 'all settled up';
+    final up = comparison.changeMinor > 0;
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            formatMoney(owed.balanceMinor.abs()),
-            style: kNum.copyWith(
-              fontSize: 26,
-              fontWeight: FontWeight.w800,
-              color: positive ? c.credit : c.debit,
-            ),
+    final biggest = comparison.categories.isEmpty
+        ? 1
+        : comparison.categories
+            .map((entry) => entry.changeMinor.abs())
+            .reduce((a, b) => a > b ? a : b)
+            .clamp(1, 1 << 62);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionTitle(
+          title: 'Against ${formatMonthLabel(comparison.previousMonthLabel)}',
+          sub: 'Per category as well as in total.',
+        ),
+        const SizedBox(height: 14),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: comparison.changeMinor == 0 ? c.chipNeutral : (up ? c.debit50 : c.credit50),
+            borderRadius: BorderRadius.circular(T.rMd),
           ),
-          const SizedBox(height: 2),
-          Text(caption, style: TextStyle(fontSize: 12.5, color: c.muted)),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 14,
-            runSpacing: 6,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _OwedStat(label: 'Paid for others', value: formatMoneyShort(owed.lentMinor)),
-              _OwedStat(label: 'Paid back to you', value: formatMoneyShort(owed.settledInMinor)),
-              _OwedStat(label: 'You paid back', value: formatMoneyShort(owed.settledOutMinor)),
+              _Figure(label: 'This month', value: formatMoneyShort(comparison.totalSpendMinor)),
+              _Figure(label: 'Last month', value: formatMoneyShort(comparison.previousSpendMinor)),
+              _Figure(
+                label: 'Change',
+                value: '${up ? '+' : ''}${formatMoneyShort(comparison.changeMinor)}',
+                colour: comparison.changeMinor == 0 ? null : (up ? c.debit : c.credit),
+              ),
             ],
           ),
-          const SizedBox(height: 12),
-          Text(
-            'Compare this with Splitwise. A gap usually means one bill needs its share correcting.',
-            style: TextStyle(fontSize: 11.5, height: 1.45, color: c.mutedLight),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _OwedStat extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _OwedStat({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text('$label ', style: TextStyle(fontSize: 11.5, color: context.c.muted)),
-        Text(
-          value,
-          style: kNum.copyWith(fontSize: 11.5, fontWeight: FontWeight.w700, color: context.c.ink70),
         ),
+        const SizedBox(height: 18),
+        for (final entry in comparison.categories)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        entry.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.ink),
+                      ),
+                    ),
+                    Text(
+                      entry.changeMinor == 0
+                          ? 'no change'
+                          : '${entry.changeMinor > 0 ? '+' : '−'}'
+                              '${formatMoneyShort(entry.changeMinor.abs())}',
+                      style: entry.changeMinor == 0
+                          ? TextStyle(fontSize: 12, color: c.muted)
+                          : kNum.copyWith(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: entry.changeMinor > 0 ? c.debit : c.credit,
+                            ),
+                    ),
+                    const SizedBox(width: 6),
+                    // What it actually is now, so a change has something to
+                    // be a change *of*.
+                    Text(
+                      entry.previousMinor == 0
+                          ? 'new'
+                          : entry.amountMinor == 0
+                              ? 'stopped'
+                              : formatMoneyShort(entry.amountMinor),
+                      style: TextStyle(fontSize: 11.5, color: c.muted),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: LinearProgressIndicator(
+                    value: entry.changeMinor.abs() / biggest,
+                    minHeight: 9,
+                    backgroundColor: c.track,
+                    valueColor: AlwaysStoppedAnimation(
+                      entry.changeMinor > 0 ? c.debit : c.credit,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
       ],
     );
   }
 }
 
-class _EmiRow extends StatelessWidget {
-  final EmiPlan plan;
-  const _EmiRow({required this.plan});
+class _Figure extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color? colour;
+
+  const _Figure({required this.label, required this.value, this.colour});
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final fraction = plan.months == 0 ? 0.0 : plan.paidCount / plan.months;
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            plan.label ?? 'EMI',
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.4, color: c.ink),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            '${formatMoney(plan.monthlyAmountMinor)} a month · ${plan.paidCount} of ${plan.months} paid '
-            '· ${formatMoneyShort(plan.remainingMinor)} left',
-            style: TextStyle(fontSize: 11.8, color: c.muted),
-          ),
-          const SizedBox(height: 7),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(3),
-            child: LinearProgressIndicator(
-              value: fraction.clamp(0.0, 1.0),
-              minHeight: 5,
-              backgroundColor: c.track,
-              valueColor: AlwaysStoppedAnimation<Color>(c.brand),
-            ),
-          ),
-        ],
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: c.muted)),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w800, color: colour ?? c.ink),
+        ),
+      ],
     );
   }
 }

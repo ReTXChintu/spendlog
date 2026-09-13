@@ -153,8 +153,22 @@ source for one — it would be a number I invented, dressed up as advice.
 
 ## Phases
 
-1. **Backend.** Merchant and comparison analytics, cards by network, the
+1. ~~**Backend.**~~ Merchant and comparison analytics, cards by network, the
    perk model and lookup, the composed dashboard endpoint.
-2. **Web.** Dashboard, analytics rebuilt, settings in tabs, perks.
-3. **Phone.** The same, with the perk lookup given the prominence it earns
-   by being the one screen you open while standing in a shop.
+2. ~~**Web.**~~ Dashboard, analytics rebuilt, settings in tabs, perks.
+3. ~~**Phone.**~~ The same.
+
+### Where the perk lookup ended up on the phone
+
+Not a nav tab. The bar has five slots and Trips earns one, so a sixth would
+have meant burying something that is opened more often.
+
+Instead the ask bar is the **first thing on the dashboard** — one tap from
+launch, which is what "standing in a shop" actually requires, and better
+than a tab because the bar can say what it is for rather than fitting a
+word under an icon.
+
+Two things the phone gets that the web does not, because of where it is
+used: the lookup field holds focus the moment it opens, and a coupon code
+is tappable to copy — the next thing after reading a code is typing it
+somewhere else.

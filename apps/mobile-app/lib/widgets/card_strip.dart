@@ -3,8 +3,11 @@ import '../models/models.dart';
 import '../theme.dart';
 import '../utils/format.dart';
 
-/// One block above the ledger: which card to reach for today, and anything
-/// that needs saying before the next payment rather than after it.
+/// Anything that needs saying before the next payment rather than after it.
+///
+/// Only warnings. Which card to reach for is a decision, so it lives on the
+/// dashboard with the other decisions - two screens answering the same
+/// question in different words is worse than either answer.
 ///
 /// Deliberately quiet when nothing is wrong. A warning that is always on
 /// screen stops being read, and then so does the real one.
@@ -17,12 +20,9 @@ class CardStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final warnings = cards.where((c) => c.state == 'over' || c.state == 'close').toList();
-    final usable = cards.where((c) => c.state != 'over' && c.floatDays != null).toList();
-    final best = usable.firstOrNull;
-    final runnerUp = usable.length > 1 ? usable[1] : null;
     final paceWarning = (pace?.configured ?? false) && pace!.state != 'ok' ? pace : null;
 
-    if (warnings.isEmpty && best == null && paceWarning == null) {
+    if (warnings.isEmpty && paceWarning == null) {
       return const SizedBox.shrink();
     }
 
@@ -51,14 +51,6 @@ class CardStrip extends StatelessWidget {
                   : '${formatMoney(paceWarning.perDayMinor)} a day left over '
                       '${paceWarning.daysLeft} days — lately it has been '
                       '${formatMoney(paceWarning.recentPerDayMinor)}.',
-            ),
-          if (best != null && best.floatDays != null)
-            _Row(
-              state: 'tip',
-              icon: Icons.credit_card,
-              text: 'Paying by card today? ${best.name} gives ${best.floatDays} days before it '
-                  'has to be paid'
-                  '${runnerUp?.floatDays != null ? ', against ${runnerUp!.floatDays} on ${runnerUp.name}' : ''}.',
             ),
         ],
       ),

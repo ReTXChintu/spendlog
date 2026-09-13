@@ -21,7 +21,9 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProviderStateMixin {
+  late final TabController _tabs = TabController(length: 5, vsync: this);
+
   List<EmailConnectionStatus> _connections = [];
   bool _smsGranted = false;
   bool _syncing = false;
@@ -36,13 +38,117 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _dailyReminder = false;
   bool _nagReminder = false;
 
+  List<MerchantPreset> _presets = [];
+  List<FixedCommitment> _commitments = [];
+  int? _salaryMinor;
+  int? _salaryDay;
+
+  bool _readingStatements = false;
+  String? _statementResult;
+
   @override
   void initState() {
     super.initState();
     _loadConnections();
+    _loadYou();
+    _loadPresets();
     if (Platform.isAndroid) {
       _refreshSmsStatus();
       _loadReminders();
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabs.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadPresets() async {
+    try {
+      final result = await ApiClient.instance.get('/merchant-presets') as List<dynamic>;
+      if (!mounted) return;
+      setState(() =>
+          _presets = result.map((p) => MerchantPreset.fromJson(p as Map<String, dynamic>)).toList());
+    } catch (_) {
+      // The presets tab simply shows nothing.
+    }
+  }
+
+  Future<void> _removePreset(MerchantPreset preset) async {
+    await ApiClient.instance.delete('/merchant-presets/${preset.id}').catchError((_) => null);
+    await _loadPresets();
+  }
+
+  /// Salary and the fixed monthly costs: facts about you rather than about
+  /// money that moved, which is why they are set here and only shown on the
+  /// dashboard.
+  Future<void> _loadYou() async {
+    try {
+      final results = await Future.wait([
+        ApiClient.instance.get('/budget/profile'),
+        ApiClient.instance.get('/budget/commitments'),
+      ]);
+      if (!mounted) return;
+
+      final profile = results[0] as Map<String, dynamic>;
+      setState(() {
+        _salaryMinor = profile['salaryAmountMinor'] as int?;
+        _salaryDay = profile['salaryDay'] as int?;
+        _commitments = (results[1] as List<dynamic>)
+            .map((c) => FixedCommitment.fromJson(c as Map<String, dynamic>))
+            .toList();
+      });
+    } catch (_) {
+      // Nothing set yet, which the card says for itself.
+    }
+  }
+
+  Future<void> _editSalary() async {
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => _SalaryDialog(amountMinor: _salaryMinor, day: _salaryDay),
+    );
+    if (saved == true) await _loadYou();
+  }
+
+  Future<void> _addCommitment() async {
+    final saved = await showDialog<bool>(context: context, builder: (_) => const _CommitmentDialog());
+    if (saved == true) await _loadYou();
+  }
+
+  Future<void> _removeCommitment(FixedCommitment commitment) async {
+    await ApiClient.instance.delete('/budget/commitments/${commitment.id}').catchError((_) => null);
+    await _loadYou();
+  }
+
+  /// Go and read any statement in the mailbox that has not been read yet.
+  Future<void> _readStatements() async {
+    setState(() {
+      _readingStatements = true;
+      _statementResult = null;
+    });
+
+    try {
+      final result = await ApiClient.instance.post('/statements/sync') as Map<String, dynamic>;
+      final scanned = result['scanned'] as int? ?? 0;
+      final read = result['read'] as int? ?? 0;
+      final locked = result['locked'] as int? ?? 0;
+      final unidentified = result['unidentified'] as int? ?? 0;
+      final added = result['added'] as int? ?? 0;
+
+      if (!mounted) return;
+      setState(() => _statementResult = scanned == 0
+          ? 'No statements found in the mailbox.'
+          : 'Read $read of $scanned. $added transactions added'
+              '${locked > 0 ? ', $locked still locked' : ''}'
+              '${unidentified > 0 ? ', $unidentified on an unknown card' : ''}.');
+    } catch (error) {
+      if (!mounted) return;
+      setState(() =>
+          _statementResult = error is ApiException ? error.message : "That didn't work just now.");
+    } finally {
+      if (mounted) setState(() => _readingStatements = false);
     }
   }
 
@@ -189,11 +295,49 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Five tabs, grouped by what you are trying to do rather than by which
+    // part of the app owns the setting. One long list had grown to the point
+    // where the thing you came for was never the thing on screen.
+    return Column(
+      children: [
+        TabBar(
+          controller: _tabs,
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
+          tabs: const [
+            Tab(text: 'Connections'),
+            Tab(text: 'Accounts'),
+            Tab(text: 'Presets'),
+            Tab(text: 'You'),
+            Tab(text: 'About'),
+          ],
+        ),
+        Expanded(
+          child: TabBarView(
+            controller: _tabs,
+            children: [
+              _tab(_connectionsTab()),
+              _tab(_accountsTab()),
+              _tab(_presetsTab()),
+              _tab(_youTab()),
+              _tab(_aboutTab()),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _tab(List<Widget> children) => ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+        children: children,
+      );
+
+  /// Where the data comes from: Gmail, the statements in it, and SMS.
+  List<Widget> _connectionsTab() {
     final connection = _connections.isEmpty ? null : _connections.first;
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
-      children: [
+    return [
         _SettingsCard(
           icon: Icons.mail_outline,
           title: 'Email import',
@@ -290,6 +434,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
         const SizedBox(height: 14),
         _SettingsCard(
+          icon: Icons.receipt_long_outlined,
+          title: 'Card statements',
+          subtitle: 'The monthly PDF, from the same mailbox',
+          child: _CardBody(
+            text: 'An alert only arrives for what the bank chose to announce. The statement is its own '
+                'complete list, so reading it finds the annual fees, finance charges and anything that '
+                'happened while the phone was off.'
+                '${_statementResult != null ? '\n\n$_statementResult' : ''}',
+            actions: [
+              OutlinedButton(
+                onPressed: _readingStatements || connection == null ? null : _readStatements,
+                child: Text(_readingStatements ? 'Reading…' : 'Read statements'),
+              ),
+            ],
+          ),
+        ),
+      ];
+  }
+
+  /// What the money moves through.
+  List<Widget> _accountsTab() => [
+        _SettingsCard(
           icon: Icons.account_balance_outlined,
           title: 'Accounts and cards',
           subtitle: 'Where the money moves',
@@ -301,6 +467,104 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ],
           ),
         ),
+      ];
+
+  /// The merchant shortcuts, so a payment entered by hand takes one tap.
+  List<Widget> _presetsTab() => [
+        _SettingsCard(
+          icon: Icons.bolt_outlined,
+          title: 'Merchant presets',
+          subtitle: 'A name and the category it usually belongs to',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 12),
+              Text(
+                'These appear under the merchant field when you add or edit a payment. Picking one '
+                'fills in both, which is most of the typing gone.',
+                style: TextStyle(fontSize: 13, height: 1.5, color: context.c.ink70),
+              ),
+              const SizedBox(height: 14),
+              if (_presets.isEmpty)
+                Text(
+                  'None yet. Add one from the merchant field while editing a payment.',
+                  style: TextStyle(fontSize: 12.5, color: context.c.muted),
+                )
+              else
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final preset in _presets)
+                      InputChip(
+                        label: Text(
+                          preset.category == null
+                              ? preset.merchant
+                              : '${preset.merchant} · ${preset.category!.name}',
+                        ),
+                        onDeleted: () => _removePreset(preset),
+                      ),
+                  ],
+                ),
+            ],
+          ),
+        ),
+      ];
+
+  /// Facts about you: what lands each month, and signing out.
+  List<Widget> _youTab() => [
+        _SettingsCard(
+          icon: Icons.account_balance_wallet_outlined,
+          title: 'What lands each month',
+          subtitle: _salaryMinor != null
+              ? '${formatMoney(_salaryMinor!)} on the ${_salaryDay}th'
+              : 'Not set',
+          child: _CardBody(
+            text: 'With these, the dashboard can say how much a day is left before the next one '
+                'arrives. It is a pace, not a balance — SpendLog reads messages about transactions '
+                'and has never known what is actually in an account.',
+            actions: [
+              OutlinedButton(onPressed: _editSalary, child: const Text('Set salary')),
+              OutlinedButton(onPressed: _addCommitment, child: const Text('Add a fixed cost')),
+            ],
+          ),
+        ),
+        if (_commitments.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          _SettingsCard(
+            icon: Icons.event_repeat_outlined,
+            title: 'Fixed each month',
+            subtitle:
+                '${formatMoney(_commitments.fold<int>(0, (sum, c) => sum + c.amountMinor))} a month',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 6),
+                for (final commitment in _commitments)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: Text(commitment.name, style: const TextStyle(fontSize: 13.5)),
+                    subtitle: Text('on the ${commitment.dayOfMonth}th'),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(formatMoney(commitment.amountMinor), style: kNum.copyWith(fontSize: 13)),
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 17),
+                          onPressed: () => _removeCommitment(commitment),
+                        ),
+                      ],
+                    ),
+                  ),
+                Text(
+                  'Tick one off on the dashboard when it has actually gone out.',
+                  style: TextStyle(fontSize: 11.5, height: 1.45, color: context.c.mutedLight),
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 14),
         _SettingsCard(
           icon: Icons.lock_outline,
@@ -317,7 +581,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ],
           ),
         ),
-        const SizedBox(height: 14),
+      ];
+
+  /// What the app is, and what it cannot do.
+  List<Widget> _aboutTab() => [
         _SettingsCard(
           icon: Icons.info_outline,
           title: 'Version',
@@ -342,9 +609,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ],
           ),
         ),
-      ],
-    );
-  }
+        const SizedBox(height: 14),
+        const _SettingsCard(
+          icon: Icons.help_outline,
+          title: 'What it knows',
+          subtitle: 'And what it does not',
+          child: _CardBody(
+            text: 'SpendLog reads the messages your banks send about transactions, and the statements '
+                'they email. It has never known a balance.\n\nSo it can say you are spending faster '
+                'this fortnight than your salary supports. It cannot say whether you can afford next '
+                "week's bill. Every figure is built from money that moved.",
+          ),
+        ),
+      ];
 }
 
 class _SettingsCard extends StatelessWidget {
@@ -486,6 +763,155 @@ class _ToggleRow extends StatelessWidget {
         subtitle,
         style: TextStyle(fontSize: 12, height: 1.4, color: context.c.muted),
       ),
+    );
+  }
+}
+
+/// What lands each month and when.
+///
+/// Two numbers rather than a whole profile screen, because they are the
+/// only two the pace arithmetic needs.
+class _SalaryDialog extends StatefulWidget {
+  final int? amountMinor;
+  final int? day;
+
+  const _SalaryDialog({this.amountMinor, this.day});
+
+  @override
+  State<_SalaryDialog> createState() => _SalaryDialogState();
+}
+
+class _SalaryDialogState extends State<_SalaryDialog> {
+  late final _amount = TextEditingController(
+    text: widget.amountMinor != null ? (widget.amountMinor! ~/ 100).toString() : '',
+  );
+  late final _day = TextEditingController(text: widget.day?.toString() ?? '');
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _amount.dispose();
+    _day.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    final navigator = Navigator.of(context);
+    final rupees = double.tryParse(_amount.text.trim());
+
+    try {
+      await ApiClient.instance.patch('/budget/profile', {
+        'salaryAmountMinor': rupees == null ? null : (rupees * 100).round(),
+        'salaryDay': int.tryParse(_day.text.trim()),
+      });
+      navigator.pop(true);
+    } catch (_) {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Your salary'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _amount,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'Amount', prefixText: '₹ '),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _day,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(labelText: 'Day of the month', hintText: '15'),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+        FilledButton(onPressed: _saving ? null : _save, child: const Text('Save')),
+      ],
+    );
+  }
+}
+
+/// Rent, a SIP, insurance — anything that goes out every month whatever
+/// else happens, and is therefore not free to spend.
+class _CommitmentDialog extends StatefulWidget {
+  const _CommitmentDialog();
+
+  @override
+  State<_CommitmentDialog> createState() => _CommitmentDialogState();
+}
+
+class _CommitmentDialogState extends State<_CommitmentDialog> {
+  final _name = TextEditingController();
+  final _amount = TextEditingController();
+  final _day = TextEditingController();
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _amount.dispose();
+    _day.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final rupees = double.tryParse(_amount.text.trim());
+    if (_name.text.trim().isEmpty || rupees == null) return;
+
+    setState(() => _saving = true);
+    final navigator = Navigator.of(context);
+
+    try {
+      await ApiClient.instance.post('/budget/commitments', {
+        'name': _name.text.trim(),
+        'amountMinor': (rupees * 100).round(),
+        'dayOfMonth': int.tryParse(_day.text.trim()) ?? 1,
+      });
+      navigator.pop(true);
+    } catch (_) {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Fixed each month'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _name,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'What it is', hintText: 'Rent'),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _amount,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'Amount', prefixText: '₹ '),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _day,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(labelText: 'Day of the month', hintText: '5'),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+        FilledButton(onPressed: _saving ? null : _save, child: const Text('Add')),
+      ],
     );
   }
 }

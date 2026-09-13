@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/sms_service.dart';
 import '../theme.dart';
 import 'analytics_screen.dart';
+import 'dashboard_screen.dart';
 import 'settings_screen.dart';
 import 'transactions_screen.dart';
 import 'trips_screen.dart';
@@ -17,7 +18,11 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
-  static const _titles = ['Transactions', 'Trips', 'Analytics', 'Settings'];
+  static const _titles = ['Dashboard', 'Transactions', 'Trips', 'Analytics', 'Settings'];
+
+  // The dashboard reloads when you come back to it, since half of what
+  // it shows is a count of jobs the other tabs are where you do.
+  final _dashboard = GlobalKey<DashboardScreenState>();
 
   @override
   void initState() {
@@ -39,7 +44,12 @@ class _HomeShellState extends State<HomeShell> {
   @override
   Widget build(BuildContext context) {
     final screens = [
-      TransactionsScreen(onOpenSettings: () => setState(() => _index = 3)),
+      DashboardScreen(
+        key: _dashboard,
+        onOpenTransactions: () => setState(() => _index = 1),
+        onOpenSettings: () => setState(() => _index = 4),
+      ),
+      TransactionsScreen(onOpenSettings: () => setState(() => _index = 4)),
       const TripsScreen(),
       const AnalyticsScreen(),
       const SettingsScreen(),
@@ -65,8 +75,16 @@ class _HomeShellState extends State<HomeShell> {
       body: IndexedStack(index: _index, children: screens),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
+        onDestinationSelected: (i) {
+          setState(() => _index = i);
+          if (i == 0) _dashboard.currentState?.load();
+        },
         destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.dashboard_outlined),
+            selectedIcon: Icon(Icons.dashboard),
+            label: 'Home',
+          ),
           NavigationDestination(
             icon: Icon(Icons.receipt_long_outlined),
             selectedIcon: Icon(Icons.receipt_long),

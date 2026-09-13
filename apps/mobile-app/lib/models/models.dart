@@ -1,3 +1,5 @@
+import '../utils/format.dart';
+
 class Category {
   final String id;
   final String name;
@@ -366,6 +368,11 @@ class MerchantPreset {
 class CardStatus {
   final String accountId;
   final String name;
+  final String? last4;
+  /// RUPAY | VISA | MASTERCARD | AMEX | DINERS, or null when never set.
+  /// Matters at a till rather than in the ledger: a RuPay credit card pays
+  /// over UPI and a Visa one does not.
+  final String? network;
   final DateTime? statementOn;
   final DateTime? dueOn;
   final int? floatDays;
@@ -378,6 +385,8 @@ class CardStatus {
   CardStatus({
     required this.accountId,
     required this.name,
+    this.last4,
+    this.network,
     this.statementOn,
     this.dueOn,
     this.floatDays,
@@ -390,6 +399,8 @@ class CardStatus {
   factory CardStatus.fromJson(Map<String, dynamic> json) => CardStatus(
         accountId: json['accountId'] as String,
         name: json['name'] as String,
+        last4: json['last4'] as String?,
+        network: json['network'] as String?,
         statementOn:
             json['statementOn'] != null ? DateTime.parse(json['statementOn'] as String) : null,
         dueOn: json['dueOn'] != null ? DateTime.parse(json['dueOn'] as String) : null,
@@ -655,4 +666,357 @@ class EmailConnectionStatus {
         email: json['email'] as String,
         lastSyncedAt: json['lastSyncedAt'] != null ? DateTime.parse(json['lastSyncedAt'] as String) : null,
       );
+}
+
+/// What each network is called on screen.
+const Map<String, String> networkLabels = {
+  'RUPAY': 'RuPay',
+  'VISA': 'Visa',
+  'MASTERCARD': 'Mastercard',
+  'AMEX': 'Amex',
+  'DINERS': 'Diners',
+};
+
+/// Which card to reach for, one answer per network.
+class CardPicks {
+  final CardStatus? best;
+  final List<({String network, CardStatus card})> byNetwork;
+  final List<CardStatus> unknownNetwork;
+
+  CardPicks({this.best, this.byNetwork = const [], this.unknownNetwork = const []});
+
+  factory CardPicks.fromJson(Map<String, dynamic> json) => CardPicks(
+        best: json['best'] != null ? CardStatus.fromJson(json['best'] as Map<String, dynamic>) : null,
+        byNetwork: (json['byNetwork'] as List<dynamic>? ?? []).map((row) {
+          final entry = row as Map<String, dynamic>;
+          return (
+            network: entry['network'] as String,
+            card: CardStatus.fromJson(entry['card'] as Map<String, dynamic>),
+          );
+        }).toList(),
+        unknownNetwork: (json['unknownNetwork'] as List<dynamic>? ?? [])
+            .map((card) => CardStatus.fromJson(card as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+/// Something that makes a purchase cheaper.
+///
+/// A card offer stands until the bank changes it; a coupon is spent once
+/// and then gone. One class for both, because every lookup wants both.
+class Perk {
+  final String id;
+
+  /// CARD_OFFER | COUPON
+  final String kind;
+  final String title;
+  final String? accountId;
+  final String? cardName;
+  final List<String> merchants;
+  final num? percent;
+  final int? flatMinor;
+  final int? maxDiscountMinor;
+  final int? minSpendMinor;
+  final DateTime? expiresOn;
+  final String? code;
+  final DateTime? usedAt;
+  final bool isActive;
+  final String? notes;
+  final bool isLive;
+  final int? daysLeft;
+
+  Perk({
+    required this.id,
+    required this.kind,
+    required this.title,
+    this.accountId,
+    this.cardName,
+    this.merchants = const [],
+    this.percent,
+    this.flatMinor,
+    this.maxDiscountMinor,
+    this.minSpendMinor,
+    this.expiresOn,
+    this.code,
+    this.usedAt,
+    this.isActive = true,
+    this.notes,
+    this.isLive = true,
+    this.daysLeft,
+  });
+
+  bool get isCoupon => kind == 'COUPON';
+
+  /// What it is worth, in the words the small print uses.
+  String get worth {
+    if (flatMinor != null) return formatMoney(flatMinor!);
+    if (percent != null) return '$percent%';
+    return '';
+  }
+
+  factory Perk.fromJson(Map<String, dynamic> json) {
+    // accountId arrives populated from the list and the lookup, and as a
+    // bare id from a save. Both have to read back the same way.
+    final account = json['accountId'];
+    final nickname = account is Map<String, dynamic> ? account['nickname'] as String? : null;
+
+    return Perk(
+      id: json['id'] as String,
+      kind: json['kind'] as String,
+      title: json['title'] as String,
+      accountId: account is Map<String, dynamic> ? account['id'] as String? : account as String?,
+      cardName: account is Map<String, dynamic>
+          ? ((nickname?.trim().isNotEmpty ?? false) ? nickname : account['bankName'] as String?)
+          : null,
+      merchants: (json['merchants'] as List<dynamic>? ?? []).map((m) => m as String).toList(),
+      percent: json['percent'] as num?,
+      flatMinor: json['flatMinor'] as int?,
+      maxDiscountMinor: json['maxDiscountMinor'] as int?,
+      minSpendMinor: json['minSpendMinor'] as int?,
+      expiresOn: json['expiresOn'] != null ? DateTime.parse(json['expiresOn'] as String) : null,
+      code: json['code'] as String?,
+      usedAt: json['usedAt'] != null ? DateTime.parse(json['usedAt'] as String) : null,
+      isActive: json['isActive'] as bool? ?? true,
+      notes: json['notes'] as String?,
+      isLive: json['isLive'] as bool? ?? true,
+      daysLeft: json['daysLeft'] as int?,
+    );
+  }
+}
+
+/// A perk that applies where you are standing, and how it got there.
+class PerkMatch extends Perk {
+  /// MERCHANT | CATEGORY | ANYWHERE - most specific first.
+  final String reach;
+
+  /// Null until there is an amount to apply a percentage to.
+  final int? valueMinor;
+  final CardStatus? card;
+
+  PerkMatch({
+    required super.id,
+    required super.kind,
+    required super.title,
+    required this.reach,
+    this.valueMinor,
+    this.card,
+    super.merchants,
+    super.percent,
+    super.flatMinor,
+    super.maxDiscountMinor,
+    super.minSpendMinor,
+    super.expiresOn,
+    super.code,
+    super.daysLeft,
+  });
+
+  factory PerkMatch.fromJson(Map<String, dynamic> json) {
+    final base = Perk.fromJson(json);
+    return PerkMatch(
+      id: base.id,
+      kind: base.kind,
+      title: base.title,
+      reach: json['reach'] as String? ?? 'ANYWHERE',
+      valueMinor: json['valueMinor'] as int?,
+      card: json['card'] != null ? CardStatus.fromJson(json['card'] as Map<String, dynamic>) : null,
+      merchants: base.merchants,
+      percent: base.percent,
+      flatMinor: base.flatMinor,
+      maxDiscountMinor: base.maxDiscountMinor,
+      minSpendMinor: base.minSpendMinor,
+      expiresOn: base.expiresOn,
+      code: base.code,
+      daysLeft: base.daysLeft,
+    );
+  }
+}
+
+/// The answer to "I am at Gucci - do I have anything?"
+class PerkLookup {
+  final String query;
+  final List<PerkMatch> matches;
+
+  /// Only set when it is a different card from the one the offer names:
+  /// two pieces of advice naming one card reads as noise.
+  final CardStatus? floatAlternative;
+  final String verdict;
+
+  PerkLookup({
+    required this.query,
+    required this.matches,
+    this.floatAlternative,
+    required this.verdict,
+  });
+
+  factory PerkLookup.fromJson(Map<String, dynamic> json) => PerkLookup(
+        query: json['query'] as String? ?? '',
+        matches: (json['matches'] as List<dynamic>? ?? [])
+            .map((m) => PerkMatch.fromJson(m as Map<String, dynamic>))
+            .toList(),
+        floatAlternative: json['floatAlternative'] != null
+            ? CardStatus.fromJson(json['floatAlternative'] as Map<String, dynamic>)
+            : null,
+        verdict: json['verdict'] as String? ?? '',
+      );
+}
+
+class MerchantSpend {
+  final String merchant;
+  final int amountMinor;
+  final int count;
+
+  MerchantSpend({required this.merchant, required this.amountMinor, required this.count});
+
+  factory MerchantSpend.fromJson(Map<String, dynamic> json) => MerchantSpend(
+        merchant: json['merchant'] as String,
+        amountMinor: json['amountMinor'] as int,
+        count: json['count'] as int? ?? 0,
+      );
+}
+
+class CategoryChange {
+  final String? categoryId;
+  final String name;
+  final int amountMinor;
+  final int previousMinor;
+  final int changeMinor;
+
+  CategoryChange({
+    this.categoryId,
+    required this.name,
+    required this.amountMinor,
+    required this.previousMinor,
+    required this.changeMinor,
+  });
+
+  factory CategoryChange.fromJson(Map<String, dynamic> json) => CategoryChange(
+        categoryId: json['categoryId'] as String?,
+        name: json['name'] as String,
+        amountMinor: json['amountMinor'] as int? ?? 0,
+        previousMinor: json['previousMinor'] as int? ?? 0,
+        changeMinor: json['changeMinor'] as int? ?? 0,
+      );
+}
+
+class MonthComparison {
+  final String previousMonthLabel;
+  final int totalSpendMinor;
+  final int previousSpendMinor;
+  final int changeMinor;
+  final List<CategoryChange> categories;
+
+  MonthComparison({
+    required this.previousMonthLabel,
+    required this.totalSpendMinor,
+    required this.previousSpendMinor,
+    required this.changeMinor,
+    required this.categories,
+  });
+
+  factory MonthComparison.fromJson(Map<String, dynamic> json) => MonthComparison(
+        previousMonthLabel: json['previousMonthLabel'] as String? ?? '',
+        totalSpendMinor: json['totalSpendMinor'] as int? ?? 0,
+        previousSpendMinor: json['previousSpendMinor'] as int? ?? 0,
+        changeMinor: json['changeMinor'] as int? ?? 0,
+        categories: (json['categories'] as List<dynamic>? ?? [])
+            .map((c) => CategoryChange.fromJson(c as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+/// This month so far, against the same point in the last one.
+///
+/// Day-for-day rather than month-for-month: on the 8th, a whole previous
+/// month is not a comparison, it is a number three times larger.
+class MonthSoFar {
+  final int dayOfMonth;
+  final int spentMinor;
+  final int previousMinor;
+  final int changeMinor;
+
+  MonthSoFar({
+    required this.dayOfMonth,
+    required this.spentMinor,
+    required this.previousMinor,
+    required this.changeMinor,
+  });
+
+  factory MonthSoFar.fromJson(Map<String, dynamic> json) => MonthSoFar(
+        dayOfMonth: json['dayOfMonth'] as int? ?? 1,
+        spentMinor: json['spentMinor'] as int? ?? 0,
+        previousMinor: json['previousMinor'] as int? ?? 0,
+        changeMinor: json['changeMinor'] as int? ?? 0,
+      );
+}
+
+class StuckStatement {
+  final String id;
+  final String status;
+  final String? problem;
+
+  StuckStatement({required this.id, required this.status, this.problem});
+
+  factory StuckStatement.fromJson(Map<String, dynamic> json) => StuckStatement(
+        id: json['id'] as String,
+        status: json['status'] as String,
+        problem: json['problem'] as String?,
+      );
+}
+
+/// Everything the landing screen needs, in one request.
+class DashboardData {
+  final BudgetPace pace;
+  final List<CardStatus> cards;
+  final CardPicks picks;
+  final int needsCategoryYesterday;
+  final int needsCategoryMonth;
+  final int emiCount;
+  final int emiMonthlyMinor;
+  final int emiRemainingMinor;
+  final int owedBalanceMinor;
+  final List<Perk> expiringPerks;
+  final List<StuckStatement> stuckStatements;
+  final MonthSoFar monthSoFar;
+
+  DashboardData({
+    required this.pace,
+    required this.cards,
+    required this.picks,
+    required this.needsCategoryYesterday,
+    required this.needsCategoryMonth,
+    required this.emiCount,
+    required this.emiMonthlyMinor,
+    required this.emiRemainingMinor,
+    required this.owedBalanceMinor,
+    required this.expiringPerks,
+    required this.stuckStatements,
+    required this.monthSoFar,
+  });
+
+  factory DashboardData.fromJson(Map<String, dynamic> json) {
+    final needs = json['needsCategory'] as Map<String, dynamic>? ?? {};
+    final emis = json['emis'] as Map<String, dynamic>? ?? {};
+    final statements = json['statements'] as Map<String, dynamic>? ?? {};
+
+    return DashboardData(
+      pace: BudgetPace.fromJson(json['pace'] as Map<String, dynamic>? ?? {}),
+      cards: (json['cards'] as List<dynamic>? ?? [])
+          .map((card) => CardStatus.fromJson(card as Map<String, dynamic>))
+          .toList(),
+      picks: CardPicks.fromJson(json['picks'] as Map<String, dynamic>? ?? {}),
+      needsCategoryYesterday: needs['yesterday'] as int? ?? 0,
+      needsCategoryMonth: needs['month'] as int? ?? 0,
+      emiCount: emis['count'] as int? ?? 0,
+      emiMonthlyMinor: emis['monthlyMinor'] as int? ?? 0,
+      emiRemainingMinor: emis['remainingMinor'] as int? ?? 0,
+      owedBalanceMinor: (json['owed'] as Map<String, dynamic>? ?? {})['balanceMinor'] as int? ?? 0,
+      expiringPerks: (json['expiringPerks'] as List<dynamic>? ?? [])
+          .map((perk) => Perk.fromJson(perk as Map<String, dynamic>))
+          .toList(),
+      stuckStatements: (statements['stuck'] as List<dynamic>? ?? [])
+          .map((s) => StuckStatement.fromJson(s as Map<String, dynamic>))
+          .toList(),
+      monthSoFar: MonthSoFar.fromJson(json['monthSoFar'] as Map<String, dynamic>? ?? {}),
+    );
+  }
 }
