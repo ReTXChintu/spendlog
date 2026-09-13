@@ -4,6 +4,7 @@ import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
 import { Account, FixedCommitment, Transaction, User } from "../../models";
 import { COMMITMENT_KINDS } from "../../types";
+import { budgetPace } from "./budget.pace";
 import { budgetPeriodFor } from "./budget.period";
 
 export const budgetRouter = Router();
@@ -118,101 +119,5 @@ budgetRouter.post("/commitments/:id/paid", validObjectIdParam("id"), async (req,
 // spending has outrun the salary and cannot say whether a bill is
 // affordable. Everything below is built only from money that moved.
 budgetRouter.get("/pace", async (req, res) => {
-  const userId = currentUserId(req);
-  const user = await User.findById(userId).select("salaryAmountMinor salaryDay").orFail();
-
-  if (!user.salaryAmountMinor || !user.salaryDay) {
-    return res.json({ configured: false });
-  }
-
-  const now = new Date();
-  const period = budgetPeriodFor(user.salaryDay, now);
-
-  // Paying a card bill is not new spending — it is an earlier cycle's
-  // spending reaching the bank. Counting both would double every rupee
-  // that ever went on a card, so payments into a card account are left
-  // out of the period's total.
-  const cardIds = (await Account.find({ userId, accountType: "CARD" }).select("_id")).map(
-    (card) => card._id
-  );
-
-  const [spend] = await Transaction.aggregate<{ total: number }>([
-    {
-      $match: {
-        userId,
-        type: "DEBIT",
-        occurredAt: { $gte: period.start, $lt: period.end },
-        accountId: { $nin: cardIds },
-        countedAmountMinor: { $gt: 0 },
-      },
-    },
-    { $group: { _id: null, total: { $sum: "$countedAmountMinor" } } },
-  ]);
-
-  // Card spending still counts — just at the moment it happens, on the
-  // card, rather than when the bill lands.
-  const [cardSpend] = await Transaction.aggregate<{ total: number }>([
-    {
-      $match: {
-        userId,
-        type: "DEBIT",
-        occurredAt: { $gte: period.start, $lt: period.end },
-        accountId: { $in: cardIds },
-        countedAmountMinor: { $gt: 0 },
-      },
-    },
-    { $group: { _id: null, total: { $sum: "$countedAmountMinor" } } },
-  ]);
-
-  const spentMinor = (spend?.total ?? 0) + (cardSpend?.total ?? 0);
-
-  const commitments = await FixedCommitment.find({ userId, isActive: true }).sort({ dayOfMonth: 1 });
-  const pending = commitments.filter((commitment) => commitment.paidForPeriod !== period.key);
-  const commitmentsRemainingMinor = pending.reduce((sum, c) => sum + c.amountMinor, 0);
-
-  const availableMinor = user.salaryAmountMinor - commitmentsRemainingMinor;
-  const remainingMinor = availableMinor - spentMinor;
-  const perDayMinor = Math.round(remainingMinor / period.daysLeft);
-
-  // What has actually been going out lately, which is the only thing the
-  // sustainable figure means anything against.
-  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  const [recent] = await Transaction.aggregate<{ total: number }>([
-    {
-      $match: {
-        userId,
-        type: "DEBIT",
-        occurredAt: { $gte: weekAgo, $lte: now },
-        countedAmountMinor: { $gt: 0 },
-      },
-    },
-    { $group: { _id: null, total: { $sum: "$countedAmountMinor" } } },
-  ]);
-  const recentPerDayMinor = Math.round((recent?.total ?? 0) / 7);
-
-  const state =
-    remainingMinor < 0
-      ? "over"
-      : recentPerDayMinor > 0 && recentPerDayMinor * period.daysLeft > remainingMinor
-        ? "watch"
-        : "ok";
-
-  res.json({
-    configured: true,
-    periodStart: period.start,
-    periodEnd: period.end,
-    daysLeft: period.daysLeft,
-    daysElapsed: period.daysElapsed,
-    salaryMinor: user.salaryAmountMinor,
-    commitmentsRemainingMinor,
-    spentMinor,
-    remainingMinor,
-    perDayMinor,
-    recentPerDayMinor,
-    state,
-    commitments: commitments.map((commitment) => ({
-      ...commitment.toJSON(),
-      isPaid: commitment.paidForPeriod === period.key,
-    })),
-  });
+  res.json(await budgetPace(currentUserId(req)));
 });

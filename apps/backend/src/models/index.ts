@@ -6,6 +6,7 @@ import {
   EMI_INSTALMENT_STATUSES,
   EMI_PLAN_STATUSES,
   EMI_ROLES,
+  PERK_KINDS,
   RULE_MATCH_TYPES,
   STATEMENT_LINE_KINDS,
   STATEMENT_LINE_RESOLUTIONS,
@@ -18,6 +19,7 @@ import {
   EmiInstalmentStatus,
   EmiPlanStatus,
   EmiRole,
+  PerkKind,
   RuleMatchType,
   StatementLineKind,
   StatementLineResolution,
@@ -808,3 +810,74 @@ cardStatementSchema.index({ userId: 1, sourceRef: 1 }, { unique: true });
 cardStatementSchema.index({ userId: 1, statementDate: -1 });
 
 export const CardStatement = model<CardStatementDoc>("CardStatement", cardStatementSchema);
+
+/**
+ * Something that makes a purchase cheaper, and the answer to "I am at
+ * Gucci - do I have anything?"
+ *
+ * One collection for two kinds, because every lookup wants both and
+ * ranking them against each other is the point. A card offer stands until
+ * the bank changes it; a coupon is spent once and then gone.
+ */
+export interface PerkDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  kind: PerkKind;
+  title: string;
+  /// The card this is on. An offer without one is not an offer; a coupon
+  /// without one works on any card.
+  accountId?: Types.ObjectId | null;
+  /// Merchant patterns, stored lowercase. Empty means it is not tied to a
+  /// merchant - which, with no category either, means it applies anywhere.
+  merchants: string[];
+  categoryId?: Types.ObjectId | null;
+  /// One or the other. A percentage is how card offers are written; a flat
+  /// amount is how most coupons are.
+  percent?: number | null;
+  flatMinor?: number | null;
+  /// The cap the small print puts on a percentage, and the floor under it.
+  maxDiscountMinor?: number | null;
+  minSpendMinor?: number | null;
+  startsOn?: Date | null;
+  expiresOn?: Date | null;
+  code?: string | null;
+  /// Coupons only. Set means spent, and it stops appearing.
+  usedAt?: Date | null;
+  isActive: boolean;
+  notes?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const perkSchema = new Schema<PerkDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    kind: { type: String, enum: PERK_KINDS, required: true },
+    title: { type: String, required: true, trim: true },
+    accountId: { type: Schema.Types.ObjectId, ref: "Account", default: null },
+    merchants: { type: [String], default: [] },
+    categoryId: { type: Schema.Types.ObjectId, ref: "Category", default: null },
+    percent: { type: Number, default: null, min: 0, max: 100 },
+    flatMinor: { type: Number, default: null, min: 0 },
+    maxDiscountMinor: { type: Number, default: null, min: 0 },
+    minSpendMinor: { type: Number, default: null, min: 0 },
+    startsOn: { type: Date, default: null },
+    expiresOn: { type: Date, default: null },
+    code: { type: String, default: null, trim: true },
+    usedAt: { type: Date, default: null },
+    isActive: { type: Boolean, default: true },
+    notes: { type: String, default: null, trim: true },
+  },
+  { timestamps: true, ...serialization }
+);
+
+// Patterns are matched case-insensitively, so they are stored folded once
+// here rather than lowercased at every comparison.
+perkSchema.pre("save", function (next) {
+  this.merchants = this.merchants.map((merchant) => merchant.trim().toLowerCase()).filter(Boolean);
+  next();
+});
+
+perkSchema.index({ userId: 1, isActive: 1, expiresOn: 1 });
+
+export const Perk = model<PerkDoc>("Perk", perkSchema);

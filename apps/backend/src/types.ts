@@ -64,6 +64,18 @@ export type StatementLineResolution = (typeof STATEMENT_LINE_RESOLUTIONS)[number
 export const STATEMENT_STATUSES = ["PARSED", "LOCKED", "UNIDENTIFIED", "UNREADABLE"] as const;
 export type StatementStatus = (typeof STATEMENT_STATUSES)[number];
 
+// A card offer stands until the bank changes it; a coupon is spent once
+// and then gone. Both answer the same question at a till, which is why
+// they share a collection.
+export const PERK_KINDS = ["CARD_OFFER", "COUPON"] as const;
+export type PerkKind = (typeof PERK_KINDS)[number];
+
+// Which rails a card runs on. It matters at a till rather than in the
+// ledger: a RuPay credit card pays over UPI and a Visa one does not, so
+// "which card" is really "which card that this place takes".
+export const CARD_NETWORKS = ["RUPAY", "VISA", "MASTERCARD", "AMEX", "DINERS"] as const;
+export type CardNetwork = (typeof CARD_NETWORKS)[number];
+
 export const RULE_MATCH_TYPES = ["MERCHANT_CONTAINS", "KEYWORD", "EXACT"] as const;
 export type RuleMatchType = (typeof RULE_MATCH_TYPES)[number];
 
