@@ -150,6 +150,15 @@ export interface AccountDoc {
   aliases: AccountAlias[];
   issuer?: string | null;
   cardNetwork?: string | null;
+  /// For a debit card, the bank account it draws on.
+  ///
+  /// A debit card is a way of reaching an account rather than a pot of its
+  /// own, so its spending belongs to that account — which is where the
+  /// bank's own statement will show it, and where it has to be counted if
+  /// it is to be counted once. A debit card may also stand alone, for one
+  /// whose account SpendLog has never seen; then it is its own pot, the
+  /// way cash is.
+  linkedAccountId?: Types.ObjectId | null;
   creditLimitMinor?: number | null;
   /// What the user allows themselves on this card in a billing cycle, as
   /// distinct from creditLimitMinor, which is what the bank allows.
@@ -186,6 +195,7 @@ const accountSchema = new Schema<AccountDoc>(
     aliases: { type: [accountAliasSchema], default: [] },
     issuer: { type: String, default: null },
     cardNetwork: { type: String, default: null },
+    linkedAccountId: { type: Schema.Types.ObjectId, ref: "Account", default: null },
     creditLimitMinor: { type: Number, default: null },
     spendLimitMinor: { type: Number, default: null, min: 0 },
     statementDay: { type: Number, default: null, min: 1, max: 31 },

@@ -27,7 +27,13 @@ export function categoriesFor(categories: Category[], type: TransactionType): Ca
   return categories.filter((category) => (category.direction ?? "BOTH") !== (wanted === "IN" ? "OUT" : "IN"));
 }
 
-export type AccountType = "BANK" | "CARD" | "UPI" | "CASH";
+/**
+ * CARD is a credit card and DEBIT a debit card. They differ everywhere it
+ * matters: a credit card has a cycle, a limit, a due date and a statement
+ * of its own; a debit card has none of those, because it is a way of
+ * reaching a bank account rather than a line of credit.
+ */
+export type AccountType = "BANK" | "CARD" | "DEBIT" | "UPI" | "CASH";
 
 /** A spelling of an account that a bank uses in one of its message formats. */
 export interface AccountAlias {
@@ -45,6 +51,8 @@ export interface Account {
   aliases: AccountAlias[];
   issuer: string | null;
   cardNetwork: string | null;
+  /// For a debit card, the bank account it draws on.
+  linkedAccountId: string | null;
   creditLimitMinor: number | null;
   spendLimitMinor: number | null;
   statementDay: number | null;
@@ -85,6 +93,10 @@ export interface AccountOverview extends Account {
   /// Whether full card details are stored. Like the password, the values
   /// themselves need a PIN and a separate request.
   hasCardDetails: boolean;
+  /// What a debit card draws on, named rather than referenced.
+  linkedAccount: string | null;
+  /// For a bank account, the debit cards that reach it.
+  debitCards: { id: string; name: string; last4: string | null; network: string | null }[];
 }
 
 /** What to call an account on screen: the name given to it, else the bank's. */

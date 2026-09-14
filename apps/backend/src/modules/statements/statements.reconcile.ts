@@ -69,9 +69,15 @@ export async function reconcileStatement(
   // Everything the ledger already holds for this card over the period the
   // statement covers, read once. A statement runs to a few hundred lines
   // and querying per line would be a few hundred round trips.
+  //
+  // A bank account's debit cards count as the account. A debit card is a
+  // way of reaching an account rather than a pot of its own, so a purchase
+  // made on one appears on that account's statement - and if a row filed
+  // under the card were invisible here, the statement would decide it was
+  // missing and add it a second time.
   const existing = await Transaction.find({
     userId: statement.userId,
-    accountId: statement.accountId,
+    accountId: { $in: await accountAndItsCards(statement.userId, statement.accountId) },
     occurredAt: { $gte: window.from, $lte: window.to },
   }).sort({ occurredAt: 1 });
 
@@ -178,6 +184,25 @@ export async function reconcileStatement(
  * as the raw text. Idempotent, because a statement reconciled twice must
  * not leave the row claiming two witnesses where there was one.
  */
+/**
+ * An account, and every debit card that draws on it.
+ *
+ * Only ever a widening: a credit card has no debit cards attached to it
+ * and this returns the one id, which is what it always used.
+ */
+async function accountAndItsCards(
+  userId: Types.ObjectId,
+  accountId: Types.ObjectId
+): Promise<Types.ObjectId[]> {
+  const cards = await Account.find({
+    userId,
+    accountType: "DEBIT",
+    linkedAccountId: accountId,
+  }).select("_id");
+
+  return [accountId, ...cards.map((card) => card._id)];
+}
+
 function recordStatementSource(
   transaction: HydratedDocument<TransactionDoc>,
   statement: HydratedDocument<CardStatementDoc>,

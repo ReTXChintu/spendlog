@@ -62,13 +62,34 @@ class _Overview {
   final _Bill? bill;
   final bool hasCardDetails;
 
-  _Overview({required this.account, this.cycle, this.bill, required this.hasCardDetails});
+  /// What a debit card draws on, named rather than referenced.
+  final String? linkedAccount;
+
+  /// For a bank account, the debit cards that reach it. Its own spending
+  /// includes theirs, which a total does not say.
+  final List<({String name, String? last4})> debitCards;
+
+  _Overview({
+    required this.account,
+    this.cycle,
+    this.bill,
+    required this.hasCardDetails,
+    this.linkedAccount,
+    this.debitCards = const [],
+  });
 
   factory _Overview.fromJson(Map<String, dynamic> json) => _Overview(
         account: Account.fromJson(json),
         cycle: json['cycle'] == null ? null : _Cycle.fromJson(json['cycle'] as Map<String, dynamic>),
         bill: json['bill'] == null ? null : _Bill.fromJson(json['bill'] as Map<String, dynamic>),
         hasCardDetails: json['hasCardDetails'] as bool? ?? false,
+        linkedAccount: json['linkedAccount'] as String?,
+        debitCards: ((json['debitCards'] as List?) ?? const [])
+            .map((card) => (
+                  name: (card as Map<String, dynamic>)['name'] as String? ?? 'A card',
+                  last4: card['last4'] as String?,
+                ))
+            .toList(),
       );
 }
 
@@ -336,6 +357,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
                 switch (row.account.accountType) {
                   'BANK' => Icons.account_balance,
                   'CASH' => Icons.payments_outlined,
+                  'DEBIT' => Icons.credit_card_outlined,
                   _ => Icons.credit_card,
                 },
                 size: 16,
@@ -371,7 +393,13 @@ class _AccountsScreenState extends State<AccountsScreen> {
   Widget _panel(_Overview row) {
     final c = context.c;
     final account = row.account;
+
+    // A credit card, and only that. A debit card has no cycle, no limit,
+    // no due date and no statement of its own - its spending is the
+    // account's - so every figure below that assumes one would be an
+    // empty box on a debit card's page.
     final isCard = account.accountType == 'CARD';
+    final isDebit = account.accountType == 'DEBIT';
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -399,11 +427,16 @@ class _AccountsScreenState extends State<AccountsScreen> {
                       [
                         switch (account.accountType) {
                           'CARD' => 'Credit card',
+                          'DEBIT' => 'Debit card',
                           'BANK' => 'Bank account',
                           'CASH' => 'Cash',
                           _ => account.accountType,
                         },
                         if (account.cardNetwork != null) account.cardNetwork!,
+                        if (isDebit)
+                          row.linkedAccount == null
+                              ? 'not linked to an account'
+                              : 'draws on ${row.linkedAccount}',
                         if (!account.isActive) 'closed',
                       ].join(' · '),
                       style: TextStyle(fontSize: 12, color: c.muted),
@@ -432,23 +465,41 @@ class _AccountsScreenState extends State<AccountsScreen> {
           if (isCard && row.cycle != null)
             _meter(row.cycle!, account)
           else
-            _figure('This account', switch (account.accountType) {
-              'BANK' => 'Bank account',
-              'CASH' => 'Cash',
-              _ => 'Credit card',
-            }, isCard ? 'Set a statement day to see a cycle' : 'No billing cycle to track'),
+            _figure(
+              'This account',
+              switch (account.accountType) {
+                'BANK' => 'Bank account',
+                'DEBIT' => 'Debit card',
+                'CASH' => 'Cash',
+                _ => 'Credit card',
+              },
+              _standingNote(row, isCard: isCard, isDebit: isDebit),
+            ),
 
-          const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: _dates(account, row.cycle)),
-              const SizedBox(width: 10),
-              Expanded(child: _latestBill(row.bill)),
-            ],
-          ),
+          if (!isDebit) ...[
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: _dates(account, row.cycle)),
+                const SizedBox(width: 10),
+                Expanded(child: _latestBill(row.bill)),
+              ],
+            ),
+          ],
 
-          if (isCard)
+          if (row.debitCards.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _figure(
+              'Debit cards on it',
+              row.debitCards
+                  .map((card) => card.last4 == null ? card.name : '${card.name} ••${card.last4}')
+                  .join('\n'),
+              'This account is where their spending is counted.',
+            ),
+          ],
+
+          if (isCard || isDebit)
             CardVaultPanel(
               key: ValueKey(account.id),
               accountId: account.id,
@@ -457,6 +508,10 @@ class _AccountsScreenState extends State<AccountsScreen> {
               onChanged: _load,
             ),
 
+          // A debit card emails no statement, so there is no password for
+          // one and nothing filed under it. The account it draws on has
+          // both, and that is where its spending shows.
+          if (!isDebit) ...[
           const SizedBox(height: 14),
           _row(
             Icons.receipt_long_outlined,
@@ -489,9 +544,21 @@ class _AccountsScreenState extends State<AccountsScreen> {
               child: const Text('Open'),
             ),
           ),
+          ],
         ],
       ),
     );
+  }
+
+  /// What this account is, for anything with no cycle to show instead.
+  String _standingNote(_Overview row, {required bool isCard, required bool isDebit}) {
+    if (isDebit) {
+      return row.linkedAccount == null
+          ? 'Not linked to an account, so it is counted on its own'
+          : 'Spends ${row.linkedAccount} money, and is counted there';
+    }
+
+    return isCard ? 'Set a statement day to see a cycle' : 'No billing cycle to track';
   }
 
   /// How much of this cycle is gone.

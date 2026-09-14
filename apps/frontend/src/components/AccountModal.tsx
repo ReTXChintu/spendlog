@@ -4,8 +4,9 @@ import { Account, AccountType, CardNetwork, NETWORK_LABELS, accountLabel } from 
 import { Icon } from "./Icon";
 
 const ACCOUNT_TYPES: { value: AccountType; label: string }[] = [
-  { value: "BANK", label: "Bank" },
-  { value: "CARD", label: "Card" },
+  { value: "BANK", label: "Bank account" },
+  { value: "CARD", label: "Credit card" },
+  { value: "DEBIT", label: "Debit card" },
   { value: "UPI", label: "UPI" },
   { value: "CASH", label: "Cash" },
 ];
@@ -36,6 +37,7 @@ export function AccountModal({
   const [nickname, setNickname] = useState(account?.nickname ?? "");
   const [last4, setLast4] = useState(account?.last4 ?? "");
   const [accountType, setAccountType] = useState<AccountType>(account?.accountType ?? "BANK");
+  const [linkedAccountId, setLinkedAccountId] = useState(account?.linkedAccountId ?? "");
   const [issuer, setIssuer] = useState(account?.issuer ?? "");
   const [cardNetwork, setCardNetwork] = useState(account?.cardNetwork ?? "");
   const [creditLimit, setCreditLimit] = useState(
@@ -88,6 +90,9 @@ export function AccountModal({
       nickname: nickname.trim() || null,
       last4: last4.trim() || null,
       accountType,
+      // Only ever sent for a debit card, and null rather than "" so the
+      // server stores an absence rather than rejecting an empty id.
+      linkedAccountId: accountType === "DEBIT" ? linkedAccountId || null : null,
       issuer: issuer.trim() || null,
       // Stored in the canonical spelling, so every screen reading it back
       // gets the same word whatever was typed before the picker existed.
@@ -150,7 +155,15 @@ export function AccountModal({
   }
 
   const others = accounts.filter((a) => a.id !== account?.id);
+
+  // A credit card. Everything below that is about a cycle, a limit or a
+  // statement belongs to one of these and to nothing else: a debit card is
+  // a way of reaching an account rather than a line of credit, so it has
+  // no billing period, no limit to run up against, and no statement of its
+  // own - its spending turns up on the account's.
   const isCard = accountType === "CARD";
+  const isDebit = accountType === "DEBIT";
+  const banks = others.filter((candidate) => candidate.accountType === "BANK");
   // Cash has no issuer and no last four digits; asking for them would only
   // invite a wrong answer.
   const isCash = accountType === "CASH";
@@ -221,7 +234,30 @@ export function AccountModal({
             </>
           )}
 
-          {isCard && (
+          {isDebit && (
+            <label className="field field-wide">
+              <span>Draws on</span>
+              <select
+                value={linkedAccountId}
+                onChange={(e) => setLinkedAccountId(e.target.value)}
+                disabled={banks.length === 0}
+              >
+                <option value="">Nothing — it stands on its own</option>
+                {banks.map((bank) => (
+                  <option key={bank.id} value={bank.id}>
+                    {accountLabel(bank)}
+                  </option>
+                ))}
+              </select>
+              <span className="field-hint">
+                {banks.length === 0
+                  ? "Add the bank account first, then come back and link this card to it."
+                  : "What this card spends is that account's money, so it is counted there and shows on that account's statement. Leave it unlinked if SpendLog has never seen the account."}
+              </span>
+            </label>
+          )}
+
+          {(isCard || isDebit) && (
             <>
               <label className="field">
                 <span>Network</span>
@@ -238,7 +274,11 @@ export function AccountModal({
                   does not.
                 </span>
               </label>
+            </>
+          )}
 
+          {isCard && (
+            <>
               <label className="field">
                 <span>Credit limit (₹)</span>
                 <input

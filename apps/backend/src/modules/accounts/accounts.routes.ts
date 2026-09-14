@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { Types } from "mongoose";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
@@ -42,6 +43,16 @@ accountsRouter.get("/overview", async (req, res) => {
   ]);
 
   const statusFor = new Map(statuses.map((status) => [status.accountId, status]));
+  const nameFor = new Map(
+    accounts.map((account) => [account._id.toString(), account.nickname || account.bankName])
+  );
+
+  const cardsOn = new Map<string, typeof accounts>();
+  for (const account of accounts) {
+    if (account.accountType !== "DEBIT" || !account.linkedAccountId) continue;
+    const key = account.linkedAccountId.toString();
+    cardsOn.set(key, [...(cardsOn.get(key) ?? []), account]);
+  }
   const vaultFor = new Map(vaults.map((vault) => [vault.accountId.toString(), vault]));
   const billFor = new Map(bills.map((bill) => [bill.accountId, bill]));
 
@@ -78,6 +89,20 @@ accountsRouter.get("/overview", async (req, res) => {
             }
           : null,
         hasCardDetails: vaultFor.has(id),
+        /// What a debit card draws on, named rather than referenced - the
+        /// panel says "draws on HDFC Savings", and an id would mean the
+        /// client holding the whole list to turn it into that.
+        linkedAccount: account.linkedAccountId
+          ? (nameFor.get(account.linkedAccountId.toString()) ?? null)
+          : null,
+        /// For a bank account, the debit cards that reach it. Its spending
+        /// includes theirs.
+        debitCards: (cardsOn.get(id) ?? []).map((card) => ({
+          id: card._id.toString(),
+          name: card.nickname || card.bankName,
+          last4: card.last4 ?? null,
+          network: card.cardNetwork ?? null,
+        })),
       };
     })
   );
@@ -90,6 +115,11 @@ const accountFields = {
   nickname: z.string().max(60).nullable().optional(),
   issuer: z.string().max(80).nullable().optional(),
   cardNetwork: z.string().max(40).nullable().optional(),
+  linkedAccountId: z
+    .string()
+    .regex(/^[0-9a-fA-F]{24}$/)
+    .nullable()
+    .optional(),
   creditLimitMinor: z.number().int().nonnegative().nullable().optional(),
   spendLimitMinor: z.number().int().nonnegative().nullable().optional(),
   statementDay: z.number().int().min(1).max(31).nullable().optional(),
@@ -128,9 +158,43 @@ accountsRouter.post("/", async (req, res) => {
     return res.status(409).json({ error: "That account already exists", accountId: clash.id });
   }
 
-  const created = await Account.create({ userId, ...parsed.data, last4 });
+  const link = await resolveLink(userId, parsed.data);
+  if (typeof link === "string") return res.status(400).json({ error: link });
+
+  const created = await Account.create({ userId, ...parsed.data, last4, linkedAccountId: link });
   res.status(201).json(created);
 });
+
+/**
+ * The bank account a debit card draws on, checked before it is stored.
+ *
+ * Only a debit card has one, and it must point at a bank account of this
+ * user's. A link to a credit card or to somebody else's account would make
+ * the reconciler treat two unrelated pots as one, and it would do it
+ * quietly.
+ *
+ * Returns the id to store, null for no link, or a sentence saying why not.
+ */
+async function resolveLink(
+  userId: Types.ObjectId,
+  fields: { accountType?: string; linkedAccountId?: string | null }
+): Promise<Types.ObjectId | null | string> {
+  if (fields.linkedAccountId === undefined) return null;
+  if (fields.linkedAccountId === null) return null;
+
+  if (fields.accountType !== undefined && fields.accountType !== "DEBIT") {
+    return "Only a debit card draws on a bank account.";
+  }
+
+  const bank = await Account.findOne({
+    _id: fields.linkedAccountId,
+    userId,
+    accountType: "BANK",
+  });
+  if (!bank) return "That is not one of your bank accounts.";
+
+  return bank._id;
+}
 
 // Identity is editable, but changing it moves what incoming messages match.
 const updateAccountSchema = z.object(accountFields).partial();
@@ -139,9 +203,26 @@ accountsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   const parsed = updateAccountSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
+  const userId = currentUserId(req);
+  const account = await Account.findOne({ _id: req.params.id, userId });
+  if (!account) return res.status(404).json({ error: "Not found" });
+
+  // Checked against what the account will be, not what it is: a card can
+  // be made a debit card and linked in the same edit.
+  const link = await resolveLink(userId, {
+    accountType: parsed.data.accountType ?? account.accountType,
+    linkedAccountId: parsed.data.linkedAccountId,
+  });
+  if (typeof link === "string") return res.status(400).json({ error: link });
+
   const updated = await Account.findOneAndUpdate(
-    { _id: req.params.id, userId: currentUserId(req) },
-    { $set: parsed.data },
+    { _id: req.params.id, userId },
+    {
+      $set: {
+        ...parsed.data,
+        ...(parsed.data.linkedAccountId === undefined ? {} : { linkedAccountId: link }),
+      },
+    },
     { new: true, runValidators: true }
   );
   if (!updated) return res.status(404).json({ error: "Not found" });

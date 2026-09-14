@@ -3,9 +3,14 @@ import '../models/models.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
 
+// CARD is a credit card and DEBIT a debit card. They differ everywhere it
+// matters: a credit card has a cycle, a limit, a due date and a statement
+// of its own; a debit card has none of those, because it is a way of
+// reaching a bank account rather than a line of credit.
 const _types = [
-  ('BANK', 'Bank'),
-  ('CARD', 'Card'),
+  ('BANK', 'Bank account'),
+  ('CARD', 'Credit card'),
+  ('DEBIT', 'Debit card'),
   ('UPI', 'UPI'),
   ('CASH', 'Cash'),
 ];
@@ -56,6 +61,7 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
   late final TextEditingController _dueDay;
 
   late String _type;
+  String? _linkedAccountId;
   late bool _isActive;
   String? _mergeInto;
 
@@ -82,6 +88,7 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
     _statementDay = TextEditingController(text: a?.statementDay?.toString() ?? '');
     _dueDay = TextEditingController(text: a?.dueDay?.toString() ?? '');
     _type = a?.accountType ?? 'BANK';
+    _linkedAccountId = a?.linkedAccountId;
     _isActive = a?.isActive ?? true;
   }
 
@@ -134,6 +141,9 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
       'nickname': _nickname.text.trim().isEmpty ? null : _nickname.text.trim(),
       'last4': last4.isEmpty ? null : last4,
       'accountType': _type,
+      // Only ever sent for a debit card, so switching a card away from
+      // debit clears the link rather than leaving it dangling.
+      'linkedAccountId': _type == 'DEBIT' ? _linkedAccountId : null,
       'cardNetwork': _cardNetwork.text.trim().isEmpty ? null : _cardNetwork.text.trim(),
       'creditLimitMinor': limit == null ? null : limit * 100,
       'spendLimitMinor': _intOrNull(_spendLimit) == null ? null : _intOrNull(_spendLimit)! * 100,
@@ -276,9 +286,33 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
               _Field(label: 'Last digits', controller: _last4, hint: '1377', numeric: true),
             ],
 
-            if (_type == 'CARD') ...[
+            // What a debit card draws on. Its spending is that account's
+            // money, so it is counted there and shows on that account's
+            // statement - and a debit card whose account SpendLog has
+            // never seen stands on its own, the way cash does.
+            if (_type == 'DEBIT') ...[
+              const SizedBox(height: 14),
+              Text('Draws on', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: c.muted)),
+              const SizedBox(height: 6),
+              DropdownButtonFormField<String?>(
+                initialValue: _linkedAccountId,
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('Nothing — it stands on its own')),
+                  for (final bank in widget.accounts.where((a) => a.accountType == 'BANK'))
+                    DropdownMenuItem(value: bank.id, child: Text(bank.label)),
+                ],
+                onChanged: (value) => setState(() => _linkedAccountId = value),
+              ),
+            ],
+
+            // The network is a card thing rather than a credit-card thing:
+            // a debit card gets suggested at a till on the same grounds.
+            if (_type == 'CARD' || _type == 'DEBIT') ...[
               const SizedBox(height: 14),
               _Field(label: 'Network', controller: _cardNetwork, hint: 'Visa, Mastercard, RuPay'),
+            ],
+
+            if (_type == 'CARD') ...[
               const SizedBox(height: 14),
               _Field(label: 'Credit limit (₹)', controller: _creditLimit, hint: '200000', numeric: true),
               const SizedBox(height: 14),

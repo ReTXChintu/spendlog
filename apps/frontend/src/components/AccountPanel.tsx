@@ -16,8 +16,9 @@ import { Icon } from "./Icon";
 
 const TYPE_LABEL: Record<string, string> = {
   CARD: "Credit card",
+  DEBIT: "Debit card",
   BANK: "Bank account",
-  WALLET: "Wallet",
+  UPI: "UPI",
   CASH: "Cash",
 };
 
@@ -33,7 +34,13 @@ export function AccountPanel({
   onDeleted: () => void;
 }) {
   const cycle = account.cycle;
+
+  // A credit card, and only that. A debit card has no cycle, no limit, no
+  // due date and no statement of its own - its spending is the account's,
+  // and turns up on the account's statement - so every figure and control
+  // below that assumes one would be an empty box on a debit card's page.
   const isCard = account.accountType === "CARD";
+  const isDebit = account.accountType === "DEBIT";
 
   /// Null until Remove is pressed, then the number of transactions that
   /// would be left without an account. Deleting one is refused while
@@ -75,6 +82,14 @@ export function AccountPanel({
           <p className="account-panel-sub">
             {TYPE_LABEL[account.accountType] ?? account.accountType}
             {account.cardNetwork && <> · {account.cardNetwork}</>}
+            {isDebit && (
+              <>
+                {" · "}
+                {account.linkedAccount
+                  ? `draws on ${account.linkedAccount}`
+                  : "not linked to an account"}
+              </>
+            )}
             {!account.isActive && <> · closed</>}
           </p>
         </div>
@@ -126,8 +141,9 @@ export function AccountPanel({
       {error && <p className="desc set-warn">{error}</p>}
 
       <div className="account-figures">
-        {/* Only a card has a cycle. A savings account with an empty
-            progress bar on it would be a figure that means nothing. */}
+        {/* Only a credit card has a cycle. A savings account or a debit
+            card with an empty progress bar on it would be a figure that
+            means nothing. */}
         {isCard && cycle ? (
           <Meter
             spentMinor={cycle.spentMinor}
@@ -139,32 +155,49 @@ export function AccountPanel({
           <div className="figure-card">
             <span className="figure-label">This account</span>
             <span className="figure-value">{TYPE_LABEL[account.accountType]}</span>
-            <span className="figure-note">
-              {isCard ? "Set a statement day to see a cycle" : "No billing cycle to track"}
-            </span>
+            <span className="figure-note">{standingNote(account, isCard, isDebit)}</span>
           </div>
         )}
 
-        <div className="figure-card">
-          <span className="figure-label">Dates</span>
-          <dl className="figure-rows">
-            <div>
-              <dt>Statement</dt>
-              <dd>{account.statementDay ? ordinal(account.statementDay) : "—"}</dd>
-            </div>
-            <div>
-              <dt>Payment due</dt>
-              <dd>{account.dueDay ? ordinal(account.dueDay) : "—"}</dd>
-            </div>
-            {cycle?.floatDays != null && (
+        {!isDebit && (
+          <div className="figure-card">
+            <span className="figure-label">Dates</span>
+            <dl className="figure-rows">
               <div>
-                <dt>Float today</dt>
-                <dd>{cycle.floatDays} days</dd>
+                <dt>Statement</dt>
+                <dd>{account.statementDay ? ordinal(account.statementDay) : "—"}</dd>
               </div>
-            )}
-          </dl>
-        </div>
+              <div>
+                <dt>Payment due</dt>
+                <dd>{account.dueDay ? ordinal(account.dueDay) : "—"}</dd>
+              </div>
+              {cycle?.floatDays != null && (
+                <div>
+                  <dt>Float today</dt>
+                  <dd>{cycle.floatDays} days</dd>
+                </div>
+              )}
+            </dl>
+          </div>
+        )}
 
+        {/* A bank account lists the cards that reach it, because its own
+            spending includes theirs and a total does not say so. */}
+        {account.debitCards.length > 0 && (
+          <div className="figure-card">
+            <span className="figure-label">Debit cards on it</span>
+            <dl className="figure-rows">
+              {account.debitCards.map((card) => (
+                <div key={card.id}>
+                  <dt>{card.name}</dt>
+                  <dd>{card.last4 ? `••${card.last4}` : "—"}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        )}
+
+        {!isDebit && (
         <div className="figure-card">
           <span className="figure-label">Latest bill</span>
           {account.bill ? (
@@ -189,9 +222,10 @@ export function AccountPanel({
             </>
           )}
         </div>
+        )}
       </div>
 
-      {isCard && (
+      {(isCard || isDebit) && (
         <CardVaultPanel
           accountId={account.id}
           last4={account.last4}
@@ -200,6 +234,9 @@ export function AccountPanel({
         />
       )}
 
+      {/* A debit card emails no statement, so there is no password for
+          one. The account it draws on has both. */}
+      {!isDebit && (
       <div className="account-row">
         <span className="account-row-label">
           <Icon name="ic-receipt" /> Statement password
@@ -217,8 +254,20 @@ export function AccountPanel({
           {account.hasStatementPassword ? "Change" : "Add"}
         </button>
       </div>
+      )}
     </div>
   );
+}
+
+/** What this account is, for anything that has no cycle to show instead. */
+function standingNote(account: AccountOverview, isCard: boolean, isDebit: boolean): string {
+  if (isDebit) {
+    return account.linkedAccount
+      ? `Spends ${account.linkedAccount} money, and is counted there`
+      : "Not linked to an account, so it is counted on its own";
+  }
+
+  return isCard ? "Set a statement day to see a cycle" : "No billing cycle to track";
 }
 
 /**

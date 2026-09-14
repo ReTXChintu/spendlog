@@ -11,7 +11,15 @@ export type TransactionSource = (typeof TRANSACTION_SOURCES)[number];
 // exists only to be chosen by hand. Keeping it an account type rather
 // than a flag means filters, the ledger and trip totals treat it like
 // any other without having to know about it.
-export const ACCOUNT_TYPES = ["BANK", "CARD", "UPI", "CASH"] as const;
+//
+// CARD means a credit card specifically, and DEBIT a debit card. They are
+// different things everywhere it matters: a credit card has a billing
+// cycle, a limit, a due date and a statement of its own, and a debit card
+// has none of those because it is a way of reaching a bank account rather
+// than a line of credit. What a debit card does have is a network and a
+// number, which is why it is an account and not a field — it gets
+// suggested at a till and it holds card details.
+export const ACCOUNT_TYPES = ["BANK", "CARD", "DEBIT", "UPI", "CASH"] as const;
 export type AccountType = (typeof ACCOUNT_TYPES)[number];
 
 // Why a transaction's counted amount differs from the amount the bank

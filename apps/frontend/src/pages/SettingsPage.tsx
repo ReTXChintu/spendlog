@@ -302,6 +302,14 @@ function ConnectionsTab() {
 /** The group the server files a statement under when it has no account. */
 const UNFILED = "unfiled";
 
+const ACCOUNT_ICON: Record<string, string> = {
+  BANK: "ic-bank",
+  CARD: "ic-wallet",
+  DEBIT: "ic-wallet",
+  CASH: "ic-bag",
+  UPI: "ic-phone",
+};
+
 /**
  * Every account, one at a time.
  *
@@ -359,7 +367,10 @@ function AccountsTab() {
   }
 
   const missingNetwork = accounts.filter(
-    (account) => account.accountType === "CARD" && account.isActive && !account.cardNetwork
+    (account) =>
+      (account.accountType === "CARD" || account.accountType === "DEBIT") &&
+      account.isActive &&
+      !account.cardNetwork
   );
 
   if (loaded && accounts.length === 0) {
@@ -416,7 +427,7 @@ function AccountsTab() {
               onClick={() => select(account.id)}
             >
               <span className="account-tab-badge">
-                <Icon name={account.accountType === "BANK" ? "ic-bank" : "ic-wallet"} />
+                <Icon name={ACCOUNT_ICON[account.accountType] ?? "ic-wallet"} />
               </span>
               <span className="account-tab-main">
                 <span className="account-tab-name">{account.nickname || account.bankName}</span>
@@ -493,11 +504,13 @@ function AccountsTab() {
 
         {/* A card's statements are that card's paperwork, so they live with
             it rather than under the mailbox they arrived through. */}
-        <StatementShelf
-          accounts={accounts}
-          onChanged={reload}
-          focusAccountId={showingUnfiled ? UNFILED : (selected?.id ?? null)}
-        />
+        {(showingUnfiled || selected?.accountType !== "DEBIT") && (
+          <StatementShelf
+            accounts={accounts}
+            onChanged={reload}
+            focusAccountId={showingUnfiled ? UNFILED : (selected?.id ?? null)}
+          />
+        )}
       </div>
 
       {editing && (

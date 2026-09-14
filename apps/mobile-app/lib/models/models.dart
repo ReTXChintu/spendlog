@@ -61,6 +61,11 @@ class Account {
   final List<AccountAlias> aliases;
   final String? issuer;
   final String? cardNetwork;
+
+  /// For a debit card, the bank account it draws on. A debit card is a
+  /// way of reaching an account rather than a pot of its own, so its
+  /// spending belongs to that account.
+  final String? linkedAccountId;
   final int? creditLimitMinor;
   final int? spendLimitMinor;
   final int? statementDay;
@@ -80,6 +85,7 @@ class Account {
     this.aliases = const [],
     this.issuer,
     this.cardNetwork,
+    this.linkedAccountId,
     this.creditLimitMinor,
     this.spendLimitMinor,
     this.statementDay,
@@ -105,6 +111,7 @@ class Account {
             .toList(),
         issuer: json['issuer'] as String?,
         cardNetwork: json['cardNetwork'] as String?,
+        linkedAccountId: json['linkedAccountId'] as String?,
         creditLimitMinor: json['creditLimitMinor'] as int?,
         spendLimitMinor: json['spendLimitMinor'] as int?,
         statementDay: json['statementDay'] as int?,
