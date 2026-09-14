@@ -3,6 +3,7 @@ import { api } from "../lib/api";
 import { formatMoneyShort } from "../lib/format";
 import { Account, accountLabel } from "../types";
 import { Icon } from "./Icon";
+import { StatementTextModal } from "./StatementTextModal";
 
 /**
  * Every statement the mailbox has offered, and what became of it.
@@ -39,6 +40,7 @@ export function StatementList({ accounts }: { accounts: Account[] }) {
   const [statements, setStatements] = useState<StatementRow[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [showingText, setShowingText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -152,6 +154,18 @@ export function StatementList({ accounts }: { accounts: Account[] }) {
                 </button>
               )}
 
+              {/* What the file actually says, for when it opens and nothing
+                  is found in it. Otherwise the only way to know is to have
+                  the PDF on a machine with the repository on it. */}
+              {statement.status === "UNREADABLE" && (
+                <button
+                  className="btn btn-sm btn-ghost"
+                  onClick={() => setShowingText(statement.id)}
+                >
+                  Why?
+                </button>
+              )}
+
               {statement.status === "PARSED" && statement.counts.added > 0 && (
                 <button
                   className="btn btn-sm btn-ghost"
@@ -184,6 +198,10 @@ export function StatementList({ accounts }: { accounts: Account[] }) {
           </div>
         ))}
       </div>
+
+      {showingText && (
+        <StatementTextModal statementId={showingText} onClose={() => setShowingText(null)} />
+      )}
 
       {stuck.some((statement) => statement.status === "LOCKED") && (
         <p className="field-hint" style={{ marginTop: 12 }}>
