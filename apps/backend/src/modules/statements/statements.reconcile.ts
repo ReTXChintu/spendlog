@@ -118,13 +118,19 @@ export async function reconcileStatement(
       line.resolution = candidates.length > 1 ? "UNCERTAIN" : "MATCHED";
       summary[candidates.length > 1 ? "uncertain" : "matched"] += 1;
 
+      // The statement is a third witness to a payment the SMS and the email
+      // already reported, and it is the most authoritative of the three. So
+      // it joins the sources rather than only being noted on the statement
+      // - which is what puts the icon on the row and makes the line
+      // readable from the ledger, the same way a raw SMS is.
+      recordStatementSource(best, statement, line);
+
       // The statement names a merchant better than an SMS does, but only
       // gaps are filled and only while nobody has corrected the row by
       // hand - the same rule the duplicate path in ingest.ts follows.
-      if (!best.editedAt && !best.merchant) {
-        best.merchant = line.description;
-        await best.save();
-      }
+      if (!best.editedAt && !best.merchant) best.merchant = line.description;
+
+      await best.save();
       continue;
     }
 
@@ -162,6 +168,35 @@ export async function reconcileStatement(
   await statement.save();
 
   return summary;
+}
+
+/**
+ * Note on a transaction that a statement also reported it.
+ *
+ * The same shape the SMS and email paths use, so the clients need no new
+ * idea to show it: another entry in sources, with the statement's own line
+ * as the raw text. Idempotent, because a statement reconciled twice must
+ * not leave the row claiming two witnesses where there was one.
+ */
+function recordStatementSource(
+  transaction: HydratedDocument<TransactionDoc>,
+  statement: HydratedDocument<CardStatementDoc>,
+  line: CardStatementDoc["lines"][number]
+): void {
+  const sourceRef = `${statement.sourceRef}#${line._id.toString()}`;
+  if (transaction.sources.some((entry) => entry.sourceRef === sourceRef)) return;
+
+  transaction.sources.push({
+    source: "STATEMENT",
+    sourceRef,
+    // What the statement itself printed, which is often a better name for
+    // the payment than whatever the alert managed.
+    rawText: line.description,
+    receivedAt: statement.statementDate ?? new Date(),
+  });
+
+  transaction.statementId = statement._id;
+  transaction.statementLineId = line._id;
 }
 
 /** Which counter a resolution already reached belongs in. */
@@ -299,4 +334,98 @@ async function findCardNamedIn(userId: Types.ObjectId, description: string): Pro
 
   const named = cards.filter((card) => card.last4 && new RegExp(`\\b${card.last4}\\b`).test(description));
   return named.length === 1 ? named[0]._id : null;
+}
+
+/**
+ * Say by hand what a statement line is, when the matcher got it wrong.
+ *
+ * The matcher works on amount, direction, account and a few days either
+ * way. It never reads the merchant, so renaming one cannot break it - but
+ * two payments of the same amount in the same week are genuinely
+ * indistinguishable from the statement's side, and only a person knows
+ * which was which.
+ *
+ *   link   this line is that transaction after all
+ *   add    it is not any of them, so put it in as its own row
+ *   ignore it is not worth a row at all
+ *   reset  undo whatever was decided and let the matcher try again
+ *
+ * Anything the line previously added is taken back first, so changing one's
+ * mind never leaves a stray row behind.
+ */
+export async function resolveLineByHand(params: {
+  userId: Types.ObjectId;
+  statementId: Types.ObjectId;
+  lineId: string;
+  action: "link" | "add" | "ignore" | "reset";
+  transactionId?: string;
+}): Promise<{ resolution: StatementLineResolution } | null> {
+  const statement = await CardStatement.findOne({ _id: params.statementId, userId: params.userId });
+  if (!statement) return null;
+
+  const line = statement.lines.id(params.lineId);
+  if (!line) return null;
+
+  // Whatever this line put in the ledger comes out before anything else,
+  // so no path below can leave an orphan.
+  if (line.resolution === "ADDED" && line.transactionId) {
+    await Transaction.deleteOne({
+      userId: params.userId,
+      _id: line.transactionId,
+      statementId: statement._id,
+    });
+  }
+
+  line.transactionId = null;
+  line.resolution = "SKIPPED";
+
+  if (params.action === "link") {
+    const target = await Transaction.findOne({ _id: params.transactionId, userId: params.userId });
+    if (!target) return null;
+
+    line.transactionId = target._id;
+    line.resolution = "MATCHED";
+    recordStatementSource(target, statement, line);
+    await target.save();
+  } else if (params.action === "add") {
+    const created = await addFromLine(statement, line);
+    line.transactionId = created._id;
+    line.resolution = "ADDED";
+  }
+  // "ignore" leaves it skipped; "reset" leaves it skipped too, and the next
+  // reconcile will pick it up again because that is what SKIPPED means.
+
+  await statement.save();
+  return { resolution: line.resolution };
+}
+
+/**
+ * Transactions a statement line could plausibly be, for choosing between.
+ *
+ * Wider than the matcher's own window on purpose: this is asked precisely
+ * when the automatic answer was wrong, so holding it to the same bounds
+ * would offer the same wrong shortlist.
+ */
+export async function candidatesForLine(
+  userId: Types.ObjectId,
+  statementId: Types.ObjectId,
+  lineId: string
+): Promise<HydratedDocument<TransactionDoc>[]> {
+  const statement = await CardStatement.findOne({ _id: statementId, userId });
+  const line = statement?.lines.id(lineId);
+  if (!statement || !line) return [];
+
+  const window = 10 * DAY_MS;
+  return Transaction.find({
+    userId,
+    type: line.type,
+    occurredAt: {
+      $gte: new Date(line.date.getTime() - window),
+      $lte: new Date(line.date.getTime() + window),
+    },
+  })
+    .sort({ occurredAt: -1 })
+    .limit(40)
+    .populate("category")
+    .populate("account");
 }

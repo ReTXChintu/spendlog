@@ -39,6 +39,7 @@ export function RawMessageModal({
 
   function labelFor(source: string): string {
     if (source === "MANUAL") return "Added by hand";
+    if (source === "STATEMENT") return "Statement";
     return source === "EMAIL" ? "Email" : "SMS";
   }
 
@@ -58,7 +59,7 @@ export function RawMessageModal({
           <Icon name="ic-receipt" />
           <span>
             {sources.length > 1
-              ? `This transaction was reported ${sources.length} times`
+              ? `Reported ${sources.length} times — a statement is the bank's own list, so it is the last word`
               : `${labelFor(sources[0].source)} · ${formatDateTime(sources[0].receivedAt)}`}
           </span>
         </div>

@@ -344,3 +344,176 @@ describe("unpickStatement", () => {
     assert.equal(await models.Transaction.countDocuments({ userId }), 1);
   });
 });
+
+describe("what the ledger remembers about a statement", () => {
+  it("records the statement as a witness on a row it only matched", async () => {
+    // Two payments of the same amount days apart are indistinguishable
+    // from a statement's side. Knowing a statement confirmed a row is what
+    // lets the ledger show a third icon beside the SMS and the email.
+    const card = await makeCard();
+    const known = await makeTransaction(card._id, "2026-09-05", 389010);
+    const statement = await makeStatement(card._id, [
+      { day: "2026-09-05", description: "BIGBASKET BANGALORE", amountMinor: 389010 },
+    ]);
+
+    await reconcile.reconcileStatement(statement);
+
+    const after = await models.Transaction.findById(known).orFail();
+    const fromStatement = after.sources.filter((entry) => entry.source === "STATEMENT");
+    assert.equal(fromStatement.length, 1);
+    assert.equal(fromStatement[0].rawText, "BIGBASKET BANGALORE");
+    assert.equal(after.statementId?.toString(), statement._id.toString());
+  });
+
+  it("does not claim two witnesses where there was one", async () => {
+    const card = await makeCard();
+    const known = await makeTransaction(card._id, "2026-09-05", 389010);
+    const statement = await makeStatement(card._id, [
+      { day: "2026-09-05", description: "BIGBASKET BANGALORE", amountMinor: 389010 },
+    ]);
+
+    await reconcile.reconcileStatement(statement);
+    await reconcile.reconcileStatement(await models.CardStatement.findById(statement._id).orFail());
+
+    const after = await models.Transaction.findById(known).orFail();
+    assert.equal(after.sources.filter((entry) => entry.source === "STATEMENT").length, 1);
+  });
+
+  it("matches on the amount and the day, never on the merchant's name", async () => {
+    // So renaming a merchant by hand cannot stop a statement recognising
+    // the payment it belongs to.
+    const card = await makeCard();
+    await models.Transaction.create({
+      userId,
+      accountId: card._id,
+      amountMinor: 389010,
+      type: "DEBIT",
+      merchant: "Weekly shop",
+      source: "SMS",
+      occurredAt: istDayStart("2026-09-05"),
+      editedAt: new Date(),
+    });
+
+    const statement = await makeStatement(card._id, [
+      { day: "2026-09-05", description: "BIGBASKET BANGALORE", amountMinor: 389010 },
+    ]);
+
+    const summary = await reconcile.reconcileStatement(statement);
+    assert.equal(summary.matched, 1);
+    assert.equal(summary.added, 0);
+  });
+});
+
+describe("saying by hand what a line is", () => {
+  it("links a line to a transaction the matcher passed over", async () => {
+    const card = await makeCard();
+    // Too far out for the matcher's window, but the right payment.
+    const actual = await makeTransaction(card._id, "2026-08-28", 124000);
+    const statement = await makeStatement(card._id, [
+      { day: "2026-09-08", description: "AMZNIN MUMBAI IN", amountMinor: 124000 },
+    ]);
+
+    await reconcile.reconcileStatement(statement);
+    assert.equal(await models.Transaction.countDocuments({ userId }), 2, "it added its own row");
+
+    const reread = await models.CardStatement.findById(statement._id).orFail();
+    const result = await reconcile.resolveLineByHand({
+      userId,
+      statementId: statement._id,
+      lineId: reread.lines[0]._id.toString(),
+      action: "link",
+      transactionId: actual._id.toString(),
+    });
+
+    assert.equal(result?.resolution, "MATCHED");
+    // The row it had added is gone, rather than left beside the real one.
+    assert.equal(await models.Transaction.countDocuments({ userId }), 1);
+
+    const after = await models.Transaction.findById(actual).orFail();
+    assert.equal(after.sources.filter((entry) => entry.source === "STATEMENT").length, 1);
+  });
+
+  it("adds a row for a line the matcher wrongly tied to something else", async () => {
+    const card = await makeCard();
+    await makeTransaction(card._id, "2026-09-05", 25000);
+    const statement = await makeStatement(card._id, [
+      { day: "2026-09-05", description: "THIRD WAVE COFFEE", amountMinor: 25000 },
+    ]);
+
+    await reconcile.reconcileStatement(statement);
+    assert.equal(await models.Transaction.countDocuments({ userId }), 1, "matched, nothing added");
+
+    const reread = await models.CardStatement.findById(statement._id).orFail();
+    await reconcile.resolveLineByHand({
+      userId,
+      statementId: statement._id,
+      lineId: reread.lines[0]._id.toString(),
+      action: "add",
+    });
+
+    assert.equal(await models.Transaction.countDocuments({ userId }), 2, "two separate payments");
+  });
+
+  it("takes back what it added when a line is ignored", async () => {
+    const card = await makeCard();
+    const statement = await makeStatement(card._id, [
+      { day: "2026-09-01", description: "FINANCE CHARGES", amountMinor: 31875, kind: "FEE" },
+    ]);
+    await reconcile.reconcileStatement(statement);
+    assert.equal(await models.Transaction.countDocuments({ userId }), 1);
+
+    const reread = await models.CardStatement.findById(statement._id).orFail();
+    const result = await reconcile.resolveLineByHand({
+      userId,
+      statementId: statement._id,
+      lineId: reread.lines[0]._id.toString(),
+      action: "ignore",
+    });
+
+    assert.equal(result?.resolution, "SKIPPED");
+    assert.equal(await models.Transaction.countDocuments({ userId }), 0);
+  });
+
+  it("offers what a line might be, beyond the window the matcher used", async () => {
+    const card = await makeCard();
+    await makeTransaction(card._id, "2026-08-30", 124000, "Nine days earlier");
+    const statement = await makeStatement(card._id, [
+      { day: "2026-09-08", description: "AMZNIN MUMBAI IN", amountMinor: 124000 },
+    ]);
+
+    const reread = await models.CardStatement.findById(statement._id).orFail();
+    const candidates = await reconcile.candidatesForLine(
+      userId,
+      statement._id,
+      reread.lines[0]._id.toString()
+    );
+
+    assert.ok(candidates.some((row) => row.merchant === "Nine days earlier"));
+  });
+
+  it("will not link to someone else's transaction", async () => {
+    const card = await makeCard();
+    const stranger = new Types.ObjectId();
+    const theirs = await models.Transaction.create({
+      userId: stranger,
+      amountMinor: 124000,
+      type: "DEBIT",
+      source: "SMS",
+      occurredAt: istDayStart("2026-09-08"),
+    });
+
+    const statement = await makeStatement(card._id, [
+      { day: "2026-09-08", description: "AMZNIN MUMBAI IN", amountMinor: 124000 },
+    ]);
+    const reread = await models.CardStatement.findById(statement._id).orFail();
+
+    const result = await reconcile.resolveLineByHand({
+      userId,
+      statementId: statement._id,
+      lineId: reread.lines[0]._id.toString(),
+      action: "link",
+      transactionId: theirs._id.toString(),
+    });
+    assert.equal(result, null);
+  });
+});

@@ -120,11 +120,12 @@ class TransactionTile extends StatelessWidget {
                     // says so without being opened.
                     for (final kind in transaction.sourceKinds) ...[
                       Icon(
-                        kind == 'EMAIL'
-                            ? Icons.mail_outline
-                            : kind == 'MANUAL'
-                                ? Icons.edit_outlined
-                                : Icons.sms_outlined,
+                        switch (kind) {
+                          'EMAIL' => Icons.mail_outline,
+                          'MANUAL' => Icons.edit_outlined,
+                          'STATEMENT' => Icons.receipt_long_outlined,
+                          _ => Icons.sms_outlined,
+                        },
                         size: 12,
                         color: context.c.muted,
                       ),

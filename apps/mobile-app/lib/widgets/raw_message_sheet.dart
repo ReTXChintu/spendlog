@@ -3,15 +3,19 @@ import '../models/models.dart';
 import '../theme.dart';
 import '../utils/format.dart';
 
-String _labelFor(String source) {
-  if (source == 'MANUAL') return 'Added by hand';
-  return source == 'EMAIL' ? 'Email' : 'SMS';
-}
+String _labelFor(String source) => switch (source) {
+      'MANUAL' => 'Added by hand',
+      'STATEMENT' => 'Statement',
+      'EMAIL' => 'Email',
+      _ => 'SMS',
+    };
 
-IconData _iconFor(String source) {
-  if (source == 'MANUAL') return Icons.edit_outlined;
-  return source == 'EMAIL' ? Icons.mail_outline : Icons.sms_outlined;
-}
+IconData _iconFor(String source) => switch (source) {
+      'MANUAL' => Icons.edit_outlined,
+      'STATEMENT' => Icons.receipt_long_outlined,
+      'EMAIL' => Icons.mail_outline,
+      _ => Icons.sms_outlined,
+    };
 
 /// Shows the messages a transaction was parsed from. Rows appear without the
 /// user entering them, so being able to check where a figure came from is

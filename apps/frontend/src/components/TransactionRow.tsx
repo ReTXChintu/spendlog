@@ -48,7 +48,15 @@ export function TransactionRow({
   // Distinct source kinds, in the order they first arrived.
   const sourceIcons = Array.from(
     new Set((transaction.sources.length > 0 ? transaction.sources : [transaction]).map((s) => s.source))
-  ).map((source) => (source === "EMAIL" ? "ic-mail" : source === "MANUAL" ? "ic-pencil" : "ic-message"));
+  ).map((source) =>
+    source === "EMAIL"
+      ? "ic-mail"
+      : source === "MANUAL"
+        ? "ic-pencil"
+        : source === "STATEMENT"
+          ? "ic-receipt"
+          : "ic-message"
+  );
 
   const meta = [
     account ? accountLabel(account) : null,

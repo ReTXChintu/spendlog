@@ -5,7 +5,12 @@ import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
 import { Account, CardStatement, Transaction } from "../../models";
 import { encryptPassword, encryptionAvailable } from "./statements.crypto";
-import { reconcileStatement, unpickStatement } from "./statements.reconcile";
+import {
+  candidatesForLine,
+  reconcileStatement,
+  resolveLineByHand,
+  unpickStatement,
+} from "./statements.reconcile";
 import { rereadStatement, syncStatements } from "./statements.service";
 import { upcomingBills } from "./statements.bills";
 
@@ -164,6 +169,51 @@ statementsRouter.delete("/:id", validObjectIdParam("id"), async (req, res) => {
   if (!deleted) return res.status(404).json({ error: "Not found" });
 
   res.json({ removed });
+});
+
+const lineActionSchema = z.object({
+  action: z.enum(["link", "add", "ignore", "reset"]),
+  transactionId: z
+    .string()
+    .regex(/^[0-9a-fA-F]{24}$/)
+    .optional(),
+});
+
+// GET /statements/:id/lines/:lineId/candidates - what this line might be.
+//
+// Asked precisely when the automatic answer was wrong, so the window is
+// wider than the matcher's own: holding it to the same bounds would offer
+// the same wrong shortlist again.
+statementsRouter.get("/:id/lines/:lineId/candidates", validObjectIdParam("id"), async (req, res) => {
+  res.json(
+    await candidatesForLine(currentUserId(req), new Types.ObjectId(req.params.id), req.params.lineId)
+  );
+});
+
+// PATCH /statements/:id/lines/:lineId - say what a line is, by hand.
+//
+// The matcher works on amount, direction, account and a few days either
+// way, and never reads the merchant - so renaming one cannot break it. But
+// two payments of the same amount in the same week are indistinguishable
+// from the statement's side, and only a person knows which was which.
+statementsRouter.patch("/:id/lines/:lineId", validObjectIdParam("id"), async (req, res) => {
+  const parsed = lineActionSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+  if (parsed.data.action === "link" && !parsed.data.transactionId) {
+    return res.status(400).json({ error: "Say which transaction it is" });
+  }
+
+  const result = await resolveLineByHand({
+    userId: currentUserId(req),
+    statementId: new Types.ObjectId(req.params.id),
+    lineId: req.params.lineId,
+    action: parsed.data.action,
+    transactionId: parsed.data.transactionId,
+  });
+
+  if (!result) return res.status(404).json({ error: "Not found" });
+  res.json(result);
 });
 
 const assignSchema = z.object({
