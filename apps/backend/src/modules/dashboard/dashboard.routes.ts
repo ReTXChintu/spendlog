@@ -136,9 +136,19 @@ async function owedBalance(userId: Types.ObjectId) {
     {
       $group: {
         _id: null,
+        // The part of a split bill that was never the user's own spending,
+        // which is the bill less their share. There is no stored field for
+        // it - this used to read split.owedToMeMinor, which does not exist
+        // on the schema, so every lent rupee summed as nothing and the
+        // dashboard reported money owed *by* the user whenever anyone paid
+        // them back.
         lent: {
           $sum: {
-            $cond: [{ $gt: ["$split.owedToMeMinor", 0] }, "$split.owedToMeMinor", 0],
+            $cond: [
+              { $ne: [{ $ifNull: ["$split.myShareMinor", null] }, null] },
+              { $subtract: ["$amountMinor", "$split.myShareMinor"] },
+              0,
+            ],
           },
         },
         settledIn: {

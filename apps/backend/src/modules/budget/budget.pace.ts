@@ -95,6 +95,12 @@ export async function budgetPace(userId: Types.ObjectId, now = new Date()) {
   // marked against it. Marking the payment rather than ticking a box is
   // what lets a bill be paid early: the period it lands in decides which
   // month it settles, not the day of the month it was due.
+  //
+  // Summed on countedAmountMinor rather than the amount that left the
+  // account, because those differ exactly when it matters. Rent of 12,000
+  // paid for a flat of three, split down to a share of 4,000, is a 4,000
+  // commitment met in full - not a 4,000 commitment overpaid by three times
+  // over, which is what the raw amount would have said.
   const paidRows = await Transaction.aggregate<{ _id: Types.ObjectId; total: number }>([
     {
       $match: {
@@ -104,7 +110,7 @@ export async function budgetPace(userId: Types.ObjectId, now = new Date()) {
         occurredAt: { $gte: period.start, $lt: period.end },
       },
     },
-    { $group: { _id: "$commitmentId", total: { $sum: "$amountMinor" } } },
+    { $group: { _id: "$commitmentId", total: { $sum: "$countedAmountMinor" } } },
   ]);
   const paidByCommitment = new Map(paidRows.map((row) => [row._id.toString(), row.total]));
 

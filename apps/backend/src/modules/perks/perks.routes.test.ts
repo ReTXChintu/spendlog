@@ -468,6 +468,33 @@ describe("the dashboard", () => {
     assert.equal(body.expiringPerks[0].daysLeft, 3);
   });
 
+  it("counts what people owe the user, not the other way round", async () => {
+    // A bill paid whole for three, then one of them paying their share
+    // back. This read as money the user *owed* while the lent side summed
+    // a field that was never on the schema.
+    const user = await makeUser();
+    await models.Transaction.create({
+      userId: user.id,
+      amountMinor: 1200000,
+      type: "DEBIT",
+      source: "MANUAL",
+      occurredAt: new Date(),
+      split: { myShareMinor: 400000 },
+    });
+    await models.Transaction.create({
+      userId: user.id,
+      amountMinor: 400000,
+      type: "CREDIT",
+      source: "MANUAL",
+      occurredAt: new Date(),
+      isSettlement: true,
+    });
+
+    const body = await json<{ owed: { balanceMinor: number } }>(await call("/dashboard", user.token));
+    // 8,000 lent, 4,000 of it back: 4,000 still owed to the user.
+    assert.equal(body.owed.balanceMinor, 400000);
+  });
+
   it("turns nobody away without a token", async () => {
     assert.equal((await fetch(`${baseUrl}/dashboard`)).status, 401);
   });

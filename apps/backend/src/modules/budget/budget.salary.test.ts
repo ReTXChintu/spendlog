@@ -305,3 +305,62 @@ describe("a fixed cost settled by a payment rather than a tick", () => {
     assert.equal(pace.commitments[0].isPaid, false);
   });
 });
+
+describe("a fixed cost paid for a household", () => {
+  it("reads a shared bill as the share it cost, not the sum that left", async () => {
+    // Rent of 12,000 for a flat of three, paid whole by one of them. The
+    // commitment is the 4,000 it actually costs; the payment that meets it
+    // is a 12,000 debit split down to that share.
+    const userId = await paidOnThe15th();
+    const rent = await models.FixedCommitment.create({
+      userId,
+      name: "Rent",
+      amountMinor: 400000,
+      dayOfMonth: 5,
+    });
+
+    await models.Transaction.create({
+      userId,
+      amountMinor: 1200000,
+      type: "DEBIT",
+      merchant: "Landlord",
+      source: "MANUAL",
+      occurredAt: istDayStart("2026-09-18"),
+      commitmentId: rent._id,
+      split: { myShareMinor: 400000 },
+    });
+
+    const pace = await budgetPace(userId, istDayStart("2026-09-20"));
+    if (!pace.configured) return assert.fail("should be configured");
+
+    assert.equal(pace.commitments[0].paidMinor, 400000, "the share, not the cheque");
+    assert.equal(pace.commitments[0].isPaid, true);
+    assert.equal(pace.commitmentsRemainingMinor, 0);
+    assert.equal(pace.spentMinor, 400000, "and the spending is the share too");
+  });
+
+  it("still reads short when the share itself went out short", async () => {
+    const userId = await paidOnThe15th();
+    const rent = await models.FixedCommitment.create({
+      userId,
+      name: "Rent",
+      amountMinor: 400000,
+      dayOfMonth: 5,
+    });
+
+    await models.Transaction.create({
+      userId,
+      amountMinor: 900000,
+      type: "DEBIT",
+      source: "MANUAL",
+      occurredAt: istDayStart("2026-09-18"),
+      commitmentId: rent._id,
+      split: { myShareMinor: 100000 },
+    });
+
+    const pace = await budgetPace(userId, istDayStart("2026-09-20"));
+    if (!pace.configured) return assert.fail("should be configured");
+    assert.equal(pace.commitments[0].isPartial, true);
+    assert.equal(pace.commitments[0].shortfallMinor, 300000);
+  });
+});
