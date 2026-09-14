@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { gmail_v1, google } from "googleapis";
 import { HydratedDocument, Types } from "mongoose";
 import { Account, CardStatement, CardStatementDoc, EmailConnection } from "../../models";
@@ -153,6 +154,17 @@ function headerValue(payload: gmail_v1.Schema$MessagePart | undefined, name: str
 type ReadOutcome = number | "locked" | "unidentified" | "skipped";
 
 /**
+ * The three ways a statement names itself: where it came from, the mail it
+ * came in, and what it is. Written together on every path, so no statement
+ * ends up identified by one of them and not the others.
+ */
+interface StatementIdentity {
+  sourceRef: string;
+  mailKey: string;
+  fileHash: string | null;
+}
+
+/**
  * One attachment, from "have we seen this" through to reconciled.
  *
  * Returns how many transactions it added, or why it could not get that far.
@@ -174,13 +186,22 @@ async function readOneStatement(params: {
   pdf?: Buffer;
 }): Promise<ReadOutcome> {
   const sourceRef = `${params.messageId}#${params.attachment.attachmentId}`;
+  const mailKey = `${params.messageId}#${params.attachment.fileName}`;
 
-  // The first and strongest guard against reading the same statement twice.
-  const existing = await CardStatement.findOne({ userId: params.userId, sourceRef });
+  // The first and strongest guard against reading the same statement twice,
+  // and for a long time it did not hold: it was keyed on the attachment id,
+  // which Gmail mints per fetch, so every sync saw every statement as new.
+  const existing = await CardStatement.findOne({ userId: params.userId, mailKey });
   if (existing && existing.status === "PARSED" && existing.reconciledAt) return "skipped";
 
   if (params.attachment.size > MAX_ATTACHMENT_BYTES) {
-    await recordProblem(params.userId, sourceRef, params, "UNREADABLE", "The attachment is too large to be a statement");
+    await recordProblem(
+      { userId: params.userId, mailKey },
+      { sourceRef, mailKey, fileHash: null },
+      params,
+      "UNREADABLE",
+      "The attachment is too large to be a statement"
+    );
     return "skipped";
   }
 
@@ -190,9 +211,28 @@ async function readOneStatement(params: {
       ? await downloadAttachment(params.gmail, params.messageId, params.attachment.attachmentId)
       : null);
   if (!file) {
-    await recordProblem(params.userId, sourceRef, params, "UNREADABLE", "The attachment could not be downloaded");
+    await recordProblem(
+      { userId: params.userId, mailKey },
+      { sourceRef, mailKey, fileHash: null },
+      params,
+      "UNREADABLE",
+      "The attachment could not be downloaded"
+    );
     return "skipped";
   }
+
+  // The backstop mailKey cannot provide: the same PDF, re-sent by the bank
+  // under a different message id. Found by what the file is rather than by
+  // where it came from, and updated in place rather than forked.
+  const fileHash = crypto.createHash("sha256").update(file).digest("hex");
+
+  const twin = existing ?? (await CardStatement.findOne({ userId: params.userId, fileHash }));
+  if (twin && twin.status === "PARSED" && twin.reconciledAt) return "skipped";
+
+  // A statement already on file is updated where it sits. Only a genuinely
+  // new one is keyed on its mail.
+  const identity = { sourceRef, mailKey, fileHash };
+  const filter = twin ? { _id: twin._id, userId: params.userId } : { userId: params.userId, mailKey };
 
   let rows: string[] | null = null;
 
@@ -206,14 +246,7 @@ async function readOneStatement(params: {
       if (error instanceof StatementLockedError) continue;
       // Not a readable PDF at all. Recorded rather than thrown so the rest
       // of the mailbox still gets scanned.
-      await recordProblem(
-        params.userId,
-        sourceRef,
-        params,
-        "UNREADABLE",
-        "This file could not be opened as a PDF",
-        file
-      );
+      await recordProblem(filter, identity, params, "UNREADABLE", "This file could not be opened as a PDF", file);
       return "skipped";
     }
   }
@@ -232,7 +265,7 @@ async function readOneStatement(params: {
           "on the card under Accounts and cards."
         : "None of the stored passwords opened this statement. Check the one on this card.";
 
-    await recordProblem(params.userId, sourceRef, params, "LOCKED", problem, file);
+    await recordProblem(filter, identity, params, "LOCKED", problem, file);
     return "locked";
   }
 
@@ -240,11 +273,13 @@ async function readOneStatement(params: {
   const parsed = parseStatementRows(rows);
   if (parsed.lines.length === 0) {
     await recordProblem(
-      params.userId,
-      sourceRef,
+      filter,
+      identity,
       params,
       "UNREADABLE",
-      "No transaction table could be found in this file"
+      "No transaction table could be found in this file",
+      file,
+      rows
     );
     return "skipped";
   }
@@ -261,9 +296,10 @@ async function readOneStatement(params: {
     : undefined;
 
   const statement = await CardStatement.findOneAndUpdate(
-    { userId: params.userId, sourceRef },
+    filter,
     {
       $set: {
+        ...identity,
         accountId: card?._id ?? null,
         subject: params.subject,
         fileName: params.attachment.fileName,
@@ -358,22 +394,27 @@ async function downloadAttachment(
  * should not lose the reconciliation it already has.
  */
 async function recordProblem(
-  userId: Types.ObjectId,
-  sourceRef: string,
+  filter: Record<string, unknown>,
+  identity: StatementIdentity,
   params: { subject: string | null; receivedAt: Date | null; attachment: PdfAttachment },
   status: CardStatementDoc["status"],
   problem: string,
-  pdf?: Buffer
+  pdf?: Buffer,
+  rows?: string[]
 ): Promise<void> {
   const statement = await CardStatement.findOneAndUpdate(
-    { userId, sourceRef },
+    filter,
     {
       $set: {
+        ...identity,
         status,
         problem,
         subject: params.subject,
         receivedAt: params.receivedAt,
         fileName: params.attachment.fileName,
+        // A statement that opened and had nothing found in it has rows and
+        // no lines, and those rows are the whole of the evidence for why.
+        ...(rows ? { rows } : {}),
       },
       $setOnInsert: { lines: [] },
     },

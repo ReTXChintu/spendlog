@@ -781,9 +781,22 @@ export interface CardStatementDoc {
   /// Null while the statement could not be tied to a card - either it is
   /// still locked, or the card it belongs to is not in the app.
   accountId?: Types.ObjectId | null;
-  /// Gmail message id and attachment id together. Unique per user, which
-  /// is what makes a repeated sync cost nothing.
+  /// Gmail message id and attachment id together. Provenance, and
+  /// deliberately no longer an identity - see mailKey.
   sourceRef: string;
+  /// What actually identifies a statement: the mail it arrived in, and the
+  /// name of the file on it. Unique per user, which is what makes a
+  /// repeated sync cost nothing.
+  ///
+  /// sourceRef was doing this job and could not do it. Gmail's attachmentId
+  /// is an opaque token handed out per fetch rather than a stable name for
+  /// the attachment, so every sync built a different sourceRef for the same
+  /// file, matched nothing, and read the statement again from scratch -
+  /// adding every transaction on it a second and a third time.
+  mailKey?: string | null;
+  /// A SHA-256 of the PDF, and the backstop for what mailKey cannot see:
+  /// the same statement re-sent in a genuinely different mail.
+  fileHash?: string | null;
   subject?: string | null;
   fileName?: string | null;
   /// Whether this is a card statement or a bank one. The model is still
@@ -838,6 +851,8 @@ const cardStatementSchema = new Schema<CardStatementDoc>(
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     accountId: { type: Schema.Types.ObjectId, ref: "Account", default: null },
     sourceRef: { type: String, required: true },
+    mailKey: { type: String, default: null },
+    fileHash: { type: String, default: null },
     kind: { type: String, enum: STATEMENT_KINDS, default: "CARD" },
     subject: { type: String, default: null },
     fileName: { type: String, default: null },
@@ -904,7 +919,25 @@ cardStatementSchema.pre("findOneAndUpdate", async function (next) {
 // One statement per attachment. A sync that runs twice finds this rather
 // than creating a second copy, which is the whole defence against a
 // statement being reconciled - and its missing lines added - more than once.
-cardStatementSchema.index({ userId: 1, sourceRef: 1 }, { unique: true });
+//
+// Partial rather than sparse, which on a compound index is not the same
+// thing at all: sparse skips a document only when *every* indexed field is
+// missing, and userId never is - so two statements with no fileHash would
+// both index a null and the second would be rejected. The two that have
+// none are the attachment too large to be a statement and the one that
+// would not download, and neither is rare enough to lose.
+cardStatementSchema.index(
+  { userId: 1, mailKey: 1 },
+  { unique: true, partialFilterExpression: { mailKey: { $type: "string" } } }
+);
+cardStatementSchema.index(
+  { userId: 1, fileHash: 1 },
+  { unique: true, partialFilterExpression: { fileHash: { $type: "string" } } }
+);
+// Kept non-unique. It was the identity and was not stable enough to be one,
+// so it is now what it should always have been: a record of where a
+// statement came from.
+cardStatementSchema.index({ userId: 1, sourceRef: 1 });
 cardStatementSchema.index({ userId: 1, statementDate: -1 });
 // The shape the statements screen asks for: one card's statements, newest
 // month first.

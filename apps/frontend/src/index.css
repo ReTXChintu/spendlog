@@ -895,3 +895,19 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
   .statement-lines{max-height:46vh}
   .statement-pdf{height:52vh}
 }
+
+/* ------------------------------------------ statements read more than once */
+/* A card that only appears when there is a mess to clear up, and states the
+   cost in rows before it offers a button. */
+.set-card.is-warning{border-color:var(--warn)}
+.set-card-icon.is-warn{background:var(--warn-bg);color:var(--warn)}
+
+.reset-figures{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;
+  margin:14px 0 4px;padding:0}
+.reset-figures>div{padding:10px 12px;background:var(--paper);border:1px solid var(--line);
+  border-radius:var(--radius-sm)}
+.reset-figures dt{font-size:11px;font-weight:600;color:var(--muted);margin:0 0 4px}
+.reset-figures dd{margin:0;font-size:14.5px;font-weight:700;font-family:var(--font-mono);
+  font-variant-numeric:tabular-nums}
+.reset-figures dd.is-going{color:var(--debit)}
+.reset-figures dd.is-staying{color:var(--credit)}

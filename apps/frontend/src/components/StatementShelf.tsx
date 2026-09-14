@@ -4,6 +4,7 @@ import { api } from "../lib/api";
 import { formatMoneyShort } from "../lib/format";
 import { Icon } from "./Icon";
 import { StatementDetailModal } from "./StatementDetailModal";
+import { StatementResetCard } from "./StatementResetCard";
 import { StatementTextModal } from "./StatementTextModal";
 
 /**
@@ -32,7 +33,12 @@ interface StatementRow {
   knownSpendMinor: number;
   hasFile: boolean;
   lineCount: number;
-  counts: { matched: number; added: number; uncertain: number; skipped: number };
+  counts: {
+    matched: number;
+    added: number;
+    uncertain: number;
+    skipped: number;
+  };
 }
 
 interface MonthGroup {
@@ -56,7 +62,13 @@ const STATUS_LABEL: Record<StatementRow["status"], string> = {
   UNREADABLE: "Could not open",
 };
 
-export function StatementShelf({ accounts, onChanged }: { accounts: Account[]; onChanged?: () => void }) {
+export function StatementShelf({
+  accounts,
+  onChanged,
+}: {
+  accounts: Account[];
+  onChanged?: () => void;
+}) {
   const [groups, setGroups] = useState<AccountGroup[]>([]);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -76,7 +88,9 @@ export function StatementShelf({ accounts, onChanged }: { accounts: Account[]; o
         setOpen((current) =>
           Object.keys(current).length > 0
             ? current
-            : Object.fromEntries(next.map((group) => [group.accountId, needsWork(group)]))
+            : Object.fromEntries(
+                next.map((group) => [group.accountId, needsWork(group)]),
+              ),
         );
       })
       .catch(() => setGroups([]))
@@ -114,8 +128,9 @@ export function StatementShelf({ accounts, onChanged }: { accounts: Account[]; o
           </div>
         </div>
         <p className="desc">
-          Statements arrive from the same mailbox as everything else. Scan for them under Connections,
-          and they will be filed here under the card they belong to.
+          Statements arrive from the same mailbox as everything else. Scan for
+          them under Connections, and they will be filed here under the card
+          they belong to.
         </p>
       </div>
     );
@@ -123,208 +138,280 @@ export function StatementShelf({ accounts, onChanged }: { accounts: Account[]; o
 
   const cards = accounts.filter((account) => account.accountType === "CARD");
   const anyLocked = groups.some((group) =>
-    group.months.some((month) => month.statements.some((row) => row.status === "LOCKED"))
+    group.months.some((month) =>
+      month.statements.some((row) => row.status === "LOCKED"),
+    ),
   );
 
   return (
-    <div className="card set-card set-card-wide">
-      <div className="set-card-head">
-        <div className="set-card-icon">
-          <Icon name="ic-receipt" />
+    <>
+      <StatementResetCard onDone={load} />
+
+      <div className="card set-card set-card-wide">
+        <div className="set-card-head">
+          <div className="set-card-icon">
+            <Icon name="ic-receipt" />
+          </div>
+          <div>
+            <h4>Statements</h4>
+            <p className="set-card-sub">{shelfSummary(groups)}</p>
+          </div>
         </div>
-        <div>
-          <h4>Statements</h4>
-          <p className="set-card-sub">{shelfSummary(groups)}</p>
-        </div>
-      </div>
 
-      {error && <p className="desc set-warn">{error}</p>}
+        {error && <p className="desc set-warn">{error}</p>}
 
-      <div className="shelf">
-        {groups.map((group) => {
-          const count = group.months.reduce((sum, month) => sum + month.statements.length, 0);
-          const stuck = countStuck(group);
-          const isOpen = open[group.accountId] ?? false;
+        <div className="shelf">
+          {groups.map((group) => {
+            const count = group.months.reduce(
+              (sum, month) => sum + month.statements.length,
+              0,
+            );
+            const stuck = countStuck(group);
+            const isOpen = open[group.accountId] ?? false;
 
-          return (
-            <section className="shelf-account" key={group.accountId}>
-              <button
-                className="shelf-head"
-                aria-expanded={isOpen}
-                onClick={() => setOpen((current) => ({ ...current, [group.accountId]: !isOpen }))}
-              >
-                <Icon name={isOpen ? "ic-chevron-down" : "ic-chevron-right"} />
-                <span className="shelf-name">
-                  {group.name}
-                  {group.last4 && <span className="shelf-last4">•••• {group.last4}</span>}
-                  {group.network && <span className="shelf-network">{group.network}</span>}
-                </span>
-                <span className="shelf-count">
-                  {count} statement{count === 1 ? "" : "s"}
-                  {stuck > 0 && <span className="shelf-stuck">{stuck} need attention</span>}
-                </span>
-              </button>
+            return (
+              <section className="shelf-account" key={group.accountId}>
+                <button
+                  className="shelf-head"
+                  aria-expanded={isOpen}
+                  onClick={() =>
+                    setOpen((current) => ({
+                      ...current,
+                      [group.accountId]: !isOpen,
+                    }))
+                  }
+                >
+                  <Icon
+                    name={isOpen ? "ic-chevron-down" : "ic-chevron-right"}
+                  />
+                  <span className="shelf-name">
+                    {group.name}
+                    {group.last4 && (
+                      <span className="shelf-last4">•••• {group.last4}</span>
+                    )}
+                    {group.network && (
+                      <span className="shelf-network">{group.network}</span>
+                    )}
+                  </span>
+                  <span className="shelf-count">
+                    {count} statement{count === 1 ? "" : "s"}
+                    {stuck > 0 && (
+                      <span className="shelf-stuck">
+                        {stuck} need attention
+                      </span>
+                    )}
+                  </span>
+                </button>
 
-              {isOpen &&
-                group.months.map((month) => (
-                  <div className="shelf-month" key={month.month}>
-                    <h5 className="shelf-month-name">{monthLabel(month.month)}</h5>
+                {isOpen &&
+                  group.months.map((month) => (
+                    <div className="shelf-month" key={month.month}>
+                      <h5 className="shelf-month-name">
+                        {monthLabel(month.month)}
+                      </h5>
 
-                    <div className="statement-list">
-                      {month.statements.map((statement) => (
-                        <div
-                          className={`statement-row is-${statement.status.toLowerCase()}`}
-                          key={statement.id}
-                        >
-                          <div className="statement-main">
-                            <div className="statement-title">
-                              <span className={`statement-pill is-${statement.status.toLowerCase()}`}>
-                                {STATUS_LABEL[statement.status]}
-                              </span>
-                              {statement.subject ?? statement.fileName ?? "A statement"}
-                              {statement.kind === "BANK" && <span className="statement-kind">bank</span>}
+                      <div className="statement-list">
+                        {month.statements.map((statement) => (
+                          <div
+                            className={`statement-row is-${statement.status.toLowerCase()}`}
+                            key={statement.id}
+                          >
+                            <div className="statement-main">
+                              <div className="statement-title">
+                                <span
+                                  className={`statement-pill is-${statement.status.toLowerCase()}`}
+                                >
+                                  {STATUS_LABEL[statement.status]}
+                                </span>
+                                {statement.subject ??
+                                  statement.fileName ??
+                                  "A statement"}
+                                {statement.kind === "BANK" && (
+                                  <span className="statement-kind">bank</span>
+                                )}
+                              </div>
+
+                              <div className="statement-sub">
+                                {statementDay(statement) && (
+                                  <>{statementDay(statement)} · </>
+                                )}
+                                {statement.status === "PARSED" ? (
+                                  <>
+                                    {statement.lineCount} transactions ·{" "}
+                                    {statement.counts.added} added,{" "}
+                                    {statement.counts.matched +
+                                      statement.counts.uncertain}{" "}
+                                    already known
+                                    {statement.totalDueMinor ? (
+                                      <>
+                                        {" "}
+                                        ·{" "}
+                                        {formatMoneyShort(
+                                          statement.totalDueMinor,
+                                        )}{" "}
+                                        due
+                                      </>
+                                    ) : null}
+                                  </>
+                                ) : (
+                                  (statement.problem ??
+                                  "No reason was recorded.")
+                                )}
+                              </div>
                             </div>
 
-                            <div className="statement-sub">
-                              {statementDay(statement) && <>{statementDay(statement)} · </>}
-                              {statement.status === "PARSED" ? (
-                                <>
-                                  {statement.lineCount} transactions · {statement.counts.added} added,{" "}
-                                  {statement.counts.matched + statement.counts.uncertain} already known
-                                  {statement.totalDueMinor ? (
-                                    <> · {formatMoneyShort(statement.totalDueMinor)} due</>
-                                  ) : null}
-                                </>
-                              ) : (
-                                (statement.problem ?? "No reason was recorded.")
+                            <div className="statement-actions">
+                              {statement.status === "PARSED" && (
+                                <button
+                                  className="btn btn-sm"
+                                  onClick={() => setShowing(statement.id)}
+                                >
+                                  Open
+                                </button>
                               )}
-                            </div>
-                          </div>
 
-                          <div className="statement-actions">
-                            {statement.status === "PARSED" && (
-                              <button className="btn btn-sm" onClick={() => setShowing(statement.id)}>
-                                Open
-                              </button>
-                            )}
-
-                            {/* The card number printed inside is not always
+                              {/* The card number printed inside is not always
                                 the one an SMS taught SpendLog, so saying
                                 which card it is by hand fixes most of these. */}
-                            {statement.status === "UNIDENTIFIED" && cards.length > 0 && (
-                              <select
-                                className="filter-select"
-                                defaultValue=""
-                                disabled={busy === statement.id}
-                                onChange={(event) => {
-                                  const accountId = event.target.value;
-                                  if (accountId) {
+                              {statement.status === "UNIDENTIFIED" &&
+                                cards.length > 0 && (
+                                  <select
+                                    className="filter-select"
+                                    defaultValue=""
+                                    disabled={busy === statement.id}
+                                    onChange={(event) => {
+                                      const accountId = event.target.value;
+                                      if (accountId) {
+                                        act(statement.id, () =>
+                                          api.patch(
+                                            `/statements/${statement.id}`,
+                                            { accountId },
+                                          ),
+                                        );
+                                      }
+                                    }}
+                                  >
+                                    <option value="">Which card?</option>
+                                    {cards.map((card) => (
+                                      <option key={card.id} value={card.id}>
+                                        {accountLabel(card)}
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
+
+                              {statement.status !== "PARSED" && (
+                                <button
+                                  className="btn btn-sm"
+                                  disabled={busy === statement.id}
+                                  onClick={() =>
                                     act(statement.id, () =>
-                                      api.patch(`/statements/${statement.id}`, { accountId })
+                                      api.post(
+                                        `/statements/${statement.id}/reread`,
+                                      ),
+                                    )
+                                  }
+                                >
+                                  <Icon name="ic-sync" /> Read again
+                                </button>
+                              )}
+
+                              {statement.status === "UNREADABLE" && (
+                                <button
+                                  className="btn btn-sm btn-ghost"
+                                  onClick={() => setExplaining(statement.id)}
+                                >
+                                  Why?
+                                </button>
+                              )}
+
+                              {statement.status === "PARSED" &&
+                                statement.counts.added > 0 && (
+                                  <button
+                                    className="btn btn-sm btn-ghost"
+                                    disabled={busy === statement.id}
+                                    onClick={() =>
+                                      act(statement.id, () =>
+                                        api.delete(
+                                          `/statements/${statement.id}/added`,
+                                        ),
+                                      )
+                                    }
+                                  >
+                                    Undo {statement.counts.added}
+                                  </button>
+                                )}
+
+                              {/* Forgetting a statement takes back what it
+                                added on the way out, or the ledger keeps
+                                rows pointing at something gone. */}
+                              <button
+                                className="btn btn-sm btn-ghost btn-danger-text"
+                                title="Forget this statement"
+                                disabled={busy === statement.id}
+                                onClick={() => {
+                                  if (confirming === statement.id) {
+                                    act(statement.id, () =>
+                                      api.delete(`/statements/${statement.id}`),
                                     );
+                                    setConfirming(null);
+                                  } else {
+                                    setConfirming(statement.id);
                                   }
                                 }}
                               >
-                                <option value="">Which card?</option>
-                                {cards.map((card) => (
-                                  <option key={card.id} value={card.id}>
-                                    {accountLabel(card)}
-                                  </option>
-                                ))}
-                              </select>
-                            )}
-
-                            {statement.status !== "PARSED" && (
-                              <button
-                                className="btn btn-sm"
-                                disabled={busy === statement.id}
-                                onClick={() =>
-                                  act(statement.id, () => api.post(`/statements/${statement.id}/reread`))
-                                }
-                              >
-                                <Icon name="ic-sync" /> Read again
+                                {confirming === statement.id ? (
+                                  "Really?"
+                                ) : (
+                                  <Icon name="ic-x" />
+                                )}
                               </button>
-                            )}
-
-                            {statement.status === "UNREADABLE" && (
-                              <button
-                                className="btn btn-sm btn-ghost"
-                                onClick={() => setExplaining(statement.id)}
-                              >
-                                Why?
-                              </button>
-                            )}
-
-                            {statement.status === "PARSED" && statement.counts.added > 0 && (
-                              <button
-                                className="btn btn-sm btn-ghost"
-                                disabled={busy === statement.id}
-                                onClick={() =>
-                                  act(statement.id, () => api.delete(`/statements/${statement.id}/added`))
-                                }
-                              >
-                                Undo {statement.counts.added}
-                              </button>
-                            )}
-
-                            {/* Forgetting a statement takes back what it
-                                added on the way out, or the ledger keeps
-                                rows pointing at something gone. */}
-                            <button
-                              className="btn btn-sm btn-ghost btn-danger-text"
-                              title="Forget this statement"
-                              disabled={busy === statement.id}
-                              onClick={() => {
-                                if (confirming === statement.id) {
-                                  act(statement.id, () => api.delete(`/statements/${statement.id}`));
-                                  setConfirming(null);
-                                } else {
-                                  setConfirming(statement.id);
-                                }
-                              }}
-                            >
-                              {confirming === statement.id ? "Really?" : <Icon name="ic-x" />}
-                            </button>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
-            </section>
-          );
-        })}
+                  ))}
+              </section>
+            );
+          })}
+        </div>
+
+        {anyLocked && (
+          <p className="field-hint" style={{ marginTop: 12 }}>
+            A locked statement needs its password set on the card above. Every
+            card's password is tried against every statement, so one is often
+            enough for all of them.
+          </p>
+        )}
+
+        {explaining && (
+          <StatementTextModal
+            statementId={explaining}
+            onClose={() => setExplaining(null)}
+          />
+        )}
+
+        {showing && (
+          <StatementDetailModal
+            statementId={showing}
+            onClose={() => setShowing(null)}
+            onChanged={() => {
+              load();
+              onChanged?.();
+            }}
+          />
+        )}
       </div>
-
-      {anyLocked && (
-        <p className="field-hint" style={{ marginTop: 12 }}>
-          A locked statement needs its password set on the card above. Every card's password is tried
-          against every statement, so one is often enough for all of them.
-        </p>
-      )}
-
-      {explaining && (
-        <StatementTextModal statementId={explaining} onClose={() => setExplaining(null)} />
-      )}
-
-      {showing && (
-        <StatementDetailModal
-          statementId={showing}
-          onClose={() => setShowing(null)}
-          onChanged={() => {
-            load();
-            onChanged?.();
-          }}
-        />
-      )}
-    </div>
+    </>
   );
 }
 
 function countStuck(group: AccountGroup): number {
   return group.months.reduce(
-    (sum, month) => sum + month.statements.filter((row) => row.status !== "PARSED").length,
-    0
+    (sum, month) =>
+      sum + month.statements.filter((row) => row.status !== "PARSED").length,
+    0,
   );
 }
 
@@ -334,8 +421,10 @@ function needsWork(group: AccountGroup): boolean {
 
 function shelfSummary(groups: AccountGroup[]): string {
   const total = groups.reduce(
-    (sum, group) => sum + group.months.reduce((inner, month) => inner + month.statements.length, 0),
-    0
+    (sum, group) =>
+      sum +
+      group.months.reduce((inner, month) => inner + month.statements.length, 0),
+    0,
   );
   const stuck = groups.reduce((sum, group) => sum + countStuck(group), 0);
 
@@ -363,5 +452,9 @@ function statementDay(statement: StatementRow): string | null {
   const date = new Date(iso);
   return Number.isNaN(date.getTime())
     ? null
-    : date.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+    : date.toLocaleDateString("en-IN", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      });
 }

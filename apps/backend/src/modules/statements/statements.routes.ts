@@ -7,6 +7,7 @@ import { Account, CardStatement, Transaction } from "../../models";
 import { istMonthKey } from "../../time";
 import { encryptPassword, encryptionAvailable } from "./statements.crypto";
 import { deleteStatementFile, fileStoreAvailable, readStatementFile } from "./statements.files";
+import { planStatementReset, resetStatements } from "./statements.reset";
 import {
   candidatesForLine,
   reconcileStatement,
@@ -196,6 +197,29 @@ statementsRouter.get("/filed", async (req, res) => {
   }
 
   res.json(groups);
+});
+
+// GET /statements/reset — what starting over would cost, without doing it.
+statementsRouter.get("/reset", async (req, res) => {
+  res.json(await planStatementReset(currentUserId(req)));
+});
+
+/**
+ * POST /statements/reset — forget every statement and everything it added.
+ *
+ * For the ledger left behind by the period when every sync read every
+ * statement again. Guarded by a body that has to say so in words, because
+ * this deletes several hundred rows and a mis-click is not a thing to
+ * discover afterwards.
+ */
+statementsRouter.post("/reset", async (req, res) => {
+  if (req.body?.confirm !== "start over") {
+    return res.status(400).json({
+      error: 'This deletes every statement and everything it added. Send { "confirm": "start over" }.',
+    });
+  }
+
+  res.json(await resetStatements(currentUserId(req)));
 });
 
 // GET /statements/:id/file — the statement PDF itself.
