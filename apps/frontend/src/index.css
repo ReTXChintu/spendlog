@@ -816,3 +816,82 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
   background:var(--paper);border:1px solid var(--line);border-radius:var(--radius-sm);
   font-family:var(--font-mono);font-size:11.5px;line-height:1.6;white-space:pre;
   color:var(--ink-70)}
+
+/* ---------------------------------------------- statements, on the shelf */
+/* Each card, its months, its statements. The nesting is the point: three
+   levels of heading would have read as three unrelated lists. */
+.shelf{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+.shelf-account{border:1px solid var(--line);border-radius:var(--radius-md);overflow:hidden;
+  background:var(--paper)}
+.shelf-head{display:flex;align-items:center;gap:10px;width:100%;padding:11px 13px;
+  background:none;border:none;cursor:pointer;text-align:left;color:var(--ink);font:inherit}
+.shelf-head:hover{background:var(--surface)}
+.shelf-head svg{width:15px;height:15px;flex-shrink:0;color:var(--muted)}
+.shelf-name{flex:1;min-width:0;display:flex;align-items:center;gap:9px;font-size:13.5px;
+  font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shelf-last4{font-family:var(--font-mono);font-size:11.5px;color:var(--muted);letter-spacing:.02em}
+.shelf-network{font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  padding:2px 6px;border-radius:100px;background:var(--track);color:var(--muted)}
+.shelf-count{display:flex;align-items:center;gap:9px;font-size:11.5px;color:var(--muted);
+  white-space:nowrap;flex-shrink:0}
+.shelf-stuck{font-weight:700;color:var(--warn)}
+
+.shelf-month{padding:0 13px 12px}
+.shelf-month-name{margin:12px 0 7px;font-size:11px;font-weight:700;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--muted)}
+
+/* ------------------------------------------------ one statement, opened */
+/* Tabs inside a modal, which are a different size from the page's own. */
+.tabs-inline{margin:0 0 14px;gap:4px}
+.tabs-inline .tab{font-size:12.5px;padding:7px 12px}
+
+/* A statement's own modal, which holds a table and a PDF rather than a
+   form, and is the width those need rather than the width a form is. */
+.modal-statement{width:1020px;max-width:min(96vw,1020px)}
+.modal-statement .modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.modal-statement .modal-head h3{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.modal-statement .modal-sub{margin-bottom:0}
+
+.statement-lines{max-height:52vh;overflow:auto;margin:0 -4px}
+.data-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.data-table th{position:sticky;top:0;z-index:1;background:var(--paper);text-align:left;
+  padding:7px 8px;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--muted);border-bottom:1px solid var(--line);white-space:nowrap}
+.data-table td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+.data-table .num{text-align:right;font-family:var(--font-mono);font-variant-numeric:tabular-nums;
+  white-space:nowrap}
+.data-table .nowrap{white-space:nowrap;color:var(--muted)}
+.data-table .amount-in{color:var(--credit)}
+.data-table tr.line-skipped{opacity:.55}
+
+.line-desc{display:block;max-width:34ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.line-kind{display:inline-block;margin-top:2px;font-size:9.5px;font-weight:700;letter-spacing:.04em;
+  text-transform:uppercase;padding:1px 6px;border-radius:100px;background:var(--track);
+  color:var(--muted)}
+.line-match{display:block;margin-top:3px;font-size:11px;color:var(--muted);max-width:22ch;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.statement-line-actions{white-space:nowrap;text-align:right}
+.statement-line-actions .btn{padding:3px 7px;font-size:11.5px}
+
+.statement-pill.is-matched{background:var(--track);color:var(--muted)}
+.statement-pill.is-added{background:var(--credit-50);color:var(--credit)}
+.statement-pill.is-uncertain{background:var(--warn-bg);color:var(--warn)}
+.statement-pill.is-skipped{background:var(--track);color:var(--muted)}
+
+/* The extracted text, numbered so a row can be pointed at. */
+.statement-rows{list-style:none;margin:0;padding:0;white-space:normal}
+.statement-rows li{display:flex;gap:10px;padding:1px 0}
+.statement-row-n{flex-shrink:0;width:3ch;text-align:right;color:var(--muted);opacity:.7}
+.statement-rows code{white-space:pre-wrap;word-break:break-word}
+
+.statement-pdf{height:60vh;border:1px solid var(--line);border-radius:var(--radius-sm);
+  overflow:hidden;background:var(--surface)}
+.statement-pdf object{width:100%;height:100%;border:none}
+
+@media (max-width:640px){
+  .shelf-count{font-size:11px}
+  .shelf-name{font-size:12.5px}
+  .line-desc{max-width:18ch}
+  .statement-lines{max-height:46vh}
+  .statement-pdf{height:52vh}
+}

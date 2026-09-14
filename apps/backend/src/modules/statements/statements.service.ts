@@ -503,6 +503,21 @@ export async function statementText(
     ...new Set(cards.map((card) => decryptPassword(card.statementPassword)).filter(Boolean)),
   ] as (string | null)[];
 
+  // The stored file first. This is the question asked of a statement that
+  // opened and read as empty, which is exactly the statement most likely
+  // to be looked at again months later.
+  const stored = await readStatementFile(statement._id);
+  if (stored) {
+    for (const password of passwords) {
+      try {
+        return tally(await extractStatementRows(stored, password));
+      } catch (error) {
+        if (error instanceof StatementLockedError) continue;
+        return null;
+      }
+    }
+  }
+
   for (const connection of await EmailConnection.find({ userId })) {
     const client = createOAuthClient();
     client.setCredentials({
@@ -519,17 +534,7 @@ export async function statementText(
 
     for (const password of passwords) {
       try {
-        const rows = await extractStatementRows(file, password);
-
-        // What every reader manages, not only the one the headers chose.
-        // A reader finding nothing where another finds forty is the whole
-        // answer to why a statement came out empty.
-        const readers = allReaders.map((reader) => ({
-          name: reader.name,
-          lines: rows.filter((row) => reader.row(row) !== null).length,
-        }));
-
-        return { rows, readers };
+        return tally(await extractStatementRows(file, password));
       } catch (error) {
         if (error instanceof StatementLockedError) continue;
         return null;
@@ -538,4 +543,19 @@ export async function statementText(
   }
 
   return null;
+}
+
+/**
+ * The rows, and what every reader makes of them - not only the one the
+ * headers chose. A reader finding nothing where another finds forty is the
+ * whole answer to why a statement came out empty.
+ */
+function tally(rows: string[]): { rows: string[]; readers: { name: string; lines: number }[] } {
+  return {
+    rows,
+    readers: allReaders.map((reader) => ({
+      name: reader.name,
+      lines: rows.filter((row) => reader.row(row) !== null).length,
+    })),
+  };
 }

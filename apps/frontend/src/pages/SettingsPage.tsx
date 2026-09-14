@@ -3,7 +3,8 @@ import { useSearchParams } from "react-router-dom";
 import { AccountModal } from "../components/AccountModal";
 import { CommitmentModal } from "../components/CommitmentModal";
 import { Icon } from "../components/Icon";
-import { StatementList } from "../components/StatementList";
+import { StatementShelf } from "../components/StatementShelf";
+import { ThemeToggle } from "../components/ThemeToggle";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { formatMoney } from "../lib/format";
@@ -29,6 +30,7 @@ function networkLabel(raw: string | null): string | null {
 const TABS = [
   { id: "connections", label: "Connections", icon: "ic-mail" },
   { id: "accounts", label: "Accounts and cards", icon: "ic-wallet" },
+  { id: "budget", label: "Budget", icon: "ic-calendar" },
   { id: "presets", label: "Presets", icon: "ic-bolt" },
   { id: "you", label: "You", icon: "ic-lock" },
   { id: "about", label: "About", icon: "ic-info" },
@@ -37,13 +39,19 @@ const TABS = [
 type TabId = (typeof TABS)[number]["id"];
 
 /**
- * Settings, in five tabs.
+ * Settings, in six tabs, each of which answers one question completely.
  *
- * One long page had grown to the point where the thing you came for was
- * never the thing on screen. The tabs are grouped by what you are trying to
- * do rather than by which part of the app owns the setting: where data
- * comes from, what it lands in, shortcuts for entering it by hand, facts
- * about you, and facts about the app.
+ * It was five, and every one of them touched everything. Statements — the
+ * paperwork of a particular card — sat under Connections because that is
+ * where they are fetched from. "You" held a salary, a set of monthly
+ * commitments, an email address and a logout button, which is a budget and
+ * an identity in one drawer. The Android app was offered under Connections
+ * and again under About.
+ *
+ * Now: where data comes from, what it lands in and the statements that
+ * prove it, what is already spoken for each month, shortcuts for typing
+ * things by hand, who you are, and what this app is. Nothing appears
+ * twice, and nothing needs a second tab to finish.
  *
  * The tab lives in the query string so a link can point straight at one —
  * the dashboard sends you here to set a card's network.
@@ -56,7 +64,7 @@ export function SettingsPage() {
     : "connections";
 
   function selectTab(next: TabId) {
-    // Replace rather than push: five tabs would otherwise fill the back
+    // Replace rather than push: six tabs would otherwise fill the back
     // button with places nobody meant to travel through.
     setSearchParams(next === "connections" ? {} : { tab: next }, { replace: true });
   }
@@ -84,6 +92,7 @@ export function SettingsPage() {
 
       {tab === "connections" && <ConnectionsTab />}
       {tab === "accounts" && <AccountsTab />}
+      {tab === "budget" && <BudgetTab />}
       {tab === "presets" && <PresetsTab />}
       {tab === "you" && <YouTab />}
       {tab === "about" && <AboutTab />}
@@ -98,6 +107,7 @@ function ConnectionsTab() {
   const [syncing, setSyncing] = useState(false);
   const [statementSync, setStatementSync] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [apkAvailable, setApkAvailable] = useState<boolean | null>(null);
   const [searchParams] = useSearchParams();
   const gmailStatus = searchParams.get("gmail");
 
@@ -111,6 +121,12 @@ function ConnectionsTab() {
   useEffect(reload, [reload, gmailStatus]);
   useEffect(() => {
     api.get<Account[]>("/accounts").then(setAccounts).catch(() => setAccounts([]));
+  }, []);
+
+  useEffect(() => {
+    fetch("/SpendLog.apk", { method: "HEAD" })
+      .then((res) => setApkAvailable(res.ok))
+      .catch(() => setApkAvailable(false));
   }, []);
 
   async function connect() {
@@ -241,11 +257,10 @@ function ConnectionsTab() {
             {scanning ? "Reading…" : "Read statements"}
           </button>
         </div>
+        <p className="field-hint">
+          What they found is filed under each card, in Accounts and cards.
+        </p>
       </div>
-
-      {/* Every statement, with the reason each failure failed. Without it,
-          "5 could not be read" was the whole of what anybody knew. */}
-      <StatementList accounts={accounts} key={statementSync ?? "idle"} />
 
       <div className="card set-card">
         <div className="set-card-head">
@@ -260,14 +275,23 @@ function ConnectionsTab() {
         <p className="desc">
           <span className="status-pill status-off">Not available here</span>
           <br />
-          Reading text messages isn't something a browser is allowed to do. Install the Android app to
-          capture SMS automatically — most Indian banks only text.
+          Reading text messages isn't something a browser is allowed to do, and most Indian banks only
+          text. The Android app is the only route to that data.
         </p>
-        <div className="set-card-actions">
-          <a className="btn btn-sm" href="/SpendLog.apk" download>
-            <Icon name="ic-download" /> Download the Android app
-          </a>
-        </div>
+        {apkAvailable === false ? (
+          <p className="desc">No build has been published yet. Gmail import works in the meantime.</p>
+        ) : (
+          <>
+            <div className="set-card-actions">
+              <a className="btn btn-sm btn-primary" href="/SpendLog.apk" download>
+                <Icon name="ic-download" /> Download the Android app
+              </a>
+            </div>
+            <p className="field-hint" style={{ marginTop: 10 }}>
+              Android warns about installing outside the Play Store — expected for a direct download.
+            </p>
+          </>
+        )}
       </div>
     </div>
   );
@@ -355,6 +379,10 @@ function AccountsTab() {
           </button>
         </div>
       </div>
+
+      {/* A card's statements are that card's paperwork, so they live with
+          it rather than under the mailbox they arrived through. */}
+      <StatementShelf accounts={accounts} onChanged={reload} />
 
       {editing && (
         <AccountModal
@@ -462,9 +490,12 @@ function PresetsTab() {
   );
 }
 
-/** Facts about you: what lands each month, and signing out. */
-function YouTab() {
-  const { user, logout } = useAuth();
+/**
+ * What is already spoken for each month: pay in, and the fixed payments
+ * out. Together these are what the dashboard paces a month against, and
+ * they used to sit in the same drawer as the sign-out button.
+ */
+function BudgetTab() {
   const [profile, setProfile] = useState<BudgetProfile | null>(null);
   const [salary, setSalary] = useState("");
   const [salaryDay, setSalaryDay] = useState("");
@@ -629,7 +660,16 @@ function YouTab() {
           onClose={() => setEditingCommitment(null)}
         />
       )}
+    </div>
+  );
+}
 
+/** Who you are signed in as, and how to stop being. */
+function YouTab() {
+  const { user, logout } = useAuth();
+
+  return (
+    <div className="settings-grid">
       <div className="card set-card">
         <div className="set-card-head">
           <div className="set-card-icon">
@@ -650,20 +690,30 @@ function YouTab() {
           </button>
         </div>
       </div>
+
+      <div className="card set-card">
+        <div className="set-card-head">
+          <div className="set-card-icon">
+            <Icon name="ic-sun" />
+          </div>
+          <div>
+            <h4>Appearance</h4>
+            <p className="set-card-sub">Light or dark, on this device</p>
+          </div>
+        </div>
+        <p className="desc">
+          Follows the system by default. The choice is remembered in this browser and nowhere else.
+        </p>
+        <div className="set-card-actions">
+          <ThemeToggle />
+        </div>
+      </div>
     </div>
   );
 }
 
 /** What the app is, and what it cannot do. */
 function AboutTab() {
-  const [apkAvailable, setApkAvailable] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    fetch("/SpendLog.apk", { method: "HEAD" })
-      .then((res) => setApkAvailable(res.ok))
-      .catch(() => setApkAvailable(false));
-  }, []);
-
   return (
     <div className="settings-grid">
       <div className="card set-card">
@@ -699,39 +749,6 @@ function AboutTab() {
           So it can say you are spending faster this fortnight than your salary supports. It cannot say
           whether you can afford next week's bill. Every figure here is built from money that moved.
         </p>
-      </div>
-
-      <div className="card set-card">
-        <div className="set-card-head">
-          <div className="set-card-icon">
-            <Icon name="ic-phone" />
-          </div>
-          <div>
-            <h4>Android app</h4>
-            <p className="set-card-sub">{apkAvailable === false ? "Build in progress" : "Ready"}</p>
-          </div>
-        </div>
-        {apkAvailable === false ? (
-          <p className="desc">
-            No build has been published yet. Check back shortly, or carry on with Gmail import in the
-            meantime.
-          </p>
-        ) : (
-          <>
-            <p className="desc">
-              SMS import only works from the phone — it's the only route to that data, and most Indian
-              banks only text.
-            </p>
-            <div className="set-card-actions">
-              <a className="btn btn-sm btn-primary" href="/SpendLog.apk" download>
-                <Icon name="ic-download" /> Download APK
-              </a>
-            </div>
-            <p className="field-hint" style={{ marginTop: 10 }}>
-              Android warns about installing outside the Play Store — expected for a direct download.
-            </p>
-          </>
-        )}
       </div>
     </div>
   );
