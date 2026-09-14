@@ -33,6 +33,11 @@ export interface StatementReader {
   kind: StatementKind;
   /// Whether this reader recognises the document, from its headers.
   matches(rows: string[]): boolean;
+  /// True for the reader that stands in when nothing else fits. It matches
+  /// every document by design, so the fact that it found rows is never
+  /// evidence that it understood them - which is why selection has to know
+  /// which reader this is.
+  fallback?: boolean;
   row(row: string): RawStatementRow | null;
   /// Whether a row is the tail of a description that wrapped, to be joined
   /// onto the line before it.
@@ -213,6 +218,17 @@ const hdfc: StatementReader = {
  * The timestamp wraps mid-way, so the minutes and the am/pm end up on a
  * line of their own and the hour is left with a dangling colon.
  *
+ * Later in the same statement it wraps all the way, and the row keeps no
+ * part of the time at all:
+ *
+ *   01 Aug 26   SWIGGY   Rs. 364.00
+ *   12:46 pm
+ *
+ * So the time is optional here. It was not, and the effect was worse than
+ * nineteen missing rows: this reader came up short against the fallback,
+ * which reads the same table with the hour glued to the front of every
+ * merchant's name.
+ *
  * Nothing in the text says which way the money went - a credit is only
  * printed in a different colour - so this reader never claims to know, and
  * the words decide. "Repayment - Thank You" and "REFUND" are unambiguous,
@@ -232,7 +248,7 @@ const jupiter: StatementReader = {
   row(row) {
     const match = row.match(
       new RegExp(
-        `^(${NAMED_DATE})\\s+\\d{1,2}:\\s*(?:\\d{2})?\\s*(?:am|pm)?\\s+(.+?)\\s+` +
+        `^(${NAMED_DATE})\\s+(?:\\d{1,2}:\\s*(?:\\d{2})?\\s*(?:am|pm)?\\s+)?(.+?)\\s+` +
           `(?:Rs\\.?|₹|INR)\\s*(${AMOUNT})$`,
         "i"
       )
@@ -262,6 +278,7 @@ const jupiter: StatementReader = {
 const generic: StatementReader = {
   kind: "CARD",
   name: "generic",
+  fallback: true,
 
   matches() {
     return true;
@@ -277,6 +294,13 @@ const generic: StatementReader = {
     let rest = leading[2].trim();
     if (!rest) return null;
 
+    // A billing period, not a transaction: "17 JUL 2026 - 16 AUG 2026".
+    // Nothing here says amount, so the year of the closing date was being
+    // read as one - and that line is the running header of every page, so
+    // an eleven page statement arrived with eleven charges of Rs 2,026 on
+    // it. Anything that is a date, a dash and a date is a range.
+    if (new RegExp(`^(?:[-–—]|to)\\s*(?:${SLASH_DATE}|${NAMED_DATE})$`, "i").test(rest)) return null;
+
     // A posting date printed beside the transaction date. The first is the
     // one that matters; drop the second so it cannot be read as a merchant.
     const second = rest.match(new RegExp(`^(?:${SLASH_DATE}|${NAMED_DATE})\\s+(.+)$`));
@@ -286,7 +310,12 @@ const generic: StatementReader = {
     // per-issuer readers, because this one has to stand in for them when
     // their own patterns miss - and a merchant called "10:30 SWIGGY" reads
     // as a mistake even though the amount beside it is right.
-    rest = rest.replace(/^[|]?\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?\s+/i, "").trim();
+    //
+    // The minutes are optional because they are not always on the row: CSB
+    // wraps its timestamp mid-way and leaves the hour behind with a
+    // dangling colon, so seventy merchants came through named "08: MUKHWAS
+    // PAN PARLOUR" and "11: MR SHARMA SORABH".
+    rest = rest.replace(/^[|]?\s*\d{1,2}:(?:\d{2}(?::\d{2})?)?\s*(?:am|pm)?\s+/i, "").trim();
     if (!rest) return null;
 
     // Anything short and non-numeric where a currency mark belongs: a rupee
@@ -299,10 +328,17 @@ const generic: StatementReader = {
     );
     if (!match) return null;
 
+    const description = match[1].replace(/[\s.,;:-]+$/, "").trim();
+
+    // A date and a figure with nothing but a currency mark between them is
+    // a summary line - "17/07/2026 Rs. 21,286.25" is the previous balance,
+    // printed above the table. A transaction says who it was paid to.
+    if (!description || /^(?:Rs|INR|₹)$/i.test(description)) return null;
+
     const marker = (match[3] ?? "").toUpperCase();
     return {
       date: leading[1],
-      description: match[1].replace(/[\s.,;:-]+$/, "").trim(),
+      description,
       amount: match[2],
       credit: marker === "CR" ? true : marker === "DR" ? false : null,
     };

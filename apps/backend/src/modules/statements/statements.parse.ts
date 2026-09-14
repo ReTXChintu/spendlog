@@ -218,9 +218,13 @@ function firstReaderThatFinds(
     const lines = readWith(rows, reader, fallbackYear);
     if (lines.length > best.lines.length) best = { reader, lines };
 
-    // Two rows is enough to say a reader understands the document. Stopping
-    // there keeps a statement from being re-read four times over.
-    if (best.lines.length >= 2) break;
+    // Two rows is enough to say a reader understands the document, but only
+    // a reader that was written for an issuer is entitled to say it. The
+    // fallback matches every document by design, so stopping on its word
+    // was stopping on no evidence at all: a Jupiter statement whose
+    // letterhead never says "Jupiter" was read by the fallback, which found
+    // the table and also found the page header eleven times.
+    if (best.lines.length >= 2 && !best.reader.fallback) break;
   }
 
   return best;
@@ -365,6 +369,15 @@ export function findCardLast4(rows: string[]): string | null {
 
     const labelled = row.match(/card\s*(?:no|number|ending(?:\s*(?:in|with))?)\.?\s*:?\s*(?:[xX*]+\s*)?(\d{4})\b/i);
     if (labelled) return labelled[1];
+
+    // Some statements never print the card number at all, and name the card
+    // only on the heading above its table: "Rupay Transactions - 6623".
+    // Without this the statement reads perfectly and then has to be pointed
+    // at its card by hand.
+    const heading = row.match(
+      /\b(?:rupay|visa|mastercard|master\s*card|amex)\b[^\d\n]{0,24}?(\d{4})\b/i
+    );
+    if (heading) return heading[1];
   }
   return null;
 }
