@@ -50,6 +50,9 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
   late final TextEditingController _creditLimit;
   late final TextEditingController _spendLimit;
   late final TextEditingController _statementDay;
+
+  /// Never pre-filled: the stored value is not readable, by design.
+  final _statementPassword = TextEditingController();
   late final TextEditingController _dueDay;
 
   late String _type;
@@ -92,6 +95,7 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
       _creditLimit,
       _spendLimit,
       _statementDay,
+      _statementPassword,
       _dueDay,
     ]) {
       c.dispose();
@@ -139,11 +143,20 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
     };
 
     try {
-      if (_isNew) {
-        await ApiClient.instance.post('/accounts', body);
-      } else {
-        await ApiClient.instance.patch('/accounts/${widget.account!.id}', body);
+      final saved = _isNew
+          ? await ApiClient.instance.post('/accounts', body) as Map<String, dynamic>
+          : await ApiClient.instance.patch('/accounts/${widget.account!.id}', body)
+              as Map<String, dynamic>;
+
+      // Sent separately because it is encrypted before it is stored and
+      // never comes back out, so it cannot travel with the rest of the
+      // account the way an ordinary field would.
+      final password = _statementPassword.text.trim();
+      if (password.isNotEmpty) {
+        await ApiClient.instance
+            .put('/statements/password/${saved['id']}', {'password': password});
       }
+
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       setState(() {
@@ -286,6 +299,28 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
                     child: _Field(label: 'Due day', controller: _dueDay, hint: '7', numeric: true),
                   ),
                 ],
+              ),
+              const SizedBox(height: 14),
+
+              // The one field the statement reader cannot work without.
+              // Every card's password is tried against every statement, so
+              // one is often enough for all of them.
+              TextField(
+                controller: _statementPassword,
+                obscureText: true,
+                autocorrect: false,
+                enableSuggestions: false,
+                style: TextStyle(color: context.c.ink),
+                decoration: InputDecoration(
+                  labelText: 'Statement password',
+                  hintText: widget.account?.hasStatementPassword == true
+                      ? 'Already set - type a new one to replace it'
+                      : 'Opens the PDF this card emails',
+                  helperText: 'Stored encrypted and never sent back to this screen. Issuers build it '
+                      'from a date of birth, so it usually opens more than this one card.',
+                  helperMaxLines: 4,
+                  isDense: true,
+                ),
               ),
             ],
 

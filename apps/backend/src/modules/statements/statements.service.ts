@@ -2,7 +2,7 @@ import { gmail_v1, google } from "googleapis";
 import { HydratedDocument, Types } from "mongoose";
 import { Account, CardStatement, CardStatementDoc, EmailConnection } from "../../models";
 import { createOAuthClient } from "../ingestion/gmail.service";
-import { decryptPassword } from "./statements.crypto";
+import { decryptPassword, encryptionAvailable } from "./statements.crypto";
 import { parseStatementRows } from "./statements.parse";
 import { extractStatementRows, StatementLockedError } from "./statements.pdf";
 import { reconcileStatement } from "./statements.reconcile";
@@ -179,17 +179,15 @@ async function readOneStatement(params: {
   }
 
   let rows: string[] | null = null;
-  let everNeededPassword = false;
 
   for (const password of params.passwords) {
     try {
       rows = await extractStatementRows(file, password);
       break;
     } catch (error) {
-      if (error instanceof StatementLockedError) {
-        everNeededPassword = true;
-        continue;
-      }
+      // Locked. Try the next password rather than giving up: one card's
+      // password very often opens another's statement.
+      if (error instanceof StatementLockedError) continue;
       // Not a readable PDF at all. Recorded rather than thrown so the rest
       // of the mailbox still gets scanned.
       await recordProblem(params.userId, sourceRef, params, "UNREADABLE", "This file could not be opened as a PDF");
@@ -198,17 +196,23 @@ async function readOneStatement(params: {
   }
 
   if (!rows) {
-    await recordProblem(
-      params.userId,
-      sourceRef,
-      params,
-      "LOCKED",
-      everNeededPassword
-        ? "No stored password opened this statement. Set the right one on the card in Settings."
-        : "This statement is password protected"
-    );
+    // Said in the order someone would fix it. A server with no key cannot
+    // store a password at all, so telling them to go and set one would send
+    // them somewhere that refuses them; and having no password stored is a
+    // different problem from having the wrong one.
+    const problem = !encryptionAvailable()
+      ? "This statement is password protected, and the server has no STATEMENT_ENCRYPTION_KEY set, " +
+        "so no password can be stored yet. Generate one with `openssl rand -hex 32` and put it in " +
+        "the .env at the repo root."
+      : params.passwords.length <= 1
+        ? "This statement is password protected and no card has a statement password set. Add one " +
+          "on the card under Accounts and cards."
+        : "None of the stored passwords opened this statement. Check the one on this card.";
+
+    await recordProblem(params.userId, sourceRef, params, "LOCKED", problem);
     return "locked";
   }
+
 
   const parsed = parseStatementRows(rows);
   if (parsed.lines.length === 0) {

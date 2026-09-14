@@ -54,6 +54,10 @@ class Account {
   final int? dueDay;
   final bool isActive;
 
+  /// Whether a statement password is stored. The value itself never
+  /// leaves the server, so this is all a client can know about it.
+  final bool hasStatementPassword;
+
   Account({
     required this.id,
     required this.bankName,
@@ -68,6 +72,7 @@ class Account {
     this.statementDay,
     this.dueDay,
     this.isActive = true,
+    this.hasStatementPassword = false,
   });
 
   /// What to call it on screen: the name given to it, else the bank's own.
@@ -92,6 +97,7 @@ class Account {
         statementDay: json['statementDay'] as int?,
         dueDay: json['dueDay'] as int?,
         isActive: json['isActive'] as bool? ?? true,
+        hasStatementPassword: json['hasStatementPassword'] as bool? ?? false,
       );
 }
 

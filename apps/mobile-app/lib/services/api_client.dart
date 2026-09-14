@@ -82,6 +82,15 @@ class ApiClient {
     return _decode(res);
   }
 
+  Future<dynamic> put(String path, [Map<String, dynamic>? body]) async {
+    final res = await http.put(
+      Uri.parse('$_baseUrl$path'),
+      headers: await _headers(),
+      body: body != null ? jsonEncode(body) : null,
+    );
+    return _decode(res);
+  }
+
   Future<void> delete(String path) async {
     final res = await http.delete(Uri.parse('$_baseUrl$path'), headers: await _headers());
     _decode(res);
