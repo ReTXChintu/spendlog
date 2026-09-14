@@ -23,7 +23,7 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 5, vsync: this);
+  late final TabController _tabs = TabController(length: 6, vsync: this);
 
   List<EmailConnectionStatus> _connections = [];
   bool _smsGranted = false;
@@ -331,9 +331,13 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
 
   @override
   Widget build(BuildContext context) {
-    // Five tabs, grouped by what you are trying to do rather than by which
-    // part of the app owns the setting. One long list had grown to the point
-    // where the thing you came for was never the thing on screen.
+    // Six tabs, each of which answers one question completely.
+    //
+    // It was five, and every one of them touched everything. Statements —
+    // a card's paperwork — sat under Connections because that is where they
+    // are fetched from. "You" held a salary, a set of monthly commitments
+    // and a sign-out button, which is a budget and an identity in one
+    // drawer.
     return Column(
       children: [
         TabBar(
@@ -343,6 +347,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
           tabs: const [
             Tab(text: 'Connections'),
             Tab(text: 'Accounts'),
+            Tab(text: 'Budget'),
             Tab(text: 'Presets'),
             Tab(text: 'You'),
             Tab(text: 'About'),
@@ -354,6 +359,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
             children: [
               _tab(_connectionsTab()),
               _tab(_accountsTab()),
+              _tab(_budgetTab()),
               _tab(_presetsTab()),
               _tab(_youTab()),
               _tab(_aboutTab()),
@@ -483,14 +489,14 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
           child: _CardBody(
             text: 'An alert only arrives for what the bank chose to announce. The statement is its own '
                 'complete list, so reading it finds the annual fees, finance charges and anything that '
-                'happened while the phone was off.'
+                'happened while the phone was off.\n\n'
+                'What they find is filed under each card, in Accounts.'
                 '${_statementResult != null ? '\n\n$_statementResult' : ''}',
             actions: [
               OutlinedButton(
                 onPressed: _readingStatements || connection == null ? null : _readStatements,
                 child: Text(_readingStatements ? 'Reading…' : 'Read statements'),
               ),
-              OutlinedButton(onPressed: _openStatements, child: const Text('See them')),
             ],
           ),
         ),
@@ -508,6 +514,21 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                 'and add anything that never sends a message.',
             actions: [
               OutlinedButton(onPressed: _openAccounts, child: const Text('Manage accounts')),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        // A card's statements are that card's paperwork, so they live with
+        // it rather than under the mailbox they arrived through.
+        _SettingsCard(
+          icon: Icons.receipt_long_outlined,
+          title: 'Statements',
+          subtitle: 'Filed under each card, by month',
+          child: _CardBody(
+            text: 'Every statement that has arrived, what was read off it, and the PDF itself. '
+                'Open one to see each transaction on it and overrule anything SpendLog got wrong.',
+            actions: [
+              OutlinedButton(onPressed: _openStatements, child: const Text('Open statements')),
             ],
           ),
         ),
@@ -556,7 +577,10 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
       ];
 
   /// Facts about you: what lands each month, and signing out.
-  List<Widget> _youTab() => [
+  /// What is already spoken for each month: pay in, and the fixed payments
+  /// out. Together these are what the dashboard paces a month against, and
+  /// they used to sit in the same drawer as the sign-out button.
+  List<Widget> _budgetTab() => [
         _SettingsCard(
           icon: Icons.account_balance_wallet_outlined,
           title: 'What lands each month',
@@ -616,13 +640,17 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
             ),
           ),
         ],
-        const SizedBox(height: 14),
+      ];
+
+  /// Who you are signed in as, and how to stop being.
+  List<Widget> _youTab() => [
         _SettingsCard(
           icon: Icons.lock_outline,
           title: 'Account',
           subtitle: 'Signed in with Google',
           child: _CardBody(
-            text: "Signing out doesn't remove any imported transactions.",
+            text: "Signing out doesn't remove any imported transactions. They are on the server, "
+                'not on this phone.',
             actions: [
               OutlinedButton(
                 onPressed: _signOut,

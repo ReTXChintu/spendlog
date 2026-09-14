@@ -5,6 +5,7 @@ import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/format.dart';
 import '../widgets/state_block.dart';
+import 'statement_detail_screen.dart';
 
 /// Every statement the mailbox has offered, and what became of it.
 ///
@@ -107,8 +108,66 @@ String _subtitle(_Statement statement) {
       'SpendLog had ${formatMoneyShort(statement.knownSpendMinor)}.';
 }
 
+/// One month's worth of one card's statements.
+class _MonthGroup {
+  final String month;
+  final List<_Statement> statements;
+
+  _MonthGroup({required this.month, required this.statements});
+
+  factory _MonthGroup.fromJson(Map<String, dynamic> json) => _MonthGroup(
+        month: json['month'] as String? ?? '',
+        statements: ((json['statements'] as List?) ?? const [])
+            .map((s) => _Statement.fromJson(s as Map<String, dynamic>))
+            .toList(),
+      );
+
+  /// "September 2026", from a YYYY-MM key.
+  String get label {
+    final parts = month.split('-');
+    if (parts.length != 2) return month;
+
+    final year = int.tryParse(parts[0]);
+    final index = int.tryParse(parts[1]);
+    if (year == null || index == null) return month;
+
+    return DateFormat('MMMM yyyy').format(DateTime(year, index));
+  }
+}
+
+/// One card, and every statement filed under it.
+class _AccountGroup {
+  final String accountId;
+  final String name;
+  final String last4;
+  final String? network;
+  final List<_MonthGroup> months;
+
+  _AccountGroup({
+    required this.accountId,
+    required this.name,
+    required this.last4,
+    this.network,
+    required this.months,
+  });
+
+  factory _AccountGroup.fromJson(Map<String, dynamic> json) => _AccountGroup(
+        accountId: json['accountId'] as String? ?? '',
+        name: json['name'] as String? ?? 'A card',
+        last4: json['last4'] as String? ?? '',
+        network: json['network'] as String?,
+        months: ((json['months'] as List?) ?? const [])
+            .map((m) => _MonthGroup.fromJson(m as Map<String, dynamic>))
+            .toList(),
+      );
+
+  Iterable<_Statement> get all => months.expand((month) => month.statements);
+  int get count => all.length;
+  int get stuck => all.where((statement) => !statement.isRead).length;
+}
+
 class _StatementsScreenState extends State<StatementsScreen> {
-  List<_Statement> _statements = [];
+  List<_AccountGroup> _groups = [];
   List<Account> _cards = [];
   bool _loading = true;
   String? _busy;
@@ -122,13 +181,13 @@ class _StatementsScreenState extends State<StatementsScreen> {
   Future<void> _load() async {
     try {
       final results = await Future.wait([
-        ApiClient.instance.get('/statements'),
+        ApiClient.instance.get('/statements/filed'),
         ApiClient.instance.get('/accounts'),
       ]);
       if (!mounted) return;
       setState(() {
-        _statements = (results[0] as List<dynamic>)
-            .map((s) => _Statement.fromJson(s as Map<String, dynamic>))
+        _groups = (results[0] as List<dynamic>)
+            .map((g) => _AccountGroup.fromJson(g as Map<String, dynamic>))
             .toList();
         _cards = (results[1] as List<dynamic>)
             .map((a) => Account.fromJson(a as Map<String, dynamic>))
@@ -220,7 +279,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _statements.isEmpty
+          : _groups.isEmpty
               ? const StateBlock(
                   icon: Icons.receipt_long_outlined,
                   title: 'No statements yet',
@@ -231,12 +290,98 @@ class _StatementsScreenState extends State<StatementsScreen> {
                   onRefresh: _load,
                   child: ListView.separated(
                     padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
-                    itemCount: _statements.length,
+                    itemCount: _groups.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    itemBuilder: (context, index) => _row(_statements[index]),
+                    itemBuilder: (context, index) => _accountTile(_groups[index]),
                   ),
                 ),
     );
+  }
+
+  /// One card, its months inside it.
+  ///
+  /// A card with something wrong on it starts open, because that is the
+  /// only reason anybody comes to this screen unprompted.
+  Widget _accountTile(_AccountGroup group) {
+    final c = context.c;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border.all(color: c.line),
+        borderRadius: BorderRadius.circular(T.rMd),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Theme(
+        // A divider above an expanded card would read as a second card.
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: group.stuck > 0,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 13),
+          childrenPadding: const EdgeInsets.fromLTRB(13, 0, 13, 12),
+          expandedCrossAxisAlignment: CrossAxisAlignment.start,
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  group.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+                ),
+              ),
+              if (group.last4.isNotEmpty)
+                Text('•••• ${group.last4}', style: kNum.copyWith(fontSize: 11.5, color: c.muted)),
+            ],
+          ),
+          subtitle: Text(
+            [
+              '${group.count} statement${group.count == 1 ? '' : 's'}',
+              if (group.stuck > 0) '${group.stuck} need attention',
+              if (group.network != null) group.network!,
+            ].join(' · '),
+            style: TextStyle(
+              fontSize: 11.5,
+              color: group.stuck > 0 ? c.warn : c.muted,
+              fontWeight: group.stuck > 0 ? FontWeight.w700 : FontWeight.w400,
+            ),
+          ),
+          children: [
+            for (final month in group.months) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(0, 10, 0, 7),
+                child: Text(
+                  month.label.toUpperCase(),
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.5,
+                    color: c.muted,
+                  ),
+                ),
+              ),
+              for (final statement in month.statements)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: _row(statement),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _open(_Statement statement) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => StatementDetailScreen(
+          statementId: statement.id,
+          title: statement.subject ?? statement.fileName ?? 'Statement',
+        ),
+      ),
+    );
+    await _load();
   }
 
   Widget _row(_Statement statement) {
@@ -249,11 +394,11 @@ class _StatementsScreenState extends State<StatementsScreen> {
     };
 
     return Container(
-      padding: const EdgeInsets.all(13),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: c.surface,
+        color: c.paper,
         border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
+        borderRadius: BorderRadius.circular(T.rSm),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -293,6 +438,11 @@ class _StatementsScreenState extends State<StatementsScreen> {
           const SizedBox(height: 8),
           Row(
             children: [
+              if (statement.isRead)
+                OutlinedButton(
+                  onPressed: () => _open(statement),
+                  child: const Text('Open'),
+                ),
               if (statement.status == 'UNIDENTIFIED' && _cards.isNotEmpty)
                 OutlinedButton(
                   onPressed: _busy == statement.id ? null : () => _assign(statement),

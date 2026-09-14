@@ -95,4 +95,32 @@ class ApiClient {
     final res = await http.delete(Uri.parse('$_baseUrl$path'), headers: await _headers());
     _decode(res);
   }
+
+  /// A file, rather than JSON.
+  ///
+  /// The session is a bearer token, so a statement PDF cannot simply be
+  /// handed to a browser: it would arrive without one and be turned away.
+  /// The bytes come back here and are written somewhere the system viewer
+  /// can reach.
+  Future<List<int>> bytes(String path) async {
+    final token = await getToken();
+    final res = await http.get(
+      Uri.parse('$_baseUrl$path'),
+      headers: {if (token != null) 'Authorization': 'Bearer $token'},
+    );
+
+    if (res.statusCode == 401) {
+      clearToken();
+      throw ApiException(401, 'Session expired');
+    }
+    if (res.statusCode >= 400) {
+      String message = res.reasonPhrase ?? 'Request failed';
+      try {
+        message = (jsonDecode(res.body) as Map)['error']?.toString() ?? message;
+      } catch (_) {}
+      throw ApiException(res.statusCode, message);
+    }
+
+    return res.bodyBytes;
+  }
 }
