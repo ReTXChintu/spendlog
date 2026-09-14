@@ -56,6 +56,37 @@ export interface Account {
   hasStatementPassword?: boolean;
 }
 
+/**
+ * An account with everything its own panel shows, from GET
+ * /accounts/overview. Assembled on the server because the same figures
+ * already feed the dashboard, and four requests per account would be a
+ * waterfall for numbers that exist together.
+ */
+export interface AccountOverview extends Account {
+  /// Null for anything without a billing cycle - a savings account has no
+  /// limit and no month, and an empty bar drawn for one means nothing.
+  cycle: {
+    statementOn: string | null;
+    dueOn: string | null;
+    floatDays: number | null;
+    spentMinor: number;
+    limitMinor: number | null;
+    remainingMinor: number | null;
+    state: "ok" | "close" | "over" | "unset";
+  } | null;
+  /// The last bill read off a statement - the only figure on the panel
+  /// that comes from the bank rather than from adding up messages.
+  bill: {
+    totalDueMinor: number;
+    dueOn: string | null;
+    daysUntilDue: number | null;
+    isPaid: boolean;
+  } | null;
+  /// Whether full card details are stored. Like the password, the values
+  /// themselves need a PIN and a separate request.
+  hasCardDetails: boolean;
+}
+
 /** What to call an account on screen: the name given to it, else the bank's. */
 export function accountLabel(account: Pick<Account, "bankName" | "last4" | "nickname">): string {
   const name = account.nickname?.trim() || account.bankName;

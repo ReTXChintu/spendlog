@@ -911,3 +911,113 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
   font-variant-numeric:tabular-nums}
 .reset-figures dd.is-going{color:var(--debit)}
 .reset-figures dd.is-staying{color:var(--credit)}
+
+/* ================================================== accounts, one at a time */
+/* A rail of accounts beside the one in view on a wide screen; a scrolling
+   strip above it on a narrow one. Full width either way — the panel holds
+   three figure cards side by side and has no business in a column. */
+.accounts-layout{display:flex;flex-direction:column;gap:16px}
+
+.accounts-bar{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap}
+.accounts-rail{flex:1;min-width:0;display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;
+  scrollbar-width:thin}
+.accounts-bar>.btn{flex-shrink:0}
+
+.account-tab{display:flex;align-items:center;gap:10px;flex-shrink:0;padding:9px 13px;
+  border:1px solid var(--line);border-radius:var(--radius-md);background:var(--paper);
+  color:var(--ink-70);font:inherit;text-align:left;cursor:pointer}
+.account-tab:hover{border-color:var(--brand);color:var(--ink)}
+.account-tab.on{background:var(--surface);border-color:var(--brand);color:var(--ink);
+  box-shadow:inset 0 0 0 1px var(--brand)}
+.account-tab.is-closed{opacity:.55}
+.account-tab-badge{display:flex;align-items:center;justify-content:center;width:28px;height:28px;
+  border-radius:8px;background:var(--track);color:var(--muted);flex-shrink:0}
+.account-tab-badge svg{width:15px;height:15px}
+.account-tab-main{display:flex;flex-direction:column;gap:1px;min-width:0}
+.account-tab-name{font-size:13px;font-weight:600;white-space:nowrap}
+.account-tab-sub{font-size:11px;color:var(--muted);white-space:nowrap;
+  font-variant-numeric:tabular-nums}
+
+.accounts-body{display:flex;flex-direction:column;gap:16px}
+
+/* ------------------------------------------------------ one account's panel */
+.account-panel{background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--radius-lg);padding:18px 20px}
+.account-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
+  margin-bottom:16px}
+.account-panel-head h3{margin:0;font-size:17px;display:flex;align-items:baseline;gap:10px;
+  flex-wrap:wrap}
+.account-last4{font-family:var(--font-mono);font-size:13px;font-weight:600;color:var(--muted);
+  letter-spacing:.02em}
+.account-panel-sub{margin:3px 0 0;font-size:12px;color:var(--muted)}
+
+.account-figures{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:12px}
+.figure-card{display:flex;flex-direction:column;gap:5px;padding:13px 15px;background:var(--paper);
+  border:1px solid var(--line);border-radius:var(--radius-md)}
+.figure-label{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--muted)}
+.figure-value{font-size:20px;font-weight:700;font-family:var(--font-mono);
+  font-variant-numeric:tabular-nums;display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}
+.figure-value.is-none{color:var(--muted-light)}
+.figure-value.is-paid{color:var(--credit)}
+.figure-of{font-size:12.5px;font-weight:600;color:var(--muted);font-family:var(--font-sans)}
+.figure-note{font-size:11.5px;color:var(--muted);line-height:1.45}
+
+.figure-rows{margin:2px 0 0;display:flex;flex-direction:column;gap:5px}
+.figure-rows>div{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.figure-rows dt{font-size:12px;color:var(--muted)}
+.figure-rows dd{margin:0;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
+
+.meter{height:6px;border-radius:100px;background:var(--track);overflow:hidden;margin:3px 0 1px}
+.meter-fill{height:100%;border-radius:100px;background:var(--brand);transition:width .3s ease}
+.figure-card.is-close .meter-fill{background:var(--warn)}
+.figure-card.is-close .figure-note{color:var(--warn)}
+.figure-card.is-over .meter-fill{background:var(--debit)}
+.figure-card.is-over .figure-note{color:var(--debit);font-weight:600}
+
+/* One fact and one control, on a line. */
+.account-row{display:flex;align-items:center;gap:12px;margin-top:14px;padding:11px 14px;
+  background:var(--paper);border:1px solid var(--line);border-radius:var(--radius-md)}
+.account-row-label{flex:1;display:flex;align-items:center;gap:9px;font-size:13px;font-weight:600}
+.account-row-label svg{width:15px;height:15px;color:var(--muted)}
+.account-row-value{flex-shrink:0}
+
+/* --------------------------------------------------------------- the vault */
+/* Locked is the resting state. Nothing here survives a reload, because the
+   PIN is checked on the request that reveals and on no other. */
+.vault{margin-top:14px;padding:14px 15px;background:var(--paper);border:1px solid var(--line);
+  border-radius:var(--radius-md)}
+.vault.is-open{border-color:var(--brand)}
+.vault-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+  margin-bottom:10px}
+.vault-title{display:flex;align-items:center;gap:9px;font-size:13px;font-weight:600}
+.vault-title svg{width:15px;height:15px;color:var(--muted)}
+.vault-masked{display:flex;align-items:center;gap:9px;font-family:var(--font-mono);font-size:13px;
+  color:var(--muted);letter-spacing:.06em}
+.vault-state{font-family:var(--font-sans);font-size:9.5px;font-weight:700;letter-spacing:.04em;
+  text-transform:uppercase;padding:2px 7px;border-radius:100px;background:var(--track);
+  letter-spacing:.05em}
+
+.vault-pin{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.vault-pin .filter-input{width:120px;font-family:var(--font-mono);letter-spacing:.3em}
+
+.vault-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;
+  margin:0 0 12px}
+.vault-fields>div{display:flex;flex-direction:column;gap:3px}
+.vault-fields .vault-note{grid-column:1/-1}
+.vault-fields dt{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--muted)}
+.vault-fields dd{margin:0;font-size:14px;font-weight:600}
+.vault-number{font-family:var(--font-mono);font-size:16px !important;letter-spacing:.06em;
+  word-break:break-all}
+
+.vault-edit{display:flex;flex-direction:column;gap:11px}
+.vault-edit-row{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+.vault-setpin{display:flex;flex-direction:column;gap:11px}
+
+@media (max-width:720px){
+  .account-panel{padding:15px 14px}
+  .accounts-bar>.btn{width:100%;justify-content:center}
+  .vault-edit-row{grid-template-columns:1fr}
+  .figure-value{font-size:18px}
+}

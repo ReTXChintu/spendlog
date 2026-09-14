@@ -78,6 +78,12 @@ function call(path: string, init?: RequestInit) {
 
 const body = (value: unknown) => ({ body: JSON.stringify(value) });
 
+async function json<T>(response: Response): Promise<T> {
+  return (await response.json()) as T;
+}
+
+type Err = { error: string };
+
 const CARD = {
   number: "5252 2525 2525 6623",
   expiry: "08/29",
@@ -98,7 +104,7 @@ describe("the card vault", () => {
   it("will not store anything until a PIN is set", async () => {
     const response = await store();
     assert.equal(response.status, 400);
-    assert.match((await response.json()).error, /Set a PIN/);
+    assert.match((await json<Err>(response)).error, /Set a PIN/);
   });
 
   it("insists a PIN is four to six digits", async () => {
@@ -118,7 +124,7 @@ describe("the card vault", () => {
     });
     assert.equal(response.status, 200);
 
-    const revealed = await response.json();
+    const revealed = await json<Record<string, string>>(response);
     // Stored with the spacing typed and given back as digits.
     assert.equal(revealed.number, "5252252525256623");
     assert.equal(revealed.expiry, "08/29");
@@ -141,7 +147,7 @@ describe("the card vault", () => {
     await setPin();
     await store();
 
-    const listed = await (await call("/vault/cards")).json();
+    const listed = await json<Record<string, unknown>[]>(await call("/vault/cards"));
     assert.deepEqual(Object.keys(listed[0]).sort(), ["accountId", "last4", "updatedAt"]);
   });
 
@@ -153,7 +159,7 @@ describe("the card vault", () => {
     });
 
     assert.equal(response.status, 400);
-    assert.match((await response.json()).error, /does not store a CVV/);
+    assert.match((await json<Err>(response)).error, /does not store a CVV/);
   });
 
   it("turns away a wrong PIN, and says how many tries are left", async () => {
@@ -165,7 +171,7 @@ describe("the card vault", () => {
       ...body({ pin: "0000" }),
     });
     assert.equal(response.status, 403);
-    assert.match((await response.json()).error, /4 attempts left/);
+    assert.match((await json<Err>(response)).error, /4 attempts left/);
   });
 
   it("stops accepting any PIN after five wrong ones", async () => {
@@ -182,7 +188,7 @@ describe("the card vault", () => {
       ...body({ pin: "4321" }),
     });
     assert.equal(response.status, 429);
-    assert.match((await response.json()).error, /Too many wrong PINs/);
+    assert.match((await json<Err>(response)).error, /Too many wrong PINs/);
   });
 
   it("forgets the wrong answers as soon as one is right", async () => {
@@ -198,7 +204,7 @@ describe("the card vault", () => {
       200
     );
 
-    const status = await (await call("/vault")).json();
+    const status = await json<{ attemptsLeft: number }>(await call("/vault"));
     assert.equal(status.attemptsLeft, 5);
   });
 
@@ -225,7 +231,7 @@ describe("the card vault", () => {
       ...body({ confirm: "forget my card details" }),
     });
     assert.equal(done.status, 200);
-    assert.equal((await done.json()).detailsDeleted, 1);
+    assert.equal((await json<{ detailsDeleted: number }>(done)).detailsDeleted, 1);
     assert.equal(await models.CardVault.countDocuments({ userId }), 0);
   });
 
@@ -254,7 +260,7 @@ describe("the card vault", () => {
     const stranger = await models.User.create({ email: "stranger@example.com" });
     token = signToken({ id: stranger._id.toString(), email: "stranger@example.com" });
 
-    const listed = await (await call("/vault/cards")).json();
+    const listed = await json<unknown[]>(await call("/vault/cards"));
     assert.deepEqual(listed, []);
 
     // Even knowing the account id, and even with a PIN of their own.

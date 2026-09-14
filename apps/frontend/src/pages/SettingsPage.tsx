@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AccountModal } from "../components/AccountModal";
+import { AccountPanel } from "../components/AccountPanel";
 import { CommitmentModal } from "../components/CommitmentModal";
 import { Icon } from "../components/Icon";
 import { StatementShelf } from "../components/StatementShelf";
@@ -10,6 +11,7 @@ import { useAuth } from "../lib/auth";
 import { formatMoney } from "../lib/format";
 import {
   Account,
+  AccountOverview,
   BudgetProfile,
   CardNetwork,
   Category,
@@ -297,37 +299,128 @@ function ConnectionsTab() {
   );
 }
 
-/** What the money moves through, and the details each card needs. */
+/**
+ * Every account, one at a time.
+ *
+ * A single list of accounts told you almost nothing about any of them: to
+ * find out where a card stood you opened a modal, and to find its
+ * statements you went to a different tab. So each account gets a tab of
+ * its own, and under it everything that belongs to it - what it is, where
+ * it stands this cycle, when it bills, its stored details, and its
+ * statements.
+ *
+ * The tab list is a rail on a wide screen and a scrolling strip on a
+ * narrow one. Which account is selected lives in the query string, so the
+ * dashboard can send you straight at one.
+ */
 function AccountsTab() {
-  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [accounts, setAccounts] = useState<AccountOverview[]>([]);
   const [editing, setEditing] = useState<{ account: Account | null } | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [loaded, setLoaded] = useState(false);
 
   const reload = useCallback(() => {
-    api.get<Account[]>("/accounts").then(setAccounts).catch(() => setAccounts([]));
+    api
+      .get<AccountOverview[]>("/accounts/overview")
+      .then(setAccounts)
+      .catch(() => setAccounts([]))
+      .finally(() => setLoaded(true));
   }, []);
 
   useEffect(reload, [reload]);
 
-  const cards = accounts.filter((account) => account.accountType === "CARD");
-  const missingNetwork = cards.filter((card) => !card.cardNetwork);
+  const wanted = searchParams.get("account");
+  const selected = accounts.find((account) => account.id === wanted) ?? accounts[0] ?? null;
 
-  return (
-    <div className="settings-grid">
-      <div className="card set-card set-card-wide">
-        <div className="set-card-head">
-          <div className="set-card-icon">
-            <Icon name="ic-wallet" />
+  function select(accountId: string) {
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", "accounts");
+    next.set("account", accountId);
+    setSearchParams(next, { replace: true });
+  }
+
+  const missingNetwork = accounts.filter(
+    (account) => account.accountType === "CARD" && account.isActive && !account.cardNetwork
+  );
+
+  if (loaded && accounts.length === 0) {
+    return (
+      <div className="settings-grid">
+        <div className="card set-card set-card-wide">
+          <div className="set-card-head">
+            <div className="set-card-icon">
+              <Icon name="ic-wallet" />
+            </div>
+            <div>
+              <h4>Accounts and cards</h4>
+              <p className="set-card-sub">None yet</p>
+            </div>
           </div>
-          <div>
-            <h4>Accounts and cards</h4>
-            <p className="set-card-sub">
-              {accounts.length === 0
-                ? "None yet"
-                : `${accounts.length} ${accounts.length === 1 ? "account" : "accounts"}`}
-            </p>
+          <p className="desc">
+            These appear on their own the first time a bank texts you. Add one by hand for anything
+            that doesn&apos;t — cash, or an account that never sends alerts.
+          </p>
+          <div className="set-card-actions">
+            <button className="btn btn-sm btn-primary" onClick={() => setEditing({ account: null })}>
+              <Icon name="ic-plus" /> Add an account
+            </button>
           </div>
         </div>
 
+        {editing && (
+          <AccountModal
+            account={editing.account}
+            accounts={accounts}
+            onSaved={() => {
+              setEditing(null);
+              reload();
+            }}
+            onClose={() => setEditing(null)}
+          />
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="accounts-layout">
+      <div className="accounts-bar">
+        <div className="accounts-rail" role="tablist" aria-label="Accounts">
+          {accounts.map((account) => (
+            <button
+              key={account.id}
+              role="tab"
+              aria-selected={selected?.id === account.id}
+              className={`account-tab${selected?.id === account.id ? " on" : ""}${
+                account.isActive ? "" : " is-closed"
+              }`}
+              onClick={() => select(account.id)}
+            >
+              <span className="account-tab-badge">
+                <Icon name={account.accountType === "BANK" ? "ic-bank" : "ic-wallet"} />
+              </span>
+              <span className="account-tab-main">
+                <span className="account-tab-name">{account.nickname || account.bankName}</span>
+                <span className="account-tab-sub">
+                  {[
+                    account.last4 ? `•••• ${account.last4}` : null,
+                    networkLabel(account.cardNetwork),
+                    account.isActive ? null : "closed",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
+
+        <button className="btn btn-sm btn-primary" onClick={() => setEditing({ account: null })}>
+          <Icon name="ic-plus" /> Add card or account
+        </button>
+      </div>
+
+      <div className="accounts-body">
         {missingNetwork.length > 0 && (
           <p className="desc set-warn">
             <Icon name="ic-alert" />
@@ -337,52 +430,19 @@ function AccountsTab() {
           </p>
         )}
 
-        {accounts.length === 0 ? (
-          <p className="desc">
-            These appear on their own the first time a bank texts you. Add one by hand for anything that
-            doesn't — cash, or an account that never sends alerts.
-          </p>
-        ) : (
-          <div className="account-list">
-            {accounts.map((account) => (
-              <button
-                key={account.id}
-                className={`account-row${account.isActive ? "" : " is-closed"}`}
-                onClick={() => setEditing({ account })}
-              >
-                <span className="account-badge">
-                  <Icon name={account.accountType === "BANK" ? "ic-bank" : "ic-wallet"} />
-                </span>
-                <span className="account-row-main">
-                  <span className="account-row-name">{accountLabel(account)}</span>
-                  <span className="account-row-sub">
-                    {[
-                      account.nickname ? account.bankName : null,
-                      networkLabel(account.cardNetwork),
-                      account.statementDay ? `bills on the ${account.statementDay}th` : null,
-                      account.hasStatementPassword ? "statement password set" : null,
-                      !account.isActive ? "Closed" : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ") || "Detected from your messages"}
-                  </span>
-                </span>
-                <span className="account-row-type">{account.accountType}</span>
-              </button>
-            ))}
-          </div>
+        {selected && (
+          <AccountPanel
+            key={selected.id}
+            account={selected}
+            onEdit={() => setEditing({ account: selected })}
+            onChanged={reload}
+          />
         )}
 
-        <div className="set-card-actions">
-          <button className="btn btn-sm" onClick={() => setEditing({ account: null })}>
-            <Icon name="ic-plus" /> Add an account
-          </button>
-        </div>
+        {/* A card's statements are that card's paperwork, so they live with
+            it rather than under the mailbox they arrived through. */}
+        <StatementShelf accounts={accounts} onChanged={reload} focusAccountId={selected?.id ?? null} />
       </div>
-
-      {/* A card's statements are that card's paperwork, so they live with
-          it rather than under the mailbox they arrived through. */}
-      <StatementShelf accounts={accounts} onChanged={reload} />
 
       {editing && (
         <AccountModal

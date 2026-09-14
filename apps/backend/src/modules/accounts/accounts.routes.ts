@@ -2,7 +2,9 @@ import { Router } from "express";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
-import { Account, Transaction } from "../../models";
+import { Account, CardVault, Transaction } from "../../models";
+import { cardStatuses } from "../cards/cards.status";
+import { upcomingBills } from "../statements/statements.bills";
 import { ACCOUNT_TYPES } from "../../types";
 
 export const accountsRouter = Router();
@@ -17,6 +19,68 @@ accountsRouter.get("/", async (req, res) => {
     last4: 1,
   });
   res.json(accounts);
+});
+
+/**
+ * GET /accounts/overview — every account with everything its own panel
+ * shows, in one request.
+ *
+ * The accounts screen draws a card per account: what it is, where it
+ * stands this cycle, when its statement and its bill fall, whether a
+ * statement password and card details are stored. Left to the client that
+ * is four requests per account and a waterfall; the figures already exist
+ * together on the server, because the dashboard needs the same ones.
+ */
+accountsRouter.get("/overview", async (req, res) => {
+  const userId = currentUserId(req);
+
+  const [accounts, statuses, vaults, bills] = await Promise.all([
+    Account.find({ userId }).sort({ isActive: -1, accountType: 1, bankName: 1, last4: 1 }),
+    cardStatuses(userId),
+    CardVault.find({ userId }).select("accountId last4"),
+    upcomingBills(userId),
+  ]);
+
+  const statusFor = new Map(statuses.map((status) => [status.accountId, status]));
+  const vaultFor = new Map(vaults.map((vault) => [vault.accountId.toString(), vault]));
+  const billFor = new Map(bills.map((bill) => [bill.accountId, bill]));
+
+  res.json(
+    accounts.map((account) => {
+      const id = account._id.toString();
+      const status = statusFor.get(id) ?? null;
+
+      return {
+        ...account.toJSON(),
+        /// Null for anything that is not an active card: a savings account
+        /// has no cycle and no limit, and inventing zeroes for it would
+        /// put an empty progress bar on screen that means nothing.
+        cycle: status
+          ? {
+              statementOn: status.statementOn,
+              dueOn: status.dueOn,
+              floatDays: status.floatDays,
+              spentMinor: status.spentMinor,
+              limitMinor: status.limitMinor,
+              remainingMinor: status.remainingMinor,
+              state: status.state,
+            }
+          : null,
+        /// The last bill read off a statement, which is the only figure
+        /// here that comes from the bank rather than from adding up
+        /// messages.
+        bill: billFor.get(id)
+          ? {
+              totalDueMinor: billFor.get(id)!.totalDueMinor,
+              dueOn: billFor.get(id)!.dueDate,
+              daysUntilDue: billFor.get(id)!.daysUntilDue,
+              isPaid: billFor.get(id)!.isPaid,
+            }
+          : null,
+        hasCardDetails: vaultFor.has(id),
+      };
+    })
+  );
 });
 
 const accountFields = {

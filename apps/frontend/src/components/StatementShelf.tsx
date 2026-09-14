@@ -65,9 +65,14 @@ const STATUS_LABEL: Record<StatementRow["status"], string> = {
 export function StatementShelf({
   accounts,
   onChanged,
+  /// Which account the page is currently about. Its statements lead, and
+  /// its group opens by itself. Null shows the whole shelf in its own
+  /// order, which is how this is used where no one account is in view.
+  focusAccountId = null,
 }: {
   accounts: Account[];
   onChanged?: () => void;
+  focusAccountId?: string | null;
 }) {
   const [groups, setGroups] = useState<AccountGroup[]>([]);
   const [open, setOpen] = useState<Record<string, boolean>>({});
@@ -83,19 +88,23 @@ export function StatementShelf({
       .get<AccountGroup[]>("/statements/filed")
       .then((next) => {
         setGroups(next);
-        // The card with something wrong on it opens by itself, because that
-        // is the only reason anybody comes to this screen unprompted.
+        // The account being looked at opens by itself, and so does any
+        // other with something wrong on it — that is the only reason
+        // anybody comes to this screen unprompted.
         setOpen((current) =>
           Object.keys(current).length > 0
             ? current
             : Object.fromEntries(
-                next.map((group) => [group.accountId, needsWork(group)]),
+                next.map((group) => [
+                  group.accountId,
+                  group.accountId === focusAccountId || needsWork(group),
+                ]),
               ),
         );
       })
       .catch(() => setGroups([]))
       .finally(() => setLoaded(true));
-  }, []);
+  }, [focusAccountId]);
 
   useEffect(load, [load]);
 
@@ -161,7 +170,7 @@ export function StatementShelf({
         {error && <p className="desc set-warn">{error}</p>}
 
         <div className="shelf">
-          {groups.map((group) => {
+          {ownFirst(groups, focusAccountId).map((group) => {
             const count = group.months.reduce(
               (sum, month) => sum + month.statements.length,
               0,
@@ -405,6 +414,16 @@ export function StatementShelf({
       </div>
     </>
   );
+}
+
+/** The account being looked at first, the rest in the order they came. */
+function ownFirst(groups: AccountGroup[], focusAccountId: string | null): AccountGroup[] {
+  if (!focusAccountId) return groups;
+
+  return [
+    ...groups.filter((group) => group.accountId === focusAccountId),
+    ...groups.filter((group) => group.accountId !== focusAccountId),
+  ];
 }
 
 function countStuck(group: AccountGroup): number {
