@@ -118,8 +118,30 @@ what a flat "2% on everything" card is.
 
 `GET /perks/lookup?q=...`, tolerant of how a person types: *"I'm at
 Gucci"*, *"gucci"*, *"GUCCI INDIA PVT"* all have to find a perk stored as
-`gucci`. Matching is substring in **both** directions, because a stored
-pattern may be longer or shorter than what is typed.
+`gucci`.
+
+Words match through the two things that routinely differ between what was
+saved and what is typed:
+
+- **A plural.** A coupon saved as `flights` has to answer `flight`, and the
+  s may be on either side, so the prefix test runs both ways.
+- **A typo**, including the one autocorrect makes — typing a brand the
+  keyboard has never heard of turns `wrogn` into `wrong`. Damerau rather
+  than plain edit distance, because a swapped pair is one mistake and two
+  substitutions, and only the first number is small enough to allow. From
+  five letters up only: at four, one edit is as likely to be a different
+  word, and `zara` and `tara` are not the same shop.
+
+A pattern then matches in one of three strengths, ranked in that order:
+the whole pattern appearing in the query, the query being the start of the
+pattern, or any word of the pattern turning up anywhere in the query.
+
+That last one was refused at first, on the reasoning that a name is typed
+from its beginning. The reasoning did not survive a coupon saved as
+*MakeMyTrip flights* and someone typing *flight* — the same shape as
+`coffee` against *blue tokai coffee*, and obviously wanting to match. It is
+allowed and ranked last instead: the answer is a list saying where each
+perk works, so a wrong guess costs a glance rather than a trip.
 
 Expired, used and inactive perks never appear. There is no worse outcome
 here than being told to hand over a code that does not work.

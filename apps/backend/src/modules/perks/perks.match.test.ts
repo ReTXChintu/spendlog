@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   comparePerks,
   merchantMatches,
+  merchantMatchStrength,
   normaliseMerchantQuery,
   perkIsLive,
   perkReach,
@@ -42,12 +43,41 @@ describe("merchantMatches", () => {
     assert.equal(merchantMatches("gucci", "gucci gurgaon"), true);
   });
 
-  it("does not let a common word claim a shop it was never meant for", () => {
-    // A name is typed from its beginning, so "coffee" does not mean the
-    // perk saved for "blue tokai coffee" - that is the wrong shop and a
-    // wasted trip.
-    assert.equal(merchantMatches("blue tokai coffee", "coffee"), false);
-    assert.equal(merchantMatches("blue tokai coffee", "blue tokai"), true);
+  it("finds a shop by a word from the middle of its saved name", () => {
+    // This used to be refused, on the reasoning that a name is typed from
+    // its beginning. The reasoning did not survive a coupon saved as
+    // "MakeMyTrip flights" and someone typing "flight" - the same shape,
+    // and obviously wanting to match. It is ranked last instead.
+    assert.equal(merchantMatchStrength("makemytrip flights", "flight"), 1);
+    assert.equal(merchantMatchStrength("blue tokai coffee", "coffee"), 1);
+
+    // Still below a pattern the query hit squarely, which is what keeps a
+    // loose match from answering ahead of the shop actually named.
+    assert.equal(merchantMatchStrength("blue tokai coffee", "blue tokai"), 2);
+    assert.equal(merchantMatchStrength("coffee", "coffee"), 3);
+  });
+
+  it("still refuses a word too short to tell from a different one", () => {
+    assert.equal(merchantMatches("pvr inox", "pay"), false);
+  });
+
+  it("reads through a plural, whichever side is carrying it", () => {
+    // A coupon saved as "flights" has to answer someone typing "flight".
+    assert.equal(merchantMatches("flights", "flight"), true);
+    assert.equal(merchantMatches("flight", "flights"), true);
+  });
+
+  it("reads through a typo, including the one autocorrect makes", () => {
+    // Typing a brand the keyboard has never heard of: "wrogn" becomes
+    // "wrong" on the way in, and the coupon still has to be found.
+    assert.equal(merchantMatches("wrogn", "wrong"), true);
+    assert.equal(merchantMatches("myntra", "myntraa"), true);
+  });
+
+  it("does not call two different short names a typo", () => {
+    // One edit apart and not the same shop. Fuzziness starts at five
+    // letters for exactly this reason.
+    assert.equal(merchantMatches("zara", "tara"), false);
   });
 
   it("finds the pattern buried in an aggregator's merchant string", () => {
@@ -162,5 +192,30 @@ describe("comparePerks", () => {
   it("puts the bigger number first once the kind is the same", () => {
     const sorted = [perk({ percent: 2 }), perk({ percent: 5 })].sort(comparePerks);
     assert.deepEqual(sorted.map((p) => p.percent), [5, 2]);
+  });
+});
+
+describe("ranking a loose match against a square one", () => {
+  const perk = (over: Partial<Parameters<typeof comparePerks>[0]>) => ({
+    reach: "MERCHANT" as const,
+    strength: 3,
+    kind: "CARD_OFFER",
+    valueMinor: null,
+    percent: null,
+    ...over,
+  });
+
+  it("puts the shop that was named above one that shares a word with it", () => {
+    const sorted = [perk({ strength: 1 }), perk({ strength: 3 }), perk({ strength: 2 })].sort(comparePerks);
+    assert.deepEqual(sorted.map((p) => p.strength), [3, 2, 1]);
+  });
+
+  it("does not let strength beat reach", () => {
+    // A perk naming this shop loosely still beats one covering everywhere
+    // squarely, because reach is the more trustworthy signal.
+    const sorted = [perk({ reach: "ANYWHERE", strength: 3 }), perk({ reach: "MERCHANT", strength: 1 })].sort(
+      comparePerks
+    );
+    assert.deepEqual(sorted.map((p) => p.reach), ["MERCHANT", "ANYWHERE"]);
   });
 });

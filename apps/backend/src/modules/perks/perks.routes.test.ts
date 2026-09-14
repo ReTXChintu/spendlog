@@ -327,6 +327,71 @@ describe("asking what I have here", () => {
     assert.equal(with90k.matches[0].valueMinor, 45000);
   });
 
+  it("finds a coupon saved in the plural", async () => {
+    // Reported: a coupon added for flights, searched for as "flight".
+    const user = await makeUser();
+    await models.Perk.create({
+      userId: user.id,
+      kind: "COUPON",
+      title: "15% off",
+      merchants: ["flights"],
+      percent: 15,
+    });
+
+    const lookup = await json<Lookup>(await call("/perks/lookup?q=flight", user.token));
+    assert.equal(lookup.matches.length, 1);
+  });
+
+  it("finds a coupon by one word of a longer saved name", async () => {
+    const user = await makeUser();
+    await models.Perk.create({
+      userId: user.id,
+      kind: "COUPON",
+      title: "15% off",
+      merchants: ["makemytrip flights"],
+      percent: 15,
+    });
+
+    const lookup = await json<Lookup>(await call("/perks/lookup?q=flight", user.token));
+    assert.equal(lookup.matches.length, 1);
+  });
+
+  it("survives what autocorrect does to a brand it has never heard of", async () => {
+    // Reported: typing "wrogn" is corrected to "wrong" on the way in.
+    const user = await makeUser();
+    await models.Perk.create({
+      userId: user.id,
+      kind: "COUPON",
+      title: "₹500 off",
+      merchants: ["wrogn"],
+      flatMinor: 50000,
+    });
+
+    const lookup = await json<Lookup>(await call("/perks/lookup?q=wrong", user.token));
+    assert.equal(lookup.matches.length, 1);
+  });
+
+  it("answers with the shop that was named before one that shares a word", async () => {
+    const user = await makeUser();
+    await models.Perk.create({
+      userId: user.id,
+      kind: "COUPON",
+      title: "Loose",
+      merchants: ["blue tokai coffee"],
+      percent: 5,
+    });
+    await models.Perk.create({
+      userId: user.id,
+      kind: "COUPON",
+      title: "Square",
+      merchants: ["coffee"],
+      percent: 5,
+    });
+
+    const lookup = await json<Lookup>(await call("/perks/lookup?q=coffee", user.token));
+    assert.deepEqual(lookup.matches.map((match) => match.title), ["Square", "Loose"]);
+  });
+
   it("wants something to look for", async () => {
     const user = await makeUser();
     assert.equal((await call("/perks/lookup", user.token)).status, 400);

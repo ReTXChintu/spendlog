@@ -6,7 +6,14 @@ import { validObjectIdParam } from "../../middleware/validate";
 import { Account, Perk } from "../../models";
 import { PERK_KINDS } from "../../types";
 import { cardStatuses } from "../cards/cards.status";
-import { comparePerks, normaliseMerchantQuery, perkIsLive, perkReach, perkValueMinor } from "./perks.match";
+import {
+  bestMerchantStrength,
+  comparePerks,
+  normaliseMerchantQuery,
+  perkIsLive,
+  perkReach,
+  perkValueMinor,
+} from "./perks.match";
 
 export const perksRouter = Router();
 perksRouter.use(requireAuth);
@@ -159,6 +166,9 @@ perksRouter.get("/lookup", async (req, res) => {
       return {
         ...perk.toJSON(),
         reach,
+        // How squarely the query hit, so a perk whose pattern merely shares
+        // a word never outranks the one that named the shop.
+        strength: bestMerchantStrength(perk.merchants, q),
         valueMinor: perkValueMinor(perk, spendMinor),
         card: accountId ? (cardById.get(accountId) ?? null) : null,
         daysLeft: perk.expiresOn ? daysBetween(now, perk.expiresOn) : null,
