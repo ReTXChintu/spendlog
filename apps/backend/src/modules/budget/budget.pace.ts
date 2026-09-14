@@ -89,7 +89,9 @@ export async function budgetPace(userId: Types.ObjectId, now = new Date()) {
 
   const spentMinor = spend?.total ?? 0;
 
-  const commitments = await FixedCommitment.find({ userId, isActive: true }).sort({ dayOfMonth: 1 });
+  const commitments = await FixedCommitment.find({ userId, isActive: true })
+    .sort({ dayOfMonth: 1 })
+    .populate("categoryId");
 
   // What has actually gone out towards each one this period, from payments
   // marked against it. Marking the payment rather than ticking a box is

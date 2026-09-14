@@ -461,6 +461,13 @@ class FixedCommitment {
   /// an unticked box.
   final bool isPartial;
 
+  /// Who it goes to and what it counts as, prefilled onto a payment
+  /// marked against it. A fixed cost is the same merchant and the same
+  /// category every month.
+  final String? merchant;
+  final String? categoryId;
+  final String? categoryName;
+
   FixedCommitment({
     required this.id,
     required this.name,
@@ -470,6 +477,9 @@ class FixedCommitment {
     this.paidMinor = 0,
     this.shortfallMinor = 0,
     this.isPartial = false,
+    this.merchant,
+    this.categoryId,
+    this.categoryName,
   });
 
   factory FixedCommitment.fromJson(Map<String, dynamic> json) => FixedCommitment(
@@ -481,6 +491,15 @@ class FixedCommitment {
         paidMinor: json['paidMinor'] as int? ?? 0,
         shortfallMinor: json['shortfallMinor'] as int? ?? 0,
         isPartial: json['isPartial'] as bool? ?? false,
+        merchant: json['merchant'] as String?,
+        // Populated on the way out, so it arrives as the category itself
+        // rather than an id - but a bare id after a save.
+        categoryId: json['categoryId'] is Map<String, dynamic>
+            ? (json['categoryId'] as Map<String, dynamic>)['id'] as String?
+            : json['categoryId'] as String?,
+        categoryName: json['categoryId'] is Map<String, dynamic>
+            ? (json['categoryId'] as Map<String, dynamic>)['name'] as String?
+            : null,
       );
 }
 

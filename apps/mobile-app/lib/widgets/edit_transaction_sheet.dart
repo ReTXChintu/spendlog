@@ -331,6 +331,27 @@ class _EditSheetState extends State<_EditSheet> {
     });
   }
 
+  /// Picking a fixed cost fills in what it is always paid to and always
+  /// counts as. A fixed cost is the same merchant and the same category
+  /// every month, so typing them again is typing them again.
+  ///
+  /// Only fills what is empty: a merchant read off a bank message is
+  /// better evidence than a default recorded weeks ago.
+  void _pickCommitment(String? id) {
+    setState(() {
+      _commitmentId = id;
+      if (id == null) return;
+
+      final picked = _commitments.where((commitment) => commitment.id == id).firstOrNull;
+      if (picked == null) return;
+
+      if (_merchant.text.trim().isEmpty && picked.merchant != null) {
+        _merchant.text = picked.merchant!;
+      }
+      _categoryId ??= picked.categoryId;
+    });
+  }
+
   Future<void> _loadCommitments() async {
     try {
       final result = await ApiClient.instance.get('/budget/commitments') as List<dynamic>;
@@ -638,7 +659,7 @@ class _EditSheetState extends State<_EditSheet> {
                       ),
                     ),
                 ],
-                onChanged: (value) => setState(() => _commitmentId = value),
+                onChanged: _pickCommitment,
               ),
               const SizedBox(height: 8),
             ],

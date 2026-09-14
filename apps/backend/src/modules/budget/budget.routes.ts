@@ -45,14 +45,21 @@ const commitmentSchema = z.object({
   amountMinor: z.number().int().nonnegative(),
   dayOfMonth: z.number().int().min(1).max(31),
   kind: z.enum(COMMITMENT_KINDS).optional(),
+  // Prefilled onto a payment when the commitment is picked, so a fixed
+  // cost does not need its merchant and category typed every month.
+  merchant: z.string().max(120).nullable().optional(),
+  categoryId: z
+    .string()
+    .regex(/^[0-9a-fA-F]{24}$/)
+    .nullable()
+    .optional(),
   isActive: z.boolean().optional(),
 });
 
 budgetRouter.get("/commitments", async (req, res) => {
-  const commitments = await FixedCommitment.find({ userId: currentUserId(req) }).sort({
-    isActive: -1,
-    dayOfMonth: 1,
-  });
+  const commitments = await FixedCommitment.find({ userId: currentUserId(req) })
+    .sort({ isActive: -1, dayOfMonth: 1 })
+    .populate("categoryId");
   res.json(commitments);
 });
 

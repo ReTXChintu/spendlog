@@ -201,6 +201,9 @@ export interface FixedCommitment {
   amountMinor: number;
   dayOfMonth: number;
   kind: "RENT" | "SIP" | "INSURANCE" | "LOAN" | "OTHER";
+  /** Who it goes to and what it counts as, prefilled onto a payment. */
+  merchant?: string | null;
+  categoryId?: string | Category | null;
   isActive: boolean;
   isPaid?: boolean;
   /** What has actually gone out towards it this period. */

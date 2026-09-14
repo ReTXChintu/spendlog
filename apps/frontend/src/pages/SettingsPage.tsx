@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AccountModal } from "../components/AccountModal";
+import { CommitmentModal } from "../components/CommitmentModal";
 import { Icon } from "../components/Icon";
 import { StatementList } from "../components/StatementList";
 import { api } from "../lib/api";
@@ -470,30 +471,19 @@ function YouTab() {
   const [saved, setSaved] = useState(false);
 
   const [commitments, setCommitments] = useState<FixedCommitment[]>([]);
-  const [commitmentName, setCommitmentName] = useState("");
-  const [commitmentAmount, setCommitmentAmount] = useState("");
-  const [commitmentDay, setCommitmentDay] = useState("");
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [editingCommitment, setEditingCommitment] = useState<{ commitment: FixedCommitment | null } | null>(
+    null
+  );
 
   const reloadCommitments = useCallback(() => {
     api.get<FixedCommitment[]>("/budget/commitments").then(setCommitments).catch(() => setCommitments([]));
   }, []);
 
   useEffect(reloadCommitments, [reloadCommitments]);
-
-  async function addCommitment() {
-    const rupees = Number.parseFloat(commitmentAmount);
-    if (!commitmentName.trim() || !Number.isFinite(rupees)) return;
-
-    await api.post("/budget/commitments", {
-      name: commitmentName.trim(),
-      amountMinor: Math.round(rupees * 100),
-      dayOfMonth: Number.parseInt(commitmentDay, 10) || 1,
-    });
-    setCommitmentName("");
-    setCommitmentAmount("");
-    setCommitmentDay("");
-    reloadCommitments();
-  }
+  useEffect(() => {
+    api.get<Category[]>("/categories").then(setCategories).catch(() => setCategories([]));
+  }, []);
 
   useEffect(() => {
     api
@@ -588,58 +578,57 @@ function YouTab() {
         </p>
 
         {commitments.length > 0 && (
-          <div className="preset-list">
+          <div className="account-list">
             {commitments.map((commitment) => (
-              <span className="preset-chip" key={commitment.id}>
-                {commitment.name}
-                <em>
-                  {formatMoney(commitment.amountMinor)} · {commitment.dayOfMonth}
-                  {ordinal(commitment.dayOfMonth)}
-                </em>
-                <button
-                  className="preset-remove"
-                  title={`Remove ${commitment.name}`}
-                  onClick={async () => {
-                    await api.delete(`/budget/commitments/${commitment.id}`);
-                    reloadCommitments();
-                  }}
-                >
-                  ×
-                </button>
-              </span>
+              <button
+                className="account-row"
+                key={commitment.id}
+                onClick={() => setEditingCommitment({ commitment })}
+              >
+                <span className="account-badge">
+                  <Icon name="ic-calendar" />
+                </span>
+                <span className="account-row-main">
+                  <span className="account-row-name">{commitment.name}</span>
+                  <span className="account-row-sub">
+                    {[
+                      `${formatMoney(commitment.amountMinor)} on the ${commitment.dayOfMonth}${ordinal(
+                        commitment.dayOfMonth
+                      )}`,
+                      commitment.merchant,
+                      typeof commitment.categoryId === "object" ? commitment.categoryId?.name : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                </span>
+                <span className="account-row-type">Edit</span>
+              </button>
             ))}
           </div>
         )}
 
-        <div className="budget-setup" style={{ marginTop: 12 }}>
-          <input
-            className="filter-input"
-            placeholder="Rent"
-            value={commitmentName}
-            onChange={(e) => setCommitmentName(e.target.value)}
-          />
-          <input
-            className="filter-input"
-            placeholder="₹ amount"
-            inputMode="decimal"
-            value={commitmentAmount}
-            onChange={(e) => setCommitmentAmount(e.target.value)}
-          />
-          <input
-            className="filter-input"
-            placeholder="Day"
-            inputMode="numeric"
-            value={commitmentDay}
-            onChange={(e) => setCommitmentDay(e.target.value)}
-          />
-          <button className="btn btn-sm btn-primary" onClick={addCommitment}>
-            Add
+        <div className="set-card-actions" style={{ marginTop: 12 }}>
+          <button className="btn btn-sm" onClick={() => setEditingCommitment({ commitment: null })}>
+            <Icon name="ic-plus" /> Add a fixed cost
           </button>
         </div>
         <p className="field-hint" style={{ marginTop: 8 }}>
           Tick one off on the dashboard when it has actually gone out.
         </p>
       </div>
+
+      {editingCommitment && (
+        <CommitmentModal
+          commitment={editingCommitment.commitment}
+          categories={categories}
+          onSaved={() => {
+            setEditingCommitment(null);
+            reloadCommitments();
+          }}
+          onClose={() => setEditingCommitment(null)}
+        />
+      )}
 
       <div className="card set-card">
         <div className="set-card-head">

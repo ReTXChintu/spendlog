@@ -703,6 +703,12 @@ export interface FixedCommitmentDoc {
   amountMinor: number;
   dayOfMonth: number;
   kind: CommitmentKind;
+  /// Who it goes to, and what it counts as. Carried here so selecting the
+  /// commitment on a payment fills both in - a fixed cost is the same
+  /// merchant and the same category every month, which is most of the
+  /// typing the payment would otherwise need.
+  merchant?: string | null;
+  categoryId?: Types.ObjectId | null;
   isActive: boolean;
   /// The period this was last ticked off for, as that period's start date
   /// in YYYY-MM-DD. Equal to the current period's start means it is paid.
@@ -722,6 +728,8 @@ const fixedCommitmentSchema = new Schema<FixedCommitmentDoc>(
     amountMinor: { type: Number, required: true, min: 0 },
     dayOfMonth: { type: Number, required: true, min: 1, max: 31 },
     kind: { type: String, enum: COMMITMENT_KINDS, default: "OTHER" },
+    merchant: { type: String, default: null, trim: true },
+    categoryId: { type: Schema.Types.ObjectId, ref: "Category", default: null },
     isActive: { type: Boolean, default: true },
     paidForPeriod: { type: String, default: null },
   },

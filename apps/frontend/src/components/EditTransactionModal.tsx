@@ -208,6 +208,27 @@ export function EditTransactionModal({
     }
   }
 
+  /**
+   * Picking a fixed cost fills in what it is always paid to and always
+   * counts as. A fixed cost is the same merchant and the same category
+   * every month, so typing them again is typing them again.
+   *
+   * Only fills what is empty: a merchant already read off a bank message
+   * is better evidence than a default recorded weeks ago.
+   */
+  function pickCommitment(id: string) {
+    setCommitmentId(id);
+    if (!id) return;
+
+    const picked = commitments.find((commitment) => commitment.id === id);
+    if (!picked) return;
+
+    if (!merchant.trim() && picked.merchant) setMerchant(picked.merchant);
+
+    const category = typeof picked.categoryId === "object" ? picked.categoryId?.id : picked.categoryId;
+    if (!categoryId && category) setCategoryId(category);
+  }
+
   async function save() {
     const rupees = Number.parseFloat(amount);
     if (!Number.isFinite(rupees) || rupees <= 0) {
@@ -495,7 +516,7 @@ export function EditTransactionModal({
             <div className="form-row form-row-wide">
               <label className="field">
                 <span>Towards a fixed monthly cost?</span>
-                <select value={commitmentId} onChange={(e) => setCommitmentId(e.target.value)}>
+                <select value={commitmentId} onChange={(e) => pickCommitment(e.target.value)}>
                   <option value="">No — ordinary spending</option>
                   {commitments.map((commitment) => (
                     <option key={commitment.id} value={commitment.id}>

@@ -40,6 +40,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   bool _nagReminder = false;
 
   List<MerchantPreset> _presets = [];
+  List<Category> _categories = [];
   List<FixedCommitment> _commitments = [];
   int? _salaryMinor;
   int? _salaryDay;
@@ -89,6 +90,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
       final results = await Future.wait([
         ApiClient.instance.get('/budget/profile'),
         ApiClient.instance.get('/budget/commitments'),
+        ApiClient.instance.get('/categories'),
       ]);
       if (!mounted) return;
 
@@ -98,6 +100,9 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
         _salaryDay = profile['salaryDay'] as int?;
         _commitments = (results[1] as List<dynamic>)
             .map((c) => FixedCommitment.fromJson(c as Map<String, dynamic>))
+            .toList();
+        _categories = (results[2] as List<dynamic>)
+            .map((c) => Category.fromJson(c as Map<String, dynamic>))
             .toList();
       });
     } catch (_) {
@@ -113,8 +118,11 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     if (saved == true) await _loadYou();
   }
 
-  Future<void> _addCommitment() async {
-    final saved = await showDialog<bool>(context: context, builder: (_) => const _CommitmentDialog());
+  Future<void> _editCommitment([FixedCommitment? commitment]) async {
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => _CommitmentDialog(commitment: commitment, categories: _categories),
+    );
     if (saved == true) await _loadYou();
   }
 
@@ -533,7 +541,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                 'and has never known what is actually in an account.',
             actions: [
               OutlinedButton(onPressed: _editSalary, child: const Text('Set salary')),
-              OutlinedButton(onPressed: _addCommitment, child: const Text('Add a fixed cost')),
+              OutlinedButton(onPressed: () => _editCommitment(), child: const Text('Add a fixed cost')),
             ],
           ),
         ),
@@ -552,8 +560,15 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     dense: true,
+                    onTap: () => _editCommitment(commitment),
                     title: Text(commitment.name, style: const TextStyle(fontSize: 13.5)),
-                    subtitle: Text('on the ${commitment.dayOfMonth}th'),
+                    subtitle: Text(
+                      [
+                        'on the ${commitment.dayOfMonth}th',
+                        if (commitment.merchant != null) commitment.merchant!,
+                        if (commitment.categoryName != null) commitment.categoryName!,
+                      ].join(' · '),
+                    ),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -848,19 +863,32 @@ class _SalaryDialogState extends State<_SalaryDialog> {
   }
 }
 
-/// Rent, a SIP, insurance — anything that goes out every month whatever
+/// Rent, a SIP, insurance - anything that goes out every month whatever
 /// else happens, and is therefore not free to spend.
+///
+/// The merchant and category live here rather than only on the payment,
+/// because a fixed cost is the same both every month: recording them once
+/// means a payment marked against it arrives already filled in.
 class _CommitmentDialog extends StatefulWidget {
-  const _CommitmentDialog();
+  /// null means "add a new one".
+  final FixedCommitment? commitment;
+  final List<Category> categories;
+
+  const _CommitmentDialog({this.commitment, this.categories = const []});
 
   @override
   State<_CommitmentDialog> createState() => _CommitmentDialogState();
 }
 
 class _CommitmentDialogState extends State<_CommitmentDialog> {
-  final _name = TextEditingController();
-  final _amount = TextEditingController();
-  final _day = TextEditingController();
+  late final _name = TextEditingController(text: widget.commitment?.name ?? '');
+  late final _amount = TextEditingController(
+    text: widget.commitment != null ? (widget.commitment!.amountMinor ~/ 100).toString() : '',
+  );
+  late final _day = TextEditingController(text: widget.commitment?.dayOfMonth.toString() ?? '');
+  late final _merchant = TextEditingController(text: widget.commitment?.merchant ?? '');
+
+  late String? _categoryId = widget.commitment?.categoryId;
   bool _saving = false;
 
   @override
@@ -868,6 +896,7 @@ class _CommitmentDialogState extends State<_CommitmentDialog> {
     _name.dispose();
     _amount.dispose();
     _day.dispose();
+    _merchant.dispose();
     super.dispose();
   }
 
@@ -878,12 +907,20 @@ class _CommitmentDialogState extends State<_CommitmentDialog> {
     setState(() => _saving = true);
     final navigator = Navigator.of(context);
 
+    final body = {
+      'name': _name.text.trim(),
+      'amountMinor': (rupees * 100).round(),
+      'dayOfMonth': int.tryParse(_day.text.trim()) ?? 1,
+      'merchant': _merchant.text.trim().isEmpty ? null : _merchant.text.trim(),
+      'categoryId': _categoryId,
+    };
+
     try {
-      await ApiClient.instance.post('/budget/commitments', {
-        'name': _name.text.trim(),
-        'amountMinor': (rupees * 100).round(),
-        'dayOfMonth': int.tryParse(_day.text.trim()) ?? 1,
-      });
+      if (widget.commitment == null) {
+        await ApiClient.instance.post('/budget/commitments', body);
+      } else {
+        await ApiClient.instance.patch('/budget/commitments/${widget.commitment!.id}', body);
+      }
       navigator.pop(true);
     } catch (_) {
       if (mounted) setState(() => _saving = false);
@@ -893,32 +930,63 @@ class _CommitmentDialogState extends State<_CommitmentDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Fixed each month'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: _name,
-            autofocus: true,
-            decoration: const InputDecoration(labelText: 'What it is', hintText: 'Rent'),
-          ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: _amount,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: 'Amount', prefixText: '₹ '),
-          ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: _day,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Day of the month', hintText: '5'),
-          ),
-        ],
+      title: Text(widget.commitment == null ? 'Add a fixed cost' : 'Edit fixed cost'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _name,
+              autofocus: widget.commitment == null,
+              decoration: const InputDecoration(labelText: 'What it is', hintText: 'Rent'),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _amount,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Amount a month',
+                prefixText: '₹ ',
+                helperText: 'What it costs you - your share, on a bill you pay whole for others.',
+                helperMaxLines: 3,
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _day,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Day of the month', hintText: '5'),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _merchant,
+              decoration: const InputDecoration(labelText: 'Usually paid to', hintText: 'Landlord'),
+            ),
+            const SizedBox(height: 10),
+            DropdownButtonFormField<String?>(
+              initialValue: _categoryId,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Usual category',
+                helperText: 'Both fill themselves in on a payment marked against this.',
+                helperMaxLines: 3,
+              ),
+              items: [
+                const DropdownMenuItem<String?>(value: null, child: Text('None')),
+                for (final category in widget.categories)
+                  DropdownMenuItem<String?>(value: category.id, child: Text(category.name)),
+              ],
+              onChanged: (value) => setState(() => _categoryId = value),
+            ),
+          ],
+        ),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
-        FilledButton(onPressed: _saving ? null : _save, child: const Text('Add')),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: Text(widget.commitment == null ? 'Add' : 'Save'),
+        ),
       ],
     );
   }
