@@ -20,6 +20,7 @@ class StatementsScreen extends StatefulWidget {
 class _Statement {
   final String id;
   final String status;
+  final String kind;
   final String? problem;
   final String? subject;
   final String? fileName;
@@ -33,6 +34,7 @@ class _Statement {
   _Statement({
     required this.id,
     required this.status,
+    this.kind = 'CARD',
     this.problem,
     this.subject,
     this.fileName,
@@ -45,6 +47,7 @@ class _Statement {
   });
 
   bool get isRead => status == 'PARSED';
+  bool get isBank => kind == 'BANK';
 
   String get label => switch (status) {
         'PARSED' => 'Read',
@@ -58,6 +61,7 @@ class _Statement {
     return _Statement(
       id: json['id'] as String,
       status: json['status'] as String,
+      kind: json['kind'] as String? ?? 'CARD',
       problem: json['problem'] as String?,
       subject: json['subject'] as String?,
       fileName: json['fileName'] as String?,
@@ -150,6 +154,28 @@ class _StatementsScreenState extends State<StatementsScreen> {
     });
   }
 
+  Future<void> _forget(_Statement statement) async {
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Forget this statement?'),
+        content: const Text(
+          'Anything it added to the ledger comes back out with it. Anything it only matched is '
+          'left where it is.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Forget')),
+        ],
+      ),
+    );
+
+    if (sure != true) return;
+    await _act(statement.id, () async {
+      await ApiClient.instance.delete('/statements/${statement.id}');
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.c;
@@ -218,7 +244,8 @@ class _StatementsScreenState extends State<StatementsScreen> {
               const SizedBox(width: 9),
               Expanded(
                 child: Text(
-                  statement.subject ?? statement.fileName ?? 'A statement',
+                  '${statement.subject ?? statement.fileName ?? 'A statement'}'
+                  '${statement.isBank ? '  (bank)' : ''}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 13.3, fontWeight: FontWeight.w600, color: c.ink),
@@ -263,9 +290,18 @@ class _StatementsScreenState extends State<StatementsScreen> {
                       : () => _act(statement.id, () async {
                             await ApiClient.instance.delete('/statements/${statement.id}/added');
                           }),
-                  style: TextButton.styleFrom(foregroundColor: c.debit),
                   child: Text('Undo ${statement.added}'),
                 ),
+              const Spacer(),
+              // Forgetting one takes back what it added on the way out, or
+              // the ledger keeps rows pointing at something that no longer
+              // exists.
+              IconButton(
+                icon: const Icon(Icons.delete_outline, size: 19),
+                color: c.debit,
+                tooltip: 'Forget this statement',
+                onPressed: _busy == statement.id ? null : () => _forget(statement),
+              ),
             ],
           ),
         ],

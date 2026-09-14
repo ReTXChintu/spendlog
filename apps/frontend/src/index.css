@@ -793,3 +793,15 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
 /* A fixed cost that went out for less than its usual amount. */
 .commitment-short{font-style:normal;font-size:11px;font-weight:700;color:var(--warn);
   margin-left:7px;white-space:nowrap}
+
+/* Bank statements sit in the same list as card ones. */
+.statement-kind{font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  padding:2px 6px;border-radius:100px;background:var(--track);color:var(--muted)}
+
+/* A card bill that has been read and is still to pay. */
+.bill-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+  padding:7px 0;font-size:13px;border-top:1px solid var(--line)}
+.bill-row:first-of-type{border-top:none}
+.bill-due{font-size:11.5px;font-weight:700;white-space:nowrap;color:var(--muted)}
+.bill-due.is-soon{color:var(--warn)}
+.bill-due.is-late{color:var(--debit)}

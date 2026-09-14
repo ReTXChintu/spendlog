@@ -12,12 +12,18 @@ import '../config.dart';
 
 const String _dailyEnabledKey = 'spendlog_reminder_daily';
 const String _nagEnabledKey = 'spendlog_reminder_nag';
+const String _billsEnabledKey = 'spendlog_reminder_bills';
+
+/// The bills already told about, so a bill is announced once rather than
+/// every half hour until it is paid.
+const String _billsSeenKey = 'spendlog_reminder_bills_seen';
 
 const String _nagTask = 'spendlog-review-nag';
 
 /// Notification ids. Fixed so that re-scheduling replaces rather than piles up.
 const int _dailyNotificationId = 1;
 const int _nagNotificationId = 2;
+const int _billNotificationId = 3;
 
 /// The hour the nagging is allowed to start.
 const int _nagFromHour = 6;
@@ -123,10 +129,10 @@ class ReminderService {
     await init();
     final prefs = await SharedPreferences.getInstance();
 
-    await Workmanager().cancelByUniqueName(_nagTask);
     if (!enabled) {
       await prefs.setBool(_nagEnabledKey, false);
       await _plugin.cancel(id: _nagNotificationId);
+      await _rescheduleBackgroundTask();
       return false;
     }
 
@@ -135,6 +141,44 @@ class ReminderService {
       return false;
     }
     await prefs.setBool(_nagEnabledKey, true);
+    await _rescheduleBackgroundTask();
+    return true;
+  }
+
+  Future<bool> billsEnabled() async =>
+      (await SharedPreferences.getInstance()).getBool(_billsEnabledKey) ?? false;
+
+  /// Said once per statement, so it shares the half-hourly task the
+  /// follow-ups already use rather than scheduling one of its own.
+  Future<bool> setBillsEnabled(bool enabled) async {
+    await init();
+    final prefs = await SharedPreferences.getInstance();
+
+    if (!enabled) {
+      await prefs.setBool(_billsEnabledKey, false);
+      await _plugin.cancel(id: _billNotificationId);
+      await _rescheduleBackgroundTask();
+      return false;
+    }
+
+    if (!await requestPermission()) {
+      await prefs.setBool(_billsEnabledKey, false);
+      return false;
+    }
+    await prefs.setBool(_billsEnabledKey, true);
+    await _rescheduleBackgroundTask();
+    return true;
+  }
+
+  /// The one periodic task both background reminders run off. Registered
+  /// while either wants it and cancelled once neither does, so nothing
+  /// wakes up to ask questions nobody is listening for.
+  Future<void> _rescheduleBackgroundTask() async {
+    final prefs = await SharedPreferences.getInstance();
+    final wanted = (prefs.getBool(_nagEnabledKey) ?? false) || (prefs.getBool(_billsEnabledKey) ?? false);
+
+    await Workmanager().cancelByUniqueName(_nagTask);
+    if (!wanted) return;
 
     await Workmanager().registerPeriodicTask(
       _nagTask,
@@ -143,7 +187,6 @@ class ReminderService {
       existingWorkPolicy: ExistingPeriodicWorkPolicy.replace,
       constraints: Constraints(networkType: NetworkType.connected),
     );
-    return true;
   }
 
   static tz.TZDateTime _nextMidnight() {
@@ -159,7 +202,13 @@ class ReminderService {
 void reminderTaskDispatcher() {
   Workmanager().executeTask((task, _) async {
     if (task != _nagTask) return true;
-    return _remindIfAnythingIsUnfiled();
+
+    // Both run off the one periodic task rather than two: waking twice as
+    // often to ask two questions costs the same battery and twice the
+    // scheduling.
+    final unfiled = await _remindIfAnythingIsUnfiled();
+    final bills = await _tellAboutNewBills();
+    return unfiled && bills;
   });
 }
 
@@ -208,6 +257,86 @@ Future<bool> _remindIfAnythingIsUnfiled() async {
           'Still to categorise',
           channelDescription:
               'Repeats through the day while yesterday still has uncategorised payments.',
+          importance: Importance.defaultImportance,
+        ),
+      ),
+    );
+  } catch (_) {
+    // Offline, or the server is down. Nothing worth waking anyone for.
+  }
+
+  return true;
+}
+
+/// Tell someone a bill has been read, once.
+///
+/// A statement is the first moment the app can know what a bill actually
+/// is, rather than estimating it from the transactions it happened to see -
+/// so it is the moment worth saying so, and saying so once. The ids already
+/// announced are remembered, because a reminder that repeats every half
+/// hour until the bill is paid is not a reminder, it is a nuisance, and the
+/// dashboard already carries it for as long as it is owed.
+Future<bool> _tellAboutNewBills() async {
+  final prefs = await SharedPreferences.getInstance();
+  if (!(prefs.getBool(_billsEnabledKey) ?? false)) return true;
+
+  final token = prefs.getString(tokenStorageKey);
+  if (token == null) return true;
+
+  try {
+    final response = await http.get(
+      Uri.parse('$apiBaseUrl/statements/bills'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(const Duration(seconds: 10));
+    if (response.statusCode != 200) return true;
+
+    final bills = (jsonDecode(response.body) as List<dynamic>)
+        .cast<Map<String, dynamic>>()
+        .where((bill) => bill['isPaid'] != true)
+        .toList();
+
+    final seen = prefs.getStringList(_billsSeenKey) ?? <String>[];
+    final fresh = bills.where((bill) => !seen.contains(bill['statementId'] as String)).toList();
+
+    // Kept to the bills that still exist, so the list cannot grow for ever
+    // and a statement read again is announced again.
+    await prefs.setStringList(
+      _billsSeenKey,
+      bills.map((bill) => bill['statementId'] as String).toList(),
+    );
+
+    if (fresh.isEmpty) return true;
+
+    final bill = fresh.first;
+    final amount = ((bill['totalDueMinor'] as int? ?? 0) / 100).round();
+    final card = bill['cardName'] as String? ?? 'a card';
+    final days = bill['daysUntilDue'] as int?;
+
+    final plugin = FlutterLocalNotificationsPlugin();
+    await plugin.initialize(
+      settings: const InitializationSettings(
+        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      ),
+    );
+    await plugin.show(
+      id: _billNotificationId,
+      title: fresh.length == 1
+          ? '$card bill: ₹$amount'
+          : '${fresh.length} card bills have arrived',
+      body: fresh.length == 1
+          ? (days == null
+              ? 'Read from the statement that just came in.'
+              : days < 0
+                  ? 'It was due ${days.abs()} days ago.'
+                  : days == 0
+                      ? 'It is due today.'
+                      : 'Due in $days days.')
+          : 'Read from the statements that just came in.',
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'spendlog-bills',
+          'Card bills',
+          channelDescription: 'Said once, when a statement shows what a bill has come to.',
           importance: Importance.defaultImportance,
         ),
       ),

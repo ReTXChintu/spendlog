@@ -1,9 +1,9 @@
 import { HydratedDocument, Types } from "mongoose";
-import { CardStatement, CardStatementDoc, Transaction, TransactionDoc } from "../../models";
+import { Account, CardStatement, CardStatementDoc, Transaction, TransactionDoc } from "../../models";
 import { StatementLineResolution } from "../../types";
 import { categorizeTransaction } from "../../parsing/categorizer";
 import { tripForOccurredAt } from "../trips/trips.service";
-import { countsAsStatementSpend, isLedgerWorthy } from "./statements.classify";
+import { countsAsStatementSpend, isLedgerWorthy, looksLikeCardBill } from "./statements.classify";
 
 /**
  * Matching a statement against the ledger, and adding what is missing.
@@ -220,6 +220,17 @@ async function addFromLine(
 
   const tripId = await tripForOccurredAt(statement.userId, line.date);
 
+  // A bank statement lists the card bill going out, while the card's own
+  // statement lists every purchase behind it. Adding both as spending books
+  // the same money twice, and it is the largest row on the page - so where
+  // the narration names a card of the user's, the payment is linked to it
+  // and counts as nothing. "CC PAYMENT ICICI 2009" against a card ending
+  // 2009 is not a guess.
+  const paidCard =
+    statement.kind === "BANK" && line.type === "DEBIT" && looksLikeCardBill(line.description)
+      ? await findCardNamedIn(statement.userId, line.description)
+      : null;
+
   return Transaction.create({
     userId: statement.userId,
     accountId: statement.accountId,
@@ -231,6 +242,7 @@ async function addFromLine(
     merchant: line.description,
     rawText: line.description,
     source: "STATEMENT",
+    cardPaymentFor: paidCard,
     sourceRef: `${statement.sourceRef}#${line._id.toString()}`,
     occurredAt: line.date,
     statementId: statement._id,
@@ -273,4 +285,18 @@ export async function unpickStatement(userId: Types.ObjectId, statementId: Types
   await statement.save();
 
   return added.length;
+}
+
+/**
+ * A card of the user's whose last four digits appear in a narration.
+ *
+ * Deliberately narrow: it wants the digits themselves, not a bank name,
+ * because two cards from the same bank would both answer to the name and
+ * linking a bill to the wrong one is worse than not linking it at all.
+ */
+async function findCardNamedIn(userId: Types.ObjectId, description: string): Promise<Types.ObjectId | null> {
+  const cards = await Account.find({ userId, accountType: "CARD", last4: { $ne: null } }).select("last4");
+
+  const named = cards.filter((card) => card.last4 && new RegExp(`\\b${card.last4}\\b`).test(description));
+  return named.length === 1 ? named[0]._id : null;
 }

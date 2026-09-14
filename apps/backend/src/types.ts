@@ -50,7 +50,24 @@ export type CommitmentKind = (typeof COMMITMENT_KINDS)[number];
 // What a row on a credit card statement actually is. Only SPEND and FEE
 // may ever become a transaction; the rest exist so that the ones that must
 // not be added have somewhere to be put. See modules/statements/classify.ts.
-export const STATEMENT_LINE_KINDS = ["SPEND", "FEE", "PAYMENT", "REVERSAL", "NOISE"] as const;
+// A card statement and a bank statement are the same job on different
+// documents: one lists what a card was used for, the other everything
+// that touched an account. What differs is what an unexplained credit
+// means - on a card it is almost always the bill being paid, and on a
+// bank account it is money arriving.
+export const STATEMENT_KINDS = ["CARD", "BANK"] as const;
+export type StatementKind = (typeof STATEMENT_KINDS)[number];
+
+export const STATEMENT_LINE_KINDS = [
+  "SPEND",
+  "FEE",
+  // Money arriving in an account. Only ever found on a bank statement:
+  // a credit on a card is the bill being paid, not income.
+  "INCOME",
+  "PAYMENT",
+  "REVERSAL",
+  "NOISE",
+] as const;
 export type StatementLineKind = (typeof STATEMENT_LINE_KINDS)[number];
 
 // What reconciling did with a line.

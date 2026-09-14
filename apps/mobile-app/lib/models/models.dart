@@ -1052,6 +1052,41 @@ class StuckStatement {
       );
 }
 
+/// A card bill that has been read from a statement and not yet paid.
+///
+/// A statement is the first moment the app can know what a bill actually
+/// is, rather than estimating it from the transactions it happened to see.
+class UpcomingBill {
+  final String statementId;
+  final String cardName;
+  final int totalDueMinor;
+
+  /// Negative once the due date has gone past.
+  final int? daysUntilDue;
+
+  UpcomingBill({
+    required this.statementId,
+    required this.cardName,
+    required this.totalDueMinor,
+    this.daysUntilDue,
+  });
+
+  factory UpcomingBill.fromJson(Map<String, dynamic> json) => UpcomingBill(
+        statementId: json['statementId'] as String,
+        cardName: json['cardName'] as String? ?? 'A card',
+        totalDueMinor: json['totalDueMinor'] as int? ?? 0,
+        daysUntilDue: json['daysUntilDue'] as int?,
+      );
+
+  String get whenDue {
+    final days = daysUntilDue;
+    if (days == null) return '';
+    if (days < 0) return ' - ${days.abs()} days overdue';
+    if (days == 0) return ' - due today';
+    return ' - due in $days days';
+  }
+}
+
 /// Everything the landing screen needs, in one request.
 class DashboardData {
   final BudgetPace pace;
@@ -1065,6 +1100,7 @@ class DashboardData {
   final int owedBalanceMinor;
   final List<Perk> expiringPerks;
   final List<StuckStatement> stuckStatements;
+  final List<UpcomingBill> bills;
   final MonthSoFar monthSoFar;
 
   DashboardData({
@@ -1079,6 +1115,7 @@ class DashboardData {
     required this.owedBalanceMinor,
     required this.expiringPerks,
     required this.stuckStatements,
+    required this.bills,
     required this.monthSoFar,
   });
 
@@ -1104,6 +1141,9 @@ class DashboardData {
           .toList(),
       stuckStatements: (statements['stuck'] as List<dynamic>? ?? [])
           .map((s) => StuckStatement.fromJson(s as Map<String, dynamic>))
+          .toList(),
+      bills: (json['bills'] as List<dynamic>? ?? [])
+          .map((bill) => UpcomingBill.fromJson(bill as Map<String, dynamic>))
           .toList(),
       monthSoFar: MonthSoFar.fromJson(json['monthSoFar'] as Map<String, dynamic>? ?? {}),
     );

@@ -407,6 +407,21 @@ export interface MonthSoFar {
   changeMinor: number;
 }
 
+/** A card bill that has been read from a statement and not yet paid. */
+export interface UpcomingBill {
+  statementId: string;
+  accountId: string;
+  cardName: string;
+  totalDueMinor: number;
+  minimumDueMinor: number | null;
+  statementDate: string | null;
+  dueDate: string | null;
+  /** Negative once the due date has gone past. */
+  daysUntilDue: number | null;
+  paidMinor: number;
+  isPaid: boolean;
+}
+
 /** Everything the landing screen needs, in one request. */
 export interface DashboardData {
   today: string;
@@ -422,4 +437,5 @@ export interface DashboardData {
     stuck: { id: string; status: string; problem: string | null; subject: string | null }[];
   };
   monthSoFar: MonthSoFar;
+  bills: UpcomingBill[];
 }

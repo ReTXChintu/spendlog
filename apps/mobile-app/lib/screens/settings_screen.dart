@@ -38,6 +38,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
 
   bool _dailyReminder = false;
   bool _nagReminder = false;
+  bool _billReminder = false;
 
   List<MerchantPreset> _presets = [];
   List<Category> _categories = [];
@@ -164,25 +165,45 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   Future<void> _loadReminders() async {
     final daily = await ReminderService.instance.dailyEnabled();
     final nag = await ReminderService.instance.nagEnabled();
+    final bills = await ReminderService.instance.billsEnabled();
     if (!mounted) return;
     setState(() {
       _dailyReminder = daily;
       _nagReminder = nag;
+      _billReminder = bills;
     });
   }
 
-  /// Both switches go through here so a refused permission shows on screen,
-  /// rather than leaving a switch on that can never fire anything.
-  Future<void> _setReminder(bool daily, bool enabled) async {
-    setState(() => daily ? _dailyReminder = enabled : _nagReminder = enabled);
+  /// Every switch goes through here so a refused permission shows on
+  /// screen, rather than leaving one on that can never fire anything.
+  Future<void> _setReminder(String which, bool enabled) async {
+    setState(() {
+      if (which == 'daily') {
+        _dailyReminder = enabled;
+      } else if (which == 'nag') {
+        _nagReminder = enabled;
+      } else {
+        _billReminder = enabled;
+      }
+    });
     final messenger = ScaffoldMessenger.of(context);
 
-    final armed = daily
-        ? await ReminderService.instance.setDailyEnabled(enabled)
-        : await ReminderService.instance.setNagEnabled(enabled);
+    final armed = switch (which) {
+      'daily' => await ReminderService.instance.setDailyEnabled(enabled),
+      'nag' => await ReminderService.instance.setNagEnabled(enabled),
+      _ => await ReminderService.instance.setBillsEnabled(enabled),
+    };
 
     if (!mounted || armed == enabled) return;
-    setState(() => daily ? _dailyReminder = false : _nagReminder = false);
+    setState(() {
+      if (which == 'daily') {
+        _dailyReminder = false;
+      } else if (which == 'nag') {
+        _nagReminder = false;
+      } else {
+        _billReminder = false;
+      }
+    });
     messenger.showSnackBar(
       const SnackBar(content: Text('Notifications are turned off for SpendLog in Android settings.')),
     );
@@ -434,14 +455,21 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                   title: 'At midnight',
                   subtitle: 'One nudge as the day closes.',
                   value: _dailyReminder,
-                  onChanged: (on) => _setReminder(true, on),
+                  onChanged: (on) => _setReminder('daily', on),
+                ),
+                _ToggleRow(
+                  title: 'When a card bill arrives',
+                  subtitle: 'Said once, when a statement shows what the bill has come to. The '
+                      'dashboard carries it after that until it is paid.',
+                  value: _billReminder,
+                  onChanged: (on) => _setReminder('bills', on),
                 ),
                 _ToggleRow(
                   title: 'Keep reminding',
                   subtitle: 'From 6am, every half hour, while anything from yesterday is still '
                       'uncategorised. Stops as soon as none are.',
                   value: _nagReminder,
-                  onChanged: (on) => _setReminder(false, on),
+                  onChanged: (on) => _setReminder('nag', on),
                 ),
               ],
             ),

@@ -6,6 +6,7 @@ import { istDayEnd, istDayKey, istDayStart, istMonthKey, istMonthStart } from ".
 import { cardStatuses, pickCards } from "../cards/cards.status";
 import { budgetPace } from "../budget/budget.pace";
 import { perkIsLive } from "../perks/perks.match";
+import { upcomingBills } from "../statements/statements.bills";
 
 export const dashboardRouter = Router();
 dashboardRouter.use(requireAuth);
@@ -34,7 +35,7 @@ dashboardRouter.get("/", async (req, res) => {
   const yesterday = istDayKey(new Date(now.getTime() - 24 * 60 * 60 * 1000));
   const month = istMonthKey(now);
 
-  const [cards, pace, needsCategory, emis, owed, perks, statements, monthSoFar] = await Promise.all([
+  const [cards, pace, needsCategory, emis, owed, perks, statements, monthSoFar, bills] = await Promise.all([
     cardStatuses(userId, now),
     budgetPace(userId, now),
     countNeedingACategory(userId, yesterday, month),
@@ -43,6 +44,7 @@ dashboardRouter.get("/", async (req, res) => {
     Perk.find({ userId, isActive: true, usedAt: null }).populate("accountId"),
     statementsNeedingAttention(userId),
     monthAgainstLast(userId, now, today),
+    upcomingBills(userId, now),
   ]);
 
   // Only the ones close enough to act on. Settled: shown here, never as a
@@ -67,6 +69,9 @@ dashboardRouter.get("/", async (req, res) => {
     expiringPerks: expiring,
     statements,
     monthSoFar,
+    // Only the ones still to pay. A bill already cleared is a fact about
+    // last month, not something to do today.
+    bills: bills.filter((bill) => !bill.isPaid),
   });
 });
 

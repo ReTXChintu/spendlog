@@ -1,4 +1,4 @@
-import { TransactionType } from "../../types";
+import { StatementKind, TransactionType } from "../../types";
 import { istDayStart } from "../../time";
 import { classifyStatementLine, creditByDescription } from "./statements.classify";
 import { readerFor, StatementReader } from "./statements.issuers";
@@ -20,12 +20,16 @@ export interface ParsedStatementLine {
   amountMinor: number;
   type: TransactionType;
   kind: StatementLineKind;
+  /// The running balance after this row, where the statement prints one.
+  /// Only a bank statement does, and it is what settles the direction.
+  balanceMinor?: number | null;
 }
 
 export interface ParsedStatement {
   /// Which reader read it, so an unrecognised layout is visible rather
   /// than silently producing a short list of lines.
   issuer: string;
+  kind: StatementKind;
   lines: ParsedStatementLine[];
   last4: string | null;
   statementDate: Date | null;
@@ -128,7 +132,63 @@ export function parseStatementRow(
   if (!raw.description || amountMinor === null || amountMinor <= 0) return null;
 
   const type: TransactionType = raw.credit ?? creditByDescription(raw.description) ? "CREDIT" : "DEBIT";
-  return { date, description: raw.description, amountMinor, type, kind: classifyStatementLine(raw.description, type) };
+
+  return {
+    date,
+    description: raw.description,
+    amountMinor,
+    type,
+    kind: classifyStatementLine(raw.description, type, reader.kind),
+    balanceMinor: raw.balance ? parseAmountToMinor(raw.balance) : null,
+  };
+}
+
+/**
+ * Which way each row on a bank statement went, from how the balance moved.
+ *
+ * Withdrawals and deposits sit in separate columns, both of which vanish
+ * when empty, so a row of either kind arrives as the same two numbers and
+ * the position says nothing. The balance says everything: down by the
+ * amount means money out, up by it means money in.
+ *
+ * It also checks the parse. A row whose balance moves by something other
+ * than its own amount was misread - a reference number taken for a figure,
+ * a wrapped line joined wrongly - and a row that cannot be trusted is
+ * better dropped than guessed at, because guessing puts a wrong number in
+ * the ledger and nothing ever questions it again.
+ */
+function directionsFromBalance(lines: ParsedStatementLine[]): ParsedStatementLine[] {
+  const kept: ParsedStatementLine[] = [];
+  let previous: number | null = null;
+
+  for (const line of lines) {
+    const balance = line.balanceMinor;
+    if (balance == null) {
+      kept.push(line);
+      continue;
+    }
+
+    if (previous !== null) {
+      const moved = balance - previous;
+
+      if (Math.abs(moved + line.amountMinor) <= 1) line.type = "DEBIT";
+      else if (Math.abs(moved - line.amountMinor) <= 1) line.type = "CREDIT";
+      else {
+        // The balance did not move by this row's amount, so one of the two
+        // was read wrongly. Dropped, and the running balance picked up
+        // again from here so one bad row does not condemn the rest.
+        previous = balance;
+        continue;
+      }
+
+      line.kind = classifyStatementLine(line.description, line.type, "BANK");
+    }
+
+    previous = balance;
+    kept.push(line);
+  }
+
+  return kept;
 }
 
 /** A labelled figure from the summary block, e.g. "Total Dues 47,850.25". */
@@ -210,11 +270,13 @@ export function parseStatementRows(rows: string[]): ParsedStatement {
     }
   }
 
-  const dated = lines.map((line) => line.date.getTime());
+  const settled = reader.kind === "BANK" ? directionsFromBalance(lines) : lines;
+  const dated = settled.map((line) => line.date.getTime());
 
   return {
     issuer: reader.name,
-    lines,
+    kind: reader.kind,
+    lines: settled,
     last4: findCardLast4(rows),
     statementDate,
     dueDate,

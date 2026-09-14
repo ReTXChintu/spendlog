@@ -20,6 +20,7 @@ interface StatementRow {
   subject: string | null;
   fileName: string | null;
   issuer: string | null;
+  kind: "CARD" | "BANK";
   statementDate: string | null;
   statementSpendMinor: number;
   knownSpendMinor: number;
@@ -37,6 +38,7 @@ const STATUS_LABEL: Record<StatementRow["status"], string> = {
 export function StatementList({ accounts }: { accounts: Account[] }) {
   const [statements, setStatements] = useState<StatementRow[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -93,6 +95,7 @@ export function StatementList({ accounts }: { accounts: Account[] }) {
                   {STATUS_LABEL[statement.status]}
                 </span>
                 {statement.subject ?? statement.fileName ?? "A statement"}
+                {statement.kind === "BANK" && <span className="statement-kind">bank</span>}
               </div>
 
               <div className="statement-sub">
@@ -151,13 +154,32 @@ export function StatementList({ accounts }: { accounts: Account[] }) {
 
               {statement.status === "PARSED" && statement.counts.added > 0 && (
                 <button
-                  className="btn btn-sm btn-ghost btn-danger-text"
+                  className="btn btn-sm btn-ghost"
                   disabled={busy === statement.id}
                   onClick={() => act(statement.id, () => api.delete(`/statements/${statement.id}/added`))}
                 >
                   Undo {statement.counts.added}
                 </button>
               )}
+
+              {/* Forgetting a statement takes back what it added on the way
+                  out, or the ledger keeps rows pointing at something that no
+                  longer exists. */}
+              <button
+                className="btn btn-sm btn-ghost btn-danger-text"
+                title="Forget this statement"
+                disabled={busy === statement.id}
+                onClick={() => {
+                  if (confirming === statement.id) {
+                    act(statement.id, () => api.delete(`/statements/${statement.id}`));
+                    setConfirming(null);
+                  } else {
+                    setConfirming(statement.id);
+                  }
+                }}
+              >
+                {confirming === statement.id ? "Really?" : <Icon name="ic-x" />}
+              </button>
             </div>
           </div>
         ))}

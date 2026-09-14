@@ -1,4 +1,4 @@
-import { StatementLineKind, TransactionType } from "../../types";
+import { StatementKind, StatementLineKind, TransactionType } from "../../types";
 
 /**
  * What a row on a statement actually is.
@@ -67,7 +67,11 @@ const NOISE_RE = new RegExp(
  * and payments are tested before reversals because "PAYMENT RECEIVED -
  * THANK YOU" and a refund are both credits.
  */
-export function classifyStatementLine(description: string, type: TransactionType): StatementLineKind {
+export function classifyStatementLine(
+  description: string,
+  type: TransactionType,
+  statement: StatementKind = "CARD"
+): StatementLineKind {
   if (NOISE_RE.test(description)) return "NOISE";
 
   if (type === "CREDIT") {
@@ -76,10 +80,14 @@ export function classifyStatementLine(description: string, type: TransactionType
     // A charge given back: "Fuel Surcharges ... 4.27 Cr" is the waiver of
     // a fee, not a payment against the bill.
     if (FEE_RE.test(description)) return "REVERSAL";
-    // An unexplained credit on a card is far more often the bill being
-    // paid than money coming back, and treating it as a payment only
-    // means it is left alone.
-    return "PAYMENT";
+
+    // The one place the two documents disagree. An unexplained credit on a
+    // card is far more often the bill being paid than money coming back,
+    // and treating it as a payment leaves it alone. On a bank account it
+    // is money arriving - a salary, a refund, someone paying you back -
+    // and leaving that alone would be throwing away the income the whole
+    // exercise was meant to find.
+    return statement === "BANK" ? "INCOME" : "PAYMENT";
   }
 
   if (FEE_RE.test(description)) return "FEE";
@@ -104,7 +112,7 @@ export function creditByDescription(description: string): boolean {
 
 /** Whether a line of this kind may become a transaction. */
 export function isLedgerWorthy(kind: StatementLineKind): boolean {
-  return kind === "SPEND" || kind === "FEE" || kind === "REVERSAL";
+  return kind === "SPEND" || kind === "FEE" || kind === "REVERSAL" || kind === "INCOME";
 }
 
 /**
@@ -117,4 +125,26 @@ export function isLedgerWorthy(kind: StatementLineKind): boolean {
  */
 export function countsAsStatementSpend(kind: StatementLineKind): boolean {
   return kind === "SPEND" || kind === "FEE";
+}
+
+// A bank statement lists paying a card bill, and the card's own statement
+// lists every purchase behind it. Importing both without noticing would
+// book the same money twice - which is the trap cardPaymentFor exists to
+// close, so a line that looks like one is worth marking as it goes in.
+const CARD_BILL_RE = new RegExp(
+  "\\b(?:cc\\s*(?:payment|pymt|bill)|credit\\s*card\\s*(?:payment|bill)|card\\s*payment" +
+    "|bbps\\s*(?:cc|card)|autopay\\s*(?:cc|card)|payment\\s*to\\s*card)" +
+    PLURAL,
+  "i"
+);
+
+/**
+ * Whether a debit on a bank statement looks like paying off a card.
+ *
+ * Only a hint - it names no card, and cannot. What it is for is putting a
+ * marker on the row so the person reconciling can see the one line on the
+ * statement that would otherwise double their month.
+ */
+export function looksLikeCardBill(description: string): boolean {
+  return CARD_BILL_RE.test(description);
 }

@@ -5,7 +5,7 @@ import { Icon } from "../components/Icon";
 import { StateBlock } from "../components/States";
 import { api } from "../lib/api";
 import { formatMoney, formatMoneyShort } from "../lib/format";
-import { DashboardData, FixedCommitment } from "../types";
+import { DashboardData, FixedCommitment, UpcomingBill } from "../types";
 
 /**
  * The landing screen: what you need to know now.
@@ -58,7 +58,7 @@ export function DashboardPage() {
 
   if (!data) return <section className="screen" />;
 
-  const { pace, monthSoFar, needsCategory, emis, owed, expiringPerks, statements } = data;
+  const { pace, monthSoFar, needsCategory, emis, owed, expiringPerks, statements, bills } = data;
   const change = monthSoFar.changeMinor;
 
   return (
@@ -78,6 +78,7 @@ export function DashboardPage() {
         needsCategory={needsCategory}
         stuckStatements={statements.stuckCount}
         expiring={expiringPerks.length}
+        bills={bills}
       />
 
       <div className="layout-2">
@@ -261,10 +262,12 @@ function TodoStrip({
   needsCategory,
   stuckStatements,
   expiring,
+  bills,
 }: {
   needsCategory: { yesterday: number; month: number };
   stuckStatements: number;
   expiring: number;
+  bills: UpcomingBill[];
 }) {
   const jobs: { to: string; icon: string; text: string; urgent?: boolean }[] = [];
 
@@ -284,6 +287,26 @@ function TodoStrip({
       text: `${needsCategory.month} this month still ${
         needsCategory.month === 1 ? "needs" : "need"
       } a category`,
+    });
+  }
+
+  // A statement is the first moment the app can know what a bill actually
+  // is, rather than estimating it from the transactions it happened to see.
+  for (const bill of bills) {
+    const due =
+      bill.daysUntilDue === null
+        ? ""
+        : bill.daysUntilDue < 0
+          ? ` — ${Math.abs(bill.daysUntilDue)} days overdue`
+          : bill.daysUntilDue === 0
+            ? " — due today"
+            : ` — due in ${bill.daysUntilDue} days`;
+
+    jobs.push({
+      to: "/transactions",
+      icon: "ic-wallet",
+      text: `${bill.cardName} bill ${formatMoney(bill.totalDueMinor)}${due}`,
+      urgent: (bill.daysUntilDue ?? 99) <= 3,
     });
   }
 

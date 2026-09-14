@@ -226,6 +226,15 @@ class _Todos extends StatelessWidget {
       ));
     }
 
+    for (final bill in data.bills) {
+      jobs.add((
+        icon: Icons.account_balance_wallet_outlined,
+        text: '${bill.cardName} bill ${formatMoney(bill.totalDueMinor)}${bill.whenDue}',
+        urgent: (bill.daysUntilDue ?? 99) <= 3,
+        onTap: onOpenTransactions,
+      ));
+    }
+
     if (data.stuckStatements.isNotEmpty) {
       final count = data.stuckStatements.length;
       jobs.add((

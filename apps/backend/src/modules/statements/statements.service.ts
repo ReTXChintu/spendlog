@@ -22,6 +22,7 @@ import { reconcileStatement } from "./statements.reconcile";
 const STATEMENT_QUERY =
   'has:attachment filename:pdf (subject:statement OR subject:"e-statement" OR subject:estatement ' +
   'OR subject:"credit card statement" OR subject:"card statement" OR subject:"monthly statement" ' +
+  'OR subject:"account statement" OR subject:"statement of account" OR subject:passbook ' +
   'OR subject:bill)';
 
 /** How far back a first run looks. Later runs only need what is new. */
@@ -56,7 +57,10 @@ export async function syncStatements(userId: Types.ObjectId, options?: { days?: 
   // password cannot say which card a file belongs to: an issuer builds it
   // from a date of birth, so one person's cards very often share one.
   // Identification comes from the card number printed inside instead.
-  const cards = await Account.find({ userId, accountType: "CARD" });
+  // Bank accounts as well as cards: a bank statement identifies itself
+  // by an account number the same way a card statement does by a card
+  // number, and both come from the same mailbox.
+  const cards = await Account.find({ userId, accountType: { $in: ["CARD", "BANK"] } });
   const passwords = [
     null,
     ...new Set(cards.map((card) => decryptPassword(card.statementPassword)).filter(Boolean)),
@@ -227,7 +231,15 @@ async function readOneStatement(params: {
   }
 
   // By the card number printed inside, never by which password worked.
-  const card = parsed.last4 ? params.cards.find((candidate) => candidate.last4 === parsed.last4) : undefined;
+  // Matched against the right sort of account: a card statement belongs to
+  // a card and a bank statement to a bank account, and the last four digits
+  // alone could otherwise put one on the other.
+  const wanted = parsed.kind === "BANK" ? "BANK" : "CARD";
+  const card = parsed.last4
+    ? params.cards.find(
+        (candidate) => candidate.last4 === parsed.last4 && candidate.accountType === wanted
+      )
+    : undefined;
 
   const statement = await CardStatement.findOneAndUpdate(
     { userId: params.userId, sourceRef },
@@ -237,12 +249,14 @@ async function readOneStatement(params: {
         subject: params.subject,
         fileName: params.attachment.fileName,
         issuer: parsed.issuer,
+        kind: parsed.kind,
         status: card ? "PARSED" : "UNIDENTIFIED",
         problem: card
           ? null
           : parsed.last4
-            ? `No card ending ${parsed.last4} in SpendLog. Add it, then read this again.`
-            : "No card number could be found in this statement",
+            ? `No ${wanted === "BANK" ? "account" : "card"} ending ${parsed.last4} in SpendLog. `
+              + "Add it, then read this again."
+            : `No ${wanted === "BANK" ? "account" : "card"} number could be found in this statement`,
         statementDate: parsed.statementDate,
         dueDate: parsed.dueDate,
         periodStart: parsed.periodStart,
@@ -321,7 +335,10 @@ export async function rereadStatement(
   if (!messageId || !attachmentId) return null;
 
   const connections = await EmailConnection.find({ userId });
-  const cards = await Account.find({ userId, accountType: "CARD" });
+  // Bank accounts as well as cards: a bank statement identifies itself
+  // by an account number the same way a card statement does by a card
+  // number, and both come from the same mailbox.
+  const cards = await Account.find({ userId, accountType: { $in: ["CARD", "BANK"] } });
   const passwords = [
     null,
     ...new Set(cards.map((card) => decryptPassword(card.statementPassword)).filter(Boolean)),

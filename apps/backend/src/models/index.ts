@@ -9,6 +9,7 @@ import {
   EMI_ROLES,
   PERK_KINDS,
   RULE_MATCH_TYPES,
+  STATEMENT_KINDS,
   STATEMENT_LINE_KINDS,
   STATEMENT_LINE_RESOLUTIONS,
   STATEMENT_STATUSES,
@@ -23,6 +24,7 @@ import {
   EmiRole,
   PerkKind,
   RuleMatchType,
+  StatementKind,
   StatementLineKind,
   StatementLineResolution,
   StatementStatus,
@@ -783,6 +785,11 @@ export interface CardStatementDoc {
   sourceRef: string;
   subject?: string | null;
   fileName?: string | null;
+  /// Whether this is a card statement or a bank one. The model is still
+  /// called CardStatement, and the collection with it, because renaming
+  /// would move every document for no gain a reader of this line does
+  /// not already get from the field itself.
+  kind: StatementKind;
   /// Which reader read it. Worth storing: "generic" against a bank that
   /// has its own reader means the layout changed, and a short list of
   /// lines is the symptom either way.
@@ -813,6 +820,7 @@ const cardStatementSchema = new Schema<CardStatementDoc>(
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     accountId: { type: Schema.Types.ObjectId, ref: "Account", default: null },
     sourceRef: { type: String, required: true },
+    kind: { type: String, enum: STATEMENT_KINDS, default: "CARD" },
     subject: { type: String, default: null },
     fileName: { type: String, default: null },
     issuer: { type: String, default: null },

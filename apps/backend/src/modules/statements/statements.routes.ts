@@ -7,6 +7,7 @@ import { Account, CardStatement, Transaction } from "../../models";
 import { encryptPassword, encryptionAvailable } from "./statements.crypto";
 import { reconcileStatement, unpickStatement } from "./statements.reconcile";
 import { rereadStatement, syncStatements } from "./statements.service";
+import { upcomingBills } from "./statements.bills";
 
 export const statementsRouter = Router();
 statementsRouter.use(requireAuth);
@@ -67,6 +68,14 @@ statementsRouter.post("/sync", async (req, res) => {
     Number.isFinite(days) && days > 0 ? { days: Math.min(days, 400) } : undefined
   );
   res.json(result);
+});
+
+// GET /statements/bills - card bills that have been read and not yet paid.
+//
+// A statement is the first moment the app can know what a bill actually is,
+// so it is the moment worth saying so.
+statementsRouter.get("/bills", async (req, res) => {
+  res.json(await upcomingBills(currentUserId(req)));
 });
 
 // GET /statements/:id — one statement, with every line and what became of it.
@@ -137,6 +146,23 @@ statementsRouter.post("/:id/reconcile", validObjectIdParam("id"), async (req, re
 // because that row was not created here.
 statementsRouter.delete("/:id/added", validObjectIdParam("id"), async (req, res) => {
   const removed = await unpickStatement(currentUserId(req), new Types.ObjectId(req.params.id));
+  res.json({ removed });
+});
+
+// DELETE /statements/:id - forget a statement entirely.
+//
+// Takes back anything it added on the way out, because leaving those rows
+// behind would leave transactions in the ledger pointing at a statement
+// that no longer exists - and nothing to say where they came from or how
+// to be rid of them.
+statementsRouter.delete("/:id", validObjectIdParam("id"), async (req, res) => {
+  const userId = currentUserId(req);
+  const statementId = new Types.ObjectId(req.params.id);
+
+  const removed = await unpickStatement(userId, statementId);
+  const deleted = await CardStatement.findOneAndDelete({ _id: statementId, userId });
+  if (!deleted) return res.status(404).json({ error: "Not found" });
+
   res.json({ removed });
 });
 

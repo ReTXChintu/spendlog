@@ -1,3 +1,5 @@
+import { StatementKind } from "../../types";
+
 /**
  * Per-issuer readers for the transaction table.
  *
@@ -18,10 +20,17 @@ export interface RawStatementRow {
   /// null where the statement gives no sign either way, and the words have
   /// to answer instead.
   credit: boolean | null;
+  /// The running balance after this row, on a statement that prints one.
+  /// It is how a bank statement's direction is worked out - see the note
+  /// on the bank reader.
+  balance?: string;
 }
 
 export interface StatementReader {
   name: string;
+  /// What kind of document this reads. Decides what an unexplained credit
+  /// means, which is the one thing a card and a bank statement disagree on.
+  kind: StatementKind;
   /// Whether this reader recognises the document, from its headers.
   matches(rows: string[]): boolean;
   row(row: string): RawStatementRow | null;
@@ -39,8 +48,18 @@ const SLASH_DATE = "\\d{1,2}[/\\-.]\\d{1,2}[/\\-.]\\d{2,4}";
 /** 17 Jul 26, 17-Jul-2026. */
 const NAMED_DATE = "\\d{1,2}[\\s\\-]+[A-Za-z]{3,9}[\\s\\-]+\\d{2,4}";
 
+/**
+ * How far into a document to look for its letterhead.
+ *
+ * Issuer detection used to read every row, which meant a bank statement
+ * full of UPI handles was claimed by the ICICI card reader on the strength
+ * of "SWIGGY@ICICI" - and then read nothing at all, silently. A bank names
+ * itself at the top of its own statement, so that is where to look.
+ */
+const HEADER_ROWS = 20;
+
 function anyRowMatches(rows: string[], pattern: RegExp): boolean {
-  return rows.some((row) => pattern.test(row));
+  return rows.slice(0, HEADER_ROWS).some((row) => pattern.test(row));
 }
 
 /**
@@ -55,6 +74,7 @@ function anyRowMatches(rows: string[], pattern: RegExp): boolean {
  * row is the amount only once the points have been accounted for.
  */
 const icici: StatementReader = {
+  kind: "CARD",
   name: "ICICI",
 
   matches(rows) {
@@ -103,6 +123,7 @@ const icici: StatementReader = {
  * carry an EMI badge, which extracts as a word in front of the merchant.
  */
 const hdfc: StatementReader = {
+  kind: "CARD",
   name: "HDFC",
 
   matches(rows) {
@@ -151,6 +172,7 @@ const hdfc: StatementReader = {
  * which is what makes that safe here.
  */
 const jupiter: StatementReader = {
+  kind: "CARD",
   name: "Jupiter",
 
   matches(rows) {
@@ -191,6 +213,7 @@ const jupiter: StatementReader = {
  * it does not begin with a date and end with one.
  */
 const generic: StatementReader = {
+  kind: "CARD",
   name: "generic",
 
   matches() {
@@ -222,7 +245,65 @@ const generic: StatementReader = {
   },
 };
 
-const READERS: StatementReader[] = [icici, hdfc, jupiter];
+/**
+ * A bank account statement, as every Indian bank lays one out.
+ *
+ *   14/09/26  UPI-SWIGGY-...  UPI-123456  14/09/26   432.50    45,320.10
+ *   15/09/26  SALARY SEP      NEFT-0099   15/09/26  96,000.00  1,41,320.10
+ *
+ * Two things make this a different document rather than a different bank.
+ *
+ * There is a running balance, so the last number on a row is never the
+ * amount. And withdrawals and deposits sit in separate columns, both of
+ * which vanish when empty - so a row of either kind arrives as exactly two
+ * trailing numbers and the position tells you nothing about which it was.
+ *
+ * The balance is what answers it. A row where the balance fell by the
+ * amount was money going out; one where it rose was money coming in. That
+ * is worked out in a second pass, once the rows are in order - see
+ * statements.parse.ts. It also checks itself: a row whose balance does not
+ * move by its own amount was misread, and is better dropped than guessed at.
+ */
+const bank: StatementReader = {
+  kind: "BANK",
+  name: "bank",
+
+  matches(rows) {
+    const hasBalance = anyRowMatches(rows, /closing\s*balance|balance\s*\(inr\)|running\s*balance/i);
+    const hasColumns = anyRowMatches(rows, /withdrawal|deposit|debit\s*amount|credit\s*amount|narration/i);
+    return hasBalance && hasColumns;
+  },
+
+  row(row) {
+    // The last two numbers on the row: the balance, and the amount before
+    // it. Anything further left is a reference number or a value date.
+    const match = row.match(
+      new RegExp(`^(${SLASH_DATE}|${NAMED_DATE})\\s+(.+?)\\s+(${AMOUNT})\\s+(${AMOUNT})\\s*$`)
+    );
+    if (!match) return null;
+
+    // A reference number and a value date sit between the narration and the
+    // figures, and neither says anything about what the payment was for.
+    const description = match[2]
+      .replace(new RegExp(`\\s+${SLASH_DATE}\\s*$`), "")
+      .replace(/\s+[A-Za-z]*[-/]?\d{6,}[A-Za-z0-9]*\s*$/, "")
+      .replace(new RegExp(`\\s+${SLASH_DATE}\\s*$`), "")
+      .trim();
+
+    if (!description) return null;
+
+    return {
+      date: match[1],
+      description,
+      amount: match[3],
+      balance: match[4],
+      // Settled in the second pass, from how the balance moved.
+      credit: null,
+    };
+  },
+};
+
+const READERS: StatementReader[] = [bank, icici, hdfc, jupiter];
 
 /**
  * The reader for a document, chosen from what its headers say.
@@ -234,4 +315,4 @@ export function readerFor(rows: string[]): StatementReader {
   return READERS.find((reader) => reader.matches(rows)) ?? generic;
 }
 
-export const readers = { icici, hdfc, jupiter, generic };
+export const readers = { bank, icici, hdfc, jupiter, generic };
