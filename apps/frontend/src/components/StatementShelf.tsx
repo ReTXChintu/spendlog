@@ -65,9 +65,10 @@ const STATUS_LABEL: Record<StatementRow["status"], string> = {
 export function StatementShelf({
   accounts,
   onChanged,
-  /// Which account the page is currently about. Its statements lead, and
-  /// its group opens by itself. Null shows the whole shelf in its own
-  /// order, which is how this is used where no one account is in view.
+  /// Which account the page is about. Only its statements are shown -
+  /// this sits under one account's panel, and the others belong under
+  /// theirs. Null shows every group, which is how the unfiled pile is
+  /// listed.
   focusAccountId = null,
 }: {
   accounts: Account[];
@@ -88,18 +89,12 @@ export function StatementShelf({
       .get<AccountGroup[]>("/statements/filed")
       .then((next) => {
         setGroups(next);
-        // The account being looked at opens by itself, and so does any
-        // other with something wrong on it — that is the only reason
-        // anybody comes to this screen unprompted.
+        // Open by default. A group is one account's own statements now,
+        // so there is nothing to collapse it away from.
         setOpen((current) =>
           Object.keys(current).length > 0
             ? current
-            : Object.fromEntries(
-                next.map((group) => [
-                  group.accountId,
-                  group.accountId === focusAccountId || needsWork(group),
-                ]),
-              ),
+            : Object.fromEntries(next.map((group) => [group.accountId, true])),
         );
       })
       .catch(() => setGroups([]))
@@ -124,7 +119,11 @@ export function StatementShelf({
 
   if (!loaded) return null;
 
-  if (groups.length === 0) {
+  const shown = focusAccountId
+    ? groups.filter((group) => group.accountId === focusAccountId)
+    : groups;
+
+  if (shown.length === 0) {
     return (
       <div className="card set-card set-card-wide">
         <div className="set-card-head">
@@ -133,7 +132,7 @@ export function StatementShelf({
           </div>
           <div>
             <h4>Statements</h4>
-            <p className="set-card-sub">None yet</p>
+            <p className="set-card-sub">None for this one yet</p>
           </div>
         </div>
         <p className="desc">
@@ -145,8 +144,13 @@ export function StatementShelf({
     );
   }
 
-  const cards = accounts.filter((account) => account.accountType === "CARD");
-  const anyLocked = groups.some((group) =>
+  // A statement can be pointed at any account that holds one - a bank
+  // statement belongs to a bank account, and offering only cards was why
+  // there was no way to file one.
+  const cards = accounts.filter(
+    (account) => account.accountType === "CARD" || account.accountType === "BANK",
+  );
+  const anyLocked = shown.some((group) =>
     group.months.some((month) =>
       month.statements.some((row) => row.status === "LOCKED"),
     ),
@@ -163,14 +167,14 @@ export function StatementShelf({
           </div>
           <div>
             <h4>Statements</h4>
-            <p className="set-card-sub">{shelfSummary(groups)}</p>
+            <p className="set-card-sub">{shelfSummary(shown)}</p>
           </div>
         </div>
 
         {error && <p className="desc set-warn">{error}</p>}
 
         <div className="shelf">
-          {ownFirst(groups, focusAccountId).map((group) => {
+          {shown.map((group) => {
             const count = group.months.reduce(
               (sum, month) => sum + month.statements.length,
               0,
@@ -300,10 +304,21 @@ export function StatementShelf({
                                       }
                                     }}
                                   >
-                                    <option value="">Which card?</option>
-                                    {cards.map((card) => (
+                                    <option value="">
+                                      {statement.kind === "BANK"
+                                        ? "Which account?"
+                                        : "Which card?"}
+                                    </option>
+                                    {/* The sort puts the right sort first
+                                        without hiding the other: a bank
+                                        statement is usually a bank
+                                        account's, and occasionally the
+                                        statement is wrong about which it
+                                        is. */}
+                                    {sortedForKind(cards, statement.kind).map((card) => (
                                       <option key={card.id} value={card.id}>
                                         {accountLabel(card)}
+                                        {card.accountType === "BANK" ? " — bank" : ""}
                                       </option>
                                     ))}
                                   </select>
@@ -416,13 +431,13 @@ export function StatementShelf({
   );
 }
 
-/** The account being looked at first, the rest in the order they came. */
-function ownFirst(groups: AccountGroup[], focusAccountId: string | null): AccountGroup[] {
-  if (!focusAccountId) return groups;
+/** The kind of account a statement of this kind usually belongs to, first. */
+function sortedForKind(accounts: Account[], kind: "CARD" | "BANK"): Account[] {
+  const wanted = kind === "BANK" ? "BANK" : "CARD";
 
   return [
-    ...groups.filter((group) => group.accountId === focusAccountId),
-    ...groups.filter((group) => group.accountId !== focusAccountId),
+    ...accounts.filter((account) => account.accountType === wanted),
+    ...accounts.filter((account) => account.accountType !== wanted),
   ];
 }
 

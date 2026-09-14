@@ -13,7 +13,14 @@ import 'statement_detail_screen.dart';
 /// written, and nothing ever showed one — so "5 statements could not be
 /// read" was the whole of what anybody knew. This is that list.
 class StatementsScreen extends StatefulWidget {
-  const StatementsScreen({super.key});
+  const StatementsScreen({super.key, this.onlyAccountId, this.title});
+
+  /// Which account's statements to show. Null shows every account's, which
+  /// is how the pile with no account is reached.
+  final String? onlyAccountId;
+
+  /// What to call the screen when it is about one account.
+  final String? title;
 
   @override
   State<StatementsScreen> createState() => _StatementsScreenState();
@@ -172,6 +179,11 @@ class _StatementsScreenState extends State<StatementsScreen> {
   bool _loading = true;
   String? _busy;
 
+  /// The groups this screen is about: one account's, or all of them.
+  List<_AccountGroup> get _shown => widget.onlyAccountId == null
+      ? _groups
+      : _groups.where((group) => group.accountId == widget.onlyAccountId).toList();
+
   int _duplicates = 0;
   int _totalStatements = 0;
   int _addedRows = 0;
@@ -197,7 +209,8 @@ class _StatementsScreenState extends State<StatementsScreen> {
             .toList();
         _cards = (results[1] as List<dynamic>)
             .map((a) => Account.fromJson(a as Map<String, dynamic>))
-            .where((account) => account.accountType == 'CARD')
+            .where((account) =>
+                account.accountType == 'CARD' || account.accountType == 'BANK')
             .toList();
 
         final plan = results[2] as Map<String, dynamic>;
@@ -229,23 +242,38 @@ class _StatementsScreenState extends State<StatementsScreen> {
   }
 
   /// The card number printed inside is not always the one an SMS taught
-  /// SpendLog, so saying which card it is by hand fixes most of these.
+  /// SpendLog, so saying which account it is by hand fixes most of these.
+  ///
+  /// The kind a statement of this kind usually belongs to is listed first,
+  /// and the rest are still listed: occasionally the statement is wrong
+  /// about which it is.
   Future<void> _assign(_Statement statement) async {
+    final wanted = statement.isBank ? 'BANK' : 'CARD';
+    final ordered = [
+      ..._cards.where((account) => account.accountType == wanted),
+      ..._cards.where((account) => account.accountType != wanted),
+    ];
+
     final chosen = await showModalBottomSheet<String>(
       context: context,
       builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        child: ListView(
+          shrinkWrap: true,
           children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('Which card is this statement for?',
-                  style: TextStyle(fontWeight: FontWeight.w700)),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                statement.isBank
+                    ? 'Which account is this statement for?'
+                    : 'Which card is this statement for?',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
             ),
-            for (final card in _cards)
+            for (final account in ordered)
               ListTile(
-                title: Text(card.label),
-                onTap: () => Navigator.of(context).pop(card.id),
+                title: Text(account.label),
+                subtitle: Text(account.accountType == 'BANK' ? 'Bank account' : 'Credit card'),
+                onTap: () => Navigator.of(context).pop(account.id),
               ),
           ],
         ),
@@ -287,12 +315,12 @@ class _StatementsScreenState extends State<StatementsScreen> {
     return Scaffold(
       backgroundColor: c.paper,
       appBar: AppBar(
-        title: const Text('Statements'),
+        title: Text(widget.title ?? 'Statements'),
         shape: Border(bottom: BorderSide(color: c.line)),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _groups.isEmpty
+          : _shown.isEmpty
               ? const StateBlock(
                   icon: Icons.receipt_long_outlined,
                   title: 'No statements yet',
@@ -305,7 +333,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
                     padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
                     children: [
                       if (_duplicates > 0) ...[_resetCard(), const SizedBox(height: 14)],
-                      for (final group in _groups) ...[
+                      for (final group in _shown) ...[
                         _accountTile(group),
                         const SizedBox(height: 10),
                       ],
@@ -538,7 +566,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
               if (statement.status == 'UNIDENTIFIED' && _cards.isNotEmpty)
                 OutlinedButton(
                   onPressed: _busy == statement.id ? null : () => _assign(statement),
-                  child: const Text('Pick the card'),
+                  child: const Text('Pick the account'),
                 ),
               if (!statement.isRead) ...[
                 const SizedBox(width: 8),

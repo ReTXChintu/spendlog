@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { AccountOverview } from "../types";
+import { api, ApiError } from "../lib/api";
 import { formatMoney } from "../lib/format";
 import { CardVaultPanel } from "./CardVaultPanel";
 import { Icon } from "./Icon";
@@ -23,13 +25,44 @@ export function AccountPanel({
   account,
   onEdit,
   onChanged,
+  onDeleted,
 }: {
   account: AccountOverview;
   onEdit: () => void;
   onChanged: () => void;
+  onDeleted: () => void;
 }) {
   const cycle = account.cycle;
   const isCard = account.accountType === "CARD";
+
+  /// Null until Remove is pressed, then the number of transactions that
+  /// would be left without an account. Deleting one is refused while
+  /// history points at it, and that refusal is the useful half - it says
+  /// how much history there is before anything happens to it.
+  const [removing, setRemoving] = useState<{ inUse: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function remove(unassign: boolean) {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.delete(`/accounts/${account.id}${unassign ? "?unassign=true" : ""}`);
+      onDeleted();
+    } catch (err) {
+      // The server refuses while transactions use it and says how many.
+      // That is the question worth asking, not an error to report.
+      if (err instanceof ApiError && err.status === 409) {
+        const inUse = Number(/^(\d+)/.exec(err.message)?.[1] ?? 0);
+        setRemoving({ inUse });
+      } else {
+        setError(err instanceof Error ? err.message : "That didn't work.");
+        setRemoving(null);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="account-panel">
@@ -45,10 +78,52 @@ export function AccountPanel({
             {!account.isActive && <> · closed</>}
           </p>
         </div>
-        <button className="btn btn-sm btn-ghost" onClick={onEdit}>
-          <Icon name="ic-pencil" /> Edit
-        </button>
+        <div className="account-panel-actions">
+          <button className="btn btn-sm btn-ghost" onClick={onEdit}>
+            <Icon name="ic-pencil" /> Edit
+          </button>
+          {/* Cash is a fixture rather than something that was added -
+              every account needs somewhere to put a payment that came out
+              of a pocket - so it is closed rather than deleted. */}
+          {account.accountType !== "CASH" && (
+            <button
+              className="btn btn-sm btn-ghost btn-danger-text"
+              disabled={busy}
+              onClick={() => (removing ? setRemoving(null) : remove(false))}
+            >
+              <Icon name="ic-x" /> Remove
+            </button>
+          )}
+        </div>
       </header>
+
+      {removing && (
+        <div className="account-remove">
+          <p className="desc">
+            {removing.inUse > 0 ? (
+              <>
+                <b>{removing.inUse}</b>{" "}
+                {removing.inUse === 1 ? "transaction is" : "transactions are"} filed under{" "}
+                {account.nickname || account.bankName}. Removing it keeps them and leaves them
+                without an account — or merge it into another account instead, from Edit, to move
+                them across.
+              </>
+            ) : (
+              <>Nothing is filed under this account, so removing it loses nothing.</>
+            )}
+          </p>
+          <div className="set-card-actions">
+            <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => remove(true)}>
+              {busy ? "Removing…" : removing.inUse > 0 ? "Remove it anyway" : "Remove it"}
+            </button>
+            <button className="btn btn-sm btn-ghost" disabled={busy} onClick={() => setRemoving(null)}>
+              Keep it
+            </button>
+          </div>
+        </div>
+      )}
+
+      {error && <p className="desc set-warn">{error}</p>}
 
       <div className="account-figures">
         {/* Only a card has a cycle. A savings account with an empty

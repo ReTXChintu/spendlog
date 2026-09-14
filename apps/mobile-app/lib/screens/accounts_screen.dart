@@ -76,6 +76,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
   List<_Overview>? _accounts;
   String? _selectedId;
   bool _error = false;
+  int _unfiled = 0;
 
   @override
   void initState() {
@@ -85,10 +86,27 @@ class _AccountsScreenState extends State<AccountsScreen> {
 
   Future<void> _load() async {
     try {
-      final result = await ApiClient.instance.get('/accounts/overview') as List<dynamic>;
+      final results = await Future.wait([
+        ApiClient.instance.get('/accounts/overview'),
+        ApiClient.instance.get('/statements/filed'),
+      ]);
       if (!mounted) return;
       setState(() {
-        _accounts = result.map((a) => _Overview.fromJson(a as Map<String, dynamic>)).toList();
+        _accounts = (results[0] as List<dynamic>)
+            .map((a) => _Overview.fromJson(a as Map<String, dynamic>))
+            .toList();
+
+        final orphans = (results[1] as List<dynamic>).cast<Map<String, dynamic>>().where(
+              (group) => group['accountId'] == 'unfiled',
+            );
+        _unfiled = orphans.isEmpty
+            ? 0
+            : ((orphans.first['months'] as List<dynamic>?) ?? []).fold<int>(
+                0,
+                (sum, month) =>
+                    sum + (((month as Map<String, dynamic>)['statements'] as List?)?.length ?? 0),
+              );
+
         _error = false;
         // Keep whatever was being looked at, unless it has gone.
         if (!_accounts!.any((row) => row.account.id == _selectedId)) {
@@ -97,6 +115,51 @@ class _AccountsScreenState extends State<AccountsScreen> {
       });
     } catch (_) {
       if (mounted) setState(() => _error = true);
+    }
+  }
+
+  Future<void> _remove(Account account) async {
+    int inUse = 0;
+    try {
+      await ApiClient.instance.delete('/accounts/${account.id}');
+      await _load();
+      return;
+    } catch (error) {
+      if (error is ApiException && error.statusCode == 409) {
+        inUse = int.tryParse(RegExp(r'^(\d+)').firstMatch(error.message)?.group(1) ?? '') ?? 0;
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+        }
+        return;
+      }
+    }
+
+    if (!mounted) return;
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Remove ${account.label}?'),
+        content: Text(
+          '$inUse ${inUse == 1 ? 'transaction is' : 'transactions are'} filed under it. Removing '
+          'it keeps them and leaves them without an account — or merge it into another account '
+          'instead, from Edit, to move them across.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Keep it')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (sure != true) return;
+
+    try {
+      await ApiClient.instance.delete('/accounts/${account.id}?unassign=true');
+      await _load();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+      }
     }
   }
 
@@ -194,6 +257,57 @@ class _AccountsScreenState extends State<AccountsScreen> {
                 padding: const EdgeInsets.only(right: 8),
                 child: _chip(row),
               ),
+            // Last, and only while there is something in it: the
+            // statements no account could be found for. A to-do list
+            // rather than a place, so it says how long it is.
+            if (_unfiled > 0) _unfiledChip(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _unfiledChip() {
+    final c = context.c;
+
+    return GestureDetector(
+      onTap: () async {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => const StatementsScreen(
+              onlyAccountId: 'unfiled',
+              title: 'Not on an account',
+            ),
+          ),
+        );
+        await _load();
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: c.warnBg,
+          border: Border.all(color: c.warn),
+          borderRadius: BorderRadius.circular(T.rMd),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.help_outline, size: 16, color: c.warn),
+            const SizedBox(width: 8),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Not on an account',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: c.warn,
+                    )),
+                Text('$_unfiled statement${_unfiled == 1 ? '' : 's'}',
+                    style: TextStyle(fontSize: 10.5, color: c.warn)),
+              ],
+            ),
           ],
         ),
       ),
@@ -302,6 +416,15 @@ class _AccountsScreenState extends State<AccountsScreen> {
                 icon: const Icon(Icons.edit_outlined, size: 16),
                 label: const Text('Edit'),
               ),
+              // Cash is a fixture rather than something that was added -
+              // every account needs somewhere to put a payment that came
+              // out of a pocket - so it is closed rather than deleted.
+              if (account.accountType != 'CASH')
+                IconButton(
+                  tooltip: 'Remove this account',
+                  onPressed: () => _remove(account),
+                  icon: Icon(Icons.delete_outline, size: 19, color: c.debit),
+                ),
             ],
           ),
           const SizedBox(height: 14),
@@ -354,7 +477,12 @@ class _AccountsScreenState extends State<AccountsScreen> {
             action: TextButton(
               onPressed: () async {
                 await Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const StatementsScreen()),
+                  MaterialPageRoute(
+                    builder: (_) => StatementsScreen(
+                      onlyAccountId: account.id,
+                      title: account.label,
+                    ),
+                  ),
                 );
                 await _load();
               },

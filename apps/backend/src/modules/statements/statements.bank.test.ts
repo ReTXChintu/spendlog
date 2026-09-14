@@ -130,3 +130,37 @@ describe("a card statement is still read as one", () => {
     assert.equal(line?.balance, undefined);
   });
 });
+
+describe("finding which account a bank statement is for", () => {
+  it("reads a masked account number", () => {
+    assert.equal(parseStatementRows(BANK_ROWS).last4, "4821");
+  });
+
+  it("reads one that is not masked at all", () => {
+    // The reported gap. A bank statement has no card number on it, and
+    // nothing here looked for an account number - so every one of them
+    // read perfectly and then landed on "no account number could be found
+    // in this statement", with only cards offered to point it at.
+    for (const row of [
+      "Account Number 50100123454821",
+      "Account No. : 50100123454821",
+      "A/c No 50100123454821",
+      "Acct Number: 50100123454821",
+      "Alternate Account Number 0001010430008391372",
+    ]) {
+      const parsed = parseStatementRows([row, ...BANK_ROWS.slice(2)]);
+      assert.equal(parsed.last4, row.includes("0001010") ? "1372" : "4821", row);
+    }
+  });
+
+  it("still prefers a card number where a statement prints both", () => {
+    // A card statement often carries the account the card is billed to,
+    // and it is the card the statement belongs to.
+    const rows = [
+      "BISWAJIT PANDA Credit Card No. 652925XXXXXX1377",
+      "Alternate Account Number 0001010430008391372",
+      ...BANK_ROWS.slice(2),
+    ];
+    assert.equal(parseStatementRows(rows).last4, "1377");
+  });
+});

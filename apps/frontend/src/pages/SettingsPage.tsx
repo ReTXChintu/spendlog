@@ -299,6 +299,9 @@ function ConnectionsTab() {
   );
 }
 
+/** The group the server files a statement under when it has no account. */
+const UNFILED = "unfiled";
+
 /**
  * Every account, one at a time.
  *
@@ -318,6 +321,7 @@ function AccountsTab() {
   const [editing, setEditing] = useState<{ account: Account | null } | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const [loaded, setLoaded] = useState(false);
+  const [unfiled, setUnfiled] = useState(0);
 
   const reload = useCallback(() => {
     api
@@ -325,12 +329,27 @@ function AccountsTab() {
       .then(setAccounts)
       .catch(() => setAccounts([]))
       .finally(() => setLoaded(true));
+
+    // How many statements have no account. Asked here rather than inside
+    // the shelf because the tab that leads to them lives out here.
+    api
+      .get<{ accountId: string; months: { statements: unknown[] }[] }[]>("/statements/filed")
+      .then((groups) => {
+        const orphans = groups.find((group) => group.accountId === UNFILED);
+        setUnfiled(
+          orphans?.months.reduce((sum, month) => sum + month.statements.length, 0) ?? 0,
+        );
+      })
+      .catch(() => setUnfiled(0));
   }, []);
 
   useEffect(reload, [reload]);
 
   const wanted = searchParams.get("account");
-  const selected = accounts.find((account) => account.id === wanted) ?? accounts[0] ?? null;
+  const showingUnfiled = wanted === UNFILED;
+  const selected = showingUnfiled
+    ? null
+    : (accounts.find((account) => account.id === wanted) ?? accounts[0] ?? null);
 
   function select(accountId: string) {
     const next = new URLSearchParams(searchParams);
@@ -413,6 +432,28 @@ function AccountsTab() {
               </span>
             </button>
           ))}
+
+          {/* Last, and only while there is something in it: the statements
+              no account could be found for. A to-do list rather than a
+              place, so it says how long it is. */}
+          {unfiled > 0 && (
+            <button
+              role="tab"
+              aria-selected={showingUnfiled}
+              className={`account-tab is-unfiled${showingUnfiled ? " on" : ""}`}
+              onClick={() => select(UNFILED)}
+            >
+              <span className="account-tab-badge">
+                <Icon name="ic-question" />
+              </span>
+              <span className="account-tab-main">
+                <span className="account-tab-name">Not on an account</span>
+                <span className="account-tab-sub">
+                  {unfiled} statement{unfiled === 1 ? "" : "s"}
+                </span>
+              </span>
+            </button>
+          )}
         </div>
 
         <button className="btn btn-sm btn-primary" onClick={() => setEditing({ account: null })}>
@@ -430,18 +471,33 @@ function AccountsTab() {
           </p>
         )}
 
-        {selected && (
-          <AccountPanel
-            key={selected.id}
-            account={selected}
-            onEdit={() => setEditing({ account: selected })}
-            onChanged={reload}
-          />
+        {showingUnfiled ? (
+          <p className="desc">
+            These were read but no account could be matched to what was printed inside. Point each
+            one at the account it belongs to, or forget it.
+          </p>
+        ) : (
+          selected && (
+            <AccountPanel
+              key={selected.id}
+              account={selected}
+              onEdit={() => setEditing({ account: selected })}
+              onDeleted={() => {
+                setSearchParams({ tab: "accounts" }, { replace: true });
+                reload();
+              }}
+              onChanged={reload}
+            />
+          )
         )}
 
         {/* A card's statements are that card's paperwork, so they live with
             it rather than under the mailbox they arrived through. */}
-        <StatementShelf accounts={accounts} onChanged={reload} focusAccountId={selected?.id ?? null} />
+        <StatementShelf
+          accounts={accounts}
+          onChanged={reload}
+          focusAccountId={showingUnfiled ? UNFILED : (selected?.id ?? null)}
+        />
       </div>
 
       {editing && (

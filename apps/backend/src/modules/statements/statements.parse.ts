@@ -378,6 +378,18 @@ export function findCardLast4(rows: string[]): string | null {
       /\b(?:rupay|visa|mastercard|master\s*card|amex)\b[^\d\n]{0,24}?(\d{4})\b/i
     );
     if (heading) return heading[1];
+
+    // A bank statement does not have a card number on it. It has an account
+    // number, which is longer, unmasked, and labelled differently - and
+    // because nothing here looked for one, every bank statement read
+    // perfectly and then landed on "no account number could be found".
+    //
+    // The last four digits are what an account is matched on either way,
+    // because that is what the SMS alerts print.
+    const account = row.match(
+      /\b(?:a\/c|acct?|account)\.?\s*(?:no|number|ending(?:\s*(?:in|with))?)?\.?\s*:?\s*(?:[xX*]+\s*)?(\d{4,20})\b/i
+    );
+    if (account) return account[1].slice(-4);
   }
   return null;
 }

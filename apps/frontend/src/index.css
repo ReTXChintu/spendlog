@@ -1021,3 +1021,20 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
   .vault-edit-row{grid-template-columns:1fr}
   .figure-value{font-size:18px}
 }
+
+/* ------------------------------------ removing an account, and the orphans */
+.account-panel-actions{display:flex;align-items:center;gap:4px;flex-shrink:0}
+
+/* The refusal is the useful half: it says how much history points at this
+   account before anything happens to it. */
+.account-remove{margin:0 0 14px;padding:13px 15px;background:var(--warn-bg);
+  border:1px solid var(--warn);border-radius:var(--radius-md)}
+.account-remove .desc{margin:0 0 10px}
+.account-remove .set-card-actions{margin-top:0}
+
+/* The tab for statements no account could be found for. Last in the rail
+   and only there while it has something in it. */
+.account-tab.is-unfiled{border-style:dashed}
+.account-tab.is-unfiled .account-tab-badge{background:var(--warn-bg);color:var(--warn)}
+.account-tab.is-unfiled.on{border-style:solid;border-color:var(--warn);
+  box-shadow:inset 0 0 0 1px var(--warn)}
