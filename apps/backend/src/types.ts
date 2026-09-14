@@ -19,6 +19,10 @@ export type AccountType = (typeof ACCOUNT_TYPES)[number];
 export const COUNTED_REASONS = [
   "FULL",
   "TRANSFER",
+  // Paying a credit card bill. Every purchase on that card was counted
+  // the day it happened, so the bill landing is the same money reaching
+  // the bank a month later - counting both books it twice.
+  "CARD_BILL",
   "SETTLEMENT",
   "SPLIT",
   "EMI_PARENT",

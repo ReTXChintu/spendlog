@@ -61,6 +61,8 @@ class _EditSheetState extends State<_EditSheet> {
   String? _accountId;
   late DateTime _occurredAt;
   late bool _isTransfer;
+  late bool _isSalary;
+  String? _cardPaymentFor;
   late bool _isSplit;
   late bool _isSettlement;
   /// On a trip, an expense is everyone's unless it says otherwise. The only
@@ -115,6 +117,8 @@ class _EditSheetState extends State<_EditSheet> {
     // is set to. Converted back to a real instant on save.
     _occurredAt = istWallClock(t?.occurredAt ?? DateTime.now());
     _isTransfer = t?.isTransfer ?? false;
+    _isSalary = t?.isSalary ?? false;
+    _cardPaymentFor = t?.cardPaymentFor;
     _isSplit = t?.split != null;
     _isSettlement = t?.isSettlement ?? false;
     _tripJustMine = (t?.tripShareWith?.isNotEmpty ?? false);
@@ -238,6 +242,8 @@ class _EditSheetState extends State<_EditSheet> {
       'accountId': _accountId,
       'occurredAt': fromIstWallClock(_occurredAt).toIso8601String(),
       'isTransfer': _isTransfer,
+      'isSalary': _type == 'CREDIT' && _isSalary,
+      'cardPaymentFor': _type == 'DEBIT' ? _cardPaymentFor : null,
       'isSettlement': _isSettlement,
       // Narrowed to the payer alone, or widened back to everyone on the trip.
       if (widget.transaction?.tripId != null)
@@ -292,6 +298,9 @@ class _EditSheetState extends State<_EditSheet> {
       });
     }
   }
+
+  List<Account> get _cardAccounts =>
+      widget.accounts.where((account) => account.accountType == 'CARD').toList();
 
   @override
   Widget build(BuildContext context) {
@@ -532,6 +541,53 @@ class _EditSheetState extends State<_EditSheet> {
                 style: TextStyle(fontSize: 12.8, color: c.ink70),
               ),
             ),
+
+            // A bill payment usually produces one message, from the bank
+            // being debited, with nothing on the card side to pair it with
+            // - so the automatic transfer detection can never find it.
+            if (_type == 'DEBIT' && _cardAccounts.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              DropdownButtonFormField<String?>(
+                initialValue: _cardPaymentFor,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Paid a credit card bill?',
+                  helperText: 'Counts as nothing - the purchases on that card were already counted.',
+                  helperMaxLines: 3,
+                  isDense: true,
+                ),
+                items: [
+                  const DropdownMenuItem<String?>(value: null, child: Text('No - ordinary spending')),
+                  for (final card in _cardAccounts)
+                    DropdownMenuItem<String?>(
+                      value: card.id,
+                      child: Text('Yes, the bill for ${card.label}', overflow: TextOverflow.ellipsis),
+                    ),
+                ],
+                onChanged: (value) => setState(() => _cardPaymentFor = value),
+              ),
+              const SizedBox(height: 8),
+            ],
+
+            // Only a person can say which credit is the month's pay: it
+            // lands a day either side of the day it is meant to, and a
+            // month with leave in it is smaller than the profile says.
+            if (_type == 'CREDIT')
+              CheckboxListTile(
+                value: _isSalary,
+                onChanged: (value) => setState(() => _isSalary = value ?? false),
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                dense: true,
+                title: Text(
+                  'This is my salary',
+                  style: TextStyle(fontSize: 12.8, color: c.ink70),
+                ),
+                subtitle: Text(
+                  'Starts the spending period here, and uses this amount rather than the one in Settings.',
+                  style: TextStyle(fontSize: 11.5, height: 1.4, color: c.mutedLight),
+                ),
+              ),
 
             CheckboxListTile(
               value: _isSplit,

@@ -10,6 +10,12 @@ let mongod: MongoMemoryServer;
 before(async () => {
   mongod = await MongoMemoryServer.create();
   await mongoose.connect(mongod.getUri("spendlog_trips_test"));
+
+  // "Only one running trip" is enforced by a partial unique index, which
+  // Mongoose builds in the background after connecting. Without waiting,
+  // the test that expects a second trip to be rejected raced the index and
+  // failed only when the suite was busy enough to lose.
+  await Trip.init();
 });
 
 after(async () => {

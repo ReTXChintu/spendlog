@@ -62,3 +62,56 @@ export function budgetPeriodFor(salaryDay: number, now: Date): BudgetPeriod {
     daysElapsed: Math.max(1, Math.round((todayStart - start.getTime()) / day) + 1),
   };
 }
+
+/**
+ * The period opened by a salary that has actually landed.
+ *
+ * A configured pay day is a prediction; a credit marked as pay is a fact.
+ * Salaries arrive a day either side of the date they are meant to, and a
+ * period that starts on the 15th when the money came in on the 14th counts
+ * a day of spending against the wrong month twice over — once at the end of
+ * the old period and not at all in the new one.
+ *
+ * So the marked credit sets the start, and the configured day is used only
+ * to say when the next one is due.
+ */
+export function budgetPeriodFromSalary(paidOn: Date, salaryDay: number, now: Date): BudgetPeriod {
+  const start = new Date(Date.parse(`${istDayKey(paidOn)}T00:00:00.000+05:30`));
+
+  const shifted = new Date(start.getTime() + IST_OFFSET_MS);
+  const year = shifted.getUTCFullYear();
+  const month = shifted.getUTCMonth();
+
+  // Which due date this payment was *for*, which is not always the next one
+  // after it. Pay arriving on the 14th against a due day of the 15th is
+  // early pay for the 15th, not a payment in the middle of a cycle - so the
+  // period it opens has to close on the 15th of the following month, not
+  // the day after it started.
+  const candidates = [
+    istDate(year, month - 1, salaryDay),
+    istDate(year, month, salaryDay),
+    istDate(year, month + 1, salaryDay),
+  ];
+  const paidFor = candidates.reduce((nearest, candidate) =>
+    Math.abs(candidate.getTime() - start.getTime()) < Math.abs(nearest.getTime() - start.getTime())
+      ? candidate
+      : nearest
+  );
+
+  const forParts = new Date(paidFor.getTime() + IST_OFFSET_MS);
+  const end = istDate(forParts.getUTCFullYear(), forParts.getUTCMonth() + 1, salaryDay);
+
+  const day = 24 * 60 * 60 * 1000;
+  const todayStart = Date.parse(`${istDayKey(now)}T00:00:00.000+05:30`);
+
+  return {
+    start,
+    end,
+    key: istDayKey(start),
+    // Clamped at one, which also covers a salary that is simply late: what
+    // is left has to last until it arrives, and nobody knows when that is.
+    // Erring towards "less per day" is the safe direction to be wrong in.
+    daysLeft: Math.max(1, Math.ceil((end.getTime() - todayStart) / day)),
+    daysElapsed: Math.max(1, Math.round((todayStart - start.getTime()) / day) + 1),
+  };
+}

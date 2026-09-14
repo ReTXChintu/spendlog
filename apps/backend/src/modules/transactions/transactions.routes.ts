@@ -265,6 +265,12 @@ const updateTransactionSchema = z.object({
   accountId: z.string().nullable().optional(),
   occurredAt: z.coerce.date().optional(),
   isTransfer: z.boolean().optional(),
+  // Only a person can say which credit is the month's pay: it lands a day
+  // either side of the day it is meant to, and a month with leave in it is
+  // smaller than the figure in the profile.
+  isSalary: z.boolean().optional(),
+  // Which card's bill this settled. null clears it.
+  cardPaymentFor: z.string().nullable().optional(),
   // Zero is meaningful: someone else's bill paid from the user's card, all
   // of which is owed back. null clears the split entirely.
   split: z

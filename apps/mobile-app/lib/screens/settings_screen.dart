@@ -11,6 +11,7 @@ import '../theme.dart';
 import '../utils/format.dart';
 import '../version.dart';
 import 'accounts_screen.dart';
+import 'statements_screen.dart';
 import 'login_screen.dart';
 import 'permission_screen.dart';
 
@@ -247,6 +248,12 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     );
   }
 
+  /// The list of what has been read and what could not be, with the reason
+  /// against each. Without it, a count of failures was all anyone had.
+  Future<void> _openStatements() async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const StatementsScreen()));
+  }
+
   Future<void> _loadConnections() async {
     try {
       final result = await ApiClient.instance.get('/ingestion/email/status') as List<dynamic>;
@@ -447,6 +454,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                 onPressed: _readingStatements || connection == null ? null : _readStatements,
                 child: Text(_readingStatements ? 'Reading…' : 'Read statements'),
               ),
+              OutlinedButton(onPressed: _openStatements, child: const Text('See them')),
             ],
           ),
         ),

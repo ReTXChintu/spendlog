@@ -14,6 +14,16 @@ import { CountedReason } from "../types";
 export interface CountedInput {
   amountMinor: number;
   isTransfer?: boolean | null;
+  /**
+   * The card whose bill this payment settled. Every purchase on that card
+   * was counted the day it happened, so the bill is that same money
+   * reaching the bank a month later, not new spending.
+   *
+   * Marked by hand: a bill payment usually produces one message, from the
+   * bank being debited, with nothing on the card side to pair it with -
+   * which is why detectSelfTransfer cannot find it.
+   */
+  cardPaymentFor?: unknown;
   isSettlement?: boolean | null;
   excludeFromTotals?: boolean | null;
   /**
@@ -53,6 +63,12 @@ export interface CountedAmount {
 export function resolveCountedAmount(transaction: CountedInput): CountedAmount {
   if (transaction.isTransfer) {
     return { countedAmountMinor: 0, countedReason: "TRANSFER" };
+  }
+
+  // Above everything else for the same reason a transfer is: the money was
+  // already counted, on the card, on the day each purchase happened.
+  if (transaction.cardPaymentFor) {
+    return { countedAmountMinor: 0, countedReason: "CARD_BILL" };
   }
 
   // The instalments count as they are paid, so counting the purchase too

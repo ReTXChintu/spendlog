@@ -157,9 +157,18 @@ async function owedBalance(userId: Types.ObjectId) {
   return { balanceMinor: row.lent - row.settledIn + row.settledOut };
 }
 
-/** Statements that cannot be read without someone doing something. */
+/**
+ * Statements that cannot be read without someone doing something.
+ *
+ * UNREADABLE is in the list as well as the two fixable ones. A file nobody
+ * can open is still worth naming - left out, it sat in the database with a
+ * reason recorded against it and no screen that would ever show it.
+ */
 async function statementsNeedingAttention(userId: Types.ObjectId) {
-  const stuck = await CardStatement.find({ userId, status: { $in: ["LOCKED", "UNIDENTIFIED"] } })
+  const stuck = await CardStatement.find({
+    userId,
+    status: { $in: ["LOCKED", "UNIDENTIFIED", "UNREADABLE"] },
+  })
     .sort({ statementDate: -1 })
     .limit(5);
 

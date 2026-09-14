@@ -285,6 +285,13 @@ export interface TransactionDoc {
   /// the refund endpoints rather than set by hand.
   refundedMinor: number;
   isTransfer: boolean;
+  /// Whether this credit is the month's pay. Marked by hand and never
+  /// guessed: it lands a day either side of the date it is meant to, and a
+  /// month with leave taken in it is smaller than the figure in a profile.
+  isSalary?: boolean;
+  /// The card whose bill this payment settled. Counts as nothing: every
+  /// purchase on that card was already counted the day it happened.
+  cardPaymentFor?: Types.ObjectId | null;
   /// Set when only part of this bill was the user's own spending. The rest
   /// is money owed back, and countedAmountMinor drops to the share.
   split?: TransactionSplit | null;
@@ -373,6 +380,8 @@ const transactionSchema = new Schema<TransactionDoc>(
     emiPlanId: { type: Schema.Types.ObjectId, ref: "EmiPlan", default: null },
     emiRole: { type: String, enum: EMI_ROLES, default: null },
     isTransfer: { type: Boolean, default: false },
+    isSalary: { type: Boolean, default: false },
+    cardPaymentFor: { type: Schema.Types.ObjectId, ref: "Account", default: null },
     split: { type: transactionSplitSchema, default: null },
     isSettlement: { type: Boolean, default: false },
     pending: { type: Boolean, default: false },

@@ -89,3 +89,37 @@ describe("resolveCountedAmount", () => {
     assert.deepEqual(result, { countedAmountMinor: 120000, countedReason: "FULL" });
   });
 });
+
+describe("a credit card bill payment", () => {
+  it("counts as nothing, because the spending was counted on the card", () => {
+    // The trap this whole design is arranged around. Every purchase on the
+    // card was counted the day it happened; the bill is that same money
+    // reaching the bank a month later.
+    const result = resolveCountedAmount({
+      amountMinor: 4785025,
+      cardPaymentFor: "65f000000000000000000001",
+    });
+
+    assert.equal(result.countedAmountMinor, 0);
+    assert.equal(result.countedReason, "CARD_BILL");
+  });
+
+  it("outranks a split on the same row", () => {
+    // Splitting a card bill with a flatmate does not make part of it
+    // spending: the purchases behind it were already counted in full.
+    const result = resolveCountedAmount({
+      amountMinor: 4785025,
+      cardPaymentFor: "65f000000000000000000001",
+      split: { myShareMinor: 2000000 },
+    });
+
+    assert.equal(result.countedAmountMinor, 0);
+    assert.equal(result.countedReason, "CARD_BILL");
+  });
+
+  it("is ordinary spending again once the card is cleared off it", () => {
+    const result = resolveCountedAmount({ amountMinor: 4785025, cardPaymentFor: null });
+    assert.equal(result.countedAmountMinor, 4785025);
+    assert.equal(result.countedReason, "FULL");
+  });
+});

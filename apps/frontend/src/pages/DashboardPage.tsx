@@ -132,6 +132,13 @@ export function DashboardPage() {
                 </div>
               </div>
 
+              <div className={`pace-source${pace.salaryIsActual ? "" : " is-guess"}`}>
+                <Icon name={pace.salaryIsActual ? "ic-check" : "ic-info"} />
+                {pace.salaryIsActual
+                  ? `Built on the ${formatMoney(pace.salaryMinor)} that actually landed.`
+                  : "Built on the salary in Settings. Tick the credit on your ledger as salary and this uses what really arrived."}
+              </div>
+
               {pace.state !== "ok" && (
                 <p className="budget-verdict">
                   <Icon name="ic-alert" />

@@ -365,6 +365,34 @@ class _PaceBlock extends StatelessWidget {
                   _Figure(label: 'Lately', value: formatMoneyShort(pace.recentPerDayMinor)),
                 ],
               ),
+              const SizedBox(height: 10),
+              // Where the figure came from, said plainly rather than left
+              // to be guessed from a number that moves when a month has
+              // leave taken in it.
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    pace.salaryIsActual ? Icons.check_circle_outline : Icons.info_outline,
+                    size: 13,
+                    color: pace.salaryIsActual ? c.muted : c.warn,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      pace.salaryIsActual
+                          ? 'Built on the ${formatMoney(pace.salaryMinor)} that actually landed.'
+                          : 'Built on the salary in Settings. Tick the credit on your ledger as '
+                              'salary and this uses what really arrived.',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        height: 1.4,
+                        color: pace.salaryIsActual ? c.muted : c.warn,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
               if (pace.state != 'ok') ...[
                 const SizedBox(height: 10),
                 Text(

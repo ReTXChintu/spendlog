@@ -171,6 +171,12 @@ class Transaction {
   /// monthly payment.
   final String? emiRole;
   final bool isTransfer;
+
+  /// Marked by hand: the credit that opens a spending period.
+  final bool isSalary;
+
+  /// The card whose bill this settled. Counts as nothing when set.
+  final String? cardPaymentFor;
   final TransactionSplit? split;
   final bool isSettlement;
   final bool pending;
@@ -201,6 +207,8 @@ class Transaction {
     this.emiPlanId,
     this.emiRole,
     required this.isTransfer,
+    this.isSalary = false,
+    this.cardPaymentFor,
     this.split,
     this.isSettlement = false,
     required this.pending,
@@ -248,6 +256,8 @@ class Transaction {
         emiPlanId: json['emiPlanId'] as String?,
         emiRole: json['emiRole'] as String?,
         isTransfer: json['isTransfer'] as bool? ?? false,
+        isSalary: json['isSalary'] as bool? ?? false,
+        cardPaymentFor: json['cardPaymentFor'] as String?,
         split: json['split'] != null
             ? TransactionSplit.fromJson(json['split'] as Map<String, dynamic>)
             : null,
@@ -450,6 +460,11 @@ class BudgetPace {
   final int recentPerDayMinor;
   /// "ok" | "watch" | "over"
   final String state;
+
+  /// Whether salaryMinor is what actually landed, or the figure from the
+  /// profile. Worth saying out loud: the two differ in any month with
+  /// leave taken in it.
+  final bool salaryIsActual;
   final List<FixedCommitment> commitments;
 
   BudgetPace({
@@ -462,6 +477,7 @@ class BudgetPace {
     this.perDayMinor = 0,
     this.recentPerDayMinor = 0,
     this.state = 'ok',
+    this.salaryIsActual = false,
     this.commitments = const [],
   });
 
@@ -477,6 +493,7 @@ class BudgetPace {
       perDayMinor: json['perDayMinor'] as int? ?? 0,
       recentPerDayMinor: json['recentPerDayMinor'] as int? ?? 0,
       state: json['state'] as String? ?? 'ok',
+      salaryIsActual: json['salaryIsActual'] as bool? ?? false,
       commitments: (json['commitments'] as List<dynamic>? ?? [])
           .map((c) => FixedCommitment.fromJson(c as Map<String, dynamic>))
           .toList(),

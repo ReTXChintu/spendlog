@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AccountModal } from "../components/AccountModal";
 import { Icon } from "../components/Icon";
+import { StatementList } from "../components/StatementList";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { formatMoney } from "../lib/format";
@@ -92,6 +93,7 @@ export function SettingsPage() {
 /** Where the data comes from: Gmail, SMS, and the statements in the inbox. */
 function ConnectionsTab() {
   const [connections, setConnections] = useState<EmailConnectionStatus[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [statementSync, setStatementSync] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -106,6 +108,9 @@ function ConnectionsTab() {
   }, []);
 
   useEffect(reload, [reload, gmailStatus]);
+  useEffect(() => {
+    api.get<Account[]>("/accounts").then(setAccounts).catch(() => setAccounts([]));
+  }, []);
 
   async function connect() {
     const { url } = await api.get<{ url: string }>("/ingestion/email/connect");
@@ -235,10 +240,11 @@ function ConnectionsTab() {
             {scanning ? "Reading…" : "Read statements"}
           </button>
         </div>
-        <p className="field-hint" style={{ marginTop: 10 }}>
-          A locked statement needs its password set on the card, under Accounts and cards.
-        </p>
       </div>
+
+      {/* Every statement, with the reason each failure failed. Without it,
+          "5 could not be read" was the whole of what anybody knew. */}
+      <StatementList accounts={accounts} key={statementSync ?? "idle"} />
 
       <div className="card set-card">
         <div className="set-card-head">

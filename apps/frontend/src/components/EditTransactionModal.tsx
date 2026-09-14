@@ -63,7 +63,13 @@ export function EditTransactionModal({
   const [accountId, setAccountId] = useState(transaction?.account?.id ?? "");
   const [date, setDate] = useState(initial.date);
   const [time, setTime] = useState(initial.time);
+  // Named apart from `cards`, which is the card *statuses* the limit
+  // warning reads, not the accounts a bill can be paid against.
+  const cardAccounts = accounts.filter((account) => account.accountType === "CARD");
+
   const [isTransfer, setIsTransfer] = useState(transaction?.isTransfer ?? false);
+  const [isSalary, setIsSalary] = useState(transaction?.isSalary ?? false);
+  const [cardPaymentFor, setCardPaymentFor] = useState(transaction?.cardPaymentFor ?? "");
   const [isSplit, setIsSplit] = useState(transaction?.split != null);
   const [myShare, setMyShare] = useState(
     transaction?.split ? (transaction.split.myShareMinor / 100).toFixed(2) : ""
@@ -183,6 +189,8 @@ export function EditTransactionModal({
       accountId: accountId || null,
       occurredAt: fromIstParts(date, time),
       isTransfer,
+      isSalary: type === "CREDIT" ? isSalary : false,
+      cardPaymentFor: type === "DEBIT" ? cardPaymentFor || null : null,
       isSettlement,
       // Narrowed to the payer alone, or widened back to everyone on the trip.
       ...(transaction?.tripId ? { tripShareWith: tripJustMine ? [transaction.userId] : null } : {}),
@@ -418,6 +426,44 @@ export function EditTransactionModal({
               </span>
             </label>
           </div>
+
+          {/* A bill payment usually produces one message, from the bank
+              being debited, with nothing on the card side to pair it with —
+              so the automatic transfer detection can never find it. */}
+          {type === "DEBIT" && cardAccounts.length > 0 && (
+            <div className="form-row form-row-wide">
+              <label className="field">
+                <span>Paid a credit card bill?</span>
+                <select value={cardPaymentFor} onChange={(e) => setCardPaymentFor(e.target.value)}>
+                  <option value="">No — ordinary spending</option>
+                  {cardAccounts.map((card) => (
+                    <option key={card.id} value={card.id}>
+                      Yes, the bill for {accountLabel(card)}
+                    </option>
+                  ))}
+                </select>
+                <span className="field-hint">
+                  Counts as nothing. Every purchase on that card was already counted the day it
+                  happened, so counting the bill too would book the same money twice.
+                </span>
+              </label>
+            </div>
+          )}
+
+          {/* Only a person can say which credit is the month's pay: it
+              lands a day either side of the day it is meant to, and a month
+              with leave in it is smaller than the figure in the profile. */}
+          {type === "CREDIT" && (
+            <div className="form-row form-row-wide">
+              <label className="checkbox-row">
+                <input type="checkbox" checked={isSalary} onChange={(e) => setIsSalary(e.target.checked)} />
+                <span>
+                  This is my salary — start the spending period here, and use this amount rather than
+                  the one in Settings
+                </span>
+              </label>
+            </div>
+          )}
 
           <div className="form-row form-row-wide">
             <label className="checkbox-row">

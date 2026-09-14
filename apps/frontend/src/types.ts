@@ -201,6 +201,9 @@ export type BudgetPace =
       daysLeft: number;
       daysElapsed: number;
       salaryMinor: number;
+      /** Whether salaryMinor is what landed, or what was configured. */
+      salaryIsActual: boolean;
+      salaryPaidOn: string | null;
       commitmentsRemainingMinor: number;
       spentMinor: number;
       remainingMinor: number;
@@ -233,6 +236,10 @@ export interface Transaction {
   emiPlanId: string | null;
   emiRole: EmiRole | null;
   isTransfer: boolean;
+  /** Marked by hand: the credit that opens a spending period. */
+  isSalary?: boolean;
+  /** The card whose bill this settled. Counts as nothing when set. */
+  cardPaymentFor?: string | null;
   split: TransactionSplit | null;
   isSettlement: boolean;
   pending: boolean;
