@@ -49,6 +49,18 @@ const SLASH_DATE = "\\d{1,2}[/\\-.]\\d{1,2}[/\\-.]\\d{2,4}";
 const NAMED_DATE = "\\d{1,2}[\\s\\-]+[A-Za-z]{3,9}[\\s\\-]+\\d{2,4}";
 
 /**
+ * Where a currency mark sits, if the statement prints one at all.
+ *
+ * Symbols rather than letters, beyond the two known words. A rupee sign in
+ * a subset font extracts as whatever glyph that subset used - sometimes
+ * nothing, sometimes a character no pattern would think to allow - so any
+ * symbol is admitted. Arbitrary letters are not, because "AMZNIN MUMBAI IN
+ * 1,240.00" would then lose its "IN" to this slot and read as a merchant
+ * called "AMZNIN MUMBAI".
+ */
+const CURRENCY = "(?:₹|Rs\\.?|INR|[^\\w\\s]{1,2})?";
+
+/**
  * How far into a document to look for its letterhead.
  *
  * Issuer detection used to read every row, which meant a bank statement
@@ -134,13 +146,19 @@ const hdfc: StatementReader = {
   },
 
   row(row) {
+    // The time is optional, and so is the currency mark. Both were required
+    // at first, from a screenshot, and a real statement met neither: not
+    // every row carries a time, and a rupee sign in a subset font extracts
+    // as whatever glyph the subset happened to use - sometimes nothing at
+    // all, sometimes a character no pattern would think to allow. So the
+    // space where it belongs takes anything that is not a digit.
     const match = row.match(
       new RegExp(
-        `^(${SLASH_DATE})\\s*\\|?\\s*\\d{1,2}:\\d{2}\\s*(?:am|pm)?\\s+(.+?)\\s+` +
-          `([+-])?\\s*(?:₹|Rs\\.?|INR)?\\s*(${AMOUNT})\\s*(CR|DR)?$`,
+        `^(${SLASH_DATE})\\s*[|]?\\s*(?:\\d{1,2}:\\d{2}(?::\\d{2})?\\s*(?:am|pm)?)?\\s+(.+?)\\s+` +
+          `([+-])?\\s*${CURRENCY}\\s*(${AMOUNT})\\s*(CR|DR)?$`,
         "i"
-      ),
-      );
+      )
+    );
     if (!match) return null;
 
     // The badge is not part of the merchant's name.
@@ -154,6 +172,10 @@ const hdfc: StatementReader = {
       amount: match[4],
       credit: match[3] === "+" || marker === "CR" ? true : marker === "DR" || match[3] === "-" ? false : null,
     };
+  },
+
+  continuation(row) {
+    return /^[A-Za-z][A-Za-z\s&'.\-*]{0,40}$/.test(row.trim());
   },
 };
 
@@ -221,7 +243,10 @@ const generic: StatementReader = {
   },
 
   row(row) {
-    const leading = row.match(new RegExp(`^(${SLASH_DATE}|${NAMED_DATE})\\s+(.*)$`));
+    // The separator is optional and may be flush against the date, which is
+    // how HDFC prints it: "03/08/2026| 10:30". Requiring whitespace there
+    // was enough to stop this reader standing in for that one.
+    const leading = row.match(new RegExp(`^(${SLASH_DATE}|${NAMED_DATE})\\s*[|]?\\s+(.*)$`));
     if (!leading) return null;
 
     let rest = leading[2].trim();
@@ -232,7 +257,18 @@ const generic: StatementReader = {
     const second = rest.match(new RegExp(`^(?:${SLASH_DATE}|${NAMED_DATE})\\s+(.+)$`));
     if (second) rest = second[1].trim();
 
-    const match = rest.match(new RegExp(`^(.+?)\\s+(?:₹|Rs\\.?|INR)?\\s*\\(?(${AMOUNT})\\)?\\s*(CR|DR)?$`, "i"));
+    // A time, where the date carries one. Stripped here as well as in the
+    // per-issuer readers, because this one has to stand in for them when
+    // their own patterns miss - and a merchant called "10:30 SWIGGY" reads
+    // as a mistake even though the amount beside it is right.
+    rest = rest.replace(/^[|]?\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?\s+/i, "").trim();
+    if (!rest) return null;
+
+    // Anything short and non-numeric where a currency mark belongs: a rupee
+    // sign in a subset font extracts as whatever glyph that subset used.
+    const match = rest.match(
+      new RegExp(`^(.+?)\\s+[+-]?\\s*${CURRENCY}\\s*\\(?(${AMOUNT})\\)?\\s*(CR|DR)?$`, "i")
+    );
     if (!match) return null;
 
     const marker = (match[3] ?? "").toUpperCase();
@@ -316,3 +352,7 @@ export function readerFor(rows: string[]): StatementReader {
 }
 
 export const readers = { bank, icici, hdfc, jupiter, generic };
+
+/// Every reader, likeliest first and the fallback last. Used when the
+/// one the headers pointed at turns out to find nothing.
+export const allReaders: StatementReader[] = [...READERS, generic];

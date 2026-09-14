@@ -11,7 +11,7 @@ import {
   resolveLineByHand,
   unpickStatement,
 } from "./statements.reconcile";
-import { rereadStatement, syncStatements } from "./statements.service";
+import { rereadStatement, statementText, syncStatements } from "./statements.service";
 import { upcomingBills } from "./statements.bills";
 
 export const statementsRouter = Router();
@@ -188,6 +188,17 @@ statementsRouter.get("/:id/lines/:lineId/candidates", validObjectIdParam("id"), 
   res.json(
     await candidatesForLine(currentUserId(req), new Types.ObjectId(req.params.id), req.params.lineId)
   );
+});
+
+// GET /statements/:id/text - the text this statement extracts to.
+//
+// For when one opens but nothing is found in it. "No transaction table
+// could be found" is a true statement about the readers and a useless one
+// about the file; this is the file.
+statementsRouter.get("/:id/text", validObjectIdParam("id"), async (req, res) => {
+  const result = await statementText(currentUserId(req), new Types.ObjectId(req.params.id));
+  if (!result) return res.status(404).json({ error: "Not found, or it could not be opened" });
+  res.json(result);
 });
 
 // PATCH /statements/:id/lines/:lineId - say what a line is, by hand.

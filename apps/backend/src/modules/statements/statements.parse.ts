@@ -1,7 +1,7 @@
 import { StatementKind, TransactionType } from "../../types";
 import { istDayStart } from "../../time";
 import { classifyStatementLine, creditByDescription } from "./statements.classify";
-import { readerFor, StatementReader } from "./statements.issuers";
+import { allReaders, readerFor, StatementReader } from "./statements.issuers";
 import { StatementLineKind } from "../../types";
 
 /**
@@ -191,6 +191,61 @@ function directionsFromBalance(lines: ParsedStatementLine[]): ParsedStatementLin
   return kept;
 }
 
+/**
+ * The first reader that finds anything, starting with the likeliest.
+ *
+ * A reader that finds nothing has not proved the document is unreadable,
+ * only that it is not the document that reader expects - so the others get
+ * a turn before anyone is told there is no table in it.
+ */
+function firstReaderThatFinds(
+  rows: string[],
+  preferred: StatementReader,
+  fallbackYear: number | undefined
+): { reader: StatementReader; lines: ParsedStatementLine[] } {
+  const order = [preferred, ...allReaders.filter((candidate) => candidate !== preferred)];
+
+  let best: { reader: StatementReader; lines: ParsedStatementLine[] } = { reader: preferred, lines: [] };
+
+  for (const reader of order) {
+    const lines = readWith(rows, reader, fallbackYear);
+    if (lines.length > best.lines.length) best = { reader, lines };
+
+    // Two rows is enough to say a reader understands the document. Stopping
+    // there keeps a statement from being re-read four times over.
+    if (best.lines.length >= 2) break;
+  }
+
+  return best;
+}
+
+function readWith(
+  rows: string[],
+  reader: StatementReader,
+  fallbackYear: number | undefined
+): ParsedStatementLine[] {
+  const lines: ParsedStatementLine[] = [];
+
+  for (const row of rows) {
+    const line = parseStatementRow(row, reader, fallbackYear);
+    if (line) {
+      lines.push(line);
+      continue;
+    }
+
+    // A merchant name too long for its column wraps, leaving its tail on a
+    // line of its own. Joined back on, because a name cut in half matches
+    // nothing and reads as a mistake.
+    const previous = lines[lines.length - 1];
+    if (previous && reader.continuation?.(row)) {
+      previous.description = `${previous.description} ${row.trim()}`.replace(/\s+/g, " ");
+      previous.kind = classifyStatementLine(previous.description, previous.type, reader.kind);
+    }
+  }
+
+  return lines;
+}
+
 /** A labelled figure from the summary block, e.g. "Total Dues 47,850.25". */
 function findLabelledAmount(rows: string[], label: RegExp): number | null {
   for (const row of rows) {
@@ -239,8 +294,6 @@ export function findCardLast4(rows: string[]): string | null {
  * alone, so nothing here is allowed to fail the whole parse.
  */
 export function parseStatementRows(rows: string[]): ParsedStatement {
-  const reader = readerFor(rows);
-
   const statementDate =
     findLabelledDate(rows, /statement\s*(?:date|generated\s*on)/i) ?? findLabelledDate(rows, /statement/i);
 
@@ -252,23 +305,14 @@ export function parseStatementRows(rows: string[]): ParsedStatement {
   // sorts out by date proximity rather than this guess.
   const fallbackYear = statementDate?.getUTCFullYear();
 
-  const lines: ParsedStatementLine[] = [];
-  for (const row of rows) {
-    const line = parseStatementRow(row, reader, fallbackYear);
-    if (line) {
-      lines.push(line);
-      continue;
-    }
-
-    // A merchant name too long for its column wraps, leaving its tail on a
-    // line of its own. Joined back on, because a name cut in half matches
-    // nothing and reads as a mistake.
-    const previous = lines[lines.length - 1];
-    if (previous && reader.continuation?.(row)) {
-      previous.description = `${previous.description} ${row.trim()}`.replace(/\s+/g, " ");
-      previous.kind = classifyStatementLine(previous.description, previous.type);
-    }
-  }
+  // The reader the headers point at, then every other one, then the
+  // fallback. Picking by header is a good guess and not a promise: a bank
+  // changes its layout, or names itself on a page whose table looks like
+  // somebody else's. Before this, a reader chosen and then failing meant
+  // "no transaction table could be found in this file" - which was never
+  // true of the file, only of the one reader that had been tried.
+  const preferred = readerFor(rows);
+  const { reader, lines } = firstReaderThatFinds(rows, preferred, fallbackYear);
 
   const settled = reader.kind === "BANK" ? directionsFromBalance(lines) : lines;
   const dated = settled.map((line) => line.date.getTime());

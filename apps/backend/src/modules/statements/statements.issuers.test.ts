@@ -220,3 +220,76 @@ describe("an issuer nobody has written a reader for", () => {
     assert.equal(parsed.lines[0].amountMinor, 124000);
   });
 });
+
+describe("when the reader the headers chose finds nothing", () => {
+  it("lets another reader have a go before giving up", () => {
+    // Reported: an HDFC Tata Neu statement said "no transaction table could
+    // be found in this file". The headers named HDFC, the HDFC reader did
+    // not fit the real layout, and that was the end of it - even though the
+    // rows were perfectly ordinary underneath.
+    const rows = [
+      "HDFC Bank Credit Card Statement",
+      "Tata Neu Plus HDFC Bank Credit Card",
+      // No time, no currency mark: neither of which the HDFC reader was
+      // written to do without.
+      "03/08/2026 UPI-JAY MEWAD RAJAVADICHA 143.00",
+      "04/08/2026 UPI-SHREE KRISHNA PANPARLOUR 28.00",
+      "05/08/2026 BIGBASKET BANGALORE 3,890.10",
+    ];
+
+    const parsed = parseStatementRows(rows);
+    assert.equal(parsed.lines.length, 3);
+    assert.deepEqual(
+      parsed.lines.map((line) => line.amountMinor),
+      [14300, 2800, 389010]
+    );
+  });
+
+  it("keeps the reader that actually read it", () => {
+    const rows = ["Some Bank Statement", "03/08/2026 A MERCHANT 143.00", "04/08/2026 ANOTHER 28.00"];
+    assert.equal(parseStatementRows(rows).issuer, "generic");
+  });
+});
+
+describe("HDFC, as a real statement rather than a screenshot", () => {
+  it("reads a row with no time on it", () => {
+    const line = parseStatementRow("03/08/2026 UPI-JAY MEWAD RAJAVADICHA 143.00", readers.hdfc)!;
+    assert.equal(line.description, "UPI-JAY MEWAD RAJAVADICHA");
+    assert.equal(line.amountMinor, 14300);
+  });
+
+  it("reads a row whose rupee sign came out as something else", () => {
+    // A rupee sign in a subset font extracts as whatever glyph that subset
+    // used - sometimes nothing, sometimes a character no pattern would
+    // think to allow. The space where it belongs takes anything non-numeric.
+    for (const mark of ["₹", "Rs.", "", "\uf0b9", "?"]) {
+      const line = parseStatementRow(`03/08/2026| 10:30 SWIGGY BANGALORE ${mark} 432.50`, readers.hdfc);
+      assert.equal(line?.amountMinor, 43250, `with "${mark}"`);
+    }
+  });
+
+  it("reads seconds on the timestamp", () => {
+    const line = parseStatementRow("03/08/2026| 10:30:15 SWIGGY BANGALORE 432.50", readers.hdfc)!;
+    assert.equal(line.description, "SWIGGY BANGALORE");
+  });
+
+  it("still keeps the EMI badge out of the merchant", () => {
+    const line = parseStatementRow("04/08/2026| 19:57 EMI UPI-TANISHQ 8,000.00", readers.hdfc)!;
+    assert.equal(line.description, "UPI-TANISHQ");
+  });
+
+  it("does not read a date and a bare number as a payment", () => {
+    // The looser pattern must not start claiming summary rows.
+    assert.equal(parseStatementRow("Page 1 of 4", readers.hdfc), null);
+    assert.equal(parseStatementRow("Statement Date 17/09/2026", readers.hdfc), null);
+  });
+});
+
+describe("the generic reader as a fallback", () => {
+  it("strips a time the per-issuer reader would have handled", () => {
+    // Otherwise a merchant reads as "10:30 SWIGGY BANGALORE", which is a
+    // mistake on the row even though the amount beside it is right.
+    const line = parseStatementRow("03/08/2026| 10:30 SWIGGY BANGALORE 432.50", readers.generic)!;
+    assert.equal(line.description, "SWIGGY BANGALORE");
+  });
+});

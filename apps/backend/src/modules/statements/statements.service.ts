@@ -3,6 +3,7 @@ import { HydratedDocument, Types } from "mongoose";
 import { Account, CardStatement, CardStatementDoc, EmailConnection } from "../../models";
 import { createOAuthClient } from "../ingestion/gmail.service";
 import { decryptPassword, encryptionAvailable } from "./statements.crypto";
+import { allReaders } from "./statements.issuers";
 import { parseStatementRows } from "./statements.parse";
 import { extractStatementRows, StatementLockedError } from "./statements.pdf";
 import { reconcileStatement } from "./statements.reconcile";
@@ -378,6 +379,72 @@ export async function rereadStatement(
       unidentified: outcome === "unidentified" ? 1 : 0,
       added: typeof outcome === "number" ? outcome : 0,
     };
+  }
+
+  return null;
+}
+
+/**
+ * The text a statement actually extracts to, and what each reader makes of
+ * it.
+ *
+ * For when a statement opens but nothing is found in it. "No transaction
+ * table could be found in this file" is a true statement about the readers
+ * and a useless one about the file, and without this the only way to learn
+ * more was to have the PDF on a machine with the repository on it.
+ *
+ * The attachment is fetched afresh and thrown away, as everywhere else: a
+ * statement is the most sensitive file in the mailbox and there is no
+ * reason for this app to keep one.
+ */
+export async function statementText(
+  userId: Types.ObjectId,
+  statementId: Types.ObjectId
+): Promise<{ rows: string[]; readers: { name: string; lines: number }[] } | null> {
+  const statement = await CardStatement.findOne({ _id: statementId, userId });
+  if (!statement) return null;
+
+  const [messageId, attachmentId] = statement.sourceRef.split("#");
+  if (!messageId || !attachmentId) return null;
+
+  const cards = await Account.find({ userId, accountType: { $in: ["CARD", "BANK"] } });
+  const passwords = [
+    null,
+    ...new Set(cards.map((card) => decryptPassword(card.statementPassword)).filter(Boolean)),
+  ] as (string | null)[];
+
+  for (const connection of await EmailConnection.find({ userId })) {
+    const client = createOAuthClient();
+    client.setCredentials({
+      access_token: connection.accessToken,
+      refresh_token: connection.refreshToken,
+    });
+
+    const file = await downloadAttachment(
+      google.gmail({ version: "v1", auth: client }),
+      messageId,
+      attachmentId
+    );
+    if (!file) continue;
+
+    for (const password of passwords) {
+      try {
+        const rows = await extractStatementRows(file, password);
+
+        // What every reader manages, not only the one the headers chose.
+        // A reader finding nothing where another finds forty is the whole
+        // answer to why a statement came out empty.
+        const readers = allReaders.map((reader) => ({
+          name: reader.name,
+          lines: rows.filter((row) => reader.row(row) !== null).length,
+        }));
+
+        return { rows, readers };
+      } catch (error) {
+        if (error instanceof StatementLockedError) continue;
+        return null;
+      }
+    }
   }
 
   return null;
