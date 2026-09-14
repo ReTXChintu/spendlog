@@ -172,6 +172,11 @@ class _StatementsScreenState extends State<StatementsScreen> {
   bool _loading = true;
   String? _busy;
 
+  int _duplicates = 0;
+  int _totalStatements = 0;
+  int _addedRows = 0;
+  int _categorisedRows = 0;
+
   @override
   void initState() {
     super.initState();
@@ -183,6 +188,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
       final results = await Future.wait([
         ApiClient.instance.get('/statements/filed'),
         ApiClient.instance.get('/accounts'),
+        ApiClient.instance.get('/statements/reset'),
       ]);
       if (!mounted) return;
       setState(() {
@@ -193,6 +199,13 @@ class _StatementsScreenState extends State<StatementsScreen> {
             .map((a) => Account.fromJson(a as Map<String, dynamic>))
             .where((account) => account.accountType == 'CARD')
             .toList();
+
+        final plan = results[2] as Map<String, dynamic>;
+        _duplicates = plan['duplicateGroups'] as int? ?? 0;
+        _totalStatements = plan['statements'] as int? ?? 0;
+        _addedRows = plan['addedTransactions'] as int? ?? 0;
+        _categorisedRows = plan['categorisedAmongThem'] as int? ?? 0;
+
         _loading = false;
       });
     } catch (_) {
@@ -288,14 +301,93 @@ class _StatementsScreenState extends State<StatementsScreen> {
                 )
               : RefreshIndicator(
                   onRefresh: _load,
-                  child: ListView.separated(
+                  child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
-                    itemCount: _groups.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    itemBuilder: (context, index) => _accountTile(_groups[index]),
+                    children: [
+                      if (_duplicates > 0) ...[_resetCard(), const SizedBox(height: 14)],
+                      for (final group in _groups) ...[
+                        _accountTile(group),
+                        const SizedBox(height: 10),
+                      ],
+                    ],
                   ),
                 ),
     );
+  }
+
+  /// Statements that were read more than once, and the offer to start over.
+  ///
+  /// Shown only while there is a mess. For a while every sync read every
+  /// statement again - a statement was identified by Gmail's attachment id
+  /// and Gmail mints one of those per fetch - so each run added every
+  /// transaction on every statement afresh.
+  ///
+  /// The counts come first and the button second. This deletes several
+  /// hundred rows, and that is not a thing to discover afterwards.
+  Widget _resetCard() {
+    final c = context.c;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border.all(color: c.warn),
+        borderRadius: BorderRadius.circular(T.rMd),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.error_outline, size: 17, color: c.warn),
+              const SizedBox(width: 9),
+              const Expanded(
+                child: Text(
+                  'Statements were read more than once',
+                  style: TextStyle(fontSize: 13.3, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '$_duplicates of $_totalStatements are copies. They put $_addedRows transactions in '
+            'the ledger, $_categorisedRows of which you have categorised by hand. Nothing read from '
+            'an SMS or an email is touched.',
+            style: TextStyle(fontSize: 12, height: 1.45, color: c.muted),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton(
+            onPressed: _busy == 'reset' ? null : _confirmReset,
+            style: OutlinedButton.styleFrom(foregroundColor: c.debit),
+            child: Text(_busy == 'reset' ? 'Removing…' : 'Start over'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmReset() async {
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Start over?'),
+        content: Text(
+          'This removes every statement and the $_addedRows transactions they added, including '
+          '$_categorisedRows you have categorised. Rows from SMS and email stay. '
+          'Read the statements again afterwards, under Settings.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (sure != true) return;
+
+    await _act('reset', () async {
+      await ApiClient.instance.post('/statements/reset', {'confirm': 'start over'});
+    });
   }
 
   /// One card, its months inside it.
