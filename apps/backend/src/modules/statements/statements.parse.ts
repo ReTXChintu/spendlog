@@ -48,7 +48,9 @@ const MONTHS: Record<string, number> = {
 // 02/09/2026, 02-09-2026, 02.09.26
 const NUMERIC_DATE_RE = /^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/;
 // 02 Sep 2026, 02-Sep-26, 2 September 2026
-const NAMED_DATE_RE = /^(\d{1,2})[\s\-/]*([a-z]{3,9})[\s\-/]*(\d{2,4})$/i;
+// The comma matters: HDFC writes its statement date as "01 Jun, 2026", and
+// without it the whole summary block read as having no dates in it.
+const NAMED_DATE_RE = /^(\d{1,2})[\s\-/,]*([a-z]{3,9})[\s\-/,]*(\d{2,4})$/i;
 
 /**
  * Indian statements are day-first without exception, so there is no
@@ -129,7 +131,12 @@ export function parseStatementRow(
   if (!date) return null;
 
   const amountMinor = parseAmountToMinor(raw.amount);
-  if (!raw.description || amountMinor === null || amountMinor <= 0) return null;
+  if (amountMinor === null || amountMinor <= 0) return null;
+
+  // An empty description is allowed through, because a row whose text
+  // wrapped onto the lines around its figures arrives with none - and the
+  // caller can put it back from the line above. Dropping the row here
+  // instead would lose the money along with the name.
 
   const type: TransactionType = raw.credit ?? creditByDescription(raw.description) ? "CREDIT" : "DEBIT";
 
@@ -226,12 +233,27 @@ function readWith(
 ): ParsedStatementLine[] {
   const lines: ParsedStatementLine[] = [];
 
+  // The last row that was not itself a transaction. A description too long
+  // for its column wraps onto the lines *around* the figures rather than
+  // after them, so a row can arrive with its date and amount and no text at
+  // all - and what it said is sitting just above.
+  let orphan: string | null = null;
+
   for (const row of rows) {
     const line = parseStatementRow(row, reader, fallbackYear);
     if (line) {
+      if (!line.description && orphan) {
+        line.description = orphan.trim();
+        line.kind = classifyStatementLine(line.description, line.type, reader.kind);
+      }
+      orphan = null;
       lines.push(line);
       continue;
     }
+
+    // Kept only if it could be a description: long enough to be words, and
+    // not a page footer or a column heading.
+    orphan = looksLikeStrandedText(row) ? row : null;
 
     // A merchant name too long for its column wraps, leaving its tail on a
     // line of its own. Joined back on, because a name cut in half matches
@@ -247,27 +269,86 @@ function readWith(
 }
 
 /** A labelled figure from the summary block, e.g. "Total Dues 47,850.25". */
+/**
+ * Whether a row could be the text of a transaction whose figures landed on
+ * a different line.
+ *
+ * Deliberately shy. Attaching the wrong words to an amount is worse than
+ * leaving it unnamed, so page furniture, column headings and anything too
+ * short to be a merchant are all refused.
+ */
+function looksLikeStrandedText(row: string): boolean {
+  const text = row.trim();
+  if (text.length < 6 || text.length > 90) return false;
+  if (!/[A-Za-z]{3}/.test(text)) return false;
+
+  return !/^(page\s|hsn|note|domestic|international|date\s*&|transaction\s|total|important)/i.test(text);
+}
+
+/**
+ * How far past a label to keep looking for its value.
+ *
+ * A summary block puts its headings on one row and its figures on another,
+ * with a stray caption or an underscore between them. Reading only the
+ * label's own row found nothing on a real statement, so the total due and
+ * the due date both came out empty.
+ */
+const LOOKAHEAD_ROWS = 4;
+
 function findLabelledAmount(rows: string[], label: RegExp): number | null {
-  for (const row of rows) {
-    const match = row.match(label);
+  for (let index = 0; index < rows.length; index += 1) {
+    const match = rows[index].match(label);
     if (!match) continue;
 
-    const after = row.slice((match.index ?? 0) + match[0].length);
-    const amount = after.match(new RegExp(`^[^\\d-]{0,20}${AMOUNT_RE.source}`));
-    if (amount) return parseAmountToMinor(amount[1]);
+    const after = rows[index].slice((match.index ?? 0) + match[0].length);
+    const sameRow = after.match(new RegExp(`^[^\\d-]{0,20}${AMOUNT_RE.source}`));
+    if (sameRow) return parseAmountToMinor(sameRow[1]);
+
+    for (let ahead = index + 1; ahead <= index + LOOKAHEAD_ROWS && ahead < rows.length; ahead += 1) {
+      const figure = amountOnSummaryRow(rows[ahead]);
+      if (figure !== null) return figure;
+    }
   }
   return null;
 }
 
+/**
+ * The figure a summary row is actually reporting.
+ *
+ * A row of workings - "C 16,127.47 C 16,127.00 + C 8,168.58 + C 0.00 =
+ * C 8,169.00" - is answering with the number after the equals sign, not
+ * the first one on the line. Anywhere else the first is what was meant.
+ */
+function amountOnSummaryRow(row: string): number | null {
+  const total = row.match(new RegExp(`=[^\\d-]{0,10}${AMOUNT_RE.source}`));
+  if (total) return parseAmountToMinor(total[1]);
+
+  const first = row.match(new RegExp(`(?:^|\\s)[^\\d\\s-]{0,3}\\s*${AMOUNT_RE.source}`));
+  return first ? parseAmountToMinor(first[1]) : null;
+}
+
+/** A date as a statement writes one, including "01 Jun, 2026". */
+// Letters rather than word characters in the middle. \w admits digits, so
+// "C 2,018.00 21 Jun, 2026" read its own minimum-due figure as the date and
+// the real date was never reached.
+const LOOSE_DATE_RE =
+  /(\d{1,2}[\s\-.,/]+[A-Za-z]{3,9}[\s\-.,/]+\d{2,4}|\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4})/;
+
 function findLabelledDate(rows: string[], label: RegExp): Date | null {
-  for (const row of rows) {
-    const match = row.match(label);
+  for (let index = 0; index < rows.length; index += 1) {
+    const match = rows[index].match(label);
     if (!match) continue;
 
-    const after = row.slice((match.index ?? 0) + match[0].length);
-    const date = after.match(/[^\d]{0,10}(\d{1,2}[\s/\-.][\w]{2,9}[\s/\-.]?\d{2,4})/);
-    if (date) {
-      const parsed = parseStatementDate(date[1]);
+    const after = rows[index].slice((match.index ?? 0) + match[0].length);
+    const sameRow = after.match(LOOSE_DATE_RE);
+    if (sameRow) {
+      const parsed = parseStatementDate(sameRow[1]);
+      if (parsed) return parsed;
+    }
+
+    for (let ahead = index + 1; ahead <= index + LOOKAHEAD_ROWS && ahead < rows.length; ahead += 1) {
+      const nearby = rows[ahead].match(LOOSE_DATE_RE);
+      const parsed = nearby ? parseStatementDate(nearby[1]) : null;
       if (parsed) return parsed;
     }
   }

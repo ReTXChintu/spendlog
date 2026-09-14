@@ -51,14 +51,26 @@ const NAMED_DATE = "\\d{1,2}[\\s\\-]+[A-Za-z]{3,9}[\\s\\-]+\\d{2,4}";
 /**
  * Where a currency mark sits, if the statement prints one at all.
  *
- * Symbols rather than letters, beyond the two known words. A rupee sign in
- * a subset font extracts as whatever glyph that subset used - sometimes
- * nothing, sometimes a character no pattern would think to allow - so any
- * symbol is admitted. Arbitrary letters are not, because "AMZNIN MUMBAI IN
- * 1,240.00" would then lose its "IN" to this slot and read as a merchant
- * called "AMZNIN MUMBAI".
+ * A rupee sign in a subset font extracts as whatever glyph that subset
+ * used. On a real HDFC statement it comes out as a capital C - which is a
+ * letter, and an earlier version of this admitted symbols only and so read
+ * nothing at all from those files.
+ *
+ * So: the known words, any symbol, or a *single* letter. One and not two,
+ * which is what keeps "AMZNIN MUMBAI IN 1,240.00" from losing its "IN" to
+ * this slot and reading as a merchant called "AMZNIN MUMBAI". There is a
+ * test on that row.
  */
-const CURRENCY = "(?:₹|Rs\\.?|INR|[^\\w\\s]{1,2})?";
+const CURRENCY = "(?:Rs\\.?|INR|[^\\w\\s]{1,2}|[A-Za-z])?";
+
+/**
+ * What follows the amount on a statement that prints something there.
+ *
+ * HDFC ends every row with its Purchase Indicator, a coloured dot that
+ * extracts as a lowercase L. Left unallowed, every transaction row on the
+ * statement failed to match on its last character.
+ */
+const TRAILING_MARK = "(?:\\s+[^\\d\\s]{1,2})?";
 
 /**
  * How far into a document to look for its letterhead.
@@ -146,24 +158,37 @@ const hdfc: StatementReader = {
   },
 
   row(row) {
-    // The time is optional, and so is the currency mark. Both were required
-    // at first, from a screenshot, and a real statement met neither: not
-    // every row carries a time, and a rupee sign in a subset font extracts
-    // as whatever glyph the subset happened to use - sometimes nothing at
-    // all, sometimes a character no pattern would think to allow. So the
-    // space where it belongs takes anything that is not a digit.
+    // Written against a real statement rather than a screenshot, which is
+    // why so little of it is required. The rows read:
+    //
+    //   01/05/2026| 23:57 UPI-ZEPTO MARKETPLACEPRIVATE C 101.00 l
+    //   15/05/2026| 23:32 CC PAYMENT ... (Ref# 000...) + C 16,127.00 l
+    //   01/05/2026| 00:00 C 5.40 l
+    //
+    // The C is the rupee sign as that font subset extracts it. The trailing
+    // l is the Purchase Indicator dot. And the third row has no description
+    // at all, because its text wrapped onto the lines either side of it -
+    // so the description is allowed to be empty and filled in afterwards.
+    // The description is optional but, when present, must end at a space.
+    // Without that the single-letter currency could be taken off the end of
+    // a word instead - "UPI-JAY MEWAD RAJAVADICHA 143.00" read as a
+    // merchant called "UPI-JAY MEWAD RAJAVADICH" with an "A" for a rupee.
     const match = row.match(
       new RegExp(
-        `^(${SLASH_DATE})\\s*[|]?\\s*(?:\\d{1,2}:\\d{2}(?::\\d{2})?\\s*(?:am|pm)?)?\\s+(.+?)\\s+` +
-          `([+-])?\\s*${CURRENCY}\\s*(${AMOUNT})\\s*(CR|DR)?$`,
+        `^(${SLASH_DATE})\\s*[|]?\\s*(?:\\d{1,2}:\\d{2}(?::\\d{2})?\\s*(?:am|pm)?)?\\s+(?:(.*?)\\s+)?` +
+          `([+-])?\\s*${CURRENCY}\\s*(${AMOUNT})\\s*(CR|DR)?${TRAILING_MARK}\\s*$`,
         "i"
       )
     );
     if (!match) return null;
 
-    // The badge is not part of the merchant's name.
-    const description = match[2].trim().replace(/^EMI\s+/i, "");
-    if (!description) return null;
+    // The badge is not part of the merchant's name, and nor is a lone
+    // currency mark left behind where the description was empty.
+    const description = (match[2] ?? "")
+      .trim()
+      .replace(/^EMI\s+/i, "")
+      .replace(/^[A-Za-z]$/, "")
+      .trim();
 
     const marker = (match[5] ?? "").toUpperCase();
     return {
@@ -267,7 +292,10 @@ const generic: StatementReader = {
     // Anything short and non-numeric where a currency mark belongs: a rupee
     // sign in a subset font extracts as whatever glyph that subset used.
     const match = rest.match(
-      new RegExp(`^(.+?)\\s+[+-]?\\s*${CURRENCY}\\s*\\(?(${AMOUNT})\\)?\\s*(CR|DR)?$`, "i")
+      new RegExp(
+        `^(.+?)\\s+[+-]?\\s*${CURRENCY}\\s*\\(?(${AMOUNT})\\)?\\s*(CR|DR)?${TRAILING_MARK}\\s*$`,
+        "i"
+      )
     );
     if (!match) return null;
 
