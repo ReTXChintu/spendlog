@@ -90,8 +90,43 @@ export async function budgetPace(userId: Types.ObjectId, now = new Date()) {
   const spentMinor = spend?.total ?? 0;
 
   const commitments = await FixedCommitment.find({ userId, isActive: true }).sort({ dayOfMonth: 1 });
-  const pending = commitments.filter((commitment) => commitment.paidForPeriod !== period.key);
-  const commitmentsRemainingMinor = pending.reduce((sum, c) => sum + c.amountMinor, 0);
+
+  // What has actually gone out towards each one this period, from payments
+  // marked against it. Marking the payment rather than ticking a box is
+  // what lets a bill be paid early: the period it lands in decides which
+  // month it settles, not the day of the month it was due.
+  const paidRows = await Transaction.aggregate<{ _id: Types.ObjectId; total: number }>([
+    {
+      $match: {
+        userId,
+        commitmentId: { $ne: null },
+        type: "DEBIT",
+        occurredAt: { $gte: period.start, $lt: period.end },
+      },
+    },
+    { $group: { _id: "$commitmentId", total: { $sum: "$amountMinor" } } },
+  ]);
+  const paidByCommitment = new Map(paidRows.map((row) => [row._id.toString(), row.total]));
+
+  const commitmentState = commitments.map((commitment) => {
+    const paidMinor = paidByCommitment.get(commitment._id.toString()) ?? 0;
+    // A hand-tick still means "consider this settled", for anything paid
+    // in a way the app will never see.
+    const ticked = commitment.paidForPeriod === period.key;
+
+    return {
+      commitment,
+      paidMinor,
+      ticked,
+      isPaid: ticked || paidMinor >= commitment.amountMinor,
+      // Only what is still to go out. Holding back the whole amount once
+      // part of it has been sent would count that part twice, since it is
+      // already in the spending above.
+      shortfallMinor: ticked ? 0 : Math.max(0, commitment.amountMinor - paidMinor),
+    };
+  });
+
+  const commitmentsRemainingMinor = commitmentState.reduce((sum, row) => sum + row.shortfallMinor, 0);
 
   const availableMinor = salaryMinor - commitmentsRemainingMinor;
   const remainingMinor = availableMinor - spentMinor;
@@ -136,10 +171,16 @@ export async function budgetPace(userId: Types.ObjectId, now = new Date()) {
     perDayMinor,
     recentPerDayMinor,
     state,
-    commitments: commitments.map((commitment) => ({
-      ...commitment.toJSON(),
-      isPaid: commitment.paidForPeriod === period.key,
+    commitments: commitmentState.map((row) => ({
+      ...row.commitment.toJSON(),
+      isPaid: row.isPaid,
+      paidMinor: row.paidMinor,
+      shortfallMinor: row.shortfallMinor,
+      // Part of it sent and part not, which is the case worth a sentence
+      // rather than a tick box.
+      isPartial: row.paidMinor > 0 && row.paidMinor < row.commitment.amountMinor && !row.ticked,
     })),
+    shortfallNote: shortfallNote(commitmentState, remainingMinor),
     configured: true as const,
   };
 }
@@ -164,4 +205,34 @@ function clusterStart(salaries: { occurredAt: Date }[]): Date | null {
   }
 
   return earliest;
+}
+
+/**
+ * A sentence about a fixed cost that only went out in part.
+ *
+ * Careful about the causal claim. Sending less than usual is not proof of
+ * overspending - it might simply have been a choice - so the shortfall is
+ * stated as the fact it is, and the reason is only offered when the
+ * arithmetic actually supports it: there was not enough left to have sent
+ * the rest.
+ */
+function shortfallNote(
+  rows: { commitment: { name: string; amountMinor: number }; paidMinor: number; shortfallMinor: number }[],
+  remainingMinor: number
+): string | null {
+  const short = rows.filter((row) => row.paidMinor > 0 && row.shortfallMinor > 0);
+  if (short.length === 0) return null;
+
+  const rupees = (minor: number) => `₹${Math.round(minor / 100).toLocaleString("en-IN")}`;
+  const total = short.reduce((sum, row) => sum + row.shortfallMinor, 0);
+
+  const what =
+    short.length === 1
+      ? `${short[0].commitment.name} went out at ${rupees(short[0].paidMinor)} of the usual ` +
+        `${rupees(short[0].commitment.amountMinor)}`
+      : `${short.length} fixed costs went out short, by ${rupees(total)} between them`;
+
+  return remainingMinor < total
+    ? `${what}. There was not enough left this period to have sent the rest - something else took it.`
+    : `${what}. There is still room to send the rest.`;
 }

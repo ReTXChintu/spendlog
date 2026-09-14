@@ -63,6 +63,12 @@ class _EditSheetState extends State<_EditSheet> {
   late bool _isTransfer;
   late bool _isSalary;
   String? _cardPaymentFor;
+  String? _commitmentId;
+
+  /// Fetched here rather than threaded through as a prop, because this
+  /// sheet opens from several places and only one of them would have
+  /// had them to hand.
+  List<FixedCommitment> _commitments = [];
   late bool _isSplit;
   late bool _isSettlement;
   /// On a trip, an expense is everyone's unless it says otherwise. The only
@@ -119,6 +125,9 @@ class _EditSheetState extends State<_EditSheet> {
     _isTransfer = t?.isTransfer ?? false;
     _isSalary = t?.isSalary ?? false;
     _cardPaymentFor = t?.cardPaymentFor;
+    _commitmentId = t?.commitmentId;
+
+    _loadCommitments();
     _isSplit = t?.split != null;
     _isSettlement = t?.isSettlement ?? false;
     _tripJustMine = (t?.tripShareWith?.isNotEmpty ?? false);
@@ -244,6 +253,7 @@ class _EditSheetState extends State<_EditSheet> {
       'isTransfer': _isTransfer,
       'isSalary': _type == 'CREDIT' && _isSalary,
       'cardPaymentFor': _type == 'DEBIT' ? _cardPaymentFor : null,
+      'commitmentId': _type == 'DEBIT' ? _commitmentId : null,
       'isSettlement': _isSettlement,
       // Narrowed to the payer alone, or widened back to everyone on the trip.
       if (widget.transaction?.tripId != null)
@@ -296,6 +306,39 @@ class _EditSheetState extends State<_EditSheet> {
         _error = "Couldn't delete it.";
         _saving = false;
       });
+    }
+  }
+
+  /// Changing direction has to drop anything the new one cannot mean, or
+  /// a category picked as spending stays attached to something that is now
+  /// income and quietly lands in the wrong total.
+  void _setType(String type) {
+    setState(() {
+      _type = type;
+
+      final stillValid = categoriesFor(widget.categories, type)
+          .any((category) => category.id == _categoryId);
+      if (!stillValid) _categoryId = null;
+
+      if (type == 'CREDIT') {
+        _isSplit = false;
+        _tripJustMine = false;
+        _cardPaymentFor = null;
+        _commitmentId = null;
+      } else {
+        _isSalary = false;
+      }
+    });
+  }
+
+  Future<void> _loadCommitments() async {
+    try {
+      final result = await ApiClient.instance.get('/budget/commitments') as List<dynamic>;
+      if (!mounted) return;
+      setState(() => _commitments =
+          result.map((c) => FixedCommitment.fromJson(c as Map<String, dynamic>)).toList());
+    } catch (_) {
+      // The picker simply does not appear.
     }
   }
 
@@ -354,13 +397,13 @@ class _EditSheetState extends State<_EditSheet> {
                   _Segment(
                     label: 'Money out',
                     on: _type == 'DEBIT',
-                    onTap: () => setState(() => _type = 'DEBIT'),
+                    onTap: () => _setType('DEBIT'),
                   ),
                   const SizedBox(width: 8),
                   _Segment(
                     label: 'Money in',
                     on: _type == 'CREDIT',
-                    onTap: () => setState(() => _type = 'CREDIT'),
+                    onTap: () => _setType('CREDIT'),
                   ),
                 ],
               ),
@@ -449,7 +492,7 @@ class _EditSheetState extends State<_EditSheet> {
                 style: TextStyle(fontSize: 14, color: c.ink),
                 items: [
                   const DropdownMenuItem<String?>(value: null, child: Text('Uncategorized')),
-                  ...widget.categories.map(
+                  ...categoriesFor(widget.categories, _type).map(
                     (category) => DropdownMenuItem<String?>(
                       value: category.id,
                       child: Text(category.name),
@@ -569,6 +612,37 @@ class _EditSheetState extends State<_EditSheet> {
               const SizedBox(height: 8),
             ],
 
+            // Marking the payment rather than ticking a due date is what
+            // lets a bill be paid early - an early salary can be spent on
+            // early - and what makes a part payment tellable from none.
+            if (_type == 'DEBIT' && _commitments.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              DropdownButtonFormField<String?>(
+                initialValue: _commitmentId,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Towards a fixed monthly cost?',
+                  helperText: 'Still counts as spending. Sending less than usual is fine - the '
+                      'dashboard says what went short rather than calling it unpaid.',
+                  helperMaxLines: 3,
+                  isDense: true,
+                ),
+                items: [
+                  const DropdownMenuItem<String?>(value: null, child: Text('No - ordinary spending')),
+                  for (final commitment in _commitments)
+                    DropdownMenuItem<String?>(
+                      value: commitment.id,
+                      child: Text(
+                        '${commitment.name} - ${formatMoney(commitment.amountMinor)} a month',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+                onChanged: (value) => setState(() => _commitmentId = value),
+              ),
+              const SizedBox(height: 8),
+            ],
+
             // Only a person can say which credit is the month's pay: it
             // lands a day either side of the day it is meant to, and a
             // month with leave in it is smaller than the profile says.
@@ -589,6 +663,7 @@ class _EditSheetState extends State<_EditSheet> {
                 ),
               ),
 
+            if (_type == 'DEBIT')
             CheckboxListTile(
               value: _isSplit,
               onChanged: (value) => setState(() {
@@ -606,7 +681,7 @@ class _EditSheetState extends State<_EditSheet> {
               ),
             ),
 
-            if (_isSplit) ...[
+            if (_isSplit && _type == 'DEBIT') ...[
               const SizedBox(height: 6),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,

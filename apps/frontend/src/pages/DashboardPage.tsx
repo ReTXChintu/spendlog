@@ -148,6 +148,15 @@ export function DashboardPage() {
                 </p>
               )}
 
+              {/* Sending less than usual is worth a sentence rather than a
+                  silently unticked box. */}
+              {pace.shortfallNote && (
+                <p className="budget-verdict">
+                  <Icon name="ic-info" />
+                  {pace.shortfallNote}
+                </p>
+              )}
+
               {pace.commitments.length > 0 && (
                 <div className="budget-commitments">
                   <div className="trip-settle-title">
@@ -165,8 +174,17 @@ export function DashboardPage() {
                       <span className={commitment.isPaid ? "is-paid" : ""}>
                         {commitment.name} · {commitment.dayOfMonth}
                         {ordinal(commitment.dayOfMonth)}
+                        {commitment.isPartial && (
+                          <em className="commitment-short">
+                            {formatMoneyShort(commitment.shortfallMinor ?? 0)} short
+                          </em>
+                        )}
                       </span>
-                      <span className="num">{formatMoney(commitment.amountMinor)}</span>
+                      <span className="num">
+                        {commitment.isPartial
+                          ? `${formatMoney(commitment.paidMinor ?? 0)} of ${formatMoney(commitment.amountMinor)}`
+                          : formatMoney(commitment.amountMinor)}
+                      </span>
                     </label>
                   ))}
                 </div>

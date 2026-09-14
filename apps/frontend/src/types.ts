@@ -1,12 +1,30 @@
 export type TransactionType = "DEBIT" | "CREDIT";
 export type TransactionSource = "SMS" | "EMAIL" | "MANUAL" | "STATEMENT";
 
+export type CategoryDirection = "IN" | "OUT" | "BOTH";
+
 export interface Category {
   id: string;
   name: string;
   icon: string | null;
   color: string | null;
+  /** Which way money has to be moving for this to make sense. */
+  direction?: CategoryDirection;
   isSystem: boolean;
+}
+
+/**
+ * The categories that make sense for money moving this way.
+ *
+ * Sending money out is never income, and a refund is never a way of
+ * spending, so offering either is offering a mistake. A category with no
+ * direction recorded is shown either way: better a stale one in the list
+ * than a category someone added quietly missing from the picker they
+ * added it for.
+ */
+export function categoriesFor(categories: Category[], type: TransactionType): Category[] {
+  const wanted = type === "CREDIT" ? "IN" : "OUT";
+  return categories.filter((category) => (category.direction ?? "BOTH") !== (wanted === "IN" ? "OUT" : "IN"));
 }
 
 export type AccountType = "BANK" | "CARD" | "UPI" | "CASH";
@@ -185,6 +203,10 @@ export interface FixedCommitment {
   kind: "RENT" | "SIP" | "INSURANCE" | "LOAN" | "OTHER";
   isActive: boolean;
   isPaid?: boolean;
+  /** What has actually gone out towards it this period. */
+  paidMinor?: number;
+  shortfallMinor?: number;
+  isPartial?: boolean;
 }
 
 export interface BudgetProfile {
@@ -210,6 +232,8 @@ export type BudgetPace =
       perDayMinor: number;
       recentPerDayMinor: number;
       state: "ok" | "watch" | "over";
+      /** Set when a fixed cost went out for less than its usual amount. */
+      shortfallNote: string | null;
       commitments: FixedCommitment[];
     };
 
@@ -240,6 +264,8 @@ export interface Transaction {
   isSalary?: boolean;
   /** The card whose bill this settled. Counts as nothing when set. */
   cardPaymentFor?: string | null;
+  /** The fixed monthly cost this went towards. Still counts as spending. */
+  commitmentId?: string | null;
   split: TransactionSplit | null;
   isSettlement: boolean;
   pending: boolean;

@@ -393,6 +393,15 @@ class _PaceBlock extends StatelessWidget {
                   ),
                 ],
               ),
+              // Sending less than usual is worth a sentence rather than a
+              // silently unticked box.
+              if (pace.shortfallNote != null) ...[
+                const SizedBox(height: 10),
+                Text(
+                  pace.shortfallNote!,
+                  style: TextStyle(fontSize: 12, height: 1.45, color: foreground),
+                ),
+              ],
               if (pace.state != 'ok') ...[
                 const SizedBox(height: 10),
                 Text(
@@ -426,15 +435,21 @@ class _PaceBlock extends StatelessWidget {
               controlAffinity: ListTileControlAffinity.leading,
               dense: true,
               title: Text(
-                commitment.name,
+                commitment.isPartial
+                    ? '${commitment.name}  ·  ${formatMoneyShort(commitment.shortfallMinor)} short'
+                    : commitment.name,
                 style: TextStyle(
                   fontSize: 12.8,
-                  color: commitment.isPaid ? c.mutedLight : c.ink70,
+                  color: commitment.isPaid
+                      ? c.mutedLight
+                      : (commitment.isPartial ? c.warn : c.ink70),
                   decoration: commitment.isPaid ? TextDecoration.lineThrough : null,
                 ),
               ),
               secondary: Text(
-                formatMoney(commitment.amountMinor),
+                commitment.isPartial
+                    ? '${formatMoneyShort(commitment.paidMinor)}/${formatMoneyShort(commitment.amountMinor)}'
+                    : formatMoney(commitment.amountMinor),
                 style: kNum.copyWith(fontSize: 12.8, color: c.ink70),
               ),
             ),

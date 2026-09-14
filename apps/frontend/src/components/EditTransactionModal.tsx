@@ -1,7 +1,17 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { formatMoney } from "../lib/format";
-import { Account, CardStatus, Category, MerchantPreset, Transaction, TransactionType, accountLabel } from "../types";
+import {
+  Account,
+  CardStatus,
+  Category,
+  FixedCommitment,
+  MerchantPreset,
+  Transaction,
+  TransactionType,
+  accountLabel,
+  categoriesFor,
+} from "../types";
 import { Icon } from "./Icon";
 
 /** Splits an ISO instant into the two values the date/time inputs want. */
@@ -70,6 +80,8 @@ export function EditTransactionModal({
   const [isTransfer, setIsTransfer] = useState(transaction?.isTransfer ?? false);
   const [isSalary, setIsSalary] = useState(transaction?.isSalary ?? false);
   const [cardPaymentFor, setCardPaymentFor] = useState(transaction?.cardPaymentFor ?? "");
+  const [commitmentId, setCommitmentId] = useState(transaction?.commitmentId ?? "");
+  const [commitments, setCommitments] = useState<FixedCommitment[]>([]);
   const [isSplit, setIsSplit] = useState(transaction?.split != null);
   const [myShare, setMyShare] = useState(
     transaction?.split ? (transaction.split.myShareMinor / 100).toFixed(2) : ""
@@ -107,6 +119,10 @@ export function EditTransactionModal({
       .get<CardStatus[]>("/cards")
       .then(setCards)
       .catch(() => setCards([]));
+    api
+      .get<FixedCommitment[]>("/budget/commitments")
+      .then(setCommitments)
+      .catch(() => setCommitments([]));
   }, []);
 
   /** Fills the name and its usual category in one go. */
@@ -171,6 +187,27 @@ export function EditTransactionModal({
     }
   }
 
+  /**
+   * Changing direction has to drop anything the new one cannot mean, or a
+   * category picked as spending stays attached to something that is now
+   * income and quietly lands in the wrong total.
+   */
+  function changeType(next: TransactionType) {
+    setType(next);
+
+    const stillValid = categoriesFor(categories, next).some((category) => category.id === categoryId);
+    if (!stillValid) setCategoryId("");
+
+    if (next === "CREDIT") {
+      setIsSplit(false);
+      setTripJustMine(false);
+      setCardPaymentFor("");
+      setCommitmentId("");
+    } else {
+      setIsSalary(false);
+    }
+  }
+
   async function save() {
     const rupees = Number.parseFloat(amount);
     if (!Number.isFinite(rupees) || rupees <= 0) {
@@ -191,6 +228,7 @@ export function EditTransactionModal({
       isTransfer,
       isSalary: type === "CREDIT" ? isSalary : false,
       cardPaymentFor: type === "DEBIT" ? cardPaymentFor || null : null,
+      commitmentId: type === "DEBIT" ? commitmentId || null : null,
       isSettlement,
       // Narrowed to the payer alone, or widened back to everyone on the trip.
       ...(transaction?.tripId ? { tripShareWith: tripJustMine ? [transaction.userId] : null } : {}),
@@ -272,7 +310,7 @@ export function EditTransactionModal({
                 <button
                   key={value}
                   className={`filter-radio${type === value ? " on" : ""}`}
-                  onClick={() => setType(value)}
+                  onClick={() => changeType(value)}
                 >
                   {label}
                 </button>
@@ -360,7 +398,7 @@ export function EditTransactionModal({
               onChange={(e) => setCategoryId(e.target.value)}
             >
               <option value="">Uncategorized</option>
-              {categories.map((category) => (
+              {categoriesFor(categories, type).map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}
                 </option>
@@ -450,6 +488,29 @@ export function EditTransactionModal({
             </div>
           )}
 
+          {/* Marking the payment rather than ticking a due date is what
+              lets a bill be paid early — an early salary can be spent on
+              early — and what makes a part payment tellable from none. */}
+          {type === "DEBIT" && commitments.length > 0 && (
+            <div className="form-row form-row-wide">
+              <label className="field">
+                <span>Towards a fixed monthly cost?</span>
+                <select value={commitmentId} onChange={(e) => setCommitmentId(e.target.value)}>
+                  <option value="">No — ordinary spending</option>
+                  {commitments.map((commitment) => (
+                    <option key={commitment.id} value={commitment.id}>
+                      {commitment.name} · {formatMoney(commitment.amountMinor)} a month
+                    </option>
+                  ))}
+                </select>
+                <span className="field-hint">
+                  Still counts as spending. Sending less than usual is fine — the dashboard says what
+                  went short rather than treating it as unpaid.
+                </span>
+              </label>
+            </div>
+          )}
+
           {/* Only a person can say which credit is the month's pay: it
               lands a day either side of the day it is meant to, and a month
               with leave in it is smaller than the figure in the profile. */}
@@ -465,6 +526,7 @@ export function EditTransactionModal({
             </div>
           )}
 
+          {type === "DEBIT" && (
           <div className="form-row form-row-wide">
             <label className="checkbox-row">
               <input
@@ -481,6 +543,7 @@ export function EditTransactionModal({
               <span>Split — only part of this was mine</span>
             </label>
           </div>
+          )}
 
           {isSplit && (
             <>
@@ -517,7 +580,7 @@ export function EditTransactionModal({
             </>
           )}
 
-          {transaction?.trip && (
+          {transaction?.trip && type === "DEBIT" && (
             <div className="form-row form-row-wide">
               <label className="checkbox-row">
                 <input

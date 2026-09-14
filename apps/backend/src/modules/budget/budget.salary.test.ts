@@ -27,7 +27,11 @@ after(async () => {
 });
 
 beforeEach(async () => {
-  await Promise.all([models.Transaction.deleteMany({}), models.User.deleteMany({})]);
+  await Promise.all([
+    models.Transaction.deleteMany({}),
+    models.User.deleteMany({}),
+    models.FixedCommitment.deleteMany({}),
+  ]);
 });
 
 let userCount = 0;
@@ -184,5 +188,120 @@ describe("the pace, once a salary is marked", () => {
     const pace = await budgetPace(mine, istDayStart("2026-09-20"));
     if (!pace.configured) return assert.fail("should be configured");
     assert.equal(istDayKey(pace.periodStart), "2026-09-15");
+  });
+});
+
+describe("a fixed cost settled by a payment rather than a tick", () => {
+  async function commitment(userId: Types.ObjectId, name: string, amountMinor: number) {
+    return models.FixedCommitment.create({ userId, name, amountMinor, dayOfMonth: 5 });
+  }
+
+  async function payTowards(
+    userId: Types.ObjectId,
+    commitmentId: Types.ObjectId,
+    day: string,
+    amountMinor: number
+  ) {
+    return models.Transaction.create({
+      userId,
+      amountMinor,
+      type: "DEBIT",
+      merchant: "Towards a fixed cost",
+      source: "MANUAL",
+      occurredAt: istDayStart(day),
+      commitmentId,
+    });
+  }
+
+  it("counts it paid once the money has gone out", async () => {
+    const userId = await paidOnThe15th();
+    const father = await commitment(userId, "Father", 1000000);
+    await payTowards(userId, father._id, "2026-09-18", 1000000);
+
+    const pace = await budgetPace(userId, istDayStart("2026-09-20"));
+    if (!pace.configured) return assert.fail("should be configured");
+
+    assert.equal(pace.commitments[0].isPaid, true);
+    assert.equal(pace.commitmentsRemainingMinor, 0, "nothing left to hold back");
+  });
+
+  it("lets it be paid early, on the day the money actually moved", async () => {
+    // The whole reason for marking a payment rather than ticking a due
+    // date: an early salary can be spent on early.
+    const userId = await paidOnThe15th();
+    await credit(userId, "2026-09-14", 10000000, true);
+
+    const father = await commitment(userId, "Father", 1000000);
+    await payTowards(userId, father._id, "2026-09-14", 1000000);
+
+    const pace = await budgetPace(userId, istDayStart("2026-09-16"));
+    if (!pace.configured) return assert.fail("should be configured");
+    assert.equal(pace.commitments[0].isPaid, true);
+  });
+
+  it("holds back only what is still to go out", async () => {
+    // Sending half and still holding back the whole would count the half
+    // already sent twice: once in the spending, once here.
+    const userId = await paidOnThe15th();
+    const father = await commitment(userId, "Father", 1000000);
+    await payTowards(userId, father._id, "2026-09-18", 500000);
+
+    const pace = await budgetPace(userId, istDayStart("2026-09-20"));
+    if (!pace.configured) return assert.fail("should be configured");
+
+    assert.equal(pace.commitmentsRemainingMinor, 500000);
+    assert.equal(pace.commitments[0].isPartial, true);
+    assert.equal(pace.commitments[0].isPaid, false);
+  });
+
+  it("says what went short, and why only when the money really was not there", async () => {
+    const userId = await paidOnThe15th();
+    const father = await commitment(userId, "Father", 1000000);
+    await payTowards(userId, father._id, "2026-09-18", 500000);
+
+    const roomy = await budgetPace(userId, istDayStart("2026-09-20"));
+    if (!roomy.configured) return assert.fail("should be configured");
+    assert.match(roomy.shortfallNote!, /Father went out at ₹5,000 of the usual ₹10,000/);
+    assert.match(roomy.shortfallNote!, /still room to send the rest/);
+
+    // Now spend the period dry. The claim becomes supportable.
+    await spend(userId, "2026-09-19", 9500000);
+    const tight = await budgetPace(userId, istDayStart("2026-09-20"));
+    if (!tight.configured) return assert.fail("should be configured");
+    assert.match(tight.shortfallNote!, /not enough left this period/);
+  });
+
+  it("says nothing when a fixed cost has simply not gone out yet", async () => {
+    // Not yet paid is not the same as paid short, and calling it a
+    // shortfall would nag about every bill on the first of the month.
+    const userId = await paidOnThe15th();
+    await commitment(userId, "Father", 1000000);
+
+    const pace = await budgetPace(userId, istDayStart("2026-09-20"));
+    if (!pace.configured) return assert.fail("should be configured");
+    assert.equal(pace.shortfallNote, null);
+    assert.equal(pace.commitmentsRemainingMinor, 1000000);
+  });
+
+  it("still honours a hand-tick, for money the app will never see", async () => {
+    const userId = await paidOnThe15th();
+    const father = await commitment(userId, "Father", 1000000);
+    father.paidForPeriod = "2026-09-15";
+    await father.save();
+
+    const pace = await budgetPace(userId, istDayStart("2026-09-20"));
+    if (!pace.configured) return assert.fail("should be configured");
+    assert.equal(pace.commitments[0].isPaid, true);
+    assert.equal(pace.commitmentsRemainingMinor, 0);
+  });
+
+  it("does not let last period's payment settle this one", async () => {
+    const userId = await paidOnThe15th();
+    const father = await commitment(userId, "Father", 1000000);
+    await payTowards(userId, father._id, "2026-08-18", 1000000);
+
+    const pace = await budgetPace(userId, istDayStart("2026-09-20"));
+    if (!pace.configured) return assert.fail("should be configured");
+    assert.equal(pace.commitments[0].isPaid, false);
   });
 });

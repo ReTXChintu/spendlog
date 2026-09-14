@@ -11,7 +11,9 @@ async function main() {
   for (const seed of DEFAULT_CATEGORIES) {
     const category = await Category.findOneAndUpdate(
       { name: seed.name, userId: null, isSystem: true },
-      { $set: { icon: seed.icon, color: seed.color } },
+      // direction is in the $set rather than $setOnInsert so re-running
+      // this fills it in on an install that predates the field.
+      { $set: { icon: seed.icon, color: seed.color, direction: seed.direction } },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 

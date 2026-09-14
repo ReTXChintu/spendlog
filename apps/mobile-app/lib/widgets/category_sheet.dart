@@ -126,7 +126,11 @@ class _CategorySheetState extends State<_CategorySheet> {
             Flexible(
               child: SingleChildScrollView(
                 child: Column(
-                  children: widget.categories.map((category) {
+                  // Money out is never income, and a refund is never a
+                  // way of spending, so offering either is offering a
+                  // mistake.
+                  children: categoriesFor(widget.categories, widget.transaction.type)
+                      .map((category) {
                     final selected = widget.transaction.category?.id == category.id;
                     return ListTile(
                       contentPadding: EdgeInsets.zero,

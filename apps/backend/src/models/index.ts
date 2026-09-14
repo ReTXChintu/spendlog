@@ -1,6 +1,7 @@
 import { Schema, Types, model } from "mongoose";
 import {
   ACCOUNT_TYPES,
+  CATEGORY_DIRECTIONS,
   COMMITMENT_KINDS,
   COUNTED_REASONS,
   EMI_INSTALMENT_STATUSES,
@@ -14,6 +15,7 @@ import {
   TRANSACTION_SOURCES,
   TRANSACTION_TYPES,
   AccountType,
+  CategoryDirection,
   CommitmentKind,
   CountedReason,
   EmiInstalmentStatus,
@@ -182,6 +184,10 @@ export interface CategoryDoc {
   name: string;
   icon?: string | null;
   color?: string | null;
+  /// Which way money has to be moving for this to make sense. BOTH is
+  /// the default, so a category someone adds themselves is never
+  /// quietly hidden from the picker they added it for.
+  direction: CategoryDirection;
   isSystem: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -193,6 +199,7 @@ const categorySchema = new Schema<CategoryDoc>(
     name: { type: String, required: true },
     icon: { type: String, default: null },
     color: { type: String, default: null },
+    direction: { type: String, enum: CATEGORY_DIRECTIONS, default: "BOTH" },
     isSystem: { type: Boolean, default: false },
   },
   { timestamps: true, ...serialization }
@@ -292,6 +299,10 @@ export interface TransactionDoc {
   /// The card whose bill this payment settled. Counts as nothing: every
   /// purchase on that card was already counted the day it happened.
   cardPaymentFor?: Types.ObjectId | null;
+  /// The fixed monthly cost this payment went towards. Unlike a card
+  /// bill this is real spending and counts in full - the link is about
+  /// knowing the commitment has been met, and by how much.
+  commitmentId?: Types.ObjectId | null;
   /// Set when only part of this bill was the user's own spending. The rest
   /// is money owed back, and countedAmountMinor drops to the share.
   split?: TransactionSplit | null;
@@ -382,6 +393,7 @@ const transactionSchema = new Schema<TransactionDoc>(
     isTransfer: { type: Boolean, default: false },
     isSalary: { type: Boolean, default: false },
     cardPaymentFor: { type: Schema.Types.ObjectId, ref: "Account", default: null },
+    commitmentId: { type: Schema.Types.ObjectId, ref: "FixedCommitment", default: null },
     split: { type: transactionSplitSchema, default: null },
     isSettlement: { type: Boolean, default: false },
     pending: { type: Boolean, default: false },

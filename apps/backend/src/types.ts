@@ -80,6 +80,12 @@ export type PerkKind = (typeof PERK_KINDS)[number];
 export const CARD_NETWORKS = ["RUPAY", "VISA", "MASTERCARD", "AMEX", "DINERS"] as const;
 export type CardNetwork = (typeof CARD_NETWORKS)[number];
 
+// Which way money has to be moving for a category to make sense. Sending
+// money out is never income, and a refund is never a way of spending, so
+// offering either is offering a mistake.
+export const CATEGORY_DIRECTIONS = ["IN", "OUT", "BOTH"] as const;
+export type CategoryDirection = (typeof CATEGORY_DIRECTIONS)[number];
+
 export const RULE_MATCH_TYPES = ["MERCHANT_CONTAINS", "KEYWORD", "EXACT"] as const;
 export type RuleMatchType = (typeof RULE_MATCH_TYPES)[number];
 

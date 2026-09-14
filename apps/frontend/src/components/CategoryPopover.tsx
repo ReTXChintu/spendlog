@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
-import { Category, Transaction } from "../types";
+import { Category, Transaction, categoriesFor } from "../types";
 import { Icon } from "./Icon";
 
 export function CategoryPopover({
@@ -52,7 +52,9 @@ export function CategoryPopover({
     <div className="cat-popover" ref={ref}>
       <div className="cat-popover-title">Set category</div>
       <div className="cat-grid">
-        {categories.map((category) => (
+        {/* Money out is never income, and a refund is never a way of
+            spending, so offering either is offering a mistake. */}
+        {categoriesFor(categories, transaction.type).map((category) => (
           <button
             key={category.id}
             className="cat-opt"

@@ -5,15 +5,28 @@ class Category {
   final String name;
   final String? icon;
   final String? color;
+
+  /// IN | OUT | BOTH - which way money has to be moving for this to make
+  /// sense. BOTH by default, so a category someone adds is never quietly
+  /// hidden from the picker they added it for.
+  final String direction;
   final bool isSystem;
 
-  Category({required this.id, required this.name, this.icon, this.color, required this.isSystem});
+  Category({
+    required this.id,
+    required this.name,
+    this.icon,
+    this.color,
+    this.direction = 'BOTH',
+    required this.isSystem,
+  });
 
   factory Category.fromJson(Map<String, dynamic> json) => Category(
         id: json['id'] as String,
         name: json['name'] as String,
         icon: json['icon'] as String?,
         color: json['color'] as String?,
+        direction: json['direction'] as String? ?? 'BOTH',
         isSystem: json['isSystem'] as bool? ?? false,
       );
 }
@@ -183,6 +196,9 @@ class Transaction {
 
   /// The card whose bill this settled. Counts as nothing when set.
   final String? cardPaymentFor;
+
+  /// The fixed monthly cost this went towards. Still counts as spending.
+  final String? commitmentId;
   final TransactionSplit? split;
   final bool isSettlement;
   final bool pending;
@@ -215,6 +231,7 @@ class Transaction {
     required this.isTransfer,
     this.isSalary = false,
     this.cardPaymentFor,
+    this.commitmentId,
     this.split,
     this.isSettlement = false,
     required this.pending,
@@ -264,6 +281,7 @@ class Transaction {
         isTransfer: json['isTransfer'] as bool? ?? false,
         isSalary: json['isSalary'] as bool? ?? false,
         cardPaymentFor: json['cardPaymentFor'] as String?,
+        commitmentId: json['commitmentId'] as String?,
         split: json['split'] != null
             ? TransactionSplit.fromJson(json['split'] as Map<String, dynamic>)
             : null,
@@ -435,12 +453,23 @@ class FixedCommitment {
   final int dayOfMonth;
   final bool isPaid;
 
+  /// What has actually gone out towards it this period, and what is left.
+  final int paidMinor;
+  final int shortfallMinor;
+
+  /// Part of it sent and part not - the case worth a sentence rather than
+  /// an unticked box.
+  final bool isPartial;
+
   FixedCommitment({
     required this.id,
     required this.name,
     required this.amountMinor,
     required this.dayOfMonth,
     required this.isPaid,
+    this.paidMinor = 0,
+    this.shortfallMinor = 0,
+    this.isPartial = false,
   });
 
   factory FixedCommitment.fromJson(Map<String, dynamic> json) => FixedCommitment(
@@ -449,7 +478,20 @@ class FixedCommitment {
         amountMinor: json['amountMinor'] as int,
         dayOfMonth: json['dayOfMonth'] as int,
         isPaid: json['isPaid'] as bool? ?? false,
+        paidMinor: json['paidMinor'] as int? ?? 0,
+        shortfallMinor: json['shortfallMinor'] as int? ?? 0,
+        isPartial: json['isPartial'] as bool? ?? false,
       );
+}
+
+/// The categories that make sense for money moving this way.
+///
+/// Sending money out is never income, and a refund is never a way of
+/// spending, so offering either is offering a mistake. A category with no
+/// direction recorded shows either way.
+List<Category> categoriesFor(List<Category> categories, String type) {
+  final refused = type == 'CREDIT' ? 'OUT' : 'IN';
+  return categories.where((category) => category.direction != refused).toList();
 }
 
 /// How fast money is going out against how fast it can. A pace, not a
@@ -471,6 +513,9 @@ class BudgetPace {
   /// profile. Worth saying out loud: the two differ in any month with
   /// leave taken in it.
   final bool salaryIsActual;
+
+  /// Set when a fixed cost went out for less than its usual amount.
+  final String? shortfallNote;
   final List<FixedCommitment> commitments;
 
   BudgetPace({
@@ -484,6 +529,7 @@ class BudgetPace {
     this.recentPerDayMinor = 0,
     this.state = 'ok',
     this.salaryIsActual = false,
+    this.shortfallNote,
     this.commitments = const [],
   });
 
@@ -500,6 +546,7 @@ class BudgetPace {
       recentPerDayMinor: json['recentPerDayMinor'] as int? ?? 0,
       state: json['state'] as String? ?? 'ok',
       salaryIsActual: json['salaryIsActual'] as bool? ?? false,
+      shortfallNote: json['shortfallNote'] as String?,
       commitments: (json['commitments'] as List<dynamic>? ?? [])
           .map((c) => FixedCommitment.fromJson(c as Map<String, dynamic>))
           .toList(),

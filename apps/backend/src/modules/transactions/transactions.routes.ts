@@ -271,6 +271,9 @@ const updateTransactionSchema = z.object({
   isSalary: z.boolean().optional(),
   // Which card's bill this settled. null clears it.
   cardPaymentFor: z.string().nullable().optional(),
+  // The fixed monthly cost this went towards. Paying early is the point
+  // of marking the payment rather than ticking a box on a due date.
+  commitmentId: z.string().nullable().optional(),
   // Zero is meaningful: someone else's bill paid from the user's card, all
   // of which is owed back. null clears the split entirely.
   split: z
