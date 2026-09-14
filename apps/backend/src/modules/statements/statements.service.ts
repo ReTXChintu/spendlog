@@ -3,6 +3,7 @@ import { HydratedDocument, Types } from "mongoose";
 import { Account, CardStatement, CardStatementDoc, EmailConnection } from "../../models";
 import { createOAuthClient } from "../ingestion/gmail.service";
 import { decryptPassword, encryptionAvailable } from "./statements.crypto";
+import { readStatementFile, saveStatementFile } from "./statements.files";
 import { allReaders } from "./statements.issuers";
 import { parseStatementRows } from "./statements.parse";
 import { extractStatementRows, StatementLockedError } from "./statements.pdf";
@@ -159,7 +160,9 @@ type ReadOutcome = number | "locked" | "unidentified" | "skipped";
  * unreadable file must not stop the rest of the mailbox being scanned.
  */
 async function readOneStatement(params: {
-  gmail: gmail_v1.Gmail;
+  /// Absent when the file is already in hand, which is how a re-read works
+  /// once the statement has been filed: there is nothing to fetch.
+  gmail?: gmail_v1.Gmail;
   userId: Types.ObjectId;
   messageId: string;
   subject: string | null;
@@ -167,6 +170,8 @@ async function readOneStatement(params: {
   attachment: PdfAttachment;
   passwords: (string | null)[];
   cards: HydratedDocument<import("../../models").AccountDoc>[];
+  /// The statement itself, where it has already been read off disk.
+  pdf?: Buffer;
 }): Promise<ReadOutcome> {
   const sourceRef = `${params.messageId}#${params.attachment.attachmentId}`;
 
@@ -179,7 +184,11 @@ async function readOneStatement(params: {
     return "skipped";
   }
 
-  const file = await downloadAttachment(params.gmail, params.messageId, params.attachment.attachmentId);
+  const file =
+    params.pdf ??
+    (params.gmail
+      ? await downloadAttachment(params.gmail, params.messageId, params.attachment.attachmentId)
+      : null);
   if (!file) {
     await recordProblem(params.userId, sourceRef, params, "UNREADABLE", "The attachment could not be downloaded");
     return "skipped";
@@ -197,7 +206,14 @@ async function readOneStatement(params: {
       if (error instanceof StatementLockedError) continue;
       // Not a readable PDF at all. Recorded rather than thrown so the rest
       // of the mailbox still gets scanned.
-      await recordProblem(params.userId, sourceRef, params, "UNREADABLE", "This file could not be opened as a PDF");
+      await recordProblem(
+        params.userId,
+        sourceRef,
+        params,
+        "UNREADABLE",
+        "This file could not be opened as a PDF",
+        file
+      );
       return "skipped";
     }
   }
@@ -216,7 +232,7 @@ async function readOneStatement(params: {
           "on the card under Accounts and cards."
         : "None of the stored passwords opened this statement. Check the one on this card.";
 
-    await recordProblem(params.userId, sourceRef, params, "LOCKED", problem);
+    await recordProblem(params.userId, sourceRef, params, "LOCKED", problem, file);
     return "locked";
   }
 
@@ -263,6 +279,10 @@ async function readOneStatement(params: {
         statementDate: parsed.statementDate,
         dueDate: parsed.dueDate,
         receivedAt: params.receivedAt,
+        // What the readers actually saw. Worth keeping on a statement that
+        // read perfectly as well as one that did not: it is the only way
+        // to check a row against the page it came off.
+        rows,
         periodStart: parsed.periodStart,
         periodEnd: parsed.periodEnd,
         totalDueMinor: parsed.totalDueMinor,
@@ -273,10 +293,39 @@ async function readOneStatement(params: {
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
 
+  // Filed after the statement exists, because the file is named by its id.
+  // A statement whose PDF cannot be kept is still a statement: this records
+  // what happened and carries on either way.
+  await keepFile(statement, file);
+
   if (!card) return "unidentified";
 
   const summary = await reconcileStatement(statement);
   return summary.added;
+}
+
+/**
+ * Keep the PDF against a statement, and note on the statement that it is
+ * there. The size is stored rather than looked up, so a listing can offer
+ * the file without a filesystem call per row.
+ */
+async function keepFile(statement: HydratedDocument<CardStatementDoc>, pdf: Buffer): Promise<void> {
+  const bytes = await saveStatementFile(statement._id, pdf);
+  if (bytes === null) return;
+
+  statement.fileBytes = bytes;
+  await statement.save();
+}
+
+/** One statement's outcome in the shape a whole sync reports. */
+function countOutcome(outcome: ReadOutcome): StatementSyncResult {
+  return {
+    scanned: 1,
+    read: typeof outcome === "number" ? 1 : 0,
+    locked: outcome === "locked" ? 1 : 0,
+    unidentified: outcome === "unidentified" ? 1 : 0,
+    added: typeof outcome === "number" ? outcome : 0,
+  };
 }
 
 /**
@@ -313,9 +362,10 @@ async function recordProblem(
   sourceRef: string,
   params: { subject: string | null; receivedAt: Date | null; attachment: PdfAttachment },
   status: CardStatementDoc["status"],
-  problem: string
+  problem: string,
+  pdf?: Buffer
 ): Promise<void> {
-  await CardStatement.findOneAndUpdate(
+  const statement = await CardStatement.findOneAndUpdate(
     { userId, sourceRef },
     {
       $set: {
@@ -327,15 +377,23 @@ async function recordProblem(
       },
       $setOnInsert: { lines: [] },
     },
-    { upsert: true, setDefaultsOnInsert: true }
+    { upsert: true, new: true, setDefaultsOnInsert: true }
   );
+
+  // A statement that could not be read is the one most worth keeping the
+  // file for. A locked one is read again the moment its password is set,
+  // and that should not depend on the mail still being in the mailbox.
+  if (pdf && statement) await keepFile(statement, pdf);
 }
 
 /**
  * Read one already-known statement again, for after a password is set or a
- * missing card is added. The attachment is fetched afresh rather than kept:
- * a statement PDF is the most sensitive file in the mailbox and there is no
- * reason for this app to hold a copy of one.
+ * missing card is added.
+ *
+ * The stored file first, and the mailbox only if there is not one. This is
+ * the case the file was kept for: a statement that arrived locked is read
+ * again the moment its password is set, and that should not depend on the
+ * mail still being there - or on Gmail being connected at all.
  */
 export async function rereadStatement(
   userId: Types.ObjectId,
@@ -353,7 +411,6 @@ export async function rereadStatement(
   const [messageId, attachmentId] = statement.sourceRef.split("#");
   if (!messageId || !attachmentId) return null;
 
-  const connections = await EmailConnection.find({ userId });
   // Bank accounts as well as cards: a bank statement identifies itself
   // by an account number the same way a card statement does by a card
   // number, and both come from the same mailbox.
@@ -362,6 +419,24 @@ export async function rereadStatement(
     null,
     ...new Set(cards.map((card) => decryptPassword(card.statementPassword)).filter(Boolean)),
   ] as (string | null)[];
+
+  const stored = await readStatementFile(statement._id);
+  if (stored) {
+    const outcome = await readOneStatement({
+      userId,
+      messageId,
+      subject: statement.subject ?? null,
+      receivedAt: statement.receivedAt ?? null,
+      attachment: { attachmentId, fileName: statement.fileName ?? "statement.pdf", size: stored.length },
+      passwords,
+      cards,
+      pdf: stored,
+    });
+
+    return countOutcome(outcome);
+  }
+
+  const connections = await EmailConnection.find({ userId });
 
   for (const connection of connections) {
     const client = createOAuthClient();
@@ -393,13 +468,7 @@ export async function rereadStatement(
       cards,
     });
 
-    return {
-      scanned: 1,
-      read: typeof outcome === "number" ? 1 : 0,
-      locked: outcome === "locked" ? 1 : 0,
-      unidentified: outcome === "unidentified" ? 1 : 0,
-      added: typeof outcome === "number" ? outcome : 0,
-    };
+    return countOutcome(outcome);
   }
 
   return null;

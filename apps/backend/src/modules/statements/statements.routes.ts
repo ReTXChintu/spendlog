@@ -4,7 +4,9 @@ import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
 import { Account, CardStatement, Transaction } from "../../models";
+import { istMonthKey } from "../../time";
 import { encryptPassword, encryptionAvailable } from "./statements.crypto";
+import { deleteStatementFile, fileStoreAvailable, readStatementFile } from "./statements.files";
 import {
   candidatesForLine,
   reconcileStatement,
@@ -49,6 +51,12 @@ function summarise(statement: import("../../models").CardStatementDoc) {
     statementSpendMinor: statement.statementSpendMinor,
     knownSpendMinor: statement.knownSpendMinor,
     reconciledAt: statement.reconciledAt ?? null,
+    monthKey: statement.monthKey ?? null,
+    /// Whether the PDF can be opened, not how big it is - the size is not
+    /// worth a line of screen, but a button that may not work is.
+    hasFile: Boolean(statement.fileBytes),
+    fileBytes: statement.fileBytes ?? null,
+    rowCount: statement.rows?.length ?? 0,
     lineCount: statement.lines.length,
     counts,
   };
@@ -81,6 +89,38 @@ function newestDate(statement: import("../../models").CardStatementDoc): Date {
   return statement.statementDate ?? statement.periodEnd ?? statement.receivedAt ?? statement.createdAt;
 }
 
+/** The group a statement with no card yet is filed under. */
+const UNFILED = "unfiled";
+
+/**
+ * One card's statements, split into months, newest month first and newest
+ * statement first inside each.
+ *
+ * A month a card has no statement for is not a group: this lists what is
+ * there rather than drawing a calendar, so a gap shows as a gap.
+ */
+function monthsOf(statements: import("../../models").CardStatementDoc[]) {
+  const byMonth = new Map<string, import("../../models").CardStatementDoc[]>();
+
+  for (const statement of statements) {
+    // Derived on save, but a statement written before that rule existed
+    // has none - so it is worked out here too rather than falling into an
+    // "Undated" bucket that only means "read by an older version".
+    const key = statement.monthKey ?? istMonthKey(newestDate(statement));
+    byMonth.set(key, [...(byMonth.get(key) ?? []), statement]);
+  }
+
+  return [...byMonth.entries()]
+    .sort(([left], [right]) => right.localeCompare(left))
+    .map(([month, rows]) => ({
+      month,
+      statements: rows
+        .slice()
+        .sort((left, right) => newestDate(right).getTime() - newestDate(left).getTime())
+        .map(summarise),
+    }));
+}
+
 // POST /statements/sync — go and look for statements that are new.
 //
 // Separate from the transaction sync next door: that one reads alerts as
@@ -101,6 +141,90 @@ statementsRouter.post("/sync", async (req, res) => {
 // so it is the moment worth saying so.
 statementsRouter.get("/bills", async (req, res) => {
   res.json(await upcomingBills(currentUserId(req)));
+});
+
+/**
+ * GET /statements/filed — every statement, under the card it belongs to and
+ * the month it is for.
+ *
+ * The flat list this replaces was fine at five statements and useless at
+ * fifty: every card's statements interleaved by date, with the only way to
+ * find June's HDFC bill being to read the subjects. The shape is the same
+ * one the screen draws, because working it out on the client would mean
+ * writing the same grouping and the same ordering rules twice.
+ *
+ * A statement whose card is not known yet lands in a group of its own
+ * rather than being hidden - that group is a to-do list.
+ */
+statementsRouter.get("/filed", async (req, res) => {
+  const userId = currentUserId(req);
+
+  const [statements, accounts] = await Promise.all([
+    CardStatement.find({ userId }).sort({ createdAt: -1 }),
+    Account.find({ userId, accountType: { $in: ["CARD", "BANK"] } }).sort({ bankName: 1 }),
+  ]);
+
+  const byAccount = new Map<string, typeof statements>();
+  for (const statement of statements) {
+    const key = statement.accountId?.toString() ?? UNFILED;
+    byAccount.set(key, [...(byAccount.get(key) ?? []), statement]);
+  }
+
+  const groups = accounts
+    .filter((account) => byAccount.has(account._id.toString()))
+    .map((account) => ({
+      accountId: account._id.toString(),
+      name: account.nickname || account.bankName,
+      bankName: account.bankName,
+      last4: account.last4,
+      accountType: account.accountType,
+      network: account.cardNetwork ?? null,
+      months: monthsOf(byAccount.get(account._id.toString()) ?? []),
+    }));
+
+  const unfiled = byAccount.get(UNFILED) ?? [];
+  if (unfiled.length > 0) {
+    groups.push({
+      accountId: UNFILED,
+      name: "Not on a card yet",
+      bankName: "",
+      last4: "",
+      accountType: "CARD",
+      network: null,
+      months: monthsOf(unfiled),
+    });
+  }
+
+  res.json(groups);
+});
+
+// GET /statements/:id/file — the statement PDF itself.
+//
+// Sent inline so a browser opens it in a tab rather than downloading it,
+// and never cached by anything in between: this is a bank statement.
+statementsRouter.get("/:id/file", validObjectIdParam("id"), async (req, res) => {
+  const statement = await CardStatement.findOne({
+    _id: req.params.id,
+    userId: currentUserId(req),
+  });
+  if (!statement) return res.status(404).json({ error: "Not found" });
+
+  const pdf = await readStatementFile(statement._id);
+  if (!pdf) {
+    return res.status(404).json({
+      error: !fileStoreAvailable()
+        ? "STATEMENT_ENCRYPTION_KEY is not set on the server, so no statement file could be stored."
+        : "This statement was read before SpendLog kept the file. Read it again to store one.",
+    });
+  }
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Cache-Control", "no-store, private");
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename="${(statement.fileName ?? "statement.pdf").replace(/[^\w.\- ]/g, "_")}"`
+  );
+  res.send(pdf);
 });
 
 // GET /statements/:id — one statement, with every line and what became of it.
@@ -124,6 +248,10 @@ statementsRouter.get("/:id", validObjectIdParam("id"), async (req, res) => {
   res.json({
     ...summarise(statement),
     account: statement.accountId,
+    // The text the readers saw, kept from when it was read. This is what
+    // a line is checked against when it looks wrong, and it used to mean
+    // fetching the whole PDF from Gmail again to find out.
+    rows: statement.rows ?? [],
     lines: statement.lines.map((line) => ({
       id: line._id.toString(),
       date: line.date,
@@ -187,6 +315,11 @@ statementsRouter.delete("/:id", validObjectIdParam("id"), async (req, res) => {
   const removed = await unpickStatement(userId, statementId);
   const deleted = await CardStatement.findOneAndDelete({ _id: statementId, userId });
   if (!deleted) return res.status(404).json({ error: "Not found" });
+
+  // The file is kept for as long as its statement and no longer. Deleting
+  // the record and leaving the PDF would be the worst of both: a bank
+  // statement still on the disk that nothing in the app can reach or remove.
+  await deleteStatementFile(statementId);
 
   res.json({ removed });
 });

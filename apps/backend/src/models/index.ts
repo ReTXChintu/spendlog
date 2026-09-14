@@ -32,6 +32,7 @@ import {
   TransactionType,
 } from "../types";
 import { resolveCountedAmount } from "./counted";
+import { istMonthKey } from "../time";
 
 // Responses are serialized with `id` (a string) rather than Mongo's `_id`,
 // which is the shape the web and mobile clients already consume. Virtuals
@@ -806,6 +807,19 @@ export interface CardStatementDoc {
   /// statement that could not be read has, and so the only thing that can
   /// put it in order next to the ones that could.
   receivedAt?: Date | null;
+  /// The month this statement is filed under, as YYYY-MM in IST. Derived
+  /// on save from whichever date it has, so that grouping a card's
+  /// statements by month is a field lookup rather than a rule that every
+  /// caller has to remember and apply the same way.
+  monthKey?: string | null;
+  /// The text the PDF extracted to, exactly as the readers saw it. Kept so
+  /// a statement can be looked at again - and argued with - without
+  /// fetching the mail a second time.
+  rows?: string[];
+  /// The size of the stored PDF, in bytes. Null when there is no file: the
+  /// bytes live on disk, and this is how a listing knows one is there
+  /// without going to look.
+  fileBytes?: number | null;
   totalDueMinor?: number | null;
   minimumDueMinor?: number | null;
   lines: Types.DocumentArray<StatementLine>;
@@ -835,6 +849,9 @@ const cardStatementSchema = new Schema<CardStatementDoc>(
     statementDate: { type: Date, default: null },
     dueDate: { type: Date, default: null },
     receivedAt: { type: Date, default: null },
+    monthKey: { type: String, default: null },
+    rows: { type: [String], default: [] },
+    fileBytes: { type: Number, default: null },
     totalDueMinor: { type: Number, default: null },
     minimumDueMinor: { type: Number, default: null },
     lines: { type: [statementLineSchema], default: [] },
@@ -845,11 +862,53 @@ const cardStatementSchema = new Schema<CardStatementDoc>(
   { timestamps: true, ...serialization }
 );
 
+/**
+ * The month a statement is filed under.
+ *
+ * Its own date where it has one, then the close of its billing period,
+ * then the day its mail arrived - the same order the list sorts in, so a
+ * statement never appears under one month and sorts as though it were in
+ * another. A statement too broken to have any of the three is filed under
+ * no month and shows up on its own, which is the honest answer.
+ */
+function monthKeyFor(fields: {
+  statementDate?: Date | null;
+  periodEnd?: Date | null;
+  receivedAt?: Date | null;
+}): string | null {
+  const dated = fields.statementDate ?? fields.periodEnd ?? fields.receivedAt;
+  return dated ? istMonthKey(new Date(dated)) : null;
+}
+
+cardStatementSchema.pre("save", function (next) {
+  this.monthKey = monthKeyFor(this);
+  next();
+});
+
+// Every statement the sync writes arrives through findOneAndUpdate with an
+// upsert, so deriving this on save alone would have meant deriving it
+// almost never.
+cardStatementSchema.pre("findOneAndUpdate", async function (next) {
+  const update = (this.getUpdate() as Record<string, unknown> | null) ?? {};
+  const set = (update.$set as Record<string, unknown>) ?? {};
+
+  // The dates this reads may be ones the update is setting or ones it is
+  // leaving alone, so it has to run against the document as it will be.
+  const current = (await this.model.findOne(this.getQuery()).lean()) ?? {};
+  const merged = { ...current, ...set } as Parameters<typeof monthKeyFor>[0];
+
+  this.set("monthKey", monthKeyFor(merged));
+  next();
+});
+
 // One statement per attachment. A sync that runs twice finds this rather
 // than creating a second copy, which is the whole defence against a
 // statement being reconciled - and its missing lines added - more than once.
 cardStatementSchema.index({ userId: 1, sourceRef: 1 }, { unique: true });
 cardStatementSchema.index({ userId: 1, statementDate: -1 });
+// The shape the statements screen asks for: one card's statements, newest
+// month first.
+cardStatementSchema.index({ userId: 1, accountId: 1, monthKey: -1 });
 
 export const CardStatement = model<CardStatementDoc>("CardStatement", cardStatementSchema);
 

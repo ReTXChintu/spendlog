@@ -5,6 +5,10 @@ build/
 *.log
 *.tsbuildinfo
 
+# Stored statement PDFs. Encrypted at rest, and still never committed —
+# see STATEMENT_FILE_DIR in .env.example.
+data/statements/
+
 # TLS material — never commit private keys
 certs/
 *.pem

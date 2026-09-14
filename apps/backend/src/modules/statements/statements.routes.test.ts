@@ -296,6 +296,93 @@ describe("statement routes", () => {
     );
   });
 
+  it("files statements under their card and their month", async () => {
+    const user = await makeUser();
+    const hdfc = await makeCard(user.id, "1377");
+    const csb = await makeCard(user.id, "6623");
+
+    const on = (accountId: Types.ObjectId | null, day: string) =>
+      models.CardStatement.create({
+        userId: user.id,
+        accountId,
+        sourceRef: `msg-${crypto.randomUUID()}`,
+        subject: `${accountId === null ? "orphan" : accountId.equals(hdfc._id) ? "hdfc" : "csb"} ${day}`,
+        status: "PARSED",
+        statementDate: istDayStart(day),
+        lines: [],
+      });
+
+    await on(hdfc._id, "2026-07-01");
+    await on(hdfc._id, "2026-09-01");
+    await on(csb._id, "2026-09-03");
+    await on(hdfc._id, "2026-09-18");
+    await on(null, "2026-08-04");
+
+    type Group = {
+      accountId: string;
+      last4: string;
+      months: { month: string; statements: { subject: string }[] }[];
+    };
+    const groups = await json<Group[]>(await call("/statements/filed", user.token));
+
+    const filed = groups.find((group) => group.last4 === "1377")!;
+    assert.deepEqual(
+      filed.months.map((month) => month.month),
+      ["2026-09", "2026-07"],
+      "newest month first, and a month with nothing in it is not a month"
+    );
+    assert.deepEqual(
+      filed.months[0].statements.map((statement) => statement.subject),
+      ["hdfc 2026-09-18", "hdfc 2026-09-01"],
+      "and newest first inside the month"
+    );
+
+    // One card's statements never appear under another's.
+    const other = groups.find((group) => group.last4 === "6623")!;
+    assert.equal(other.months.length, 1);
+    assert.equal(other.months[0].statements.length, 1);
+
+    // A statement whose card is not known yet is a to-do, not a secret.
+    const unknown = groups.find((group) => group.accountId === "unfiled")!;
+    assert.equal(unknown.months[0].statements[0].subject, "orphan 2026-08-04");
+  });
+
+  it("derives the month a statement is filed under from whatever date it has", async () => {
+    const user = await makeUser();
+    const card = await makeCard(user.id);
+
+    // A locked statement has no statementDate at all, and the month its
+    // mail arrived is the only thing left to file it under.
+    const locked = await models.CardStatement.create({
+      userId: user.id,
+      accountId: card._id,
+      sourceRef: `msg-${crypto.randomUUID()}`,
+      status: "LOCKED",
+      receivedAt: istDayStart("2026-09-20"),
+      lines: [],
+    });
+
+    assert.equal(locked.monthKey, "2026-09");
+
+    type Group = { last4: string; months: { month: string }[] };
+    const groups = await json<Group[]>(await call("/statements/filed", user.token));
+    assert.equal(groups.find((group) => group.last4 === "1377")!.months[0].month, "2026-09");
+  });
+
+  it("offers no file for a statement that has none", async () => {
+    const user = await makeUser();
+    const card = await makeCard(user.id);
+    const statement = await makeStatement(user.id, card._id);
+
+    const listed = await json<{ hasFile: boolean }[]>(await call("/statements", user.token));
+    assert.equal(listed[0].hasFile, false);
+
+    // And says which of the two reasons it is, rather than a bare 404.
+    const response = await call(`/statements/${statement._id}/file`, user.token);
+    assert.equal(response.status, 404);
+    assert.match((await json<{ error: string }>(response)).error, /Read it again/);
+  });
+
   it("turns nobody away without a token", async () => {
     assert.equal((await fetch(`${baseUrl}/statements`)).status, 401);
   });

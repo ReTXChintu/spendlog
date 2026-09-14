@@ -15,6 +15,7 @@ import crypto from "node:crypto";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_BYTES = 12; // 96 bits, the size GCM is specified for
+const TAG_BYTES = 16;
 const KEY_BYTES = 32;
 
 export class MissingEncryptionKeyError extends Error {
@@ -66,6 +67,36 @@ export function encryptPassword(plain: string): string {
   const encrypted = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
 
   return [iv, cipher.getAuthTag(), encrypted].map((part) => part.toString("base64")).join(".");
+}
+
+/**
+ * The same thing for a file, which is the statement PDF itself.
+ *
+ * Kept as raw bytes rather than base64 text: a statement is a megabyte or
+ * two and there is no reason to carry a third more of it around. The
+ * layout is the same all the same — nonce, tag, ciphertext — so one key
+ * covers both and a file on disk carries everything needed to read it back.
+ */
+export function encryptBytes(plain: Buffer): Buffer {
+  const iv = crypto.randomBytes(IV_BYTES);
+  const cipher = crypto.createCipheriv(ALGORITHM, key(), iv);
+  const encrypted = Buffer.concat([cipher.update(plain), cipher.final()]);
+
+  return Buffer.concat([iv, cipher.getAuthTag(), encrypted]);
+}
+
+/** Null rather than throwing, for the same reason decryptPassword is. */
+export function decryptBytes(stored: Buffer): Buffer | null {
+  if (stored.length <= IV_BYTES + TAG_BYTES) return null;
+
+  try {
+    const decipher = crypto.createDecipheriv(ALGORITHM, key(), stored.subarray(0, IV_BYTES));
+    decipher.setAuthTag(stored.subarray(IV_BYTES, IV_BYTES + TAG_BYTES));
+
+    return Buffer.concat([decipher.update(stored.subarray(IV_BYTES + TAG_BYTES)), decipher.final()]);
+  } catch {
+    return null;
+  }
 }
 
 /**
