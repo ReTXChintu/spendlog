@@ -59,9 +59,36 @@ export interface UserDoc {
   /// money arrives and then gets spent.
   salaryAmountMinor?: number | null;
   salaryDay?: number | null;
+  /// The PIN that unlocks stored card details, as a scrypt hash and its
+  /// salt. One PIN covers every card: it guards a screen, not a card, and
+  /// nobody wants four of them.
+  ///
+  /// A PIN is four to six digits, which is a million guesses at worst - so
+  /// what actually protects it is the counter beside it rather than the
+  /// hash. Never leaves the server in any form; see the toJSON transform.
+  vaultPin?: VaultPin | null;
   createdAt: Date;
   updatedAt: Date;
 }
+
+export interface VaultPin {
+  hash: string;
+  salt: string;
+  /// Consecutive wrong answers. Reset by a right one.
+  failedAttempts: number;
+  /// While this is in the future, no PIN is accepted at all.
+  lockedUntil?: Date | null;
+}
+
+const vaultPinSchema = new Schema<VaultPin>(
+  {
+    hash: { type: String, required: true },
+    salt: { type: String, required: true },
+    failedAttempts: { type: Number, default: 0 },
+    lockedUntil: { type: Date, default: null },
+  },
+  { _id: false }
+);
 
 const userSchema = new Schema<UserDoc>(
   {
@@ -70,8 +97,24 @@ const userSchema = new Schema<UserDoc>(
     googleId: { type: String, default: null },
     salaryAmountMinor: { type: Number, default: null, min: 0 },
     salaryDay: { type: Number, default: null, min: 1, max: 31 },
+    vaultPin: { type: vaultPinSchema, default: null },
   },
-  { timestamps: true, ...serialization }
+  {
+    timestamps: true,
+    ...serialization,
+    toJSON: {
+      ...serialization.toJSON,
+      // The PIN hash is not a thing any client needs, in any shape. Taken
+      // out here rather than remembered at each of the several places a
+      // user is serialised, because remembering is what eventually fails.
+      transform: (doc: unknown, ret: Record<string, unknown>) => {
+        serialization.toJSON.transform(doc, ret);
+        ret.hasVaultPin = Boolean(ret.vaultPin);
+        delete ret.vaultPin;
+        return ret;
+      },
+    },
+  }
 );
 
 // Unique only among users that actually have a Google id. A `sparse` index
@@ -1015,3 +1058,65 @@ perkSchema.pre("save", function (next) {
 perkSchema.index({ userId: 1, isActive: 1, expiresOn: 1 });
 
 export const Perk = model<PerkDoc>("Perk", perkSchema);
+
+/**
+ * The full details of a card, kept so they can be read back.
+ *
+ * A deliberate line is drawn here. The number, its expiry, the name
+ * embossed on it and a free-text note are stored; the CVV is not, and
+ * there is no field for one. A CVV is the single thing that turns a
+ * stolen number into a transaction someone else can make, it is the one
+ * value every card scheme forbids keeping, and it is three digits its
+ * owner already knows. Storing it would buy nothing and risk everything.
+ *
+ * Every stored field is ciphertext. What sits in the clear is only what
+ * the screen shows while locked: the last four digits and the network,
+ * both of which SpendLog already knows from the account.
+ */
+export interface CardVaultDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  accountId: Types.ObjectId;
+  /// iv.tag.ciphertext, base64, one field each. Separate rather than one
+  /// blob so a note can be changed without rewriting the card number.
+  number: string;
+  expiry?: string | null;
+  nameOnCard?: string | null;
+  note?: string | null;
+  /// Shown while locked, and the only part that is not encrypted.
+  last4: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const cardVaultSchema = new Schema<CardVaultDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    accountId: { type: Schema.Types.ObjectId, ref: "Account", required: true },
+    number: { type: String, required: true },
+    expiry: { type: String, default: null },
+    nameOnCard: { type: String, default: null },
+    note: { type: String, default: null },
+    last4: { type: String, required: true },
+  },
+  {
+    timestamps: true,
+    ...serialization,
+    toJSON: {
+      ...serialization.toJSON,
+      // Nothing encrypted here is ever serialised by accident. A vault is
+      // only read through the route that checks the PIN first, and that
+      // route builds its own response out of the decrypted values.
+      transform: (doc: unknown, ret: Record<string, unknown>) => {
+        serialization.toJSON.transform(doc, ret);
+        for (const secret of ["number", "expiry", "nameOnCard", "note"]) delete ret[secret];
+        return ret;
+      },
+    },
+  }
+);
+
+// One set of details per card.
+cardVaultSchema.index({ userId: 1, accountId: 1 }, { unique: true });
+
+export const CardVault = model<CardVaultDoc>("CardVault", cardVaultSchema);
