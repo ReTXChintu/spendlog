@@ -34,11 +34,13 @@ function summarise(statement: import("../../models").CardStatementDoc) {
     id: statement._id.toString(),
     accountId: statement.accountId?.toString() ?? null,
     status: statement.status,
+    kind: statement.kind,
     problem: statement.problem ?? null,
     subject: statement.subject ?? null,
     fileName: statement.fileName ?? null,
     issuer: statement.issuer ?? null,
     statementDate: statement.statementDate,
+    receivedAt: statement.receivedAt ?? null,
     dueDate: statement.dueDate,
     periodStart: statement.periodStart,
     periodEnd: statement.periodEnd,
@@ -54,12 +56,30 @@ function summarise(statement: import("../../models").CardStatementDoc) {
 
 // GET /statements — every statement seen, newest first.
 statementsRouter.get("/", async (req, res) => {
+  // Sorted here rather than in Mongo. A statement that could not be read
+  // has no statementDate at all, so a `{ statementDate: -1 }` sort put
+  // every unread one in a heap ordered by createdAt - and since Gmail
+  // lists newest mail first, the newest statement is the one created
+  // first, which turned the whole list upside down. Capped at 60, so
+  // ordering them in hand costs nothing.
   const statements = await CardStatement.find({ userId: currentUserId(req) })
-    .sort({ statementDate: -1, createdAt: -1 })
+    .sort({ createdAt: -1 })
     .limit(60);
 
-  res.json(statements.map(summarise));
+  const byDate = statements
+    .slice()
+    .sort((left, right) => newestDate(right).getTime() - newestDate(left).getTime());
+
+  res.json(byDate.map(summarise));
 });
+
+/**
+ * The date a statement belongs under: its own if it was read, otherwise
+ * the day its mail arrived.
+ */
+function newestDate(statement: import("../../models").CardStatementDoc): Date {
+  return statement.statementDate ?? statement.periodEnd ?? statement.receivedAt ?? statement.createdAt;
+}
 
 // POST /statements/sync — go and look for statements that are new.
 //

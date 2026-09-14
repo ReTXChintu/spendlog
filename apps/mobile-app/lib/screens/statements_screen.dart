@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
@@ -25,6 +26,9 @@ class _Statement {
   final String? subject;
   final String? fileName;
   final String? issuer;
+  /// The statement's own date, or the day its mail arrived for one that
+  /// could not be read far enough to have a date of its own.
+  final DateTime? dated;
   final int lineCount;
   final int added;
   final int known;
@@ -39,6 +43,7 @@ class _Statement {
     this.subject,
     this.fileName,
     this.issuer,
+    this.dated,
     required this.lineCount,
     required this.added,
     required this.known,
@@ -66,6 +71,9 @@ class _Statement {
       subject: json['subject'] as String?,
       fileName: json['fileName'] as String?,
       issuer: json['issuer'] as String?,
+      dated: DateTime.tryParse(
+        (json['statementDate'] ?? json['receivedAt']) as String? ?? '',
+      ),
       lineCount: json['lineCount'] as int? ?? 0,
       added: counts['added'] as int? ?? 0,
       known: (counts['matched'] as int? ?? 0) + (counts['uncertain'] as int? ?? 0),
@@ -73,6 +81,30 @@ class _Statement {
       knownSpendMinor: json['knownSpendMinor'] as int? ?? 0,
     );
   }
+}
+
+/// The line under a statement's name: what date it is filed under, then
+/// either what was read off it or why nothing could be.
+String _subtitle(_Statement statement) {
+  final parts = <String>[];
+
+  // Dated first, because that is the order the list is in.
+  if (statement.dated != null) parts.add(DateFormat('d MMM yyyy').format(statement.dated!));
+
+  if (!statement.isRead) {
+    parts.add(statement.problem ?? 'No reason was recorded.');
+    return parts.join(' · ');
+  }
+
+  parts.add('${statement.issuer}');
+  parts.add('${statement.lineCount} lines');
+  parts.add('${statement.added} added, ${statement.known} already known');
+
+  final head = parts.join(' · ');
+  if (statement.statementSpendMinor <= 0) return head;
+
+  return '$head\nStatement says ${formatMoneyShort(statement.statementSpendMinor)}, '
+      'SpendLog had ${formatMoneyShort(statement.knownSpendMinor)}.';
 }
 
 class _StatementsScreenState extends State<StatementsScreen> {
@@ -255,13 +287,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
           ),
           const SizedBox(height: 6),
           Text(
-            statement.isRead
-                ? '${statement.issuer} · ${statement.lineCount} lines · ${statement.added} added, '
-                    '${statement.known} already known'
-                    '${statement.statementSpendMinor > 0 ? '\n'
-                        'Statement says ${formatMoneyShort(statement.statementSpendMinor)}, '
-                        'SpendLog had ${formatMoneyShort(statement.knownSpendMinor)}.' : ''}'
-                : (statement.problem ?? 'No reason was recorded.'),
+            _subtitle(statement),
             style: TextStyle(fontSize: 12.3, height: 1.45, color: c.muted),
           ),
           const SizedBox(height: 8),

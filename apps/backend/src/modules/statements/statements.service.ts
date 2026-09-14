@@ -98,6 +98,7 @@ export async function syncStatements(userId: Types.ObjectId, options?: { days?: 
             userId,
             messageId: ref.id,
             subject: headerValue(message.data.payload, "Subject"),
+            receivedAt: mailDate(message.data.internalDate),
             attachment,
             passwords,
             cards,
@@ -162,6 +163,7 @@ async function readOneStatement(params: {
   userId: Types.ObjectId;
   messageId: string;
   subject: string | null;
+  receivedAt: Date | null;
   attachment: PdfAttachment;
   passwords: (string | null)[];
   cards: HydratedDocument<import("../../models").AccountDoc>[];
@@ -260,6 +262,7 @@ async function readOneStatement(params: {
             : `No ${wanted === "BANK" ? "account" : "card"} number could be found in this statement`,
         statementDate: parsed.statementDate,
         dueDate: parsed.dueDate,
+        receivedAt: params.receivedAt,
         periodStart: parsed.periodStart,
         periodEnd: parsed.periodEnd,
         totalDueMinor: parsed.totalDueMinor,
@@ -274,6 +277,15 @@ async function readOneStatement(params: {
 
   const summary = await reconcileStatement(statement);
   return summary.added;
+}
+
+/**
+ * Gmail's internalDate: milliseconds since the epoch, as a string.
+ */
+function mailDate(internalDate: string | null | undefined): Date | null {
+  if (!internalDate) return null;
+  const ms = Number(internalDate);
+  return Number.isFinite(ms) && ms > 0 ? new Date(ms) : null;
 }
 
 async function downloadAttachment(
@@ -299,14 +311,20 @@ async function downloadAttachment(
 async function recordProblem(
   userId: Types.ObjectId,
   sourceRef: string,
-  params: { subject: string | null; attachment: PdfAttachment },
+  params: { subject: string | null; receivedAt: Date | null; attachment: PdfAttachment },
   status: CardStatementDoc["status"],
   problem: string
 ): Promise<void> {
   await CardStatement.findOneAndUpdate(
     { userId, sourceRef },
     {
-      $set: { status, problem, subject: params.subject, fileName: params.attachment.fileName },
+      $set: {
+        status,
+        problem,
+        subject: params.subject,
+        receivedAt: params.receivedAt,
+        fileName: params.attachment.fileName,
+      },
       $setOnInsert: { lines: [] },
     },
     { upsert: true, setDefaultsOnInsert: true }
@@ -354,9 +372,11 @@ export async function rereadStatement(
     const gmail = google.gmail({ version: "v1", auth: client });
 
     let subject: string | null = statement.subject ?? null;
+    let receivedAt: Date | null = statement.receivedAt ?? null;
     try {
       const message = await gmail.users.messages.get({ userId: "me", id: messageId, format: "metadata" });
       subject = headerValue(message.data.payload, "Subject") ?? subject;
+      receivedAt = mailDate(message.data.internalDate) ?? receivedAt;
     } catch {
       // The mailbox this statement came from may not be this connection.
       continue;
@@ -367,6 +387,7 @@ export async function rereadStatement(
       userId,
       messageId,
       subject,
+      receivedAt,
       attachment: { attachmentId, fileName: statement.fileName ?? "statement.pdf", size: 0 },
       passwords,
       cards,

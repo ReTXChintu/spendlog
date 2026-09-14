@@ -802,6 +802,10 @@ export interface CardStatementDoc {
   periodEnd?: Date | null;
   statementDate?: Date | null;
   dueDate?: Date | null;
+  /// When the mail carrying this statement arrived. The only date a
+  /// statement that could not be read has, and so the only thing that can
+  /// put it in order next to the ones that could.
+  receivedAt?: Date | null;
   totalDueMinor?: number | null;
   minimumDueMinor?: number | null;
   lines: Types.DocumentArray<StatementLine>;
@@ -830,6 +834,7 @@ const cardStatementSchema = new Schema<CardStatementDoc>(
     periodEnd: { type: Date, default: null },
     statementDate: { type: Date, default: null },
     dueDate: { type: Date, default: null },
+    receivedAt: { type: Date, default: null },
     totalDueMinor: { type: Number, default: null },
     minimumDueMinor: { type: Number, default: null },
     lines: { type: [statementLineSchema], default: [] },

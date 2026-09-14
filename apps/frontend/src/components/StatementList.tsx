@@ -23,10 +23,22 @@ interface StatementRow {
   issuer: string | null;
   kind: "CARD" | "BANK";
   statementDate: string | null;
+  receivedAt: string | null;
   statementSpendMinor: number;
   knownSpendMinor: number;
   lineCount: number;
   counts: { matched: number; added: number; uncertain: number; skipped: number };
+}
+
+/** "12 Jun 2026", from whichever date the statement actually has. */
+function statementDay(statement: StatementRow): string | null {
+  const iso = statement.statementDate ?? statement.receivedAt;
+  if (!iso) return null;
+
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? null
+    : date.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
 const STATUS_LABEL: Record<StatementRow["status"], string> = {
@@ -101,6 +113,10 @@ export function StatementList({ accounts }: { accounts: Account[] }) {
               </div>
 
               <div className="statement-sub">
+                {/* The date this is filed under, and the one the list is
+                    ordered by. A statement that could not be read has no
+                    date of its own, so it shows the day its mail arrived. */}
+                {statementDay(statement) && <>{statementDay(statement)} · </>}
                 {statement.status === "PARSED" ? (
                   <>
                     {statement.issuer} · {statement.lineCount} lines · {statement.counts.added} added,{" "}

@@ -251,6 +251,51 @@ describe("statement routes", () => {
     assert.equal((await call("/statements/not-an-id", user.token)).status, 404);
   });
 
+  it("lists statements newest first, whether or not they could be read", async () => {
+    // The order this comes back in is the order it is shown in, and the
+    // bug was that an unread statement has no statementDate at all. Gmail
+    // hands over the newest mail first, so those were created first, and
+    // sorting the heap of them by createdAt descending put the oldest at
+    // the top. Created here in that same order to keep the bug reachable.
+    const user = await makeUser();
+    const card = await makeCard(user.id);
+
+    const dated = (day: string, received: string) =>
+      models.CardStatement.create({
+        userId: user.id,
+        accountId: card._id,
+        sourceRef: `msg-${crypto.randomUUID()}`,
+        subject: day,
+        status: "PARSED",
+        statementDate: istDayStart(day),
+        receivedAt: istDayStart(received),
+        lines: [],
+      });
+
+    const unread = (received: string) =>
+      models.CardStatement.create({
+        userId: user.id,
+        sourceRef: `msg-${crypto.randomUUID()}`,
+        subject: received,
+        status: "LOCKED",
+        problem: "It is locked",
+        receivedAt: istDayStart(received),
+        lines: [],
+      });
+
+    await unread("2026-09-10");
+    await dated("2026-08-01", "2026-08-02");
+    await unread("2026-07-11");
+    await dated("2026-06-01", "2026-06-02");
+
+    const listed = await json<{ subject: string }[]>(await call("/statements", user.token));
+
+    assert.deepEqual(
+      listed.map((statement) => statement.subject),
+      ["2026-09-10", "2026-08-01", "2026-07-11", "2026-06-01"]
+    );
+  });
+
   it("turns nobody away without a token", async () => {
     assert.equal((await fetch(`${baseUrl}/statements`)).status, 401);
   });
