@@ -418,8 +418,18 @@ class CardStatus {
   final DateTime? dueOn;
   final int? floatDays;
   final int spentMinor;
+
+  /// What you allow yourself on this card in a period, and what the bank
+  /// allows. Different things: being 90% through your own limit matters at
+  /// a till, and being 30% through a credit limit tells you nothing.
   final int? limitMinor;
+  final int? creditLimitMinor;
   final int? remainingMinor;
+
+  /// Whether spentMinor covers a billing cycle or a calendar month. A card
+  /// with no statement day has no cycle to measure.
+  final bool periodIsCycle;
+
   /// "ok" | "close" | "over" | "unset"
   final String state;
 
@@ -433,7 +443,9 @@ class CardStatus {
     this.floatDays,
     required this.spentMinor,
     this.limitMinor,
+    this.creditLimitMinor,
     this.remainingMinor,
+    this.periodIsCycle = true,
     required this.state,
   });
 
@@ -448,7 +460,9 @@ class CardStatus {
         floatDays: json['floatDays'] as int?,
         spentMinor: json['spentMinor'] as int? ?? 0,
         limitMinor: json['limitMinor'] as int?,
+        creditLimitMinor: json['creditLimitMinor'] as int?,
         remainingMinor: json['remainingMinor'] as int?,
+        periodIsCycle: json['periodIsCycle'] as bool? ?? true,
         state: json['state'] as String? ?? 'unset',
       );
 }

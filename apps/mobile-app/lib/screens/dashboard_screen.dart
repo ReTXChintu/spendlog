@@ -3,6 +3,7 @@ import '../models/models.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/format.dart';
+import '../widgets/card_limits.dart';
 import '../widgets/card_picker.dart';
 import '../widgets/state_block.dart';
 import 'perks_screen.dart';
@@ -101,6 +102,16 @@ class DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(height: 10),
           _MonthSoFarBlock(month: data.monthSoFar),
+
+          if (data.cards.isNotEmpty) ...[
+            const SizedBox(height: 24),
+            _Heading(
+              title: 'Where the cards stand',
+              sub: _cardsSub(data.cards),
+            ),
+            const SizedBox(height: 12),
+            CardLimits(cards: data.cards, onOpenAccounts: widget.onOpenSettings),
+          ],
 
           const SizedBox(height: 24),
           const _Heading(
@@ -510,6 +521,18 @@ class _SummaryCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// What the card bars are saying at a glance, before any of them is read.
+String _cardsSub(List<CardStatus> cards) {
+  final over = cards.where((card) => card.limitMinor != null && card.spentMinor > card.limitMinor!);
+
+  if (over.isEmpty) {
+    return 'Spending this cycle against what the bank allows, with your own limit marked.';
+  }
+  return over.length == 1
+      ? '${over.first.name} is past what you meant to spend this month.'
+      : '${over.length} cards are past what you meant to spend this month.';
 }
 
 class _Heading extends StatelessWidget {

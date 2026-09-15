@@ -286,6 +286,19 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
               _Field(label: 'Last digits', controller: _last4, hint: '1377', numeric: true),
             ],
 
+            // A limit you set on a bank account is worth exactly as much
+            // as one on a card. It was only ever a card field because
+            // cards were the only thing with a period attached.
+            if (_type != 'CASH') ...[
+              const SizedBox(height: 14),
+              _Field(
+                label: _type == 'CARD' ? 'My limit a cycle (₹)' : 'My limit a month (₹)',
+                controller: _spendLimit,
+                hint: '30000',
+                numeric: true,
+              ),
+            ],
+
             // What a debit card draws on. Its spending is that account's
             // money, so it is counted there and shows on that account's
             // statement - and a debit card whose account SpendLog has
@@ -315,13 +328,6 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
             if (_type == 'CARD') ...[
               const SizedBox(height: 14),
               _Field(label: 'Credit limit (₹)', controller: _creditLimit, hint: '200000', numeric: true),
-              const SizedBox(height: 14),
-              _Field(
-                label: 'My limit a cycle (₹)',
-                controller: _spendLimit,
-                hint: '30000',
-                numeric: true,
-              ),
               const SizedBox(height: 14),
               Row(
                 children: [
