@@ -82,6 +82,10 @@ export interface AccountOverview extends Account {
     remainingMinor: number | null;
     state: "ok" | "close" | "over" | "unset";
   } | null;
+  /// What this account has spent since the first of the month, and what
+  /// you allowed yourself. Every account has this; only a credit card has
+  /// a cycle.
+  month: { spentMinor: number; limitMinor: number | null };
   /// The last bill read off a statement - the only figure on the panel
   /// that comes from the bank rather than from adding up messages.
   bill: {
@@ -233,8 +237,15 @@ export interface CardStatus {
   dueOn: string | null;
   floatDays: number | null;
   spentMinor: number;
+  /// What you allow yourself on this card in a period, and what the bank
+  /// allows. Different things: being 90% through your own limit matters
+  /// at a till, and being 30% through a credit limit tells you nothing.
   limitMinor: number | null;
+  creditLimitMinor: number | null;
   remainingMinor: number | null;
+  /// Whether spentMinor covers a billing cycle or a calendar month. A card
+  /// with no statement day has no cycle to measure.
+  periodIsCycle: boolean;
   state: CardState;
 }
 

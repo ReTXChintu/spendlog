@@ -1,5 +1,6 @@
 import { Types } from "mongoose";
 import { Account, Transaction } from "../../models";
+import { istMonthKey, istMonthStart } from "../../time";
 import { CardNetwork, CARD_NETWORKS } from "../../types";
 import { cycleFor, floatDays } from "./cards.cycle";
 
@@ -29,8 +30,19 @@ export interface CardStatus {
   dueOn: Date | null;
   floatDays: number | null;
   spentMinor: number;
+  /// What you allow yourself on this card in a period, and what the bank
+  /// allows. Different things, and the one worth warning about is the
+  /// first: being 90% through your own budget matters at a till, and
+  /// being 30% through a credit limit tells you nothing.
   limitMinor: number | null;
+  creditLimitMinor: number | null;
   remainingMinor: number | null;
+  /// Whether spentMinor covers a billing cycle or a calendar month. A card
+  /// with no statement day has no cycle to measure, and a period of
+  /// "nothing" used to report nothing spent.
+  periodIsCycle: boolean;
+  periodStart: Date;
+  periodEnd: Date;
   state: CardState;
 }
 
@@ -53,21 +65,27 @@ export async function cardStatuses(userId: Types.ObjectId, now = new Date()): Pr
     cards.map(async (card): Promise<CardStatus> => {
       const cycle = cycleFor(card, now);
 
-      const spentMinor = cycle
-        ? ((
-            await Transaction.aggregate<{ total: number }>([
-              {
-                $match: {
-                  userId,
-                  accountId: card._id,
-                  type: "DEBIT",
-                  occurredAt: { $gte: cycle.start, $lte: cycle.statementOn },
-                },
+      // The cycle where the card has one, and the calendar month where it
+      // does not. A card with no statement day used to report nothing
+      // spent - not "unknown", but a confident zero beside a real limit,
+      // which is the most misleading figure this could produce.
+      const from = cycle?.start ?? istMonthStart(istMonthKey(now));
+      const to = cycle?.statementOn ?? now;
+
+      const spentMinor =
+        (
+          await Transaction.aggregate<{ total: number }>([
+            {
+              $match: {
+                userId,
+                accountId: card._id,
+                type: "DEBIT",
+                occurredAt: { $gte: from, $lte: to },
               },
-              { $group: { _id: null, total: { $sum: "$countedAmountMinor" } } },
-            ])
-          )[0]?.total ?? 0)
-        : 0;
+            },
+            { $group: { _id: null, total: { $sum: "$countedAmountMinor" } } },
+          ])
+        )[0]?.total ?? 0;
 
       const limitMinor = card.spendLimitMinor ?? null;
       const state: CardState = !limitMinor
@@ -91,7 +109,11 @@ export async function cardStatuses(userId: Types.ObjectId, now = new Date()): Pr
         floatDays: floatDays(card, now),
         spentMinor,
         limitMinor,
+        creditLimitMinor: card.creditLimitMinor ?? null,
         remainingMinor: limitMinor === null ? null : Math.max(0, limitMinor - spentMinor),
+        periodIsCycle: cycle !== null,
+        periodStart: from,
+        periodEnd: to,
         state,
       };
     })

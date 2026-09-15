@@ -10,6 +10,13 @@ let mongod: MongoMemoryServer;
 before(async () => {
   mongod = await MongoMemoryServer.create();
   await mongoose.connect(mongod.getUri("spendlog_accounts_test"));
+
+  // Wait for the indexes rather than racing them. What stops two messages
+  // for the same new account becoming two accounts is the unique index on
+  // { userId, bankName, last4, accountType }, and Mongoose builds that in
+  // the background - so the test for it passed alone and failed in a full
+  // run, where the first query lands before the build finishes.
+  await Account.init();
 });
 
 after(async () => {

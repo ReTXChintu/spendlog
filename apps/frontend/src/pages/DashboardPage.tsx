@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { CardLimits } from "../components/CardLimits";
 import { CardPicker } from "../components/CardPicker";
 import { Icon } from "../components/Icon";
 import { StateBlock } from "../components/States";
@@ -102,6 +103,8 @@ export function DashboardPage() {
               </Link>
             </div>
           </div>
+
+          <CardLimits cards={data.cards} />
 
           <div className="section-block">
             <h3>Which card today</h3>

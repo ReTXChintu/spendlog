@@ -5,6 +5,7 @@ import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
 import { Account, CardVault, Transaction } from "../../models";
 import { cardStatuses } from "../cards/cards.status";
+import { istMonthKey, istMonthStart } from "../../time";
 import { upcomingBills } from "../statements/statements.bills";
 import { ACCOUNT_TYPES } from "../../types";
 
@@ -35,11 +36,14 @@ accountsRouter.get("/", async (req, res) => {
 accountsRouter.get("/overview", async (req, res) => {
   const userId = currentUserId(req);
 
-  const [accounts, statuses, vaults, bills] = await Promise.all([
+  const now = new Date();
+
+  const [accounts, statuses, vaults, bills, monthSpend] = await Promise.all([
     Account.find({ userId }).sort({ isActive: -1, accountType: 1, bankName: 1, last4: 1 }),
-    cardStatuses(userId),
+    cardStatuses(userId, now),
     CardVault.find({ userId }).select("accountId last4"),
     upcomingBills(userId),
+    spentThisMonth(userId, now),
   ]);
 
   const statusFor = new Map(statuses.map((status) => [status.accountId, status]));
@@ -63,9 +67,8 @@ accountsRouter.get("/overview", async (req, res) => {
 
       return {
         ...account.toJSON(),
-        /// Null for anything that is not an active card: a savings account
-        /// has no cycle and no limit, and inventing zeroes for it would
-        /// put an empty progress bar on screen that means nothing.
+        /// A credit card's own billing cycle, where it has one. Everything
+        /// here is about a period that ends in a bill.
         cycle: status
           ? {
               statementOn: status.statementOn,
@@ -77,6 +80,15 @@ accountsRouter.get("/overview", async (req, res) => {
               state: status.state,
             }
           : null,
+        /// What this account has spent since the first of the month, and
+        /// what you allowed yourself. Every account has this, because a
+        /// limit you set on a bank account is worth just as much as one on
+        /// a card - it was only ever a card field because cards were the
+        /// only thing with a period attached.
+        month: {
+          spentMinor: monthSpend.get(id) ?? 0,
+          limitMinor: account.spendLimitMinor ?? null,
+        },
         /// The last bill read off a statement, which is the only figure
         /// here that comes from the bank rather than from adding up
         /// messages.
@@ -107,6 +119,30 @@ accountsRouter.get("/overview", async (req, res) => {
     })
   );
 });
+
+/**
+ * What each account has spent since the first of the month.
+ *
+ * One aggregation rather than one per account: this runs on every load of
+ * the accounts screen, and a query per account is a query per account.
+ *
+ * Counted on countedAmountMinor, like every other total in the app, so a
+ * rent payment split three ways counts the third that was actually yours.
+ */
+async function spentThisMonth(userId: Types.ObjectId, now: Date): Promise<Map<string, number>> {
+  const rows = await Transaction.aggregate<{ _id: Types.ObjectId | null; total: number }>([
+    {
+      $match: {
+        userId,
+        type: "DEBIT",
+        occurredAt: { $gte: istMonthStart(istMonthKey(now)), $lte: now },
+      },
+    },
+    { $group: { _id: "$accountId", total: { $sum: "$countedAmountMinor" } } },
+  ]);
+
+  return new Map(rows.filter((row) => row._id).map((row) => [row._id!.toString(), row.total]));
+}
 
 const accountFields = {
   bankName: z.string().min(1).max(80),

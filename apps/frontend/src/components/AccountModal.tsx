@@ -234,6 +234,22 @@ export function AccountModal({
             </>
           )}
 
+          {!isCash && (
+            <label className="field">
+              <span>{isCard ? "My limit a cycle (₹)" : "My limit a month (₹)"}</span>
+              <input
+                value={spendLimit}
+                onChange={(e) => setSpendLimit(e.target.value)}
+                placeholder="30000"
+                inputMode="numeric"
+              />
+              <span className="field-hint">
+                What you mean to spend, as opposed to what the bank allows. The dashboard warns you
+                as you approach it{isCard ? " and marks it on this card's bar" : ""}.
+              </span>
+            </label>
+          )}
+
           {isDebit && (
             <label className="field field-wide">
               <span>Draws on</span>
@@ -285,16 +301,6 @@ export function AccountModal({
                   value={creditLimit}
                   onChange={(e) => setCreditLimit(e.target.value)}
                   placeholder="200000"
-                  inputMode="numeric"
-                />
-              </label>
-
-              <label className="field">
-                <span>My limit a cycle (₹)</span>
-                <input
-                  value={spendLimit}
-                  onChange={(e) => setSpendLimit(e.target.value)}
-                  placeholder="30000"
                   inputMode="numeric"
                 />
               </label>

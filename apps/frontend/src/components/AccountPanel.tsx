@@ -144,6 +144,10 @@ export function AccountPanel({
         {/* Only a credit card has a cycle. A savings account or a debit
             card with an empty progress bar on it would be a figure that
             means nothing. */}
+        {/* A credit card's cycle where it has one; otherwise the month,
+            which every account has. The two are different periods and the
+            label says which, because a figure whose period is a guess is
+            not a figure. */}
         {isCard && cycle ? (
           <Meter
             spentMinor={cycle.spentMinor}
@@ -151,10 +155,18 @@ export function AccountPanel({
             capIsMine={account.spendLimitMinor != null}
             bankLimitMinor={account.creditLimitMinor}
           />
+        ) : account.month.limitMinor !== null ? (
+          <Meter
+            label="This month"
+            spentMinor={account.month.spentMinor}
+            capMinor={account.month.limitMinor}
+            capIsMine
+            bankLimitMinor={null}
+          />
         ) : (
           <div className="figure-card">
-            <span className="figure-label">This account</span>
-            <span className="figure-value">{TYPE_LABEL[account.accountType]}</span>
+            <span className="figure-label">This month</span>
+            <span className="figure-value">{formatMoney(account.month.spentMinor)}</span>
             <span className="figure-note">{standingNote(account, isCard, isDebit)}</span>
           </div>
         )}
@@ -261,13 +273,13 @@ export function AccountPanel({
 
 /** What this account is, for anything that has no cycle to show instead. */
 function standingNote(account: AccountOverview, isCard: boolean, isDebit: boolean): string {
-  if (isDebit) {
-    return account.linkedAccount
-      ? `Spends ${account.linkedAccount} money, and is counted there`
-      : "Not linked to an account, so it is counted on its own";
+  if (isDebit && account.linkedAccount) {
+    return `Spends ${account.linkedAccount} money, and is counted there too`;
   }
 
-  return isCard ? "Set a statement day to see a cycle" : "No billing cycle to track";
+  return isCard
+    ? "Set a limit and a statement day to track a cycle"
+    : "Set a monthly limit to be warned as you approach it";
 }
 
 /**
@@ -280,11 +292,13 @@ function standingNote(account: AccountOverview, isCard: boolean, isDebit: boolea
  * reassuring and wrong.
  */
 function Meter({
+  label = "This cycle",
   spentMinor,
   capMinor,
   capIsMine,
   bankLimitMinor,
 }: {
+  label?: string;
   spentMinor: number;
   capMinor: number | null;
   capIsMine: boolean;
@@ -296,7 +310,7 @@ function Meter({
 
   return (
     <div className={`figure-card is-meter ${over ? "is-over" : close ? "is-close" : ""}`}>
-      <span className="figure-label">This cycle</span>
+      <span className="figure-label">{label}</span>
       <span className="figure-value">
         {formatMoney(spentMinor)}
         {capMinor != null && <span className="figure-of">of {formatMoney(capMinor)}</span>}
