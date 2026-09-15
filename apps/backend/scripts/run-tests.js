@@ -23,7 +23,12 @@ if (tests.length === 0) {
   process.exit(1);
 }
 
-const result = spawnSync("tsx", ["--test", ...tests], {
+// Twenty of these start a MongoMemoryServer of their own, and the runner
+// will otherwise start one per core. On a 22-core machine that is twenty
+// mongod processes racing to come up, and the ones that lose fail their
+// first test - a different handful of suites each run, which reads as
+// twenty flaky tests rather than one overloaded machine.
+const result = spawnSync("tsx", ["--test", "--test-concurrency=4", ...tests], {
   cwd: path.join(__dirname, ".."),
   stdio: "inherit",
   shell: true,

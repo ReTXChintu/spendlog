@@ -18,6 +18,7 @@ import { presetsRouter } from "./modules/presets/presets.routes";
 import { emailRouter } from "./modules/ingestion/email.routes";
 import { smsRouter } from "./modules/ingestion/sms.routes";
 import { statementsRouter } from "./modules/statements/statements.routes";
+import { ledgerRouter } from "./modules/ledger/ledger.routes";
 import { vaultRouter } from "./modules/vault/vault.routes";
 import { transactionsRouter } from "./modules/transactions/transactions.routes";
 import { tripsRouter } from "./modules/trips/trips.routes";
@@ -54,6 +55,7 @@ app.use("/cards", cardsRouter);
 app.use("/budget", budgetRouter);
 app.use("/statements", statementsRouter);
 app.use("/vault", vaultRouter);
+app.use("/ledger", ledgerRouter);
 app.use("/perks", perksRouter);
 app.use("/dashboard", dashboardRouter);
 

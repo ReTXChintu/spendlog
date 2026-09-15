@@ -1083,3 +1083,12 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
   .card-limit-figures b{font-size:13.5px}
   .card-limit-name{font-size:12.5px}
 }
+
+/* ------------------------------------------- clearing out the old months */
+/* Only shown while there is something from before the ledger starts, which
+   is only ever true on an account that imported it before the rule
+   existed. */
+.ledger-purge{margin-top:14px;padding:13px 15px;background:var(--paper);
+  border:1px solid var(--line);border-radius:var(--radius-md)}
+.ledger-purge .desc{margin:0 0 10px}
+.ledger-purge .set-card-actions{margin-top:0}

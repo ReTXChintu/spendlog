@@ -1,5 +1,6 @@
 import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
@@ -50,12 +51,18 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   bool _readingStatements = false;
   String? _statementResult;
 
+  String? _ledgerMonth;
+  String? _ledgerPrevious;
+  String? _ledgerNote;
+  bool _loadingEarlier = false;
+
   @override
   void initState() {
     super.initState();
     _loadConnections();
     _loadYou();
     _loadPresets();
+    _loadLedger();
     if (Platform.isAndroid) {
       _refreshSmsStatus();
       _loadReminders();
@@ -66,6 +73,62 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   void dispose() {
     _tabs.dispose();
     super.dispose();
+  }
+
+  /// Where the ledger starts, and the month a button would open up next.
+  Future<void> _loadLedger() async {
+    try {
+      final json = await ApiClient.instance.get('/ledger') as Map<String, dynamic>;
+      if (!mounted) return;
+      setState(() {
+        _ledgerMonth = json['month'] as String?;
+        _ledgerPrevious = (json['canGoBack'] as bool? ?? false) ? json['previous'] as String? : null;
+      });
+    } catch (_) {
+      // The card says it is loading and stays that way.
+    }
+  }
+
+  /// Go back one more month, and fetch it.
+  ///
+  /// Opening a month up is only half of it: that month's alerts and
+  /// statements were skipped when they first went past, so moving the
+  /// start without going back for them would show an empty month.
+  Future<void> _loadEarlierMonth() async {
+    setState(() {
+      _loadingEarlier = true;
+      _ledgerNote = null;
+    });
+
+    try {
+      final json = await ApiClient.instance.post('/ledger/earlier') as Map<String, dynamic>;
+      if (!mounted) return;
+      setState(() {
+        _ledgerNote = '${_monthLabel(json['month'] as String)} is in. '
+            '${json['imported'] ?? 0} transactions and ${json['statementsRead'] ?? 0} statements '
+            'came back with it.';
+      });
+      await _loadLedger();
+    } catch (error) {
+      if (mounted) {
+        setState(() =>
+            _ledgerNote = error is ApiException ? error.message : "That didn't work just now.");
+      }
+    } finally {
+      if (mounted) setState(() => _loadingEarlier = false);
+    }
+  }
+
+  /// "September 2026", from a YYYY-MM key.
+  String _monthLabel(String month) {
+    final parts = month.split('-');
+    if (parts.length != 2) return month;
+
+    final year = int.tryParse(parts[0]);
+    final index = int.tryParse(parts[1]);
+    if (year == null || index == null) return month;
+
+    return DateFormat('MMMM yyyy').format(DateTime(year, index));
   }
 
   Future<void> _loadPresets() async {
@@ -383,6 +446,33 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     final connection = _connections.isEmpty ? null : _connections.first;
 
     return [
+        // Where the ledger starts is a fact about what gets fetched, so it
+        // belongs beside the mailbox and the phone it gets fetched from.
+        _SettingsCard(
+          icon: Icons.event_outlined,
+          title: 'Start loading from',
+          subtitle: _ledgerMonth == null ? 'Loading…' : _monthLabel(_ledgerMonth!),
+          child: _CardBody(
+            text: _ledgerMonth == null
+                ? 'Nothing from before the month you joined is imported.'
+                : 'Nothing from before ${_monthLabel(_ledgerMonth!)} is imported. Your mailbox and '
+                    'your phone hold plenty from before it, and none of it was ever yours to track '
+                    'here.'
+                    '${_ledgerNote == null ? '' : '\n\n$_ledgerNote'}',
+            actions: [
+              if (_ledgerPrevious != null)
+                OutlinedButton(
+                  onPressed: _loadingEarlier ? null : _loadEarlierMonth,
+                  child: Text(
+                    _loadingEarlier
+                        ? 'Fetching ${_monthLabel(_ledgerPrevious!)}…'
+                        : 'Load ${_monthLabel(_ledgerPrevious!)} too',
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
         _SettingsCard(
           icon: Icons.mail_outline,
           title: 'Email import',

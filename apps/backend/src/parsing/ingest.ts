@@ -7,6 +7,7 @@ import { matchEmiInstalment } from "../modules/emi/emi.matching";
 import { tripForOccurredAt } from "../modules/trips/trips.service";
 import { findDuplicate, detectSelfTransfer } from "./dedupe";
 import { parseTransactionText } from "./parser";
+import { horizonFor } from "../modules/ledger/ledger.horizon";
 
 export interface IngestResult {
   status: "created" | "duplicate" | "ignored";
@@ -40,6 +41,17 @@ export async function ingestRawMessage(params: {
   }
 
   const occurredAt = parsed.occurredAt ?? params.receivedAt;
+
+  // Older than this ledger goes back. A mailbox holds months of alerts and
+  // a phone holds years, and importing them would fill the app with a
+  // period nobody meant to track. Ignored rather than stored-and-hidden:
+  // a row that exists but is never shown is a row that turns up in a total
+  // one day.
+  const horizon = await horizonFor(params.userId);
+  if (!horizon || occurredAt < horizon) {
+    return { status: "ignored", transaction: null };
+  }
+
   const accountId = await resolveAccount(params.userId, parsed.account);
 
   const duplicate = await findDuplicate({

@@ -4,6 +4,7 @@ import { AccountModal } from "../components/AccountModal";
 import { AccountPanel } from "../components/AccountPanel";
 import { CommitmentModal } from "../components/CommitmentModal";
 import { Icon } from "../components/Icon";
+import { LedgerStartCard } from "../components/LedgerStartCard";
 import { StatementShelf } from "../components/StatementShelf";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { api } from "../lib/api";
@@ -176,6 +177,8 @@ function ConnectionsTab() {
 
   return (
     <div className="settings-grid">
+      <LedgerStartCard />
+
       <div className="card set-card">
         <div className="set-card-head">
           <div className="set-card-icon">

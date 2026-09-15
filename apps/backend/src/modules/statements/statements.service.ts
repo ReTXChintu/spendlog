@@ -5,6 +5,7 @@ import { Account, CardStatement, CardStatementDoc, EmailConnection } from "../..
 import { createOAuthClient } from "../ingestion/gmail.service";
 import { decryptPassword, encryptionAvailable } from "./statements.crypto";
 import { readStatementFile, saveStatementFile } from "./statements.files";
+import { horizonFor } from "../ledger/ledger.horizon";
 import { allReaders } from "./statements.issuers";
 import { parseStatementRows } from "./statements.parse";
 import { extractStatementRows, StatementLockedError } from "./statements.pdf";
@@ -69,7 +70,14 @@ export async function syncStatements(userId: Types.ObjectId, options?: { days?: 
     ...new Set(cards.map((card) => decryptPassword(card.statementPassword)).filter(Boolean)),
   ] as (string | null)[];
 
-  const after = Math.floor((Date.now() - (options?.days ?? FIRST_RUN_DAYS) * 24 * 60 * 60 * 1000) / 1000);
+  // Never further back than the ledger goes. The window asked for is a
+  // ceiling on how much mail to read, not a licence to read past the point
+  // the user said their ledger starts.
+  const horizon = await horizonFor(userId);
+  if (!horizon) return result;
+
+  const asked = Date.now() - (options?.days ?? FIRST_RUN_DAYS) * 24 * 60 * 60 * 1000;
+  const after = Math.floor(Math.max(asked, horizon.getTime()) / 1000);
 
   for (const connection of connections) {
     const client = createOAuthClient();

@@ -59,6 +59,19 @@ export interface UserDoc {
   /// money arrives and then gets spent.
   salaryAmountMinor?: number | null;
   salaryDay?: number | null;
+  /// The first month SpendLog will import anything for, as YYYY-MM.
+  ///
+  /// Somebody who joins on the 13th of September does not want August's
+  /// mail read: a half-remembered month they never meant to track would
+  /// arrive uncategorised and count against every total. So the ledger
+  /// starts on the 1st of the month they joined, and moves back only when
+  /// they ask for it.
+  ///
+  /// It governs *importing*, not the ledger itself. A payment entered by
+  /// hand with an old date is somebody saying what happened, and is kept.
+  /// Null on an account that predates the field, which reads as the month
+  /// that account was created.
+  ledgerFrom?: string | null;
   /// The PIN that unlocks stored card details, as a scrypt hash and its
   /// salt. One PIN covers every card: it guards a screen, not a card, and
   /// nobody wants four of them.
@@ -97,6 +110,7 @@ const userSchema = new Schema<UserDoc>(
     googleId: { type: String, default: null },
     salaryAmountMinor: { type: Number, default: null, min: 0 },
     salaryDay: { type: Number, default: null, min: 1, max: 31 },
+    ledgerFrom: { type: String, default: null },
     vaultPin: { type: vaultPinSchema, default: null },
   },
   {

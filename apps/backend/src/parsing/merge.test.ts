@@ -30,7 +30,16 @@ beforeEach(async () => {
 let userCount = 0;
 
 async function makeUser(): Promise<Types.ObjectId> {
-  const user = await User.create({ email: `u${(userCount += 1)}@example.com`, name: "Test" });
+  const user = await User.create({
+    email: `u${(userCount += 1)}@example.com`,
+    name: "Test",
+    // These messages are dated August 2026, and a user made today has a
+    // ledger starting this month - which would ignore every one of them
+    // before any merging happened. This suite is about what two messages
+    // for one payment do to each other, so the horizon is put out of its
+    // way rather than tested here. It has a suite of its own.
+    ledgerFrom: "2020-01",
+  });
   return user._id;
 }
 
