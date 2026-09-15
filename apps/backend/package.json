@@ -10,6 +10,7 @@
     "seed": "tsx src/seed.ts",
     "backfill:counted": "tsx scripts/backfill-counted.ts",
     "fix:sms-times": "tsx scripts/fix-sms-times.ts",
+    "ledger:start": "tsx scripts/set-ledger-start.ts",
     "test": "node scripts/run-tests.js",
     "statements:preview": "tsx scripts/preview-statement.ts"
   },
