@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/format.dart';
+import '../services/reminder_service.dart';
 import '../widgets/card_limits.dart';
 import '../widgets/card_picker.dart';
 import '../widgets/state_block.dart';
@@ -40,10 +42,16 @@ class DashboardScreenState extends State<DashboardScreen> {
     try {
       final result = await ApiClient.instance.get('/dashboard');
       if (!mounted) return;
+      final data = DashboardData.fromJson(result as Map<String, dynamic>);
       setState(() {
-        _data = DashboardData.fromJson(result as Map<String, dynamic>);
+        _data = data;
         _failed = false;
       });
+
+      // The follow-up reminders are armed and disarmed from here, because
+      // this is where the count becomes known - every open and every pull
+      // to refresh. Nothing waits on it.
+      unawaited(ReminderService.instance.updateFollowUps(data.needsCategoryYesterday));
     } catch (_) {
       if (mounted) setState(() => _failed = true);
     }

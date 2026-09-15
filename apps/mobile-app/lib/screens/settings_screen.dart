@@ -37,6 +37,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   DateTime? _smsLastSynced;
 
   bool _dailyReminder = false;
+  DateTime? _nagLastRun;
   bool _nagReminder = false;
   bool _billReminder = false;
 
@@ -166,11 +167,13 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     final daily = await ReminderService.instance.dailyEnabled();
     final nag = await ReminderService.instance.nagEnabled();
     final bills = await ReminderService.instance.billsEnabled();
+    final lastRun = await ReminderService.instance.followUpsLastRan();
     if (!mounted) return;
     setState(() {
       _dailyReminder = daily;
       _nagReminder = nag;
       _billReminder = bills;
+      _nagLastRun = lastRun;
     });
   }
 
@@ -472,11 +475,27 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                 ),
                 _ToggleRow(
                   title: 'Keep reminding',
-                  subtitle: 'From 6am, every half hour, while anything from yesterday is still '
-                      'uncategorised. Stops as soon as none are.',
+                  subtitle: 'From 6am to 10pm, every half hour, while anything from yesterday is '
+                      'still uncategorised. Stops as soon as none are.',
                   value: _nagReminder,
                   onChanged: (on) => _setReminder('nag', on),
                 ),
+                // Said out loud because it is the thing that goes wrong.
+                // Android stops background work on most phones once the
+                // app has been away a while, and the reminders fall back
+                // to alarms that fire regardless - so this line explains a
+                // "never" rather than leaving it looking broken.
+                if (_nagReminder)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(2, 2, 2, 0),
+                    child: Text(
+                      _nagLastRun == null
+                          ? 'The background check has not managed to run yet, so the reminders '
+                              'come from alarms and are switched off next time you open the app.'
+                          : 'Background check last ran ${formatDateTime(_nagLastRun!)}.',
+                      style: TextStyle(fontSize: 11.5, height: 1.45, color: context.c.mutedLight),
+                    ),
+                  ),
               ],
             ),
           ),

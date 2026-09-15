@@ -25,16 +25,37 @@ const int _dailyNotificationId = 1;
 const int _nagNotificationId = 2;
 const int _billNotificationId = 3;
 
-/// The hour the nagging is allowed to start.
+/// The hours the nagging runs between.
 const int _nagFromHour = 6;
+const int _nagUntilHour = 22;
+
+/// One notification id per half-hour slot, from 06:00 to 22:00. Fixed and
+/// contiguous so the whole day can be armed and cancelled as a block.
+const int _nagSlotBaseId = 100;
+
+/// When the background task last managed to run, so "it is not working"
+/// can be answered with a time instead of a shrug.
+const String _nagLastRunKey = 'spendlog_reminder_nag_last_run';
 
 /// Reminders to go back over yesterday's payments.
 ///
-/// Two separate things, because they answer to different machinery. The
-/// midnight nudge is a fixed time, so the notification plugin can schedule
-/// it once and forget. The follow-ups have a condition attached — only if
-/// something is still uncategorised — which needs waking up, asking the
-/// server, and deciding, so that runs as a background task.
+/// The midnight nudge is a fixed time, so the notification plugin
+/// schedules it once and forgets. The follow-ups have a condition attached
+/// — only while something is still uncategorised — which is why they were
+/// a background task asking the server every half hour.
+///
+/// That did not fire. WorkManager's periodic work is advisory on Android:
+/// Doze defers it, and most OEM battery managers stop it outright once the
+/// app has been in the background for a while. The midnight reminder kept
+/// working throughout, because an alarm is not the same machinery.
+///
+/// So the follow-ups are alarms now too — one per half-hour slot, repeating
+/// daily — and the condition moved to where it can actually be evaluated:
+/// the app arms the day's slots when it sees something uncategorised and
+/// cancels them when it sees nothing. Since categorising happens in the
+/// app, the nagging stops within a moment of the work being done. The
+/// background task is still registered and still preferred when it runs,
+/// because it can be precise about the count; it is no longer relied on.
 class ReminderService {
   ReminderService._();
   static final ReminderService instance = ReminderService._();
@@ -132,6 +153,7 @@ class ReminderService {
     if (!enabled) {
       await prefs.setBool(_nagEnabledKey, false);
       await _plugin.cancel(id: _nagNotificationId);
+      await _disarmSlots();
       await _rescheduleBackgroundTask();
       return false;
     }
@@ -143,6 +165,70 @@ class ReminderService {
     await prefs.setBool(_nagEnabledKey, true);
     await _rescheduleBackgroundTask();
     return true;
+  }
+
+  /// Arm or disarm the day's follow-ups from a count the app already has.
+  ///
+  /// Called wherever the number of uncategorised payments becomes known —
+  /// which is every time the dashboard loads, so in practice every time
+  /// the app is opened or pulled to refresh. That is what keeps the
+  /// nagging honest without a background task: the moment the last one is
+  /// categorised, the app is by definition open, and the rest of the day's
+  /// slots come off.
+  Future<void> updateFollowUps(int uncategorised) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!(prefs.getBool(_nagEnabledKey) ?? false)) return;
+
+    await init();
+
+    if (uncategorised == 0) {
+      await _plugin.cancel(id: _nagNotificationId);
+      await _disarmSlots();
+      return;
+    }
+
+    await _armSlots();
+  }
+
+  /// Every half hour from 06:00 to 22:00, repeating daily.
+  ///
+  /// No count in the wording. It is fixed at the moment of arming and
+  /// would be stale the moment anything was categorised, and a reminder
+  /// that says the wrong number is worse than one that says none.
+  Future<void> _armSlots() async {
+    for (final (index, slot) in _slots().indexed) {
+      await _plugin.zonedSchedule(
+        id: _nagSlotBaseId + index,
+        title: 'Yesterday still needs categories',
+        body: 'They stay uncategorised until you say what they were.',
+        scheduledDate: slot,
+        notificationDetails: const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'spendlog-review',
+            'Still to categorise',
+            channelDescription:
+                'Repeats through the day while yesterday still has uncategorised payments.',
+            importance: Importance.defaultImportance,
+          ),
+        ),
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        matchDateTimeComponents: DateTimeComponents.time,
+      );
+    }
+  }
+
+  Future<void> _disarmSlots() async {
+    for (var index = 0; index < _slotCount; index += 1) {
+      await _plugin.cancel(id: _nagSlotBaseId + index);
+    }
+  }
+
+  /// When the background task last ran, for the settings screen to show.
+  /// Null means it has never managed to - which is the answer on a phone
+  /// whose battery manager stops it, and worth saying out loud.
+  Future<DateTime?> followUpsLastRan() async {
+    final raw = (await SharedPreferences.getInstance()).getString(_nagLastRunKey);
+    return raw == null ? null : DateTime.tryParse(raw);
   }
 
   Future<bool> billsEnabled() async =>
@@ -189,6 +275,24 @@ class ReminderService {
     );
   }
 
+  /// How many half-hour slots there are between the two hours.
+  static int get _slotCount => (_nagUntilHour - _nagFromHour) * 2 + 1;
+
+  /// The next occurrence of each slot. Each repeats daily from there, so
+  /// one that has already gone past today is scheduled for tomorrow and
+  /// then keeps its place.
+  static Iterable<tz.TZDateTime> _slots() sync* {
+    final now = tz.TZDateTime.now(tz.local);
+
+    for (var index = 0; index < _slotCount; index += 1) {
+      final hour = _nagFromHour + index ~/ 2;
+      final minute = index.isEven ? 0 : 30;
+
+      final today = tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
+      yield today.isAfter(now) ? today : today.add(const Duration(days: 1));
+    }
+  }
+
   static tz.TZDateTime _nextMidnight() {
     final now = tz.TZDateTime.now(tz.local);
     final todayMidnight = tz.TZDateTime(tz.local, now.year, now.month, now.day);
@@ -233,11 +337,17 @@ Future<bool> _remindIfAnythingIsUnfiled() async {
     if (response.statusCode != 200) return true;
 
     final body = jsonDecode(response.body) as Map<String, dynamic>;
+    await prefs.setString(_nagLastRunKey, DateTime.now().toIso8601String());
+
     final count = body['uncategorized'] as int? ?? 0;
     if (count == 0) {
       // Nothing left, so take the last reminder off the shade rather than
-      // leaving a stale one sitting there.
+      // leaving a stale one sitting there - and with it the rest of the
+      // day's slots, which would otherwise keep asking.
       await FlutterLocalNotificationsPlugin().cancel(id: _nagNotificationId);
+      for (var index = 0; index < ReminderService._slotCount; index += 1) {
+        await FlutterLocalNotificationsPlugin().cancel(id: _nagSlotBaseId + index);
+      }
       return true;
     }
 
