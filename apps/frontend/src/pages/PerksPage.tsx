@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
 import { PerkModal } from "../components/PerkModal";
+import { PerkImportBar } from "../components/PerkImportBar";
 import { PerkDraft, readPerkFromImage } from "../lib/perkImage";
 import { StateBlock } from "../components/States";
 import { api } from "../lib/api";
@@ -40,6 +41,15 @@ export function PerksPage() {
       .then(setReader)
       .catch(() => setReader({ available: false }));
   }, []);
+
+  /// The ones a model wrote that nobody has confirmed. They count for
+  /// everything meanwhile - this is a prompt to glance, not a gate.
+  const unreviewed = perks.filter((perk) => perk.needsReview);
+
+  async function confirmAll() {
+    await api.post("/perks/reviewed", {});
+    load();
+  }
 
   async function readPicture(file: File) {
     setReading(true);
@@ -122,8 +132,9 @@ export function PerksPage() {
                 onClick={() => picker.current?.click()}
               >
                 <Icon name="ic-search" />
-                {reading ? "Reading it…" : "Read a picture"}
+                {reading ? "Reading it…" : "Read one"}
               </button>
+              <PerkImportBar onFinished={load} />
             </>
           )}
           <button className="btn btn-sm btn-primary" onClick={() => setEditing({ perk: null })}>
@@ -164,6 +175,22 @@ export function PerksPage() {
       </form>
 
       {answer && <Answer answer={answer} onUsed={(perk) => markUsed(perk, true)} />}
+
+      {unreviewed.length > 0 && (
+        <div className="review-bar">
+          <Icon name="ic-info" />
+          <div>
+            <b>
+              {unreviewed.length} {unreviewed.length === 1 ? "perk was" : "perks were"} read off a
+              picture.
+            </b>{" "}
+            Nobody has checked the figures yet — open any that look off, then say you are happy.
+          </div>
+          <button className="btn btn-sm" onClick={confirmAll}>
+            All look right
+          </button>
+        </div>
+      )}
 
       <div className="section-block" style={{ marginTop: 28 }}>
         <h3>Everything you're holding</h3>

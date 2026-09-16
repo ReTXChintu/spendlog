@@ -410,6 +410,10 @@ export interface Perk {
   expiresOn: string | null;
   code: string | null;
   usedAt: string | null;
+  /// True for one a model read off a picture that nobody has confirmed. It
+  /// is a real perk either way; the flag only says where the figures came
+  /// from.
+  needsReview?: boolean;
   isActive: boolean;
   notes: string | null;
   /** Added by the list and the dashboard, not stored. */

@@ -61,6 +61,69 @@ async function shrink(file: File): Promise<Blob> {
   });
 }
 
+export interface ImportJob {
+  id: string;
+  status: "QUEUED" | "RUNNING" | "DONE" | "FAILED";
+  problem: string | null;
+  total: number;
+  counts: { queued: number; running: number; done: number; failed: number };
+  failures: { fileName: string; problem: string | null }[];
+  duplicates: number;
+  added: number;
+  finishedAt: string | null;
+}
+
+/**
+ * Send a pile of them, and get a job back.
+ *
+ * Shrunk one at a time rather than all at once: a phone's worth of
+ * screenshots decoded in parallel is a tab that stops responding, and the
+ * upload is waiting on the slowest one either way.
+ */
+export async function importPerkImages(
+  files: File[],
+  onProgress?: (shrunk: number, total: number) => void
+): Promise<ImportJob> {
+  const images: { name: string; base64: string }[] = [];
+
+  for (const [index, file] of files.entries()) {
+    const blob = await shrink(file);
+    images.push({ name: file.name, base64: await toBase64(blob) });
+    onProgress?.(index + 1, files.length);
+  }
+
+  return postJson<ImportJob>("/perks/import", { images });
+}
+
+/** Base64 without the data-URL preamble the server would have to strip. */
+function toBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("The picture could not be read."));
+    reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const token = getToken();
+  const response = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const problem = await response.json().catch(() => ({ error: response.statusText }));
+    throw new ApiError(response.status, problem.error ?? response.statusText);
+  }
+
+  return (await response.json()) as T;
+}
+
 export async function readPerkFromImage(file: File): Promise<PerkDraft> {
   const token = getToken();
   const body = await shrink(file);
