@@ -25,13 +25,24 @@ if (tests.length === 0) {
 
 // Twenty of these start a MongoMemoryServer of their own, and the runner
 // will otherwise start one per core. On a 22-core machine that is twenty
-// mongod processes racing to come up, and the ones that lose fail their
-// first test - a different handful of suites each run, which reads as
-// twenty flaky tests rather than one overloaded machine.
+// mongod processes racing to come up, and whichever loses fails in its
+// `before` hook - a different handful of suites each run, which reads as
+// twenty flaky tests rather than one busy machine.
+//
+// Two halves to the answer. Fewer at a time, so the machine is not asked
+// to start twenty databases at once; and test-setup.js, preloaded into
+// every test process, gives mongoose long enough to keep retrying while a
+// mongod is still coming up. NODE_OPTIONS rather than an argument,
+// because the runner spawns a child process per test file and only the
+// environment reaches them.
 const result = spawnSync("tsx", ["--test", "--test-concurrency=4", ...tests], {
   cwd: path.join(__dirname, ".."),
   stdio: "inherit",
   shell: true,
+  env: {
+    ...process.env,
+    NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ./scripts/test-setup.js`.trim(),
+  },
 });
 
 process.exit(result.status ?? 1);
