@@ -1,4 +1,4 @@
-import { Router } from "express";
+import express, { Router } from "express";
 import { Types } from "mongoose";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
@@ -6,6 +6,8 @@ import { validObjectIdParam } from "../../middleware/validate";
 import { Account, Perk } from "../../models";
 import { PERK_KINDS } from "../../types";
 import { cardStatuses } from "../cards/cards.status";
+import { extractPerk } from "./perks.extract";
+import { visionProvider, VisionUnavailableError } from "./perks.vision";
 import {
   bestMerchantStrength,
   comparePerks,
@@ -36,6 +38,72 @@ const perkSchema = z.object({
   notes: z.string().trim().max(500).nullable().optional(),
   isActive: z.boolean().optional(),
 });
+
+/**
+ * GET /perks/reader — whether a picture can be read at all.
+ *
+ * Asked before the button is drawn. A deployment with no model set up
+ * hides it rather than offering something that will fail: reading a
+ * picture is an extra way to add a coupon and never the only one.
+ */
+perksRouter.get("/reader", (_req, res) => {
+  const provider = visionProvider();
+  res.json({ available: provider !== null, model: provider?.name ?? null });
+});
+
+/**
+ * POST /perks/read — one picture in, a draft out.
+ *
+ * Saves nothing, on purpose. A model that reads "20% up to ₹150" as "₹150
+ * off" is wrong in a way nobody notices until they are at a till with the
+ * wrong card out, so what comes back is a filled-in form rather than a
+ * stored perk. Checking six fields beats typing twelve, and it keeps a
+ * mistake in front of a person rather than inside a total.
+ *
+ * The image arrives as raw bytes rather than base64 in JSON: a photo of a
+ * coupon is a few megabytes and base64 would add a third to that for
+ * nothing.
+ */
+perksRouter.post(
+  "/read",
+  express.raw({ type: ["image/jpeg", "image/png", "image/webp"], limit: "12mb" }),
+  async (req, res) => {
+    const provider = visionProvider();
+    if (!provider) {
+      return res.status(503).json({
+        error:
+          "No vision model is set up on this server. Set VISION_BASE_URL in the .env at the repo " +
+          "root — see docs/coupon-reading.md.",
+      });
+    }
+
+    const image = req.body;
+    if (!Buffer.isBuffer(image) || image.length === 0) {
+      return res.status(400).json({
+        error: "Send the image itself, with a Content-Type of image/jpeg, image/png or image/webp.",
+      });
+    }
+
+    try {
+      const draft = await extractPerk({
+        userId: currentUserId(req),
+        image,
+        mimeType: req.headers["content-type"] ?? "image/jpeg",
+        provider,
+      });
+
+      res.json(draft);
+    } catch (error) {
+      // A model that is down or talking nonsense is a thing to report
+      // plainly, not a 500 - it is the most likely failure here and the
+      // person reading it can usually fix it.
+      if (error instanceof VisionUnavailableError) {
+        return res.status(503).json({ error: error.message });
+      }
+      throw error;
+    }
+  }
+);
 
 // GET /perks — everything held, newest first, live ones before dead ones.
 perksRouter.get("/", async (req, res) => {

@@ -42,4 +42,13 @@ export const env = {
   // backend would also try to use the certificate — pointless work on a
   // local hop, and it needs read access to a root-only private key.
   backendTls: flag(process.env.BACKEND_TLS, true),
+
+  // Where a vision model is listening, for reading a coupon off a picture.
+  // Empty means there is none, and the feature hides itself rather than
+  // failing - it is an extra way to add a coupon and never the only one.
+  visionBaseUrl: process.env.VISION_BASE_URL ?? "",
+  visionModel: process.env.VISION_MODEL ?? "qwen2.5-vl-3b",
+  // Generous on purpose. A 3B model on CPU cores takes tens of seconds,
+  // and the first request after a restart also loads the weights.
+  visionTimeoutMs: Number(process.env.VISION_TIMEOUT_MS ?? 180_000),
 };
