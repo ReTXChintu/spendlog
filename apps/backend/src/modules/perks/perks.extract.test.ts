@@ -50,6 +50,36 @@ async function read(answer: string) {
   });
 }
 
+/** The same, on a day the test chooses. */
+async function readOn(answer: string, now: Date) {
+  return extractPerk({
+    userId,
+    image: Buffer.from("not really a picture"),
+    mimeType: "image/png",
+    provider: saying(answer),
+    now,
+  });
+}
+
+/** What the model was told, rather than what it replied. */
+async function promptSeen(now: Date): Promise<string> {
+  let seen = "";
+  await extractPerk({
+    userId,
+    image: Buffer.from("not really a picture"),
+    mimeType: "image/png",
+    now,
+    provider: {
+      name: "test-model",
+      describe: async ({ prompt }) => {
+        seen = prompt;
+        return "{}";
+      },
+    },
+  });
+  return seen;
+}
+
 describe("reading a coupon off a picture", () => {
   it("turns rupees into minor units", async () => {
     const draft = await read(
@@ -146,6 +176,58 @@ describe("reading a coupon off a picture", () => {
     }
 
     assert.equal((await read(JSON.stringify({ expiresOn: "2026-12-31" }))).expiresOn, "2026-12-31");
+  });
+
+  it("tells the model what day it is, in IST", async () => {
+    // Late evening UTC is already tomorrow in IST. A prompt that said the
+    // 16th here would have every relative date a day short.
+    assert.match(await promptSeen(new Date("2026-09-16T21:00:00.000Z")), /Today is 2026-09-17/);
+  });
+
+  it("works out a date from a number of days", async () => {
+    const draft = await readOn(
+      JSON.stringify({ title: "Flat ₹100 off", expiresInDays: 7 }),
+      new Date("2026-09-17T06:30:00.000Z")
+    );
+
+    assert.equal(draft.expiresOn, "2026-09-24");
+    assert.ok(!draft.missing.includes("expiresOn"));
+  });
+
+  it("counts the days in IST, not in UTC", async () => {
+    // 01:00 IST on the 17th, which is still the 16th where the server sits.
+    const draft = await readOn(
+      JSON.stringify({ expiresInDays: 10 }),
+      new Date("2026-09-16T19:30:00.000Z")
+    );
+
+    assert.equal(draft.expiresOn, "2026-09-27");
+  });
+
+  it("lets a printed date beat a period", async () => {
+    const draft = await readOn(
+      JSON.stringify({ expiresOn: "2026-12-31", expiresInDays: 7 }),
+      new Date("2026-09-17T06:30:00.000Z")
+    );
+
+    assert.equal(draft.expiresOn, "2026-12-31");
+  });
+
+  it("refuses a number of days that is not one", async () => {
+    for (const bad of [-1, 401, "soon", null, Number.NaN, {}]) {
+      const draft = await readOn(
+        JSON.stringify({ expiresInDays: bad }),
+        new Date("2026-09-17T06:30:00.000Z")
+      );
+      assert.equal(draft.expiresOn, null, String(bad));
+    }
+
+    // Zero is a real thing a coupon says, and it means today.
+    const today = await readOn(
+      JSON.stringify({ expiresInDays: 0 }),
+      new Date("2026-09-17T06:30:00.000Z")
+    );
+    assert.equal(today.expiresOn, "2026-09-17");
   });
 
   it("ignores a percentage that is not one", async () => {

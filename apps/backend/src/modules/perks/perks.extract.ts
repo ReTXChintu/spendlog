@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 import { Account } from "../../models";
 import { PerkKind } from "../../types";
+import { istDayKey, istDayStart } from "../../time";
 import { VisionProvider, VisionUnavailableError } from "./perks.vision";
 
 /**
@@ -49,7 +50,10 @@ export interface PerkDraft {
  * list far better than a paragraph, and every rule here exists because of
  * a way coupons are actually written in India.
  */
-const PROMPT = `You are reading a picture of a discount coupon or a credit card offer.
+function promptFor(today: string): string {
+  return `You are reading a picture of a discount coupon or a credit card offer.
+
+Today is ${today} (IST). Every date you write is in that timezone.
 
 Reply with ONE JSON object and nothing else. No explanation, no markdown fence.
 
@@ -63,6 +67,7 @@ Reply with ONE JSON object and nothing else. No explanation, no markdown fence.
   "minSpend": the minimum order in rupees, or null,
   "startsOn": "YYYY-MM-DD" or null,
   "expiresOn": "YYYY-MM-DD" or null,
+  "expiresInDays": a whole number when it says a period rather than a date, or null,
   "code": the coupon code exactly as printed, or null,
   "card": the credit or debit card it requires, or null,
   "notes": anything else that limits it, one short sentence, or null
@@ -75,8 +80,12 @@ Rules:
 4. "Flat ₹200 off" means flatAmount 200 and percent null.
 5. "on orders above ₹499" or "min. order ₹499" means minSpend 499.
 6. Dates in Indian order: 04/08/26 is 4 August 2026. Assume 20xx.
-7. "Valid till 31 Dec" with no year means the next 31 December still ahead.
-8. Use null for anything not printed. Do not guess.`;
+7. "Valid till 31 Dec" with no year means the next 31 December after today.
+8. A period rather than a date - "expires in 7 days", "valid for 2 weeks",
+   "3 days left" - goes in expiresInDays as a number. 2 weeks is 14. Leave
+   expiresOn null when you do that; the date is worked out from today.
+9. Use null for anything not printed. Do not guess.`;
+}
 
 /** A rupee figure the model wrote as a number, in paise. */
 function toMinor(value: unknown): number | null {
@@ -92,6 +101,34 @@ function toIsoDate(value: unknown): string | null {
 
   const parsed = new Date(`${value}T00:00:00.000+05:30`);
   return Number.isNaN(parsed.getTime()) ? null : value;
+}
+
+/** How far ahead a coupon that counts in days rather than dates runs. */
+const LONGEST_SENSIBLE_DAYS = 400;
+
+/**
+ * "Expires in 7 days", turned into a date.
+ *
+ * Worked out here rather than in the prompt. A coupon that says a period
+ * instead of a date cannot be read at all without knowing what day it is,
+ * and even told the date a small model does the addition wrong often
+ * enough to matter - it is arithmetic, and arithmetic is the one thing
+ * this side of the line is better at.
+ *
+ * Counted in IST, because the day a coupon runs out is a calendar day in
+ * the place holding the coupon, and a server in UTC is five and a half
+ * hours behind that.
+ */
+function dateInDays(value: unknown, today: Date): string | null {
+  const days = typeof value === "string" ? Number(value) : value;
+  if (typeof days !== "number" || !Number.isFinite(days)) return null;
+
+  const whole = Math.round(days);
+  // Zero is "expires today", which is a real thing a coupon says. Negative
+  // is a misread, and a year out is a model inventing a number.
+  if (whole < 0 || whole > LONGEST_SENSIBLE_DAYS) return null;
+
+  return istDayKey(new Date(istDayStart(istDayKey(today)).getTime() + whole * 86_400_000));
 }
 
 /**
@@ -172,11 +209,20 @@ export async function extractPerk(params: {
   image: Buffer;
   mimeType: string;
   provider: VisionProvider;
+  /// Passed in so a test can say what day it is. Defaults to now, which is
+  /// what every caller in the app wants.
+  now?: Date;
 }): Promise<PerkDraft> {
+  const today = params.now ?? new Date();
+
   const said = await params.provider.describe({
     image: params.image,
     mimeType: params.mimeType,
-    prompt: PROMPT,
+    // The date matters more than it looks. Half the coupons in a gallery
+    // say "expires in 7 days" or "valid till 31 Dec" rather than a full
+    // date, and neither can be resolved by something that does not know
+    // what today is - it was guessing, and guessing wrong.
+    prompt: promptFor(istDayKey(today)),
   });
 
   const raw = parseModelJson(said);
@@ -214,7 +260,10 @@ export async function extractPerk(params: {
     maxDiscountMinor: percent === null ? null : toMinor(raw.maxDiscount),
     minSpendMinor: toMinor(raw.minSpend),
     startsOn: toIsoDate(raw.startsOn),
-    expiresOn: toIsoDate(raw.expiresOn),
+    // A date where it printed one, and otherwise today plus however many
+    // days it said. The date wins: a coupon that gives both has told us
+    // the answer and the period is its own rounding of it.
+    expiresOn: toIsoDate(raw.expiresOn) ?? dateInDays(raw.expiresInDays, today),
     code: typeof raw.code === "string" && raw.code.trim() ? raw.code.trim().slice(0, 60) : null,
     notes: typeof raw.notes === "string" && raw.notes.trim() ? raw.notes.trim().slice(0, 500) : null,
     accountId: await matchCard(params.userId, cardNamed),
