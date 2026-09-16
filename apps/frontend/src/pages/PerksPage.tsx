@@ -315,7 +315,11 @@ function PerkRow({
   const worth = perk.percent ? `${perk.percent}%` : perk.flatMinor ? formatMoney(perk.flatMinor) : "";
 
   return (
-    <div className={`perk-row${perk.isLive === false ? " is-dead" : ""}`}>
+    <div
+      className={`perk-row${perk.isLive === false ? " is-dead" : ""}${
+        perk.needsReview ? " needs-review" : ""
+      }`}
+    >
       <span className={`perk-kind is-${perk.kind === "COUPON" ? "coupon" : "offer"}`}>
         {perk.kind === "COUPON" ? "Coupon" : "Card offer"}
       </span>
@@ -323,6 +327,9 @@ function PerkRow({
       <div className="perk-main">
         <div className="perk-title">
           {perk.title} {worth && <span className="perk-worth">{worth}</span>}
+          {/* Which of them a machine wrote, so the count in the banner
+              above is findable rather than just a number. */}
+          {perk.needsReview && <span className="perk-unread">read from a picture</span>}
         </div>
         <div className="perk-sub">
           {perk.merchants.length > 0 ? perk.merchants.join(", ") : "anywhere"}

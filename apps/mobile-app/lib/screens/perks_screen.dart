@@ -718,6 +718,9 @@ class _PerkRow extends StatelessWidget {
         'used'
       else if (perk.daysLeft != null)
         perk.daysLeft! < 0 ? 'expired' : '${perk.daysLeft} ${perk.daysLeft == 1 ? 'day' : 'days'} left',
+      // Which of them a machine wrote, so the count in the banner above
+      // is findable rather than just a number.
+      if (perk.needsReview) 'read from a picture',
     ];
 
     return Dismissible(
@@ -739,8 +742,18 @@ class _PerkRow extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 12),
             decoration: BoxDecoration(
               color: c.surface,
-              border: Border.all(color: c.line),
               borderRadius: BorderRadius.circular(T.rMd),
+              // A thicker edge down the left on one a machine wrote, so it
+              // is visible without reading the line under it.
+              border: Border(
+                top: BorderSide(color: c.line),
+                right: BorderSide(color: c.line),
+                bottom: BorderSide(color: c.line),
+                left: BorderSide(
+                  color: perk.needsReview ? c.brand : c.line,
+                  width: perk.needsReview ? 3 : 1,
+                ),
+              ),
             ),
             child: Row(
               children: [
