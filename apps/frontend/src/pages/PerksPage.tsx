@@ -1,6 +1,7 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
 import { PerkModal } from "../components/PerkModal";
+import { PerkDraft, readPerkFromImage } from "../lib/perkImage";
 import { StateBlock } from "../components/States";
 import { api } from "../lib/api";
 import { formatMoney, formatMoneyShort } from "../lib/format";
@@ -21,7 +22,37 @@ export function PerksPage() {
   const [perks, setPerks] = useState<Perk[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [editing, setEditing] = useState<{ perk: Perk | null } | null>(null);
+  const [editing, setEditing] = useState<{ perk: Perk | null; draft?: PerkDraft | null } | null>(
+    null
+  );
+
+  /// Whether this server has a model to read a picture with. Asked before
+  /// the button is drawn: a deployment without one hides it rather than
+  /// offering something that fails.
+  const [reader, setReader] = useState<{ available: boolean } | null>(null);
+  const [reading, setReading] = useState(false);
+  const [readError, setReadError] = useState<string | null>(null);
+  const picker = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    api
+      .get<{ available: boolean }>("/perks/reader")
+      .then(setReader)
+      .catch(() => setReader({ available: false }));
+  }, []);
+
+  async function readPicture(file: File) {
+    setReading(true);
+    setReadError(null);
+    try {
+      const draft = await readPerkFromImage(file);
+      setEditing({ perk: null, draft });
+    } catch (error) {
+      setReadError(error instanceof Error ? error.message : "That picture could not be read.");
+    } finally {
+      setReading(false);
+    }
+  }
 
   const load = useCallback(() => {
     api.get<Perk[]>("/perks").then(setPerks).catch(() => setPerks([]));
@@ -66,11 +97,48 @@ export function PerksPage() {
       <div className="screen-header">
         <h1 className="screen-title">Perks</h1>
         <div className="screen-actions">
+          {/* Only where the server has a model to read with. A deployment
+              without one hides this rather than offering a button that
+              fails - reading a picture is an extra way to add a coupon
+              and never the only one. */}
+          {reader?.available && (
+            <>
+              <input
+                ref={picker}
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  // Cleared so the same picture can be picked twice, which
+                  // is exactly what you do after a bad read.
+                  event.target.value = "";
+                  if (file) readPicture(file);
+                }}
+              />
+              <button
+                className="btn btn-sm"
+                disabled={reading}
+                onClick={() => picker.current?.click()}
+              >
+                <Icon name="ic-search" />
+                {reading ? "Reading it…" : "Read a picture"}
+              </button>
+            </>
+          )}
           <button className="btn btn-sm btn-primary" onClick={() => setEditing({ perk: null })}>
             <Icon name="ic-plus" /> Add one
           </button>
         </div>
       </div>
+
+      {reading && (
+        <p className="desc">
+          The model is on your own server and runs on its processor, so this takes a little while —
+          usually under a minute, longer the first time after a restart.
+        </p>
+      )}
+      {readError && <p className="desc set-warn">{readError}</p>}
 
       <form className="ask-bar" onSubmit={ask}>
         <div className="ask-field">
@@ -131,6 +199,7 @@ export function PerksPage() {
 
       {editing && (
         <PerkModal
+          draft={editing.draft ?? null}
           perk={editing.perk}
           accounts={accounts}
           categories={categories}

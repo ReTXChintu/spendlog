@@ -1105,3 +1105,12 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
 .crash-detail{margin:14px 0 18px;padding:13px 15px;background:var(--paper);
   border:1px solid var(--line);border-radius:var(--radius-md);font-family:var(--font-mono);
   font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-word;color:var(--debit)}
+
+/* --------------------------------------------- a perk read off a picture */
+/* The model proposes and a person decides, so the form says where it came
+   from and what it could not find rather than looking like something you
+   typed. */
+.read-banner{display:flex;gap:10px;align-items:flex-start;margin:0 0 16px;padding:11px 13px;
+  background:var(--brand-50);border:1px solid var(--brand);border-radius:var(--radius-md);
+  font-size:12.5px;line-height:1.5;color:var(--ink-70)}
+.read-banner svg{width:15px;height:15px;flex-shrink:0;margin-top:1px;color:var(--brand-dark)}
