@@ -48,42 +48,58 @@ find out you forgot it.
 
 ## Running it
 
-Under PM2, beside the app:
-
-```bash
-pm2 start ~/llama.cpp/build/bin/llama-server --name spendlog-vision -- \
-  --model ~/models/qwen2.5-vl-3b-q4.gguf \
-  --mmproj ~/models/qwen2.5-vl-3b-mmproj.gguf \
-  --host 127.0.0.1 --port 8081 \
-  --threads 6 \
-  --ctx-size 4096
-pm2 save
-```
-
-`--host 127.0.0.1` matters: it keeps the model reachable from the app and
-from nothing else. Do not put it on 0.0.0.0.
-
-`--threads 6` rather than 8 leaves a couple of cores for Mongo, Node and
-the web server, which are what you actually notice slowing down.
-
-Then in the `.env` at the repo root:
+Name the paths in the `.env` at the repo root and PM2 runs it for you, as
+a third process beside the app:
 
 ```
 VISION_BASE_URL="http://127.0.0.1:8081"
 VISION_MODEL="qwen2.5-vl-3b"
+
+VISION_SERVER_BIN="/root/llama.cpp/build/bin/llama-server"
+VISION_MODEL_PATH="/root/models/qwen2.5-vl-3b-q4.gguf"
+VISION_MMPROJ_PATH="/root/models/qwen2.5-vl-3b-mmproj.gguf"
+VISION_THREADS="6"
 ```
 
-and `pm2 restart spendlog-api`. The button appears on the Perks page once
-the server can see a model; with `VISION_BASE_URL` empty it stays hidden
-rather than offering something that would fail.
+Then:
+
+```bash
+npm run pm2:start     # brings up all three
+pm2 save              # keeps them across a reboot
+```
+
+Leave any of the three paths empty and PM2 starts the usual two, on the
+assumption you are running `llama-server` yourself or pointing
+`VISION_BASE_URL` at something else. It also skips it silently if the
+files are not where the paths say - a config naming a binary that is not
+there would otherwise leave a permanently errored process in `pm2 list`,
+and that is the sort of thing you stop noticing.
+
+Three things the config decides for you, and why:
+
+- **`--host 127.0.0.1`, always.** The model has no authentication of its
+  own, so anything that can reach it can ask it anything. It is never on
+  `0.0.0.0`.
+- **Six threads, not eight.** Mongo, Node and the web server want a core
+  each, and those are what you notice slowing down. Override with
+  `VISION_THREADS`.
+- **No `max_memory_restart`.** A 3B model holds three and a half gigabytes
+  by design; a ceiling here would restart it for ever.
+
+The button appears on the Perks page once the server can see a model; with
+`VISION_BASE_URL` empty it stays hidden rather than offering something
+that would fail.
 
 ## Checking it works
 
 ```bash
+pm2 list                              # spendlog-vision should be online
+pm2 logs spendlog-vision --lines 50   # says when the model is ready
 curl -s http://127.0.0.1:8081/health
-curl -s https://your-host/api/perks/reader -H "Authorization: Bearer <token>"
-# {"available":true,"model":"qwen2.5-vl-3b"}
 ```
+
+The first request after a start loads three gigabytes off disk, so give it
+a minute before deciding it is broken.
 
 ## When it is wrong
 
