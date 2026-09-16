@@ -1,12 +1,13 @@
 import express, { Router } from "express";
-import { Types } from "mongoose";
+import { HydratedDocument, Types } from "mongoose";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
-import { Account, Perk } from "../../models";
+import { Account, Perk, PerkImport, PerkImportDoc } from "../../models";
 import { PERK_KINDS } from "../../types";
 import { cardStatuses } from "../cards/cards.status";
 import { extractPerk } from "./perks.extract";
+import { createImport, runImport } from "./perks.import";
 import { visionProvider, VisionUnavailableError } from "./perks.vision";
 import {
   bestMerchantStrength,
@@ -21,6 +22,15 @@ export const perksRouter = Router();
 perksRouter.use(requireAuth);
 
 const objectId = z.string().regex(/^[0-9a-fA-F]{24}$/);
+
+const importSchema = z.object({
+  images: z
+    .array(z.object({ name: z.string().max(200).optional(), base64: z.string().min(1) }))
+    .min(1)
+    // Enough for a folder of screenshots, short of a number that would
+    // have the model busy for an hour.
+    .max(40),
+});
 
 const perkSchema = z.object({
   kind: z.enum(PERK_KINDS),
@@ -104,6 +114,115 @@ perksRouter.post(
     }
   }
 );
+
+/**
+ * POST /perks/import — a pile of screenshots, read in the background.
+ *
+ * Returns as soon as the pictures are on disk, with a job to ask about.
+ * The reading itself takes tens of seconds each and nobody is going to
+ * watch twenty of those - a request held open that long is one a proxy
+ * would cut anyway.
+ *
+ * The images arrive base64 in JSON rather than as raw bytes, because
+ * there are several of them and this is the one shape that needs no
+ * multipart parser. They are already shrunk to 1024px by the client, so
+ * the third that base64 adds is a third of very little.
+ */
+perksRouter.post("/import", express.json({ limit: "32mb" }), async (req, res) => {
+  if (!visionProvider()) {
+    return res.status(503).json({
+      error:
+        "No vision model is set up on this server. Set VISION_BASE_URL in the .env at the repo " +
+        "root — see docs/coupon-reading.md.",
+    });
+  }
+
+  const parsed = importSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Send images: [{ name, base64 }] — up to 40 of them." });
+  }
+
+  const pictures = parsed.data.images.map((picture) => ({
+    fileName: picture.name ?? "",
+    bytes: Buffer.from(picture.base64, "base64"),
+  }));
+
+  if (pictures.some((picture) => picture.bytes.length === 0)) {
+    return res.status(400).json({ error: "One of those was empty." });
+  }
+
+  const job = await createImport(currentUserId(req), pictures);
+
+  // Deliberately not awaited. The response is the point of the request;
+  // the reading is what happens afterwards. A failure inside is recorded
+  // on the job, which is where anybody would look for it.
+  void runImport(job._id, visionProvider()).catch(() => undefined);
+
+  res.status(202).json(summariseImport(job));
+});
+
+// GET /perks/import — how the newest batch is getting on, or null. Asked
+// on load as well as while polling, so closing the page and coming back
+// picks the job up rather than losing it.
+perksRouter.get("/import", async (req, res) => {
+  const job = await PerkImport.findOne({ userId: currentUserId(req) }).sort({ createdAt: -1 });
+  res.json(job ? summariseImport(job) : null);
+});
+
+perksRouter.get("/import/:id", validObjectIdParam("id"), async (req, res) => {
+  const job = await PerkImport.findOne({ _id: req.params.id, userId: currentUserId(req) });
+  if (!job) return res.status(404).json({ error: "Not found" });
+
+  res.json(summariseImport(job));
+});
+
+/** A job in the shape a progress line needs, without the file paths. */
+function summariseImport(job: HydratedDocument<PerkImportDoc>) {
+  const counts = { queued: 0, running: 0, done: 0, failed: 0 };
+  for (const item of job.items) {
+    if (item.status === "DONE") counts.done += 1;
+    else if (item.status === "FAILED") counts.failed += 1;
+    else if (item.status === "RUNNING") counts.running += 1;
+    else counts.queued += 1;
+  }
+
+  return {
+    id: job._id.toString(),
+    status: job.status,
+    problem: job.problem ?? null,
+    total: job.items.length,
+    counts,
+    /// Named, because a failure that does not say which picture is a
+    /// failure nobody can act on.
+    failures: job.items
+      .filter((item) => item.status === "FAILED")
+      .map((item) => ({ fileName: item.fileName, problem: item.problem ?? null })),
+    /// How many were already here. Uploading the same folder twice is the
+    /// ordinary way a batch goes wrong, and silence about it would look
+    /// like the reading failed.
+    duplicates: job.items.filter((item) => item.status === "DONE" && !item.perkId).length,
+    added: job.items.filter((item) => item.perkId).length,
+    finishedAt: job.finishedAt ?? null,
+  };
+}
+
+/**
+ * POST /perks/reviewed — the "I have looked at these" button.
+ *
+ * All of them at once by default, because that is what somebody does
+ * after reading down a list of eight.
+ */
+perksRouter.post("/reviewed", async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? (req.body.ids as unknown[]) : null;
+  const userId = currentUserId(req);
+
+  const filter = ids
+    ? { userId, _id: { $in: ids.filter((id): id is string => typeof id === "string") } }
+    : { userId, needsReview: true };
+
+  const result = await Perk.updateMany(filter, { $set: { needsReview: false } });
+  res.json({ confirmed: result.modifiedCount ?? 0 });
+});
 
 // GET /perks — everything held, newest first, live ones before dead ones.
 perksRouter.get("/", async (req, res) => {

@@ -1044,6 +1044,13 @@ export interface PerkDoc {
   code?: string | null;
   /// Coupons only. Set means spent, and it stops appearing.
   usedAt?: Date | null;
+  /// True for one a model read off a picture that nobody has confirmed.
+  ///
+  /// It is a real perk either way - it shows up, it answers a lookup, it
+  /// can be used. The flag only says where the figures came from, so a
+  /// screen can offer them for a glance rather than presenting a machine's
+  /// reading of small print as though somebody had typed it.
+  needsReview?: boolean;
   isActive: boolean;
   notes?: string | null;
   createdAt: Date;
@@ -1066,6 +1073,7 @@ const perkSchema = new Schema<PerkDoc>(
     expiresOn: { type: Date, default: null },
     code: { type: String, default: null, trim: true },
     usedAt: { type: Date, default: null },
+    needsReview: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
     notes: { type: String, default: null, trim: true },
   },
@@ -1144,3 +1152,67 @@ const cardVaultSchema = new Schema<CardVaultDoc>(
 cardVaultSchema.index({ userId: 1, accountId: 1 }, { unique: true });
 
 export const CardVault = model<CardVaultDoc>("CardVault", cardVaultSchema);
+
+/**
+ * A batch of coupon screenshots, being read.
+ *
+ * One at a time and in the background, because the model takes tens of
+ * seconds an image and runs on the same cores as everything else. The job
+ * is a document rather than a variable so a client can close the page,
+ * come back, and still be told what happened - and so a restart leaves
+ * evidence rather than silence.
+ */
+export type PerkImportStatus = "QUEUED" | "RUNNING" | "DONE" | "FAILED";
+
+export interface PerkImportItem {
+  /// What the picture was called, so a failure can name it.
+  fileName: string;
+  /// Where the bytes are while they wait their turn. Deleted once the job
+  /// is over, whether it worked or not.
+  path: string;
+  status: PerkImportStatus;
+  /// The perk it became, or why it did not.
+  perkId?: Types.ObjectId | null;
+  problem?: string | null;
+}
+
+export interface PerkImportDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  status: PerkImportStatus;
+  items: Types.DocumentArray<PerkImportItem>;
+  /// Why the whole job stopped, as opposed to one picture in it.
+  problem?: string | null;
+  startedAt?: Date | null;
+  finishedAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const perkImportItemSchema = new Schema<PerkImportItem>(
+  {
+    fileName: { type: String, default: "" },
+    path: { type: String, required: true },
+    status: { type: String, enum: ["QUEUED", "RUNNING", "DONE", "FAILED"], default: "QUEUED" },
+    perkId: { type: Schema.Types.ObjectId, ref: "Perk", default: null },
+    problem: { type: String, default: null },
+  },
+  { _id: true }
+);
+
+const perkImportSchema = new Schema<PerkImportDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    status: { type: String, enum: ["QUEUED", "RUNNING", "DONE", "FAILED"], default: "QUEUED" },
+    items: { type: [perkImportItemSchema], default: [] },
+    problem: { type: String, default: null },
+    startedAt: { type: Date, default: null },
+    finishedAt: { type: Date, default: null },
+  },
+  { timestamps: true, ...serialization }
+);
+
+// The one a client asks about is nearly always the newest.
+perkImportSchema.index({ userId: 1, createdAt: -1 });
+
+export const PerkImport = model<PerkImportDoc>("PerkImport", perkImportSchema);

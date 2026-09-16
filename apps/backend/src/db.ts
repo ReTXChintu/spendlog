@@ -12,6 +12,12 @@ mongoose.set("strictQuery", true);
 export async function connectDatabase(): Promise<void> {
   await mongoose.connect(env.databaseUrl);
   await dropSupersededIndexes();
+
+  // A coupon import that was mid-flight when the process stopped. Its
+  // pictures were in a temporary directory a reboot may have emptied, and
+  // a job left on RUNNING would have a client polling it for ever.
+  const { failStalledImports } = await import("./modules/perks/perks.import");
+  await failStalledImports().catch(() => undefined);
 }
 
 /**
