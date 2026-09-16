@@ -830,6 +830,11 @@ class Perk {
   final DateTime? expiresOn;
   final String? code;
   final DateTime? usedAt;
+
+  /// True for one a model read off a picture that nobody has confirmed.
+  /// It is a real perk either way; the flag only says where the figures
+  /// came from.
+  final bool needsReview;
   final bool isActive;
   final String? notes;
   final bool isLive;
@@ -849,6 +854,7 @@ class Perk {
     this.expiresOn,
     this.code,
     this.usedAt,
+    this.needsReview = false,
     this.isActive = true,
     this.notes,
     this.isLive = true,
@@ -886,6 +892,7 @@ class Perk {
       expiresOn: json['expiresOn'] != null ? DateTime.parse(json['expiresOn'] as String) : null,
       code: json['code'] as String?,
       usedAt: json['usedAt'] != null ? DateTime.parse(json['usedAt'] as String) : null,
+      needsReview: json['needsReview'] as bool? ?? false,
       isActive: json['isActive'] as bool? ?? true,
       notes: json['notes'] as String?,
       isLive: json['isLive'] as bool? ?? true,

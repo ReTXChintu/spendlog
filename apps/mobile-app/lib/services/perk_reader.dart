@@ -77,6 +77,64 @@ class PerkDraft {
       );
 }
 
+/// A pile of screenshots being read on the server.
+class PerkImportJob {
+  final String id;
+  final String status;
+  final String? problem;
+  final int total;
+  final int done;
+  final int failed;
+  final int added;
+  final int duplicates;
+  final List<({String fileName, String? problem})> failures;
+
+  PerkImportJob({
+    required this.id,
+    required this.status,
+    this.problem,
+    required this.total,
+    required this.done,
+    required this.failed,
+    required this.added,
+    required this.duplicates,
+    this.failures = const [],
+  });
+
+  bool get isRunning => status != 'DONE' && status != 'FAILED';
+
+  /// How many have been looked at, finished or failed.
+  int get read => done + failed;
+
+  factory PerkImportJob.fromJson(Map<String, dynamic> json) {
+    final counts = (json['counts'] as Map<String, dynamic>?) ?? const {};
+    return PerkImportJob(
+      id: json['id'] as String,
+      status: json['status'] as String? ?? 'QUEUED',
+      problem: json['problem'] as String?,
+      total: json['total'] as int? ?? 0,
+      done: counts['done'] as int? ?? 0,
+      failed: counts['failed'] as int? ?? 0,
+      added: json['added'] as int? ?? 0,
+      duplicates: json['duplicates'] as int? ?? 0,
+      failures: ((json['failures'] as List?) ?? const [])
+          .map((one) => (
+                fileName: (one as Map<String, dynamic>)['fileName'] as String? ?? 'A picture',
+                problem: one['problem'] as String?,
+              ))
+          .toList(),
+    );
+  }
+
+  /// What happened, in the order somebody would ask.
+  String get summary {
+    final parts = ['$added added'];
+    if (duplicates > 0) parts.add('$duplicates you already had');
+    if (failed > 0) parts.add('$failed could not be read');
+    return '${parts.join(', ')}. Check them over below.';
+  }
+}
+
 class PerkReader {
   PerkReader._();
   static final PerkReader instance = PerkReader._();
@@ -132,6 +190,37 @@ class PerkReader {
     }
 
     return PerkDraft.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  /// Several at once, already shrunk.
+  Future<List<XFile>> pickMany() => _picker.pickMultiImage(
+        maxWidth: _maxEdge,
+        maxHeight: _maxEdge,
+        imageQuality: 90,
+      );
+
+  /// Send the pile and get a job back. Returns as soon as the bytes are on
+  /// the server — the reading is tens of seconds a picture and carries on
+  /// without the phone.
+  Future<PerkImportJob> startImport(List<XFile> pictures) async {
+    final images = <Map<String, String>>[];
+    for (final picture in pictures) {
+      images.add({
+        'name': picture.name,
+        'base64': base64Encode(await picture.readAsBytes()),
+      });
+    }
+
+    final json = await ApiClient.instance.post('/perks/import', {'images': images});
+    return PerkImportJob.fromJson(json as Map<String, dynamic>);
+  }
+
+  /// How the newest batch is getting on, or null if there has never been
+  /// one. Asked on load as well as while polling, so leaving the screen
+  /// and coming back picks the job up rather than losing it.
+  Future<PerkImportJob?> newestImport() async {
+    final json = await ApiClient.instance.get('/perks/import');
+    return json == null ? null : PerkImportJob.fromJson(json as Map<String, dynamic>);
   }
 
   /// The server only accepts the three it can decode, and image_picker

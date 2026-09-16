@@ -4,6 +4,8 @@ import '../models/models.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/format.dart';
+import 'dart:async';
+
 import '../services/perk_reader.dart';
 import '../widgets/perk_sheet.dart';
 import '../widgets/state_block.dart';
@@ -36,17 +38,37 @@ class _PerksScreenState extends State<PerksScreen> {
   bool _canRead = false;
   bool _reading = false;
 
+  /// A batch being read on the server, and the timer watching it.
+  PerkImportJob? _job;
+  Timer? _poll;
+  bool _sending = false;
+
+  /// How many perks a model wrote that nobody has confirmed.
+  int get _unreviewed => _perks.where((perk) => perk.needsReview).length;
+
   @override
   void initState() {
     super.initState();
     _load();
     PerkReader.instance.available().then((can) {
-      if (mounted) setState(() => _canRead = can);
+      if (!mounted) return;
+      setState(() => _canRead = can);
+
+      // Pick up a batch that was already going. The job lives on the
+      // server, so closing the app does not lose it.
+      if (can) {
+        PerkReader.instance.newestImport().then((job) {
+          if (!mounted || job == null) return;
+          setState(() => _job = job);
+          if (job.isRunning) _watchJob();
+        }).catchError((_) => null);
+      }
     });
   }
 
   @override
   void dispose() {
+    _poll?.cancel();
     _query.dispose();
     _amount.dispose();
     super.dispose();
@@ -162,6 +184,7 @@ class _PerksScreenState extends State<PerksScreen> {
   /// Camera or gallery. Asked rather than assumed: a coupon is as often a
   /// screenshot already on the phone as a thing in front of you.
   Future<void> _offerToRead() async {
+    var chose = false;
     final fromCamera = await showModalBottomSheet<bool>(
       context: context,
       builder: (_) => SafeArea(
@@ -183,12 +206,143 @@ class _PerksScreenState extends State<PerksScreen> {
               title: const Text('Take a photo'),
               onTap: () => Navigator.of(context).pop(true),
             ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.burst_mode_outlined),
+              title: const Text('Choose several at once'),
+              subtitle: const Text('Read in the background and added for you'),
+              onTap: () {
+                chose = true;
+                Navigator.of(context).pop(null);
+              },
+            ),
           ],
         ),
       ),
     );
 
-    if (fromCamera != null) await _readPicture(fromCamera: fromCamera);
+    if (!mounted) return;
+    if (fromCamera != null) {
+      await _readPicture(fromCamera: fromCamera);
+    } else if (chose) {
+      await _startBatch();
+    }
+  }
+
+  /// A pile of screenshots, read on the server while you get on with
+  /// something else.
+  Future<void> _startBatch() async {
+    final pictures = await PerkReader.instance.pickMany();
+    if (pictures.isEmpty || !mounted) return;
+
+    setState(() => _sending = true);
+    try {
+      final job = await PerkReader.instance.startImport(pictures);
+      if (!mounted) return;
+      setState(() => _job = job);
+      _watchJob();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(error is ApiException ? error.message : 'Those could not be sent.'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  /// Ask every few seconds until it finishes. Polled rather than pushed: a
+  /// socket to maintain for something that happens occasionally is more
+  /// machinery than the problem has.
+  void _watchJob() {
+    _poll?.cancel();
+    _poll = Timer.periodic(const Duration(seconds: 3), (timer) async {
+      final job = await PerkReader.instance.newestImport().catchError((_) => null);
+      if (!mounted) return timer.cancel();
+
+      setState(() => _job = job);
+      if (job == null || !job.isRunning) {
+        timer.cancel();
+        // The perks it wrote are new rows; the list has to go and get them.
+        await _load();
+      }
+    });
+  }
+
+  /// How a batch is getting on, or what it did.
+  Widget _importCard(PerkImportJob job) {
+    final c = context.c;
+    final running = job.isRunning;
+
+    return Container(
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: c.paper,
+        border: Border.all(color: running ? c.brand : c.line),
+        borderRadius: BorderRadius.circular(T.rMd),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  running
+                      ? 'Reading your screenshots — ${job.read} of ${job.total} done.'
+                      : job.status == 'FAILED'
+                          ? (job.problem ?? 'That batch did not finish.')
+                          : job.summary,
+                  style: TextStyle(fontSize: 12.5, height: 1.45, color: c.ink),
+                ),
+              ),
+              if (!running)
+                IconButton(
+                  icon: const Icon(Icons.close, size: 17),
+                  onPressed: () => setState(() => _job = null),
+                ),
+            ],
+          ),
+          if (job.total > 0) ...[
+            const SizedBox(height: 9),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(100),
+              child: LinearProgressIndicator(
+                value: job.read / job.total,
+                minHeight: 6,
+                backgroundColor: c.track,
+                valueColor: AlwaysStoppedAnimation(running ? c.brand : c.credit),
+              ),
+            ),
+          ],
+          if (running) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Roughly half a minute a picture, on your own server. You can close the app — it '
+              'carries on without you.',
+              style: TextStyle(fontSize: 11.5, height: 1.45, color: c.muted),
+            ),
+          ],
+          for (final failure in job.failures) ...[
+            const SizedBox(height: 6),
+            Text(
+              '${failure.fileName} — ${failure.problem ?? 'could not be read'}',
+              style: TextStyle(fontSize: 11, color: c.muted),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// The ones a model wrote that nobody has confirmed. They count for
+  /// everything meanwhile - this is a prompt to glance, not a gate.
+  Future<void> _confirmAll() async {
+    await ApiClient.instance.post('/perks/reviewed', {}).catchError((_) => null);
+    await _load();
   }
 
   @override
@@ -207,8 +361,8 @@ class _PerksScreenState extends State<PerksScreen> {
           if (_canRead)
             IconButton(
               tooltip: 'Read a coupon from a picture',
-              onPressed: _reading ? null : _offerToRead,
-              icon: _reading
+              onPressed: _reading || _sending ? null : _offerToRead,
+              icon: _reading || _sending
                   ? const SizedBox(
                       width: 18,
                       height: 18,
@@ -225,6 +379,41 @@ class _PerksScreenState extends State<PerksScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 90),
         children: [
+          // A batch being read on the server, or one that just finished.
+          if (_job != null) ...[
+            _importCard(_job!),
+            const SizedBox(height: 14),
+          ],
+
+          // The ones a model wrote that nobody has looked at. Offered for
+          // a glance rather than held back - they count meanwhile.
+          if (_unreviewed > 0) ...[
+            Container(
+              padding: const EdgeInsets.all(13),
+              decoration: BoxDecoration(
+                color: c.brand50,
+                border: Border.all(color: c.brand),
+                borderRadius: BorderRadius.circular(T.rMd),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '$_unreviewed ${_unreviewed == 1 ? 'perk was' : 'perks were'} read off a '
+                    'picture. Nobody has checked the figures yet — open any that look off.',
+                    style: TextStyle(fontSize: 12, height: 1.45, color: c.ink70),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton(
+                    onPressed: _confirmAll,
+                    child: const Text('All look right'),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
+
           if (_reading) ...[
             Container(
               padding: const EdgeInsets.all(13),
