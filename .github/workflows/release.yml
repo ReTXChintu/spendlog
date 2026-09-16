@@ -1,9 +1,11 @@
 name: Release
 
 # Runs when a GitHub release is published — cut one with `npm run release`.
-# Builds the Android APK, publishes it to the VPS, then updates the web
-# apps there to the same tag, so the phone and the website are never
-# running different versions of SpendLog.
+#
+# Tests and builds everything on the runner first, then builds the Android
+# APK, publishes it to the VPS, and updates the web apps there to the same
+# tag — so the phone and the website are never running different versions
+# of SpendLog, and nothing ships at all if the tests do not pass.
 on:
   release:
     types: [published]
@@ -50,6 +52,37 @@ jobs:
             exit 1
           fi
           echo "Releasing v$VERSION"
+
+      # Everything the server will run, checked here rather than on the
+      # server. Until now `npm ci && npm test && npm run build` happened
+      # only in the deploy step at the very end, which meant a broken
+      # backend built the APK, attached it to the release and uploaded it
+      # to the VPS before failing - leaving the phone on a new version and
+      # the website on the old one. Failing first costs a couple of
+      # minutes and cannot half-ship a release.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # Twenty test files each start a MongoMemoryServer, all from one
+      # downloaded mongod. Cached, or every release pulls 100MB before it
+      # can run a single test.
+      - name: Cache the mongod the tests run against
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}
+
+      - name: Test the backend and the web app
+        run: npm test
+
+      - name: Build the backend and the web app
+        run: npm run build
 
       # AGP requires JDK 17; the runner's default is not guaranteed to be it.
       - name: Set up JDK 17
