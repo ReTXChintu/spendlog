@@ -86,3 +86,20 @@ String currentMonth() {
   // The IST month: at 1am on the 1st, UTC still says last month.
   return istToday().substring(0, 7);
 }
+
+/// "1st", "17th", "21st", "23rd" — a day of the month, said aloud.
+///
+/// The lookup is by the last digit and the table only covers 0 to 3, so
+/// every other digit has to fall back rather than index past the end of
+/// it. This began life as a port of the web version, where reading past
+/// an array gives undefined and a `?? "th"` quietly catches it; in Dart
+/// the same expression throws, and a card billing on the 24th to the 29th
+/// took a whole screen down with a RangeError.
+String ordinalDay(int day) {
+  const suffixes = ['th', 'st', 'nd', 'rd'];
+  final last = day % 10;
+
+  // 11th, 12th and 13th are "th" despite ending in 1, 2 and 3.
+  final suffix = (day > 3 && day < 21) || last > 3 ? 'th' : suffixes[last];
+  return '$day$suffix';
+}

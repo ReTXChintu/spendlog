@@ -6,10 +6,18 @@ import 'services/reminder_service.dart';
 import 'services/theme_service.dart';
 import 'services/update_service.dart';
 import 'theme.dart';
+import 'widgets/crash_card.dart';
 import 'version.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // A widget that throws while building is replaced by an ErrorWidget. In
+  // a release build the stock one is a plain grey box with nothing on it,
+  // which is why a broken panel reads as "the screen goes blank" - no
+  // message, and no way to tell a crash from an empty page. This puts the
+  // error on screen where it can be read and copied.
+  ErrorWidget.builder = (details) => CrashCard(details);
   // Loaded before the first frame so a dark-mode user never sees a light flash.
   ThemeService.instance.load();
   // Wired up on every launch, not only when a reminder is switched on: the

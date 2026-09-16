@@ -669,8 +669,8 @@ class _AccountsScreenState extends State<AccountsScreen> {
               )),
           const SizedBox(height: 7),
           for (final (label, value) in [
-            ('Statement', account.statementDay == null ? '—' : _ordinal(account.statementDay!)),
-            ('Due', account.dueDay == null ? '—' : _ordinal(account.dueDay!)),
+            ('Statement', account.statementDay == null ? '—' : ordinalDay(account.statementDay!)),
+            ('Due', account.dueDay == null ? '—' : ordinalDay(account.dueDay!)),
             if (cycle?.floatDays != null) ('Float', '${cycle!.floatDays} days'),
           ])
             Padding(
@@ -769,8 +769,4 @@ class _AccountsScreenState extends State<AccountsScreen> {
     );
   }
 
-  String _ordinal(int day) {
-    final suffix = day > 3 && day < 21 ? 'th' : ['th', 'st', 'nd', 'rd'][day % 10];
-    return '$day$suffix';
-  }
 }
