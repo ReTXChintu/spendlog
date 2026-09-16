@@ -6,6 +6,7 @@ import '../models/models.dart';
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
 import '../services/reminder_service.dart';
+import '../services/theme_service.dart';
 import '../services/sms_service.dart';
 import '../services/update_service.dart';
 import '../theme.dart';
@@ -56,6 +57,12 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   String? _ledgerNote;
   bool _loadingEarlier = false;
 
+  /// Imported rows sitting before the month the ledger starts, from before
+  /// the horizon existed. Anything typed in by hand is never counted here
+  /// and never removed.
+  int _ledgerStale = 0;
+  bool _purgingLedger = false;
+
   @override
   void initState() {
     super.initState();
@@ -78,11 +85,18 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   /// Where the ledger starts, and the month a button would open up next.
   Future<void> _loadLedger() async {
     try {
-      final json = await ApiClient.instance.get('/ledger') as Map<String, dynamic>;
+      final results = await Future.wait([
+        ApiClient.instance.get('/ledger'),
+        ApiClient.instance.get('/ledger/purge'),
+      ]);
       if (!mounted) return;
+
+      final json = results[0] as Map<String, dynamic>;
+      final plan = results[1] as Map<String, dynamic>;
       setState(() {
         _ledgerMonth = json['month'] as String?;
         _ledgerPrevious = (json['canGoBack'] as bool? ?? false) ? json['previous'] as String? : null;
+        _ledgerStale = (plan['imported'] as int? ?? 0) + (plan['statements'] as int? ?? 0);
       });
     } catch (_) {
       // The card says it is loading and stays that way.
@@ -116,6 +130,50 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
       }
     } finally {
       if (mounted) setState(() => _loadingEarlier = false);
+    }
+  }
+
+  /// Remove what was imported before the ledger starts.
+  ///
+  /// Named before it happens rather than after: this deletes transactions
+  /// and there is no undo. Anything entered by hand is kept whatever its
+  /// date - the horizon decides what SpendLog fetches, not what somebody
+  /// is allowed to remember.
+  Future<void> _purgeOldMonths() async {
+    final month = _ledgerMonth == null ? 'the start' : _monthLabel(_ledgerMonth!);
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Clear the older months?'),
+        content: Text(
+          'This removes $_ledgerStale imported transactions and statements from before $month. '
+          'Anything you entered by hand is kept, and nothing from an SMS or an email after that '
+          'month is touched.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Keep them')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (sure != true) return;
+
+    setState(() => _purgingLedger = true);
+    try {
+      final result = await ApiClient.instance
+          .post('/ledger/purge', {'confirm': 'clear the old months'}) as Map<String, dynamic>;
+      if (!mounted) return;
+      setState(() => _ledgerNote =
+          'Removed ${result['transactionsDeleted'] ?? 0} transactions and '
+          '${result['statementsDeleted'] ?? 0} statements.');
+      await _loadLedger();
+    } catch (error) {
+      if (mounted) {
+        setState(() =>
+            _ledgerNote = error is ApiException ? error.message : "That didn't work just now.");
+      }
+    } finally {
+      if (mounted) setState(() => _purgingLedger = false);
     }
   }
 
@@ -469,6 +527,15 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                         : 'Load ${_monthLabel(_ledgerPrevious!)} too',
                   ),
                 ),
+              // Only while there is something to clear. It is only ever
+              // true on an account that imported months of history before
+              // there was a horizon to stop it.
+              if (_ledgerStale > 0)
+                OutlinedButton(
+                  onPressed: _purgingLedger ? null : _purgeOldMonths,
+                  style: OutlinedButton.styleFrom(foregroundColor: context.c.debit),
+                  child: Text(_purgingLedger ? 'Removing…' : 'Clear $_ledgerStale older rows'),
+                ),
             ],
           ),
         ),
@@ -769,7 +836,38 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
             ],
           ),
         ),
+        const SizedBox(height: 14),
+        _SettingsCard(
+          icon: ThemeService.instance.icon,
+          title: 'Appearance',
+          subtitle: ThemeService.instance.label,
+          child: _CardBody(
+            text: 'Follows the device unless you say otherwise. The choice is remembered on this '
+                'phone and nowhere else.',
+            actions: [
+              OutlinedButton(
+                onPressed: () async {
+                  await ThemeService.instance.cycle();
+                  if (mounted) setState(() {});
+                },
+                child: Text('Switch to ${_nextThemeLabel()}'),
+              ),
+            ],
+          ),
+        ),
       ];
+
+  /// What the button offers next. ThemeService cycles light, dark, system.
+  String _nextThemeLabel() {
+    switch (ThemeService.instance.mode) {
+      case ThemeMode.light:
+        return 'dark';
+      case ThemeMode.dark:
+        return 'system';
+      case ThemeMode.system:
+        return 'light';
+    }
+  }
 
   /// What the app is, and what it cannot do.
   List<Widget> _aboutTab() => [
