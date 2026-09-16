@@ -54,7 +54,10 @@ export function CardLimits({ cards }: { cards: CardStatus[] }) {
 }
 
 function CardBar({ card }: { card: CardStatus }) {
-  const { spentMinor, creditLimitMinor, limitMinor } = card;
+  // creditLimitMinor came with a later server than this page may be
+  // talking to, and undefined would make the bar a fraction of nothing.
+  const { spentMinor, limitMinor } = card;
+  const creditLimitMinor = card.creditLimitMinor ?? null;
 
   // Against the credit limit where there is one, and against your own
   // budget where there is not. A bar needs something to be a fraction of,
@@ -118,7 +121,7 @@ function CardBar({ card }: { card: CardStatus }) {
       <div className="card-limit-foot">
         {limitMinor === null ? (
           <span className="card-limit-note">
-            {card.periodIsCycle ? "This cycle" : "This month"} · no limit of your own
+            {card.periodIsCycle === false ? "This month" : "This cycle"} · no limit of your own
           </span>
         ) : over ? (
           <span className="card-limit-note is-warn">

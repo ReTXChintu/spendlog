@@ -1092,3 +1092,16 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
   border:1px solid var(--line);border-radius:var(--radius-md)}
 .ledger-purge .desc{margin:0 0 10px}
 .ledger-purge .set-card-actions{margin-top:0}
+
+/* ------------------------------------------------ when a screen throws */
+/* A blank page is the worst possible answer: it cannot be reported, it
+   cannot be worked around, and it looks the same whether the server is
+   down or a number was null. */
+.crash{max-width:640px;padding:28px 0}
+.crash-icon{display:flex;align-items:center;justify-content:center;width:46px;height:46px;
+  border-radius:12px;background:var(--warn-bg);color:var(--warn);margin-bottom:14px}
+.crash-icon svg{width:22px;height:22px}
+.crash h2{margin:0 0 8px;font-size:19px}
+.crash-detail{margin:14px 0 18px;padding:13px 15px;background:var(--paper);
+  border:1px solid var(--line);border-radius:var(--radius-md);font-family:var(--font-mono);
+  font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-word;color:var(--debit)}

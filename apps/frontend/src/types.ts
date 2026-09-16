@@ -85,7 +85,10 @@ export interface AccountOverview extends Account {
   /// What this account has spent since the first of the month, and what
   /// you allowed yourself. Every account has this; only a credit card has
   /// a cycle.
-  month: { spentMinor: number; limitMinor: number | null };
+  /// Optional because a page can outlive the server build that added
+  /// it: a browser holds a cached bundle, and a deployment restarts the
+  /// two halves seconds apart.
+  month?: { spentMinor: number; limitMinor: number | null };
   /// The last bill read off a statement - the only figure on the panel
   /// that comes from the bank rather than from adding up messages.
   bill: {
@@ -100,7 +103,7 @@ export interface AccountOverview extends Account {
   /// What a debit card draws on, named rather than referenced.
   linkedAccount: string | null;
   /// For a bank account, the debit cards that reach it.
-  debitCards: { id: string; name: string; last4: string | null; network: string | null }[];
+  debitCards?: { id: string; name: string; last4: string | null; network: string | null }[];
 }
 
 /** What to call an account on screen: the name given to it, else the bank's. */
@@ -241,11 +244,11 @@ export interface CardStatus {
   /// allows. Different things: being 90% through your own limit matters
   /// at a till, and being 30% through a credit limit tells you nothing.
   limitMinor: number | null;
-  creditLimitMinor: number | null;
+  creditLimitMinor?: number | null;
   remainingMinor: number | null;
   /// Whether spentMinor covers a billing cycle or a calendar month. A card
   /// with no statement day has no cycle to measure.
-  periodIsCycle: boolean;
+  periodIsCycle?: boolean;
   state: CardState;
 }
 

@@ -42,6 +42,14 @@ export function AccountPanel({
   const isCard = account.accountType === "CARD";
   const isDebit = account.accountType === "DEBIT";
 
+  // Both of these arrived with a later version of the server than this
+  // page may be talking to — a browser holds a cached bundle for a good
+  // while, and a deployment restarts the two halves seconds apart. A
+  // missing field threw here, and with nothing catching it React replaced
+  // the whole app with a blank page. Neither is worth that.
+  const month = account.month ?? { spentMinor: 0, limitMinor: null };
+  const debitCards = account.debitCards ?? [];
+
   /// Null until Remove is pressed, then the number of transactions that
   /// would be left without an account. Deleting one is refused while
   /// history points at it, and that refusal is the useful half - it says
@@ -155,18 +163,18 @@ export function AccountPanel({
             capIsMine={account.spendLimitMinor != null}
             bankLimitMinor={account.creditLimitMinor}
           />
-        ) : account.month.limitMinor !== null ? (
+        ) : month.limitMinor !== null ? (
           <Meter
             label="This month"
-            spentMinor={account.month.spentMinor}
-            capMinor={account.month.limitMinor}
+            spentMinor={month.spentMinor}
+            capMinor={month.limitMinor}
             capIsMine
             bankLimitMinor={null}
           />
         ) : (
           <div className="figure-card">
             <span className="figure-label">This month</span>
-            <span className="figure-value">{formatMoney(account.month.spentMinor)}</span>
+            <span className="figure-value">{formatMoney(month.spentMinor)}</span>
             <span className="figure-note">{standingNote(account, isCard, isDebit)}</span>
           </div>
         )}
@@ -195,11 +203,11 @@ export function AccountPanel({
 
         {/* A bank account lists the cards that reach it, because its own
             spending includes theirs and a total does not say so. */}
-        {account.debitCards.length > 0 && (
+        {debitCards.length > 0 && (
           <div className="figure-card">
             <span className="figure-label">Debit cards on it</span>
             <dl className="figure-rows">
-              {account.debitCards.map((card) => (
+              {debitCards.map((card) => (
                 <div key={card.id}>
                   <dt>{card.name}</dt>
                   <dd>{card.last4 ? `••${card.last4}` : "—"}</dd>

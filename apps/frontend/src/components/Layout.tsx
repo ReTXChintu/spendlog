@@ -1,4 +1,5 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { useAuth } from "../lib/auth";
 import { Icon, IconSprite } from "./Icon";
 import { ThemeToggle } from "./ThemeToggle";
@@ -23,6 +24,7 @@ function initials(user: { name?: string | null; email?: string } | null): string
 
 export function Layout() {
   const { user, logout } = useAuth();
+  const location = useLocation();
 
   return (
     <>
@@ -70,7 +72,11 @@ export function Layout() {
         </aside>
 
         <main className="content">
-          <Outlet />
+          {/* Keyed on the path, so a screen that threw does not keep its
+              error over the next one, which would have rendered fine. */}
+          <ErrorBoundary key={location.pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </>
