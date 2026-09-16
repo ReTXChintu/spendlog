@@ -4,6 +4,7 @@ import '../models/models.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/format.dart';
+import '../services/perk_reader.dart';
 import '../widgets/perk_sheet.dart';
 import '../widgets/state_block.dart';
 
@@ -30,10 +31,18 @@ class _PerksScreenState extends State<PerksScreen> {
   List<Account> _accounts = [];
   List<Category> _categories = [];
 
+  /// Whether this server has a model to read a picture with, and whether
+  /// one is being read right now.
+  bool _canRead = false;
+  bool _reading = false;
+
   @override
   void initState() {
     super.initState();
     _load();
+    PerkReader.instance.available().then((can) {
+      if (mounted) setState(() => _canRead = can);
+    });
   }
 
   @override
@@ -108,14 +117,78 @@ class _PerksScreenState extends State<PerksScreen> {
     await _load();
   }
 
-  Future<void> _edit(Perk? perk) async {
+  Future<void> _edit(Perk? perk, {PerkDraft? draft}) async {
     final saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => PerkSheet(perk: perk, accounts: _accounts, categories: _categories),
+      builder: (_) => PerkSheet(
+        perk: perk,
+        draft: draft,
+        accounts: _accounts,
+        categories: _categories,
+      ),
     );
     if (saved == true) await _load();
+  }
+
+  /// Take or choose a picture of a coupon, and let the model fill the form.
+  ///
+  /// The model is on the server and runs on its processor, so this is tens
+  /// of seconds rather than a moment. Said out loud while it waits, because
+  /// a button that looks stuck is a button people press again.
+  Future<void> _readPicture({required bool fromCamera}) async {
+    final picture = await PerkReader.instance.pick(fromCamera: fromCamera);
+    if (picture == null) return;
+
+    setState(() => _reading = true);
+    try {
+      final draft = await PerkReader.instance.read(picture);
+      if (!mounted) return;
+      await _edit(null, draft: draft);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(error is ApiException ? error.message : 'That picture could not be read.'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _reading = false);
+    }
+  }
+
+  /// Camera or gallery. Asked rather than assumed: a coupon is as often a
+  /// screenshot already on the phone as a thing in front of you.
+  Future<void> _offerToRead() async {
+    final fromCamera = await showModalBottomSheet<bool>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('Read a coupon from a picture',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choose a screenshot'),
+              onTap: () => Navigator.of(context).pop(false),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Take a photo'),
+              onTap: () => Navigator.of(context).pop(true),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (fromCamera != null) await _readPicture(fromCamera: fromCamera);
   }
 
   @override
@@ -127,6 +200,23 @@ class _PerksScreenState extends State<PerksScreen> {
       appBar: AppBar(
         title: const Text('Perks'),
         shape: Border(bottom: BorderSide(color: c.line)),
+        actions: [
+          // Only where the server has a model. Without one this hides
+          // rather than offering a button that fails - reading a picture
+          // is an extra way to add a coupon and never the only one.
+          if (_canRead)
+            IconButton(
+              tooltip: 'Read a coupon from a picture',
+              onPressed: _reading ? null : _offerToRead,
+              icon: _reading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.document_scanner_outlined),
+            ),
+        ],
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _edit(null),
@@ -135,6 +225,22 @@ class _PerksScreenState extends State<PerksScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 90),
         children: [
+          if (_reading) ...[
+            Container(
+              padding: const EdgeInsets.all(13),
+              decoration: BoxDecoration(
+                color: c.brand50,
+                borderRadius: BorderRadius.circular(T.rMd),
+              ),
+              child: Text(
+                'Reading the picture. The model is on your own server and runs on its processor, '
+                'so this takes a little while — usually under a minute, longer the first time '
+                'after a restart.',
+                style: TextStyle(fontSize: 12, height: 1.45, color: c.ink70),
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
           TextField(
             controller: _query,
             autofocus: true,

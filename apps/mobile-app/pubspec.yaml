@@ -23,6 +23,11 @@ dependencies:
   # Saving a statement PDF somewhere the system viewer can open it.
   # A file:// URI is not enough on modern Android; open_filex does the
   # FileProvider plumbing that makes one openable.
+  # Taking or choosing a picture of a coupon. Its maxWidth/maxHeight do
+  # the shrinking for us: a vision model tiles an image and the count
+  # grows with the area, so a full phone photo costs minutes on CPU where
+  # a 1024px one costs seconds.
+  image_picker: ^1.1.2
   path_provider: ^2.1.4
   open_filex: ^4.5.0
 

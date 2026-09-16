@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
+import '../services/perk_reader.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
 
@@ -11,14 +12,38 @@ import '../theme.dart';
 class PerkSheet extends StatefulWidget {
   /// null means "add a new one".
   final Perk? perk;
+
+  /// What a model made of a picture, to start from. Every field is still
+  /// editable and nothing is saved until you save it — the model proposes
+  /// and you decide, because one that reads "20% up to ₹150" as "₹150
+  /// off" is wrong in a way you would only notice at a till.
+  final PerkDraft? draft;
+
   final List<Account> accounts;
   final List<Category> categories;
 
-  const PerkSheet({super.key, this.perk, required this.accounts, required this.categories});
+  const PerkSheet({
+    super.key,
+    this.perk,
+    this.draft,
+    required this.accounts,
+    required this.categories,
+  });
 
   @override
   State<PerkSheet> createState() => _PerkSheetState();
 }
+
+/// What a missing field is called in the sentence that names it.
+const _missingLabel = {
+  'title': 'a name',
+  'discount': 'what it takes off',
+  'expiresOn': 'when it runs out',
+  'code': 'the code',
+};
+
+/// Minor units as whole rupees, for a field somebody types into.
+String _rupees(int? minor) => minor == null ? '' : (minor ~/ 100).toString();
 
 class _PerkSheetState extends State<PerkSheet> {
   late final TextEditingController _title;
@@ -42,25 +67,28 @@ class _PerkSheetState extends State<PerkSheet> {
   void initState() {
     super.initState();
     final perk = widget.perk;
+    final draft = widget.draft;
 
-    _kind = perk?.kind ?? 'COUPON';
-    _asPercent = perk?.flatMinor == null;
-    _accountId = perk?.accountId;
-    _expiresOn = perk?.expiresOn;
+    _kind = perk?.kind ?? draft?.kind ?? 'COUPON';
+    _asPercent = (perk?.flatMinor ?? draft?.flatMinor) == null;
+    _accountId = perk?.accountId ?? draft?.accountId;
+    _expiresOn = perk?.expiresOn ?? draft?.expiresOn;
 
-    _title = TextEditingController(text: perk?.title ?? '');
-    _merchants = TextEditingController(text: perk?.merchants.join(', ') ?? '');
-    _percent = TextEditingController(text: perk?.percent?.toString() ?? '');
-    _flat = TextEditingController(
-      text: perk?.flatMinor != null ? (perk!.flatMinor! ~/ 100).toString() : '',
+    _title = TextEditingController(text: perk?.title ?? draft?.title ?? '');
+    _merchants = TextEditingController(
+      text: perk?.merchants.join(', ') ?? draft?.merchants.join(', ') ?? '',
     );
+    _percent = TextEditingController(
+      text: (perk?.percent ?? draft?.percent)?.toString() ?? '',
+    );
+    _flat = TextEditingController(text: _rupees(perk?.flatMinor ?? draft?.flatMinor));
     _maxDiscount = TextEditingController(
-      text: perk?.maxDiscountMinor != null ? (perk!.maxDiscountMinor! ~/ 100).toString() : '',
+      text: _rupees(perk?.maxDiscountMinor ?? draft?.maxDiscountMinor),
     );
     _minSpend = TextEditingController(
-      text: perk?.minSpendMinor != null ? (perk!.minSpendMinor! ~/ 100).toString() : '',
+      text: _rupees(perk?.minSpendMinor ?? draft?.minSpendMinor),
     );
-    _code = TextEditingController(text: perk?.code ?? '');
+    _code = TextEditingController(text: perk?.code ?? draft?.code ?? '');
   }
 
   @override
@@ -118,10 +146,34 @@ class _PerkSheetState extends State<PerkSheet> {
     }
   }
 
+  /// What the banner says: where it came from, what it could not find,
+  /// and the card it named that is not one of yours.
+  String _readNote(PerkDraft draft) {
+    final parts = <String>['Read from your picture.'];
+
+    if (draft.missing.isEmpty) {
+      parts.add('Check it over before saving.');
+    } else {
+      final named = draft.missing.map((field) => _missingLabel[field] ?? field).join(', ');
+      parts.add('Check it over — it could not find $named.');
+    }
+
+    if (draft.cardNamed != null && draft.accountId == null) {
+      parts.add(
+        'It says this is for ${draft.cardNamed}, which is not one of your cards — pick the right '
+        'one below, or leave it blank.',
+      );
+    }
+
+    return parts.join(' ');
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final cards = widget.accounts.where((account) => account.accountType == 'CARD').toList();
+    final cards = widget.accounts
+        .where((account) => account.accountType == 'CARD' || account.accountType == 'DEBIT')
+        .toList();
 
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
@@ -146,6 +198,25 @@ class _PerkSheetState extends State<PerkSheet> {
                 style: TextStyle(fontSize: 12, height: 1.45, color: c.muted),
               ),
               const SizedBox(height: 16),
+
+              // Read, not saved. The model fills the form and you decide,
+              // because one that reads "20% up to ₹150" as "₹150 off" is
+              // wrong in a way nobody notices until they are at a till.
+              if (widget.draft != null) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: c.brand50,
+                    border: Border.all(color: c.brand),
+                    borderRadius: BorderRadius.circular(T.rMd),
+                  ),
+                  child: Text(
+                    _readNote(widget.draft!),
+                    style: TextStyle(fontSize: 12, height: 1.5, color: c.ink70),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
 
               SegmentedButton<String>(
                 segments: const [
