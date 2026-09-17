@@ -146,13 +146,28 @@ class CardLimits extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 6),
-        Text(
-          _note(card, over: over, close: close),
-          style: TextStyle(
-            fontSize: 11.5,
-            color: over ? c.debit : c.muted,
-            fontWeight: over ? FontWeight.w700 : FontWeight.w400,
-          ),
+        Wrap(
+          spacing: 10,
+          runSpacing: 2,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(
+              _note(card, over: over, close: close),
+              style: TextStyle(
+                fontSize: 11.5,
+                color: over ? c.debit : c.muted,
+                fontWeight: over ? FontWeight.w700 : FontWeight.w400,
+              ),
+            ),
+            // When the counter goes back to zero. Without this the bar is a
+            // number with no period attached, and "is this month's spending
+            // or this cycle's?" is exactly the question it should answer.
+            if (card.periodIsCycle && card.statementOn != null)
+              Text(
+                'resets after ${formatShortDate(card.statementOn!)}',
+                style: TextStyle(fontSize: 11, color: c.muted.withValues(alpha: .8)),
+              ),
+          ],
         ),
       ],
     );

@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { CardStatus } from "../types";
-import { formatMoney } from "../lib/format";
+import { formatMoney, formatShortDate } from "../lib/format";
 import { Icon } from "./Icon";
 
 /**
@@ -132,6 +132,15 @@ function CardBar({ card }: { card: CardStatus }) {
           <span className="card-limit-note">
             {formatMoney(limitMinor - spentMinor)} left of your {formatMoney(limitMinor)} limit
             {close && " — worth slowing down"}
+          </span>
+        )}
+
+        {/* When the counter goes back to zero. Without this the bar is a
+            number with no period attached, and "is this month's spending
+            or this cycle's?" is exactly the question it should answer. */}
+        {card.periodIsCycle !== false && card.statementOn && (
+          <span className="card-limit-reset">
+            resets after {formatShortDate(card.statementOn)}
           </span>
         )}
       </div>

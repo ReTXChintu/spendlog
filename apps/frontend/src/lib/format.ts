@@ -85,3 +85,15 @@ export function currentMonth(): string {
   // The IST month: at 1am on the 1st, UTC still says last month.
   return istToday().slice(0, 7);
 }
+
+/**
+ * "17 Oct", in IST. For a date named alongside something else, where the
+ * weekday formatDayLabel gives would be noise rather than help.
+ */
+export function formatShortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    timeZone: IST,
+  });
+}

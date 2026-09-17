@@ -1074,7 +1074,8 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
   background:var(--ink);opacity:.45;transform:translateX(-1px)}
 .card-limit.is-over .card-limit-mark{background:var(--debit);opacity:1}
 
-.card-limit-foot{margin-top:6px}
+.card-limit-foot{margin-top:6px;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px}
+.card-limit-reset{font-size:11px;color:var(--muted);opacity:.8;white-space:nowrap}
 .card-limit-note{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted)}
 .card-limit-note.is-warn{color:var(--debit);font-weight:600}
 .card-limit-note svg{width:13px;height:13px}

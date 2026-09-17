@@ -103,3 +103,7 @@ String ordinalDay(int day) {
   final suffix = (day > 3 && day < 21) || last > 3 ? 'th' : suffixes[last];
   return '$day$suffix';
 }
+
+/// "17 Oct", in IST. For a date named alongside something else, where the
+/// weekday formatDayLabel gives would be noise rather than help.
+String formatShortDate(DateTime date) => DateFormat('d MMM').format(_ist(date));
