@@ -5,6 +5,7 @@ import { validObjectIdParam } from "../../middleware/validate";
 import { Account, FixedCommitment, Transaction, User } from "../../models";
 import { COMMITMENT_KINDS } from "../../types";
 import { budgetPace } from "./budget.pace";
+import { dailyBudget } from "./budget.daily";
 import { budgetPeriodFor } from "./budget.period";
 
 export const budgetRouter = Router();
@@ -13,14 +14,16 @@ budgetRouter.use(requireAuth);
 const profileSchema = z.object({
   salaryAmountMinor: z.number().int().nonnegative().nullable().optional(),
   salaryDay: z.number().int().min(1).max(31).nullable().optional(),
+  dailyBudgetMinor: z.number().int().nonnegative().nullable().optional(),
 });
 
 // GET /budget/profile — what is known about money coming in.
 budgetRouter.get("/profile", async (req, res) => {
-  const user = await User.findById(currentUserId(req)).select("salaryAmountMinor salaryDay").orFail();
+  const user = await User.findById(currentUserId(req)).select("salaryAmountMinor salaryDay dailyBudgetMinor").orFail();
   res.json({
     salaryAmountMinor: user.salaryAmountMinor ?? null,
     salaryDay: user.salaryDay ?? null,
+    dailyBudgetMinor: user.dailyBudgetMinor ?? null,
   });
 });
 
@@ -37,7 +40,17 @@ budgetRouter.patch("/profile", async (req, res) => {
   res.json({
     salaryAmountMinor: user.salaryAmountMinor ?? null,
     salaryDay: user.salaryDay ?? null,
+    dailyBudgetMinor: user.dailyBudgetMinor ?? null,
   });
+});
+
+// GET /budget/daily - the daily allowance and the bucket behind it.
+//
+// Its own route as well as riding on the dashboard, because the settings
+// screen shows it while the number is being chosen: typing 1,000 and
+// seeing what this period would have come to is the only way to pick one.
+budgetRouter.get("/daily", async (req, res) => {
+  res.json(await dailyBudget(currentUserId(req)));
 });
 
 const commitmentSchema = z.object({

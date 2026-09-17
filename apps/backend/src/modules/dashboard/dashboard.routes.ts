@@ -5,6 +5,7 @@ import { CardStatement, EmiInstalment, EmiPlan, Perk, Transaction } from "../../
 import { istDayEnd, istDayKey, istDayStart, istMonthKey, istMonthStart } from "../../time";
 import { cardStatuses, pickCards } from "../cards/cards.status";
 import { budgetPace } from "../budget/budget.pace";
+import { dailyBudget } from "../budget/budget.daily";
 import { perkIsLive } from "../perks/perks.match";
 import { upcomingBills } from "../statements/statements.bills";
 
@@ -35,7 +36,8 @@ dashboardRouter.get("/", async (req, res) => {
   const yesterday = istDayKey(new Date(now.getTime() - 24 * 60 * 60 * 1000));
   const month = istMonthKey(now);
 
-  const [cards, pace, needsCategory, emis, owed, perks, statements, monthSoFar, bills] = await Promise.all([
+  const [cards, pace, needsCategory, emis, owed, perks, statements, monthSoFar, bills, daily] =
+    await Promise.all([
     cardStatuses(userId, now),
     budgetPace(userId, now),
     countNeedingACategory(userId, yesterday, month),
@@ -45,6 +47,7 @@ dashboardRouter.get("/", async (req, res) => {
     statementsNeedingAttention(userId),
     monthAgainstLast(userId, now, today),
     upcomingBills(userId, now),
+    dailyBudget(userId, now),
   ]);
 
   // Only the ones close enough to act on. Settled: shown here, never as a
@@ -61,6 +64,7 @@ dashboardRouter.get("/", async (req, res) => {
   res.json({
     today,
     pace,
+    daily,
     cards,
     picks: pickCards(cards),
     needsCategory,
