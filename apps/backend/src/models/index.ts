@@ -59,6 +59,14 @@ export interface UserDoc {
   /// money arrives and then gets spent.
   salaryAmountMinor?: number | null;
   salaryDay?: number | null;
+  /// What you allow yourself to spend in a day.
+  ///
+  /// Separate from the salary pace, and answering a different question. The
+  /// pace says what is left per day to get to payday; this says what you
+  /// decided a day should cost. Every day under it puts the difference by,
+  /// every day over it takes the difference back, and the running total is
+  /// what there is to move into savings when the next salary lands.
+  dailyBudgetMinor?: number | null;
   /// The first month SpendLog will import anything for, as YYYY-MM.
   ///
   /// Somebody who joins on the 13th of September does not want August's
@@ -110,6 +118,7 @@ const userSchema = new Schema<UserDoc>(
     googleId: { type: String, default: null },
     salaryAmountMinor: { type: Number, default: null, min: 0 },
     salaryDay: { type: Number, default: null, min: 1, max: 31 },
+    dailyBudgetMinor: { type: Number, default: null, min: 0 },
     ledgerFrom: { type: String, default: null },
     vaultPin: { type: vaultPinSchema, default: null },
   },

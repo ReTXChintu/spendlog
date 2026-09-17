@@ -5,7 +5,47 @@ import { FixedCommitment, Transaction, User } from "../../models";
 /// enough for pay that came early or late, narrow enough that last
 /// month's is not found once this month's is overdue.
 const SALARY_LOOKBACK_DAYS = 45;
-import { budgetPeriodFor, budgetPeriodFromSalary } from "./budget.period";
+import { BudgetPeriod, budgetPeriodFor, budgetPeriodFromSalary } from "./budget.period";
+
+/**
+ * The period a user's money is measured over, right now.
+ *
+ * Exported because more than one card is built on it - the pace and the
+ * daily budget's bucket - and two of them working out separately when the
+ * month started is two of them eventually disagreeing about it.
+ */
+export async function currentBudgetPeriod(
+  userId: Types.ObjectId,
+  salaryDay: number,
+  now: Date
+): Promise<BudgetPeriod & { salaryPaidOn: Date | null }> {
+  // A credit marked as pay outranks the configured day, because the day is
+  // a prediction and the credit is what happened. Looked for in a window
+  // wide enough to cover a salary that came early or late, but not so wide
+  // that last month's would still be found once this month's is overdue.
+  const recentSalaries = await Transaction.find({
+    userId,
+    isSalary: true,
+    type: "CREDIT",
+    occurredAt: { $gte: new Date(now.getTime() - SALARY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000), $lte: now },
+  }).sort({ occurredAt: -1 });
+
+  // Pay that arrives in two parts - the salary, then arrears a few days
+  // later - is one payment for the purposes of a period. Anchoring on the
+  // most recent alone would start the period at the second part and leave
+  // the first outside it, which is how the amount came out short.
+  const lastSalary = clusterStart(recentSalaries);
+
+  const period = lastSalary
+    ? budgetPeriodFromSalary(lastSalary, salaryDay, now)
+    : budgetPeriodFor(salaryDay, now);
+
+  // The date carried alongside rather than derived back out of the period:
+  // a salary that landed a day late opens the period on the day it landed,
+  // and a caller wanting to say "paid on the 2nd" cannot tell that from a
+  // start date that would have been the 1st either way.
+  return { ...period, salaryPaidOn: lastSalary };
+}
 
 /**
  * What is left to spend before the next salary, and how fast it is going.
@@ -27,26 +67,7 @@ export async function budgetPace(userId: Types.ObjectId, now = new Date()) {
     return { configured: false as const };
   }
 
-  // A credit marked as pay outranks the configured day, because the day is
-  // a prediction and the credit is what happened. Looked for in a window
-  // wide enough to cover a salary that came early or late, but not so wide
-  // that last month's would still be found once this month's is overdue.
-  const recentSalaries = await Transaction.find({
-    userId,
-    isSalary: true,
-    type: "CREDIT",
-    occurredAt: { $gte: new Date(now.getTime() - SALARY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000), $lte: now },
-  }).sort({ occurredAt: -1 });
-
-  // Pay that arrives in two parts - the salary, then arrears a few days
-  // later - is one payment for the purposes of a period. Anchoring on the
-  // most recent alone would start the period at the second part and leave
-  // the first outside it, which is how the amount came out short.
-  const lastSalary = clusterStart(recentSalaries);
-
-  const period = lastSalary
-    ? budgetPeriodFromSalary(lastSalary, user.salaryDay, now)
-    : budgetPeriodFor(user.salaryDay, now);
+  const period = await currentBudgetPeriod(userId, user.salaryDay, now);
 
   // What actually landed this period, which is the figure that knows about
   // the leave taken in it. Summed rather than taken from the newest, so
@@ -172,7 +193,7 @@ export async function budgetPace(userId: Types.ObjectId, now = new Date()) {
     // Whether the figure above is what landed or what was configured, so
     // the screen can say which it is showing.
     salaryIsActual: paid != null,
-    salaryPaidOn: lastSalary,
+    salaryPaidOn: period.salaryPaidOn,
     commitmentsRemainingMinor,
     spentMinor,
     remainingMinor,
