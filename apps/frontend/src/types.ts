@@ -282,9 +282,47 @@ export interface FixedCommitment {
   isPartial?: boolean;
 }
 
+/** One day of the daily budget: what went out, and what it left behind. */
+export interface DailyBudgetDay {
+  day: string;
+  spentMinor: number;
+  /** Budget less spending: positive put by, negative taken back. */
+  deltaMinor: number;
+}
+
+/**
+ * The daily allowance and the pot behind it.
+ *
+ * A different question from the salary pace: the pace forecasts whether
+ * you will reach payday, this keeps score against what you decided a day
+ * should cost. The bucket is what there is to move into savings when the
+ * next salary lands.
+ */
+export type DailyBudget =
+  | { configured: false }
+  | {
+      configured: true;
+      dailyBudgetMinor: number;
+      periodStart: string;
+      periodEnd: string;
+      resetsOnSalary: boolean;
+      daysCounted: number;
+      daysLeft: number;
+      allowedMinor: number;
+      spentMinor: number;
+      /** Positive is put by, negative is spent out of what was put by. */
+      bucketMinor: number;
+      todaySpentMinor: number;
+      todayLeftMinor: number;
+      daysOver: number;
+      days: DailyBudgetDay[];
+    };
+
 export interface BudgetProfile {
   salaryAmountMinor: number | null;
   salaryDay: number | null;
+  /** What you decided a day should cost. Null until one is set. */
+  dailyBudgetMinor?: number | null;
 }
 
 export type BudgetPace =
@@ -500,6 +538,8 @@ export interface UpcomingBill {
 export interface DashboardData {
   today: string;
   pace: BudgetPace;
+  /// Optional because a page can outlive the server build that added it.
+  daily?: DailyBudget;
   cards: CardStatus[];
   picks: CardPicks;
   needsCategory: { yesterday: number; month: number };

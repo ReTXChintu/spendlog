@@ -48,6 +48,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   List<FixedCommitment> _commitments = [];
   int? _salaryMinor;
   int? _salaryDay;
+  int? _dailyBudgetMinor;
 
   bool _readingStatements = false;
   String? _statementResult;
@@ -221,6 +222,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
       setState(() {
         _salaryMinor = profile['salaryAmountMinor'] as int?;
         _salaryDay = profile['salaryDay'] as int?;
+        _dailyBudgetMinor = profile['dailyBudgetMinor'] as int?;
         _commitments = (results[1] as List<dynamic>)
             .map((c) => FixedCommitment.fromJson(c as Map<String, dynamic>))
             .toList();
@@ -237,6 +239,14 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     final saved = await showDialog<bool>(
       context: context,
       builder: (_) => _SalaryDialog(amountMinor: _salaryMinor, day: _salaryDay),
+    );
+    if (saved == true) await _loadYou();
+  }
+
+  Future<void> _editDailyBudget() async {
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => _DailyBudgetDialog(amountMinor: _dailyBudgetMinor),
     );
     if (saved == true) await _loadYou();
   }
@@ -773,6 +783,25 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
             ],
           ),
         ),
+        const SizedBox(height: 14),
+        _SettingsCard(
+          icon: Icons.savings_outlined,
+          title: 'What a day should cost',
+          subtitle:
+              _dailyBudgetMinor != null ? '${formatMoney(_dailyBudgetMinor!)} a day' : 'Not set',
+          child: _CardBody(
+            text: 'Every day under it puts the difference by, every day over it takes the '
+                'difference back. The running total is what there is to move into savings when '
+                'the next salary lands, and it starts again '
+                '${_salaryDay != null ? 'on your pay day' : 'on the 1st'}.',
+            actions: [
+              OutlinedButton(
+                onPressed: _editDailyBudget,
+                child: Text(_dailyBudgetMinor != null ? 'Change it' : 'Set a daily budget'),
+              ),
+            ],
+          ),
+        ),
         if (_commitments.isNotEmpty) ...[
           const SizedBox(height: 14),
           _SettingsCard(
@@ -1057,6 +1086,67 @@ class _ToggleRow extends StatelessWidget {
 ///
 /// Two numbers rather than a whole profile screen, because they are the
 /// only two the pace arithmetic needs.
+/// What a day should cost. One field, because that is the whole setting.
+class _DailyBudgetDialog extends StatefulWidget {
+  final int? amountMinor;
+
+  const _DailyBudgetDialog({this.amountMinor});
+
+  @override
+  State<_DailyBudgetDialog> createState() => _DailyBudgetDialogState();
+}
+
+class _DailyBudgetDialogState extends State<_DailyBudgetDialog> {
+  late final _amount = TextEditingController(
+    text: widget.amountMinor != null ? (widget.amountMinor! ~/ 100).toString() : '',
+  );
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _amount.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    final navigator = Navigator.of(context);
+    final rupees = double.tryParse(_amount.text.trim());
+
+    try {
+      // An empty box clears it rather than being a mistake: that is how
+      // somebody turns the bucket off again.
+      await ApiClient.instance.patch('/budget/profile', {
+        'dailyBudgetMinor': rupees == null || rupees <= 0 ? null : (rupees * 100).round(),
+      });
+      navigator.pop(true);
+    } catch (_) {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('What a day should cost'),
+      content: TextField(
+        controller: _amount,
+        autofocus: true,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        decoration: const InputDecoration(
+          labelText: 'A day',
+          prefixText: '₹ ',
+          hintText: '1000',
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+        FilledButton(onPressed: _saving ? null : _save, child: const Text('Save')),
+      ],
+    );
+  }
+}
+
 class _SalaryDialog extends StatefulWidget {
   final int? amountMinor;
   final int? day;

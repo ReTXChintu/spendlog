@@ -558,6 +558,78 @@ List<Category> categoriesFor(List<Category> categories, String type) {
   return categories.where((category) => category.direction != refused).toList();
 }
 
+/// One day of the daily budget: what went out, and what it left behind.
+class DailyBudgetDay {
+  final String day;
+  final int spentMinor;
+
+  /// Budget less spending: positive put by, negative taken back.
+  final int deltaMinor;
+
+  DailyBudgetDay({required this.day, required this.spentMinor, required this.deltaMinor});
+
+  factory DailyBudgetDay.fromJson(Map<String, dynamic> json) => DailyBudgetDay(
+        day: json['day'] as String? ?? '',
+        spentMinor: json['spentMinor'] as int? ?? 0,
+        deltaMinor: json['deltaMinor'] as int? ?? 0,
+      );
+}
+
+/// The daily allowance and the pot filling or draining behind it.
+///
+/// A different question from the pace: the pace forecasts whether you will
+/// reach payday, this keeps score against what you decided a day should
+/// cost. The bucket is what there is to move into savings when the next
+/// salary lands.
+class DailyBudget {
+  final bool configured;
+  final int dailyBudgetMinor;
+  final bool resetsOnSalary;
+  final int daysCounted;
+  final int daysLeft;
+  final int allowedMinor;
+  final int spentMinor;
+
+  /// Positive is put by, negative is spent out of what was put by.
+  final int bucketMinor;
+  final int todaySpentMinor;
+  final int todayLeftMinor;
+  final int daysOver;
+  final List<DailyBudgetDay> days;
+
+  DailyBudget({
+    required this.configured,
+    this.dailyBudgetMinor = 0,
+    this.resetsOnSalary = false,
+    this.daysCounted = 0,
+    this.daysLeft = 0,
+    this.allowedMinor = 0,
+    this.spentMinor = 0,
+    this.bucketMinor = 0,
+    this.todaySpentMinor = 0,
+    this.todayLeftMinor = 0,
+    this.daysOver = 0,
+    this.days = const [],
+  });
+
+  factory DailyBudget.fromJson(Map<String, dynamic> json) => DailyBudget(
+        configured: json['configured'] as bool? ?? false,
+        dailyBudgetMinor: json['dailyBudgetMinor'] as int? ?? 0,
+        resetsOnSalary: json['resetsOnSalary'] as bool? ?? false,
+        daysCounted: json['daysCounted'] as int? ?? 0,
+        daysLeft: json['daysLeft'] as int? ?? 0,
+        allowedMinor: json['allowedMinor'] as int? ?? 0,
+        spentMinor: json['spentMinor'] as int? ?? 0,
+        bucketMinor: json['bucketMinor'] as int? ?? 0,
+        todaySpentMinor: json['todaySpentMinor'] as int? ?? 0,
+        todayLeftMinor: json['todayLeftMinor'] as int? ?? 0,
+        daysOver: json['daysOver'] as int? ?? 0,
+        days: (json['days'] as List<dynamic>? ?? [])
+            .map((row) => DailyBudgetDay.fromJson(row as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
 /// How fast money is going out against how fast it can. A pace, not a
 /// judgement about whether a bill can be paid — SpendLog has never known
 /// an account balance.
@@ -1142,6 +1214,7 @@ class UpcomingBill {
 /// Everything the landing screen needs, in one request.
 class DashboardData {
   final BudgetPace pace;
+  final DailyBudget daily;
   final List<CardStatus> cards;
   final CardPicks picks;
   final int needsCategoryYesterday;
@@ -1157,6 +1230,7 @@ class DashboardData {
 
   DashboardData({
     required this.pace,
+    required this.daily,
     required this.cards,
     required this.picks,
     required this.needsCategoryYesterday,
@@ -1178,6 +1252,7 @@ class DashboardData {
 
     return DashboardData(
       pace: BudgetPace.fromJson(json['pace'] as Map<String, dynamic>? ?? {}),
+      daily: DailyBudget.fromJson(json['daily'] as Map<String, dynamic>? ?? {}),
       cards: (json['cards'] as List<dynamic>? ?? [])
           .map((card) => CardStatus.fromJson(card as Map<String, dynamic>))
           .toList(),

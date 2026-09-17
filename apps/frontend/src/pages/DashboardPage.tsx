@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { CardLimits } from "../components/CardLimits";
+import { DailyBucket } from "../components/DailyBucket";
 import { CardPicker } from "../components/CardPicker";
 import { Icon } from "../components/Icon";
 import { StateBlock } from "../components/States";
@@ -59,7 +60,7 @@ export function DashboardPage() {
 
   if (!data) return <section className="screen" />;
 
-  const { pace, monthSoFar, needsCategory, emis, owed, expiringPerks, statements, bills } = data;
+  const { pace, daily, monthSoFar, needsCategory, emis, owed, expiringPerks, statements, bills } = data;
   const change = monthSoFar.changeMinor;
 
   return (
@@ -113,6 +114,8 @@ export function DashboardPage() {
             </p>
             <CardPicker picks={data.picks} />
           </div>
+
+          {daily && <DailyBucket daily={daily} />}
 
           {pace.configured ? (
             <div className="section-block">

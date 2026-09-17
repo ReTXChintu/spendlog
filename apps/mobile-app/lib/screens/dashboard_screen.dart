@@ -7,6 +7,7 @@ import '../utils/format.dart';
 import '../services/reminder_service.dart';
 import '../widgets/card_limits.dart';
 import '../widgets/card_picker.dart';
+import '../widgets/daily_bucket.dart';
 import '../widgets/state_block.dart';
 import 'perks_screen.dart';
 
@@ -128,6 +129,18 @@ class DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(height: 12),
           CardPicker(picks: data.picks, onOpenAccounts: widget.onOpenSettings),
+
+          if (data.daily.configured) ...[
+            const SizedBox(height: 24),
+            _Heading(
+              title: 'Daily budget',
+              sub: '${formatMoney(data.daily.dailyBudgetMinor)} a day, over ${data.daily.daysCounted} '
+                  '${data.daily.daysCounted == 1 ? 'day' : 'days'} so far. Starts again '
+                  '${data.daily.resetsOnSalary ? 'when you are paid' : 'on the 1st'}.',
+            ),
+            const SizedBox(height: 12),
+            DailyBucket(daily: data.daily),
+          ],
 
           const SizedBox(height: 24),
           if (data.pace.configured) ...[

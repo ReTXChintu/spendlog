@@ -631,6 +631,7 @@ function BudgetTab() {
   const [profile, setProfile] = useState<BudgetProfile | null>(null);
   const [salary, setSalary] = useState("");
   const [salaryDay, setSalaryDay] = useState("");
+  const [dailyBudget, setDailyBudget] = useState("");
   const [saved, setSaved] = useState(false);
 
   const [commitments, setCommitments] = useState<FixedCommitment[]>([]);
@@ -655,15 +656,18 @@ function BudgetTab() {
         setProfile(next);
         if (next.salaryAmountMinor) setSalary((next.salaryAmountMinor / 100).toFixed(0));
         if (next.salaryDay) setSalaryDay(String(next.salaryDay));
+        if (next.dailyBudgetMinor) setDailyBudget((next.dailyBudgetMinor / 100).toFixed(0));
       })
       .catch(() => setProfile(null));
   }, []);
 
   async function save() {
     const rupees = Number.parseFloat(salary);
+    const dailyRupees = Number.parseFloat(dailyBudget);
     const next = await api.patch<BudgetProfile>("/budget/profile", {
       salaryAmountMinor: Number.isFinite(rupees) ? Math.round(rupees * 100) : null,
       salaryDay: Number.parseInt(salaryDay, 10) || null,
+      dailyBudgetMinor: dailyRupees > 0 ? Math.round(dailyRupees * 100) : null,
     });
     setProfile(next);
     setSaved(true);
@@ -712,6 +716,42 @@ function BudgetTab() {
               value={salaryDay}
               onChange={(e) => setSalaryDay(e.target.value)}
               placeholder="15"
+            />
+          </label>
+          <button className="btn btn-sm btn-primary" onClick={save}>
+            {saved ? "Saved" : "Save"}
+          </button>
+        </div>
+      </div>
+
+      <div className="card set-card">
+        <div className="set-card-head">
+          <div className="set-card-icon">
+            <Icon name="ic-trend" />
+          </div>
+          <div>
+            <h4>What a day should cost</h4>
+            <p className="set-card-sub">
+              {profile?.dailyBudgetMinor ? `${formatMoney(profile.dailyBudgetMinor)} a day` : "Not set"}
+            </p>
+          </div>
+        </div>
+
+        <p className="desc">
+          Every day under it puts the difference by, every day over it takes the difference back. The
+          running total is what there is to move into savings when the next salary lands, and it starts
+          again {profile?.salaryDay ? "on your pay day" : "on the 1st"}.
+        </p>
+
+        <div className="budget-setup">
+          <label className="field">
+            <span>A day (₹)</span>
+            <input
+              className="filter-input"
+              inputMode="decimal"
+              value={dailyBudget}
+              onChange={(e) => setDailyBudget(e.target.value)}
+              placeholder="1000"
             />
           </label>
           <button className="btn btn-sm btn-primary" onClick={save}>
