@@ -102,6 +102,23 @@ export async function upcomingBills(userId: Types.ObjectId, now = new Date()): P
   return bills.sort((a, b) => (a.daysUntilDue ?? 9999) - (b.daysUntilDue ?? 9999));
 }
 
+/**
+ * The same bills, keyed by the card they belong to.
+ *
+ * For anyone asking about one card rather than listing them all - chiefly
+ * cardStatuses, which needs to know how much of a credit limit last
+ * month's bill is still holding on to. Built on upcomingBills rather than
+ * beside it, so "newest statement, less whatever has been paid against it"
+ * is worked out in one place and cannot drift into two answers.
+ */
+export async function outstandingByCard(
+  userId: Types.ObjectId,
+  now = new Date()
+): Promise<Map<string, UpcomingBill>> {
+  const bills = await upcomingBills(userId, now);
+  return new Map(bills.map((bill) => [bill.accountId, bill]));
+}
+
 /** Whole days from the start of today, in IST, to a date. */
 function daysBetween(now: Date, to: Date): number {
   const today = Date.parse(`${istDayKey(now)}T00:00:00.000+05:30`);

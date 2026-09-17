@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import mongoose, { Types } from "mongoose";
-import { Account, Transaction, User } from "../../models";
+import { Account, CardStatement, Transaction, User } from "../../models";
 import { dayFromStatement, learnCycleFromStatement } from "./cards.learn";
 import { cardStatuses } from "./cards.status";
 
@@ -24,6 +24,7 @@ let userCount = 0;
 beforeEach(async () => {
   await Promise.all([
     Account.deleteMany({}),
+    CardStatement.deleteMany({}),
     Transaction.deleteMany({}),
     User.deleteMany({}),
   ]);
@@ -238,9 +239,10 @@ describe("the personal spend limit, once the cycle is known", () => {
     assert.equal(status.state, "ok");
   });
 
-  it("still counts a purchase made on the statement day itself", async () => {
-    // The bill drawn on the 17th includes the 17th, so that spending
-    // belongs to the cycle that is closing, not the one opening.
+  it("puts a purchase made on the statement day into the new cycle", async () => {
+    // The bill drawn on the 17th covers up to the 16th, so the 17th's
+    // spending opens the next cycle rather than closing the last one.
+    // This is the day the counter goes back to zero.
     const hdfc = await Account.create({
       userId,
       bankName: "HDFC",
@@ -250,12 +252,162 @@ describe("the personal spend limit, once the cycle is known", () => {
       spendLimitMinor: 50_000_00,
     });
 
+    await spend(hdfc._id, "2026-09-16", 5000);
     await spend(hdfc._id, "2026-09-17", 2000);
 
+    // The 16th is the closing cycle's last day, and the 17th has not
+    // happened yet as far as this moment is concerned.
+    const [before] = await cardStatuses(userId, on("2026-09-16"));
+    assert.equal(before.spentMinor, 5000_00);
+
+    // Come the 17th the counter has reset, and the day's own spending is
+    // the only thing on it.
     const [onTheDay] = await cardStatuses(userId, on("2026-09-17"));
     assert.equal(onTheDay.spentMinor, 2000_00);
 
+    // And it is still there tomorrow - the same cycle, one day older.
     const [dayAfter] = await cardStatuses(userId, on("2026-09-18"));
-    assert.equal(dayAfter.spentMinor, 0);
+    assert.equal(dayAfter.spentMinor, 2000_00);
+  });
+});
+
+describe("what is actually left on the card", () => {
+  async function cardWithBill(billMinor: number) {
+    const hdfc = await Account.create({
+      userId,
+      bankName: "HDFC",
+      last4: "4321",
+      accountType: "CARD",
+      statementDay: 17,
+      dueDay: 6,
+      creditLimitMinor: 25_000_00,
+      spendLimitMinor: 10_000_00,
+    });
+
+    await CardStatement.create({
+      userId,
+      accountId: hdfc._id,
+      sourceRef: "m1#a1",
+      kind: "CARD",
+      status: "PARSED",
+      statementDate: on("2026-09-17"),
+      dueDate: on("2026-10-06"),
+      totalDueMinor: billMinor,
+    });
+
+    return hdfc;
+  }
+
+  async function spend(accountId: Types.ObjectId, day: string, rupees: number) {
+    await Transaction.create({
+      userId,
+      accountId,
+      type: "DEBIT",
+      amountMinor: rupees * 100,
+      occurredAt: on(day),
+      description: `spend on ${day}`,
+      source: "MANUAL",
+    });
+  }
+
+  it("takes the unpaid bill off the limit as well as this cycle's spending", async () => {
+    // The whole picture on the 20th: a 25,000 card, a 14,000 bill drawn on
+    // the 17th and not yet paid, and 3,000 spent since. The bank is
+    // holding 17,000 of the limit, so 8,000 is what is really left.
+    const hdfc = await cardWithBill(14_000_00);
+    await spend(hdfc._id, "2026-09-20", 3000);
+
+    const [status] = await cardStatuses(userId, on("2026-09-20"));
+
+    assert.equal(status.creditLimitMinor, 25_000_00);
+    assert.equal(status.outstandingMinor, 14_000_00);
+    assert.equal(status.spentMinor, 3000_00);
+    assert.equal(status.availableMinor, 8000_00);
+
+    // The personal budget is a separate question with a separate answer:
+    // 3,000 of the 10,000 allowed, and the bill has nothing to do with it.
+    assert.equal(status.limitMinor, 10_000_00);
+    assert.equal(status.remainingMinor, 7000_00);
+  });
+
+  it("gives the limit back when the bill is paid", async () => {
+    const hdfc = await cardWithBill(14_000_00);
+    await spend(hdfc._id, "2026-09-20", 3000);
+
+    // Paid from somewhere else, marked as paying this card. That marking
+    // is the only thing that says a bill has been cleared: the money
+    // leaving produces one message, on the account being debited, with
+    // nothing on the card side to pair it with.
+    await Transaction.create({
+      userId,
+      accountId: hdfc._id,
+      cardPaymentFor: hdfc._id,
+      type: "DEBIT",
+      amountMinor: 14_000_00,
+      occurredAt: on("2026-09-25"),
+      description: "card bill paid",
+      source: "MANUAL",
+    });
+
+    const [status] = await cardStatuses(userId, on("2026-09-26"));
+
+    assert.equal(status.outstandingMinor, 0);
+    assert.equal(status.availableMinor, 22_000_00, "the 14,000 came back");
+
+    // And paying the bill is not spending: it must not eat the budget.
+    assert.equal(status.spentMinor, 3000_00);
+  });
+
+  it("counts a bill paid in two goes", async () => {
+    const hdfc = await cardWithBill(14_000_00);
+
+    for (const [day, rupees] of [["2026-09-22", 6000], ["2026-09-28", 5000]] as [string, number][]) {
+      await Transaction.create({
+        userId,
+        accountId: hdfc._id,
+        cardPaymentFor: hdfc._id,
+        type: "DEBIT",
+        amountMinor: rupees * 100,
+        occurredAt: on(day),
+        description: "part payment",
+        source: "MANUAL",
+      });
+    }
+
+    const [status] = await cardStatuses(userId, on("2026-09-30"));
+    assert.equal(status.outstandingMinor, 3000_00);
+    assert.equal(status.availableMinor, 22_000_00);
+  });
+
+  it("says nothing rather than zero when no statement has been read", async () => {
+    // A card with no statement is not a card with no bill. Reporting 0
+    // would put the whole limit on the screen as available on the one day
+    // of the month when it is least likely to be.
+    const hdfc = await Account.create({
+      userId,
+      bankName: "Axis",
+      last4: "1111",
+      accountType: "CARD",
+      statementDay: 17,
+      creditLimitMinor: 25_000_00,
+    });
+    await spend(hdfc._id, "2026-09-20", 3000);
+
+    const [status] = await cardStatuses(userId, on("2026-09-20"));
+    assert.equal(status.outstandingMinor, null);
+    assert.equal(status.availableMinor, 22_000_00);
+  });
+
+  it("has no available figure without a credit limit to count from", async () => {
+    await Account.create({
+      userId,
+      bankName: "Axis",
+      last4: "1111",
+      accountType: "CARD",
+      statementDay: 17,
+    });
+
+    const [status] = await cardStatuses(userId, on("2026-09-20"));
+    assert.equal(status.availableMinor, null);
   });
 });

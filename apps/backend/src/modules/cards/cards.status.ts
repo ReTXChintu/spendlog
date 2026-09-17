@@ -3,6 +3,7 @@ import { Account, Transaction } from "../../models";
 import { istDayEnd, istDayKey, istMonthKey, istMonthStart } from "../../time";
 import { CardNetwork, CARD_NETWORKS } from "../../types";
 import { cycleFor, floatDays } from "./cards.cycle";
+import { outstandingByCard } from "../statements/statements.bills";
 
 /**
  * Where every card stands: its cycle, its limit, and how long it would be
@@ -36,7 +37,23 @@ export interface CardStatus {
   /// being 30% through a credit limit tells you nothing.
   limitMinor: number | null;
   creditLimitMinor: number | null;
+  /// What you have left of your own budget this cycle.
   remainingMinor: number | null;
+  /// Last statement's bill, less anything paid against it since. Null when
+  /// no statement has been read, which is not the same as nothing owed.
+  ///
+  /// This is money the bank is still holding against the credit limit. A
+  /// card with a 25,000 limit and a 14,000 bill outstanding has 11,000 of
+  /// room before this cycle's spending is counted at all - and a card bar
+  /// that ignores it tells you that you have the whole limit to play with
+  /// on the one day of the month when you have least of it.
+  outstandingMinor: number | null;
+  /// When that outstanding bill has to be paid. Distinct from dueOn, which
+  /// is when the bill for the cycle now running will fall due.
+  billDueOn: Date | null;
+  /// The credit limit, less the outstanding bill, less this cycle. What is
+  /// actually left to spend. Null without a credit limit to count from.
+  availableMinor: number | null;
   /// Whether spentMinor covers a billing cycle or a calendar month. A card
   /// with no statement day has no cycle to measure, and a period of
   /// "nothing" used to report nothing spent.
@@ -59,7 +76,10 @@ export function normaliseNetwork(raw: string | null | undefined): CardNetwork | 
 }
 
 export async function cardStatuses(userId: Types.ObjectId, now = new Date()): Promise<CardStatus[]> {
-  const cards = await Account.find({ userId, accountType: "CARD", isActive: true });
+  const [cards, bills] = await Promise.all([
+    Account.find({ userId, accountType: "CARD", isActive: true }),
+    outstandingByCard(userId, now),
+  ]);
 
   const rows = await Promise.all(
     cards.map(async (card): Promise<CardStatus> => {
@@ -70,14 +90,11 @@ export async function cardStatuses(userId: Types.ObjectId, now = new Date()): Pr
       // spent - not "unknown", but a confident zero beside a real limit,
       // which is the most misleading figure this could produce.
       const from = cycle?.start ?? istMonthStart(istMonthKey(now));
-      // To the end of the statement day, not to its midnight. cycleFor
-      // returns the statement day as the instant it begins, and the cycle
-      // includes that whole day - the bill drawn on the 17th covers the
-      // 17th. Cutting the range at 00:00 dropped every purchase made
-      // during the statement day out of the closing cycle, while the next
-      // cycle does not start until the 18th: one day a month where
-      // spending counted against no limit at all and simply disappeared.
-      const to = cycle ? istDayEnd(istDayKey(cycle.statementOn)) : now;
+      // To the end of the cycle's last day, which is the day before the
+      // next statement. Taken as an inclusive instant rather than as a
+      // midnight, so a purchase at eight in the evening on the last day
+      // still falls inside the cycle it belongs to.
+      const to = cycle ? istDayEnd(istDayKey(cycle.endsOn)) : now;
 
       const spentMinor =
         (
@@ -93,6 +110,18 @@ export async function cardStatuses(userId: Types.ObjectId, now = new Date()): Pr
             { $group: { _id: null, total: { $sum: "$countedAmountMinor" } } },
           ])
         )[0]?.total ?? 0;
+
+      // What last month's bill is still holding, and so what is genuinely
+      // left. Cleared the moment a payment is marked against the card:
+      // paying the 14,000 gives the 14,000 back.
+      const bill = bills.get(card.id);
+      const outstandingMinor = bill ? Math.max(0, bill.totalDueMinor - bill.paidMinor) : null;
+
+      const creditLimitMinor = card.creditLimitMinor ?? null;
+      const availableMinor =
+        creditLimitMinor === null
+          ? null
+          : Math.max(0, creditLimitMinor - (outstandingMinor ?? 0) - spentMinor);
 
       const limitMinor = card.spendLimitMinor ?? null;
       const state: CardState = !limitMinor
@@ -116,8 +145,11 @@ export async function cardStatuses(userId: Types.ObjectId, now = new Date()): Pr
         floatDays: floatDays(card, now),
         spentMinor,
         limitMinor,
-        creditLimitMinor: card.creditLimitMinor ?? null,
+        creditLimitMinor,
         remainingMinor: limitMinor === null ? null : Math.max(0, limitMinor - spentMinor),
+        outstandingMinor,
+        billDueOn: bill?.dueDate ?? null,
+        availableMinor,
         periodIsCycle: cycle !== null,
         periodStart: from,
         periodEnd: to,
