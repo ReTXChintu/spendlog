@@ -246,6 +246,16 @@ export interface CardStatus {
   limitMinor: number | null;
   creditLimitMinor?: number | null;
   remainingMinor: number | null;
+  /// Last statement's bill, less anything paid against it. Money the bank
+  /// is still holding against the credit limit. Undefined from a server
+  /// older than this field; null when no statement has been read, which is
+  /// not the same as nothing owed.
+  outstandingMinor?: number | null;
+  /// When that bill has to be paid — not the same as dueOn, which is when
+  /// the cycle now running will fall due.
+  billDueOn?: string | null;
+  /// The credit limit, less the outstanding bill, less this cycle.
+  availableMinor?: number | null;
   /// Whether spentMinor covers a billing cycle or a calendar month. A card
   /// with no statement day has no cycle to measure.
   periodIsCycle?: boolean;

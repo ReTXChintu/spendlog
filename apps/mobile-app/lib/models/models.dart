@@ -426,6 +426,18 @@ class CardStatus {
   final int? creditLimitMinor;
   final int? remainingMinor;
 
+  /// Last statement's bill, less anything paid against it. Money the bank
+  /// is still holding against the credit limit. Null when no statement has
+  /// been read, which is not the same as nothing owed.
+  final int? outstandingMinor;
+
+  /// When that bill has to be paid - not the same as dueOn, which is when
+  /// the cycle now running will fall due.
+  final DateTime? billDueOn;
+
+  /// The credit limit, less the outstanding bill, less this cycle.
+  final int? availableMinor;
+
   /// Whether spentMinor covers a billing cycle or a calendar month. A card
   /// with no statement day has no cycle to measure.
   final bool periodIsCycle;
@@ -445,6 +457,9 @@ class CardStatus {
     this.limitMinor,
     this.creditLimitMinor,
     this.remainingMinor,
+    this.outstandingMinor,
+    this.billDueOn,
+    this.availableMinor,
     this.periodIsCycle = true,
     required this.state,
   });
@@ -462,6 +477,9 @@ class CardStatus {
         limitMinor: json['limitMinor'] as int?,
         creditLimitMinor: json['creditLimitMinor'] as int?,
         remainingMinor: json['remainingMinor'] as int?,
+        outstandingMinor: json['outstandingMinor'] as int?,
+        billDueOn: json['billDueOn'] != null ? DateTime.parse(json['billDueOn'] as String) : null,
+        availableMinor: json['availableMinor'] as int?,
         periodIsCycle: json['periodIsCycle'] as bool? ?? true,
         state: json['state'] as String? ?? 'unset',
       );

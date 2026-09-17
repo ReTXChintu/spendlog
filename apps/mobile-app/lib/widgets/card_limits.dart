@@ -3,17 +3,22 @@ import '../models/models.dart';
 import '../theme.dart';
 import '../utils/format.dart';
 
-/// Where every credit card stands, as a bar each.
+/// Where every credit card stands.
 ///
-/// Two different limits sit on one bar, and keeping them apart is the whole
-/// point of it. The bar's length is spending against the *credit* limit,
-/// which is the bank's answer to how far the card goes. The mark on it is
-/// your own limit, which is the answer that changes what you do at a till —
-/// being 30% through a credit limit tells you nothing, and being 90%
-/// through what you meant to spend tells you to stop.
+/// Two questions, and they are genuinely different: how much of the card is
+/// left, and how much of what you meant to spend is left. They used to
+/// share one bar, the second as a mark on the first, and the second is the
+/// one that changes what you do at a till - being 30% through a credit
+/// limit tells you nothing, being 90% through your own budget tells you to
+/// stop. As a mark it read as a footnote. So: a bar each.
 ///
-/// So the colour follows the mark rather than the length: a card can sit
-/// comfortably inside what the bank allows and well past what you allowed.
+/// The bank's bar has two pieces, because a credit limit is not spent only
+/// by spending. Last month's bill is still holding part of it until it is
+/// paid, and a card that showed the whole limit as free on the morning the
+/// bill arrives was wrong by the size of the bill.
+///
+/// The colour follows the budget throughout: a card can sit comfortably
+/// inside what the bank allows and well past what you allowed.
 class CardLimits extends StatelessWidget {
   const CardLimits({super.key, required this.cards, this.onOpenAccounts});
 
@@ -55,23 +60,24 @@ class CardLimits extends StatelessWidget {
   Widget _bar(BuildContext context, CardStatus card) {
     final c = context.c;
 
-    // Against the credit limit where there is one, and against your own
-    // where there is not. A bar needs something to be a fraction of.
-    final scale = card.creditLimitMinor ?? card.limitMinor;
-    final used = (scale != null && scale > 0) ? (card.spentMinor / scale).clamp(0.0, 1.0) : null;
-    final percent = (scale != null && scale > 0) ? ((card.spentMinor / scale) * 100).round() : null;
-
     final limit = card.limitMinor;
     final over = limit != null && card.spentMinor > limit;
     final close = limit != null && !over && card.spentMinor >= limit * _closeFraction;
     final tint = over ? c.debit : (close ? c.warn : c.brand);
 
-    // Where your own limit falls along the bar. Only worth drawing when it
-    // sits inside it — one above the credit limit is a mistake, not a mark,
-    // and a line pinned to the far end would look like neither.
-    final markAt = (limit != null && scale != null && scale > 0 && limit < scale)
-        ? limit / scale
-        : null;
+    // The bank's bar, in two pieces: what last month's bill is still
+    // holding, then what this cycle has added on top of it. Clamped as a
+    // pair so a card over its credit limit fills the bar rather than
+    // overflowing it.
+    final scale = card.creditLimitMinor;
+    final outstanding = card.outstandingMinor ?? 0;
+    final billAt = (scale != null && scale > 0) ? (outstanding / scale).clamp(0.0, 1.0) : 0.0;
+    final spendAt = (scale != null && scale > 0)
+        ? (card.spentMinor / scale).clamp(0.0, 1.0 - billAt)
+        : 0.0;
+
+    final budgetAt =
+        (limit != null && limit > 0) ? (card.spentMinor / limit).clamp(0.0, 1.0) : 0.0;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -98,54 +104,79 @@ class CardLimits extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            Text(formatMoney(card.spentMinor), style: kNum.copyWith(fontSize: 13.5)),
-            if (scale != null) ...[
+            if (card.availableMinor != null && scale != null) ...[
+              Text(formatMoney(card.availableMinor!), style: kNum.copyWith(fontSize: 13.5)),
               const SizedBox(width: 5),
-              Text('of ${formatMoneyShort(scale)}',
+              Text('left of ${formatMoneyShort(scale)}',
                   style: TextStyle(fontSize: 11.5, color: c.muted)),
-              const SizedBox(width: 6),
-              Text('$percent%',
-                  style: kNum.copyWith(
-                    fontSize: 12,
-                    color: over || close ? tint : c.muted,
-                  )),
+            ] else ...[
+              Text(formatMoney(card.spentMinor), style: kNum.copyWith(fontSize: 13.5)),
+              const SizedBox(width: 5),
+              Text('this cycle', style: TextStyle(fontSize: 11.5, color: c.muted)),
             ],
           ],
         ),
-        const SizedBox(height: 7),
-        SizedBox(
-          height: 9,
-          child: LayoutBuilder(
-            builder: (context, box) => Stack(
-              clipBehavior: Clip.none,
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(100),
-                  child: LinearProgressIndicator(
-                    value: used ?? 0,
-                    minHeight: 9,
-                    backgroundColor: c.track,
-                    valueColor: AlwaysStoppedAnimation(tint),
-                  ),
-                ),
-                if (markAt != null)
-                  Positioned(
-                    left: box.maxWidth * markAt - 1,
-                    top: -3,
-                    bottom: -3,
-                    child: Container(
-                      width: 2,
-                      decoration: BoxDecoration(
-                        color: over ? c.debit : c.ink,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
+
+        // What the bank allows, and how much of it is already spoken for.
+        if (scale != null) ...[
+          const SizedBox(height: 7),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(100),
+            child: SizedBox(
+              height: 9,
+              child: Row(
+                children: [
+                  if (billAt > 0)
+                    Expanded(
+                      flex: (billAt * 1000).round(),
+                      child: ColoredBox(color: c.muted.withValues(alpha: .5)),
                     ),
-                  ),
-              ],
+                  if (spendAt > 0)
+                    Expanded(flex: (spendAt * 1000).round(), child: ColoredBox(color: tint)),
+                  if (billAt + spendAt < 1)
+                    Expanded(
+                      flex: ((1 - billAt - spendAt) * 1000).round(),
+                      child: ColoredBox(color: c.track),
+                    ),
+                ],
+              ),
             ),
           ),
-        ),
-        const SizedBox(height: 6),
+          const SizedBox(height: 5),
+          Wrap(
+            spacing: 12,
+            runSpacing: 2,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              if (outstanding > 0)
+                _key(
+                  c.muted.withValues(alpha: .5),
+                  '${formatMoney(outstanding)} bill pending${card.billDueOn != null ? ', due ${formatShortDate(card.billDueOn!)}' : ''}',
+                  c,
+                ),
+              _key(tint, '${formatMoney(card.spentMinor)} this cycle', c),
+            ],
+          ),
+        ],
+
+        // And what you allow yourself, which is the one that changes what
+        // you do at a till.
+        const SizedBox(height: 8),
+        if (limit != null) ...[
+          ClipRRect(
+            borderRadius: BorderRadius.circular(100),
+            child: SizedBox(
+              height: 5,
+              child: LinearProgressIndicator(
+                value: budgetAt,
+                minHeight: 5,
+                backgroundColor: c.track,
+                valueColor: AlwaysStoppedAnimation(tint),
+              ),
+            ),
+          ),
+          const SizedBox(height: 5),
+        ],
         Wrap(
           spacing: 10,
           runSpacing: 2,
@@ -159,12 +190,11 @@ class CardLimits extends StatelessWidget {
                 fontWeight: over ? FontWeight.w700 : FontWeight.w400,
               ),
             ),
-            // When the counter goes back to zero. Without this the bar is a
-            // number with no period attached, and "is this month's spending
-            // or this cycle's?" is exactly the question it should answer.
+            // When the counter goes back to zero: the statement day, which
+            // opens a cycle rather than closing one.
             if (card.periodIsCycle && card.statementOn != null)
               Text(
-                'resets after ${formatShortDate(card.statementOn!)}',
+                'resets ${formatShortDate(card.statementOn!)}',
                 style: TextStyle(fontSize: 11, color: c.muted.withValues(alpha: .8)),
               ),
           ],
@@ -172,6 +202,20 @@ class CardLimits extends StatelessWidget {
       ],
     );
   }
+
+  /// A dot and a label, naming one piece of the bank's bar.
+  Widget _key(Color colour, String label, SpendColors c) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(color: colour, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 5),
+          Text(label, style: TextStyle(fontSize: 11, color: c.muted)),
+        ],
+      );
 
   String _note(CardStatus card, {required bool over, required bool close}) {
     final limit = card.limitMinor;

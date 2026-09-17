@@ -4,17 +4,22 @@ import { formatMoney, formatShortDate } from "../lib/format";
 import { Icon } from "./Icon";
 
 /**
- * Where every credit card stands, as a bar each.
+ * Where every credit card stands.
  *
- * Two different limits sit on one bar, and keeping them apart is the whole
- * point of it. The bar's length is spending against the *credit* limit,
- * which is the bank's answer to how far the card goes. The mark on it is
- * your own budget, which is the answer that actually changes what you do
- * at a till — being 30% through a credit limit tells you nothing, and
- * being 90% through what you meant to spend tells you to stop.
+ * Two questions, and they are genuinely different: how much of the card is
+ * left, and how much of what you meant to spend is left. They used to
+ * share one bar, the second as a mark on the first, and the second is the
+ * one that changes what you do at a till — being 30% through a credit
+ * limit tells you nothing, being 90% through your own budget tells you to
+ * stop. As a mark it read as a footnote. So: a bar each.
  *
- * So the colour follows the budget, not the credit limit: a card can be
- * comfortably inside what the bank allows and well past what you allowed.
+ * The bank's bar has two pieces, because a credit limit is not spent only
+ * by spending. Last month's bill is still holding part of it until it is
+ * paid, and a card that showed the whole limit as free on the morning the
+ * bill arrives was wrong by the size of the bill.
+ *
+ * The colour follows the budget throughout: a card can sit comfortably
+ * inside what the bank allows and well past what you allowed.
  */
 
 /** Where a budget stops being a number and starts being a warning. */
@@ -32,7 +37,7 @@ export function CardLimits({ cards }: { cards: CardStatus[] }) {
       <p className="section-sub">
         {overBudget.length > 0
           ? `${overBudget.length === 1 ? `${overBudget[0].name} is` : `${overBudget.length} cards are`} past what you meant to spend this month.`
-          : "Spending this cycle against what the bank allows, with your own limit marked."}
+          : "What is left on each card, and what is left of your own limit for this cycle."}
       </p>
 
       <div className="card-limits">
@@ -54,29 +59,27 @@ export function CardLimits({ cards }: { cards: CardStatus[] }) {
 }
 
 function CardBar({ card }: { card: CardStatus }) {
-  // creditLimitMinor came with a later server than this page may be
-  // talking to, and undefined would make the bar a fraction of nothing.
+  // Undefined rather than null where the server predates the field, so a
+  // page talking to an older one degrades to the old picture rather than
+  // drawing a bar as a fraction of nothing.
   const { spentMinor, limitMinor } = card;
   const creditLimitMinor = card.creditLimitMinor ?? null;
-
-  // Against the credit limit where there is one, and against your own
-  // budget where there is not. A bar needs something to be a fraction of,
-  // and the budget is the more useful of the two to fall back on.
-  const scaleMinor = creditLimitMinor ?? limitMinor;
-  const usedFraction = scaleMinor && scaleMinor > 0 ? Math.min(1, spentMinor / scaleMinor) : null;
-  const percent = scaleMinor && scaleMinor > 0 ? Math.round((spentMinor / scaleMinor) * 100) : null;
+  const outstandingMinor = card.outstandingMinor ?? 0;
+  const availableMinor = card.availableMinor ?? null;
 
   const over = limitMinor !== null && spentMinor > limitMinor;
   const close = limitMinor !== null && !over && spentMinor >= limitMinor * CLOSE_FRACTION;
   const state = over ? "over" : close ? "close" : "ok";
 
-  // Where your own budget falls along the bar. Only worth drawing when it
-  // sits inside it — a budget above the credit limit is not a mark, it is
-  // a mistake, and a line pinned to the far end would look like neither.
-  const budgetAt =
-    limitMinor !== null && scaleMinor && scaleMinor > 0 && limitMinor < scaleMinor
-      ? (limitMinor / scaleMinor) * 100
-      : null;
+  // The bank's bar, in two pieces: what last month's bill is still
+  // holding, then what this cycle has added on top of it. Clamped as a
+  // pair so a card that is over its credit limit fills the bar rather
+  // than overflowing it.
+  const scale = creditLimitMinor && creditLimitMinor > 0 ? creditLimitMinor : null;
+  const billPct = scale ? Math.min(100, (outstandingMinor / scale) * 100) : 0;
+  const spendPct = scale ? Math.min(100 - billPct, (spentMinor / scale) * 100) : 0;
+
+  const budgetPct = limitMinor && limitMinor > 0 ? Math.min(100, (spentMinor / limitMinor) * 100) : 0;
 
   return (
     <div className={`card-limit is-${state}`}>
@@ -87,61 +90,85 @@ function CardBar({ card }: { card: CardStatus }) {
           {card.network && <span className="card-limit-network">{card.network}</span>}
         </span>
         <span className="card-limit-figures">
-          <b className="num">{formatMoney(spentMinor)}</b>
-          {scaleMinor ? (
+          {availableMinor !== null && scale ? (
             <>
-              <span className="card-limit-of">of {formatMoney(scaleMinor)}</span>
-              <span className="card-limit-percent num">{percent}%</span>
+              <b className="num">{formatMoney(availableMinor)}</b>
+              <span className="card-limit-of">left of {formatMoney(scale)}</span>
             </>
           ) : (
-            <span className="card-limit-of">no limit set</span>
+            <>
+              <b className="num">{formatMoney(spentMinor)}</b>
+              <span className="card-limit-of">this cycle</span>
+            </>
           )}
         </span>
       </div>
 
-      <div
-        className="card-limit-bar"
-        role="img"
-        aria-label={
-          percent === null
-            ? `${formatMoney(spentMinor)} spent, no limit set`
-            : `${formatMoney(spentMinor)} of ${formatMoney(scaleMinor!)}, ${percent} percent`
-        }
-      >
-        <div className="card-limit-fill" style={{ width: `${(usedFraction ?? 0) * 100}%` }} />
-        {budgetAt !== null && (
-          <span
-            className="card-limit-mark"
-            style={{ left: `${budgetAt}%` }}
-            title={`Your limit: ${formatMoney(limitMinor!)}`}
-          />
-        )}
-      </div>
+      {/* What the bank allows. The unpaid bill is part of the answer and
+          used not to be on the bar at all — a card showing its whole limit
+          as free on the morning the bill lands is wrong by the size of the
+          bill, which is the largest it is ever wrong by. */}
+      {scale && (
+        <>
+          <div
+            className="card-limit-bar"
+            role="img"
+            aria-label={
+              `${formatMoney(outstandingMinor)} still owed, ${formatMoney(spentMinor)} spent this ` +
+              `cycle, ${formatMoney(availableMinor ?? 0)} left of ${formatMoney(scale)}`
+            }
+          >
+            <div className="card-limit-fill is-bill" style={{ width: `${billPct}%` }} />
+            <div className="card-limit-fill is-spend" style={{ width: `${spendPct}%` }} />
+          </div>
 
+          <div className="card-limit-legend">
+            {outstandingMinor > 0 && (
+              <span className="card-limit-key">
+                <i className="card-limit-dot is-bill" />
+                {formatMoney(outstandingMinor)} bill pending
+                {card.billDueOn && `, due ${formatShortDate(card.billDueOn)}`}
+              </span>
+            )}
+            <span className="card-limit-key">
+              <i className="card-limit-dot is-spend" />
+              {formatMoney(spentMinor)} this cycle
+            </span>
+          </div>
+        </>
+      )}
+
+      {/* And what you allow yourself, which is the one that changes what
+          you do at a till. Its own bar, because it is a different question
+          with a different answer and sharing one made it a footnote. */}
       <div className="card-limit-foot">
         {limitMinor === null ? (
           <span className="card-limit-note">
             {card.periodIsCycle === false ? "This month" : "This cycle"} · no limit of your own
           </span>
-        ) : over ? (
-          <span className="card-limit-note is-warn">
-            <Icon name="ic-alert" />
-            {formatMoney(spentMinor - limitMinor)} over your {formatMoney(limitMinor)} limit
-          </span>
         ) : (
-          <span className="card-limit-note">
-            {formatMoney(limitMinor - spentMinor)} left of your {formatMoney(limitMinor)} limit
-            {close && " — worth slowing down"}
-          </span>
+          <>
+            <div className="card-limit-bar is-budget" role="presentation">
+              <div className="card-limit-fill is-spend" style={{ width: `${budgetPct}%` }} />
+            </div>
+            {over ? (
+              <span className="card-limit-note is-warn">
+                <Icon name="ic-alert" />
+                {formatMoney(spentMinor - limitMinor)} over your {formatMoney(limitMinor)} limit
+              </span>
+            ) : (
+              <span className="card-limit-note">
+                {formatMoney(limitMinor - spentMinor)} left of your {formatMoney(limitMinor)} limit
+                {close && " — worth slowing down"}
+              </span>
+            )}
+          </>
         )}
 
-        {/* When the counter goes back to zero. Without this the bar is a
-            number with no period attached, and "is this month's spending
-            or this cycle's?" is exactly the question it should answer. */}
+        {/* When the counter goes back to zero: the statement day, which
+            opens a cycle rather than closing one. */}
         {card.periodIsCycle !== false && card.statementOn && (
-          <span className="card-limit-reset">
-            resets after {formatShortDate(card.statementOn)}
-          </span>
+          <span className="card-limit-reset">resets {formatShortDate(card.statementOn)}</span>
         )}
       </div>
     </div>
