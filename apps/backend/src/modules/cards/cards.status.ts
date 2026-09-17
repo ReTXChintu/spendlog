@@ -1,6 +1,6 @@
 import { Types } from "mongoose";
 import { Account, Transaction } from "../../models";
-import { istMonthKey, istMonthStart } from "../../time";
+import { istDayEnd, istDayKey, istMonthKey, istMonthStart } from "../../time";
 import { CardNetwork, CARD_NETWORKS } from "../../types";
 import { cycleFor, floatDays } from "./cards.cycle";
 
@@ -70,7 +70,14 @@ export async function cardStatuses(userId: Types.ObjectId, now = new Date()): Pr
       // spent - not "unknown", but a confident zero beside a real limit,
       // which is the most misleading figure this could produce.
       const from = cycle?.start ?? istMonthStart(istMonthKey(now));
-      const to = cycle?.statementOn ?? now;
+      // To the end of the statement day, not to its midnight. cycleFor
+      // returns the statement day as the instant it begins, and the cycle
+      // includes that whole day - the bill drawn on the 17th covers the
+      // 17th. Cutting the range at 00:00 dropped every purchase made
+      // during the statement day out of the closing cycle, while the next
+      // cycle does not start until the 18th: one day a month where
+      // spending counted against no limit at all and simply disappeared.
+      const to = cycle ? istDayEnd(istDayKey(cycle.statementOn)) : now;
 
       const spentMinor =
         (
