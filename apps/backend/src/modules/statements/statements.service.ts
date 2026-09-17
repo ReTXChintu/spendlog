@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { gmail_v1, google } from "googleapis";
 import { HydratedDocument, Types } from "mongoose";
 import { Account, CardStatement, CardStatementDoc, EmailConnection } from "../../models";
+import { learnCycleFromStatement } from "../cards/cards.learn";
 import { createOAuthClient } from "../ingestion/gmail.service";
 import { decryptPassword, encryptionAvailable } from "./statements.crypto";
 import { readStatementFile, saveStatementFile } from "./statements.files";
@@ -343,6 +344,12 @@ async function readOneStatement(params: {
   await keepFile(statement, file);
 
   if (!card) return "unidentified";
+
+  // The card learns its own billing day from its own statement. Both the
+  // sync and a re-read come through here, so this is the one place it has
+  // to happen - and it happens before the reconcile, so anything that asks
+  // where the cycle starts while the rows are going in gets the new answer.
+  await learnCycleFromStatement(card, parsed);
 
   const summary = await reconcileStatement(statement);
   return summary.added;
