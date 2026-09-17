@@ -1044,7 +1044,12 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
    limit; the mark on it is your own. The colour follows the mark, because
    a card can sit comfortably inside what the bank allows and well past
    what you allowed. */
-.card-limits{display:flex;flex-direction:column;gap:14px;margin-top:4px}
+.card-limits{display:flex;flex-direction:column;gap:10px;margin-top:4px}
+/* A box each. Four cards in a column, each with a bar, a legend and a
+   second bar, ran together into one wall of lines - the last line of
+   one card sat closer to the next card's name than to its own. */
+.card-limit{padding:12px 13px;border:1px solid var(--line);border-radius:var(--radius-md);
+  background:var(--surface)}
 
 .card-limit-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
   flex-wrap:wrap;margin-bottom:7px}

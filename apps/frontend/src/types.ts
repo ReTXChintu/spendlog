@@ -251,6 +251,9 @@ export interface CardStatus {
   /// older than this field; null when no statement has been read, which is
   /// not the same as nothing owed.
   outstandingMinor?: number | null;
+  /// Whether that figure was printed on the statement or worked out from
+  /// its rows. Shown as "about" rather than hidden.
+  outstandingIsEstimate?: boolean;
   /// When that bill has to be paid — not the same as dueOn, which is when
   /// the cycle now running will fall due.
   billDueOn?: string | null;

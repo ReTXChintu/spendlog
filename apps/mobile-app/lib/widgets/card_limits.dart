@@ -38,9 +38,19 @@ class CardLimits extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // A box each. Four cards in a column, each with a bar, a legend and
+        // a second bar, ran together into one wall of lines - the last line
+        // of one card sat closer to the next card's name than to its own,
+        // and there was no telling which belonged to which.
         for (final card in cards)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 16),
+          Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 12),
+            decoration: BoxDecoration(
+              color: c.surface,
+              border: Border.all(color: c.line),
+              borderRadius: BorderRadius.circular(T.rMd),
+            ),
             child: _bar(context, card),
           ),
         if (noLimit.isNotEmpty)
@@ -151,7 +161,9 @@ class CardLimits extends StatelessWidget {
               if (outstanding > 0)
                 _key(
                   c.muted.withValues(alpha: .5),
-                  '${formatMoney(outstanding)} bill pending${card.billDueOn != null ? ', due ${formatShortDate(card.billDueOn!)}' : ''}',
+                  '${card.outstandingIsEstimate ? 'about ' : ''}'
+                      '${formatMoney(outstanding)} bill pending'
+                      '${card.billDueOn != null ? ', due ${formatShortDate(card.billDueOn!)}' : ''}',
                   c,
                 ),
               _key(tint, '${formatMoney(card.spentMinor)} this cycle', c),

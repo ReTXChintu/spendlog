@@ -431,6 +431,10 @@ class CardStatus {
   /// been read, which is not the same as nothing owed.
   final int? outstandingMinor;
 
+  /// Whether that figure was printed on the statement or worked out from
+  /// its rows. Shown as "about" rather than hidden.
+  final bool outstandingIsEstimate;
+
   /// When that bill has to be paid - not the same as dueOn, which is when
   /// the cycle now running will fall due.
   final DateTime? billDueOn;
@@ -458,6 +462,7 @@ class CardStatus {
     this.creditLimitMinor,
     this.remainingMinor,
     this.outstandingMinor,
+    this.outstandingIsEstimate = false,
     this.billDueOn,
     this.availableMinor,
     this.periodIsCycle = true,
@@ -478,6 +483,7 @@ class CardStatus {
         creditLimitMinor: json['creditLimitMinor'] as int?,
         remainingMinor: json['remainingMinor'] as int?,
         outstandingMinor: json['outstandingMinor'] as int?,
+        outstandingIsEstimate: json['outstandingIsEstimate'] as bool? ?? false,
         billDueOn: json['billDueOn'] != null ? DateTime.parse(json['billDueOn'] as String) : null,
         availableMinor: json['availableMinor'] as int?,
         periodIsCycle: json['periodIsCycle'] as bool? ?? true,

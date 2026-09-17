@@ -126,6 +126,7 @@ function CardBar({ card }: { card: CardStatus }) {
             {outstandingMinor > 0 && (
               <span className="card-limit-key">
                 <i className="card-limit-dot is-bill" />
+                {card.outstandingIsEstimate ? "about " : ""}
                 {formatMoney(outstandingMinor)} bill pending
                 {card.billDueOn && `, due ${formatShortDate(card.billDueOn)}`}
               </span>
