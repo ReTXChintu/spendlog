@@ -10,9 +10,15 @@ import { IST_OFFSET_MS, istDayKey } from "../../time";
  */
 
 export interface BillingCycle {
-  /** First day of the cycle, in IST. */
+  /** First day of the cycle, in IST. The statement day itself. */
   start: Date;
-  /** The day the bill is generated. The cycle's last day. */
+  /** The cycle's last day: the day before the next statement is drawn. */
+  endsOn: Date;
+  /**
+   * The day this cycle's bill is generated, which is also the day the next
+   * cycle opens. Spending on that day is on the cycle it opens, not on the
+   * bill drawn that morning.
+   */
   statementOn: Date;
   /** When it has to be paid. Null if the card has no due day recorded. */
   dueOn: Date | null;
@@ -38,9 +44,14 @@ function istParts(instant: Date): { year: number; month: number; day: number } {
 /**
  * The cycle a payment on `date` belongs to.
  *
- * With a statement day of 12, a payment on the 12th is on the bill drawn
- * that day; one on the 13th waits for next month's. So the cycle runs from
- * the day after a statement to the next statement inclusive.
+ * The statement day opens a cycle rather than closing one. A bill drawn on
+ * the 17th covers the month up to the 16th, so a purchase made on the 17th
+ * is on the *next* bill — which is why the cycle runs from the statement
+ * day to the day before the following one.
+ *
+ * This is the whole of "has my limit reset yet". On the morning the bill
+ * arrives the counter goes back to zero, and what is spent that day counts
+ * towards the cycle that has just opened.
  *
  * A statement day past the end of a short month clamps to its last day —
  * the 31st becomes the 28th in February — rather than spilling into March
@@ -52,26 +63,21 @@ export function cycleFor(
 ): BillingCycle | null {
   if (!card.statementDay) return null;
 
-  const { year, month, day } = istParts(date);
+  const { year, month } = istParts(date);
 
-  // On or before this month's statement day, the bill is this month's.
+  // On or after this month's statement day, that statement opened the
+  // cycle we are in. Before it, last month's did.
   const thisMonthStatement = istDate(year, month, card.statementDay);
-  const statementOn =
-    date.getTime() <= endOfIstDay(thisMonthStatement).getTime()
+  const start =
+    date.getTime() >= thisMonthStatement.getTime()
       ? thisMonthStatement
-      : istDate(year, month + 1, card.statementDay);
+      : istDate(year, month - 1, card.statementDay);
 
-  const { year: sy, month: sm } = istParts(statementOn);
-  const previousStatement = istDate(sy, sm - 1, card.statementDay);
-  const start = new Date(previousStatement.getTime() + 24 * 60 * 60 * 1000);
+  const { year: sy, month: sm } = istParts(start);
+  const statementOn = istDate(sy, sm + 1, card.statementDay);
+  const endsOn = new Date(statementOn.getTime() - 24 * 60 * 60 * 1000);
 
-  return { start, statementOn, dueOn: dueDateFor(card, statementOn) };
-}
-
-/** The last instant of the IST day an instant falls on. */
-function endOfIstDay(instant: Date): Date {
-  const { year, month, day } = istParts(instant);
-  return new Date(istDate(year, month, day).getTime() + 24 * 60 * 60 * 1000 - 1);
+  return { start, endsOn, statementOn, dueOn: dueDateFor(card, statementOn) };
 }
 
 /**
