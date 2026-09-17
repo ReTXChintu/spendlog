@@ -398,6 +398,100 @@ describe("what is actually left on the card", () => {
     assert.equal(status.availableMinor, 22_000_00);
   });
 
+  it("falls back to the statement's rows when the total was never printed", async () => {
+    // The real failure this comes from. The total due is found by matching
+    // a printed label, and an issuer that words it differently, or lays it
+    // out in a way the reader cannot follow, used to produce no bill at
+    // all - so the card showed its whole limit as free with 14,000
+    // outstanding on it.
+    const hdfc = await Account.create({
+      userId,
+      bankName: "Jupiter",
+      last4: "6623",
+      accountType: "CARD",
+      statementDay: 17,
+      creditLimitMinor: 25_000_00,
+    });
+
+    await CardStatement.create({
+      userId,
+      accountId: hdfc._id,
+      sourceRef: "m2#a2",
+      kind: "CARD",
+      status: "PARSED",
+      statementDate: on("2026-09-17"),
+      dueDate: on("2026-10-06"),
+      // No totalDueMinor at all, which is the whole point.
+      lines: [
+        { date: on("2026-09-01"), description: "swiggy", amountMinor: 10_000_00, type: "DEBIT", kind: "SPEND" },
+        { date: on("2026-09-05"), description: "amazon", amountMinor: 5000_00, type: "DEBIT", kind: "SPEND" },
+        { date: on("2026-09-09"), description: "refund", amountMinor: 1000_00, type: "CREDIT", kind: "REVERSAL" },
+      ],
+    });
+
+    const [status] = await cardStatuses(userId, on("2026-09-17"));
+
+    // 10,000 + 5,000 spent, 1,000 back.
+    assert.equal(status.outstandingMinor, 14_000_00);
+    assert.equal(status.outstandingIsEstimate, true, "worked out, not printed");
+    assert.equal(status.availableMinor, 11_000_00);
+  });
+
+  it("prefers the printed total over the rows", async () => {
+    // The bank's own figure includes interest, fees and anything carried
+    // forward. Where it was read, it is the answer.
+    const hdfc = await Account.create({
+      userId,
+      bankName: "Jupiter",
+      last4: "6623",
+      accountType: "CARD",
+      statementDay: 17,
+      creditLimitMinor: 25_000_00,
+    });
+
+    await CardStatement.create({
+      userId,
+      accountId: hdfc._id,
+      sourceRef: "m3#a3",
+      kind: "CARD",
+      status: "PARSED",
+      statementDate: on("2026-09-17"),
+      totalDueMinor: 14_500_00,
+      lines: [
+        { date: on("2026-09-01"), description: "swiggy", amountMinor: 14_000_00, type: "DEBIT", kind: "SPEND" },
+      ],
+    });
+
+    const [status] = await cardStatuses(userId, on("2026-09-17"));
+    assert.equal(status.outstandingMinor, 14_500_00);
+    assert.equal(status.outstandingIsEstimate, false);
+  });
+
+  it("says nothing for a statement with neither a total nor any rows", async () => {
+    const hdfc = await Account.create({
+      userId,
+      bankName: "Jupiter",
+      last4: "6623",
+      accountType: "CARD",
+      statementDay: 17,
+      creditLimitMinor: 25_000_00,
+    });
+
+    await CardStatement.create({
+      userId,
+      accountId: hdfc._id,
+      sourceRef: "m4#a4",
+      kind: "CARD",
+      status: "PARSED",
+      statementDate: on("2026-09-17"),
+      lines: [],
+    });
+
+    const [status] = await cardStatuses(userId, on("2026-09-17"));
+    assert.equal(status.outstandingMinor, null);
+    assert.equal(status.availableMinor, 25_000_00);
+  });
+
   it("has no available figure without a credit limit to count from", async () => {
     await Account.create({
       userId,

@@ -1,5 +1,6 @@
 import { Types } from "mongoose";
 import { Account, CardStatement, Transaction } from "../../models";
+import { TransactionType } from "../../types";
 import { istDayKey } from "../../time";
 
 /**
@@ -28,6 +29,34 @@ export interface UpcomingBill {
   daysUntilDue: number | null;
   paidMinor: number;
   isPaid: boolean;
+  /// Whether totalDueMinor is the figure the bank printed or one worked
+  /// out from the statement's own rows. Said out loud rather than hidden,
+  /// because the two deserve different amounts of trust.
+  isEstimate: boolean;
+}
+
+/**
+ * What a statement's own rows come to, for a bill whose total was not found.
+ *
+ * "Total Amount Due" is found by matching a printed label, and a label is
+ * a thing an issuer is free to word differently or lay out in a way the
+ * reader cannot follow. When that happens the bill used to be invisible:
+ * upcomingBills required a total above zero, so a statement whose summary
+ * block could not be read reported no bill at all, and a card showed its
+ * whole limit as free while a real one was outstanding.
+ *
+ * The rows are the bill, near enough. Purchases less any credits on the
+ * same statement is what the bank is asking for, provided the last one
+ * was cleared - it misses an unpaid balance carried forward, interest and
+ * fees, so it is marked as an estimate wherever it is shown.
+ */
+function billFromRows(lines: { amountMinor: number; type: TransactionType }[]): number {
+  const net = lines.reduce(
+    (total, line) => total + (line.type === "DEBIT" ? line.amountMinor : -line.amountMinor),
+    0
+  );
+
+  return Math.max(0, net);
 }
 
 /** How far back to look for a bill still worth mentioning. */
@@ -40,7 +69,9 @@ export async function upcomingBills(userId: Types.ObjectId, now = new Date()): P
     userId,
     kind: "CARD",
     status: "PARSED",
-    totalDueMinor: { $gt: 0 },
+    // Deliberately not filtered on totalDueMinor. A statement whose total
+    // could not be read is still a bill, and skipping it here was what
+    // made one disappear from the card it belongs to.
     statementDate: { $gte: since },
   })
     .sort({ statementDate: -1 })
@@ -81,7 +112,12 @@ export async function upcomingBills(userId: Types.ObjectId, now = new Date()): P
     ]);
 
     const paidMinor = paid?.total ?? 0;
-    const totalDueMinor = statement.totalDueMinor ?? 0;
+
+    // The bank's own figure where it was found, and the rows where it was
+    // not. A statement that yields neither has nothing to say.
+    const printedMinor = statement.totalDueMinor ?? 0;
+    const totalDueMinor = printedMinor > 0 ? printedMinor : billFromRows(statement.lines);
+    if (totalDueMinor <= 0) continue;
 
     bills.push({
       statementId: statement._id.toString(),
@@ -94,6 +130,7 @@ export async function upcomingBills(userId: Types.ObjectId, now = new Date()): P
       daysUntilDue: statement.dueDate ? daysBetween(now, statement.dueDate) : null,
       paidMinor,
       isPaid: paidMinor >= totalDueMinor,
+      isEstimate: printedMinor <= 0,
     });
   }
 

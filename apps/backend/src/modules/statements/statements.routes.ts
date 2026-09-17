@@ -2,6 +2,7 @@ import { Router } from "express";
 import { Types } from "mongoose";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
+import { learnCycleFromStatement } from "../cards/cards.learn";
 import { validObjectIdParam } from "../../middleware/validate";
 import { Account, CardStatement, Transaction } from "../../models";
 import { istMonthKey } from "../../time";
@@ -436,6 +437,12 @@ statementsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   statement.status = statement.lines.length > 0 ? "PARSED" : statement.status;
   statement.problem = null;
   await statement.save();
+
+  // The same lesson a statement teaches when it arrives on its own. Missed
+  // here until now: a statement mapped by hand is exactly the one whose
+  // card SpendLog knew least about, so it is the one whose billing day was
+  // most likely still a guess.
+  await learnCycleFromStatement(card, statement);
 
   res.json(await reconcileStatement(statement));
 });

@@ -48,6 +48,10 @@ export interface CardStatus {
   /// that ignores it tells you that you have the whole limit to play with
   /// on the one day of the month when you have least of it.
   outstandingMinor: number | null;
+  /// Whether the outstanding figure is the one the bank printed or one
+  /// worked out from the statement's rows, for a statement whose summary
+  /// block could not be read. Shown as "about" rather than hidden.
+  outstandingIsEstimate: boolean;
   /// When that outstanding bill has to be paid. Distinct from dueOn, which
   /// is when the bill for the cycle now running will fall due.
   billDueOn: Date | null;
@@ -148,6 +152,7 @@ export async function cardStatuses(userId: Types.ObjectId, now = new Date()): Pr
         creditLimitMinor,
         remainingMinor: limitMinor === null ? null : Math.max(0, limitMinor - spentMinor),
         outstandingMinor,
+        outstandingIsEstimate: bill?.isEstimate ?? false,
         billDueOn: bill?.dueDate ?? null,
         availableMinor,
         periodIsCycle: cycle !== null,

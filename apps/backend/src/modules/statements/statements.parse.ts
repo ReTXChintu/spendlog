@@ -432,7 +432,15 @@ export function parseStatementRows(rows: string[]): ParsedStatement {
     dueDate,
     periodStart: dated.length ? new Date(Math.min(...dated)) : null,
     periodEnd: dated.length ? new Date(Math.max(...dated)) : null,
-    totalDueMinor: findLabelledAmount(rows, /total\s*(?:amount\s*)?(?:due|dues|payable)/i),
+    // Tried in order, because the first wording that matches wins and the
+    // narrow ones have to go first. "Amount due" on its own is deliberately
+    // not here: it is a substring of "minimum amount due", and matching
+    // that row would report the minimum as the whole bill - which is the
+    // one wrong answer worse than none.
+    totalDueMinor:
+      findLabelledAmount(rows, /total\s*(?:amount\s*)?(?:due|dues|payable|outstanding)/i) ??
+      findLabelledAmount(rows, /(?:net|grand)\s*(?:amount\s*)?(?:due|payable)/i) ??
+      findLabelledAmount(rows, /closing\s*balance/i),
     minimumDueMinor: findLabelledAmount(rows, /min(?:imum)?\.?\s*(?:amount\s*)?due/i),
   };
 }
