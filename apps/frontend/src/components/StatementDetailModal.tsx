@@ -35,6 +35,7 @@ interface Detail {
   periodStart: string | null;
   periodEnd: string | null;
   totalDueMinor: number | null;
+  totalDueIsManual: boolean;
   minimumDueMinor: number | null;
   waivedMinor: number | null;
   waivedNote: string | null;
@@ -114,6 +115,7 @@ export function StatementDetailModal({
 
         {error && <p className="desc set-warn">{error}</p>}
 
+        {detail && <BillEditor detail={detail} onChanged={() => { load(); onChanged(); }} />}
         {detail?.totalDueMinor ? <WaiveRow detail={detail} onChanged={() => { load(); onChanged(); }} /> : null}
 
         <div className="tabs tabs-inline" role="tablist">
@@ -314,6 +316,102 @@ function FilePane({ statementId, hasFile }: { statementId: string; hasFile: bool
           .
         </p>
       </object>
+    </div>
+  );
+}
+
+/**
+ * The bill total, typed in or corrected by hand.
+ *
+ * A reader is a best guess at a layout it has never proved it
+ * understands, and the two ways that guess fails are the same failure
+ * from here: nothing at all, or the wrong number. Both are fixed the
+ * same way — by being told the real one.
+ */
+function BillEditor({ detail, onChanged }: { detail: Detail; onChanged: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [amount, setAmount] = useState(detail.totalDueMinor ? String(detail.totalDueMinor / 100) : "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save(totalDueMinor: number | null) {
+    setSaving(true);
+    setError(null);
+    try {
+      await api.patch(`/statements/${detail.id}/bill`, { totalDueMinor });
+      setEditing(false);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "That didn't work.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!editing && detail.totalDueMinor === null) {
+    return (
+      <button className="btn btn-sm btn-ghost waive-toggle" onClick={() => setEditing(true)}>
+        <Icon name="ic-pencil" /> This statement's bill total wasn't read — enter it
+      </button>
+    );
+  }
+
+  if (!editing) {
+    return (
+      <div className="waive-row">
+        <Icon name={detail.totalDueIsManual ? "ic-pencil" : "ic-receipt"} />
+        <span>
+          {formatMoney(detail.totalDueMinor!)} bill total
+          {detail.totalDueIsManual ? ", entered by hand" : ", read from the statement"}
+        </span>
+        <button className="btn btn-sm btn-ghost" onClick={() => setEditing(true)}>
+          {detail.totalDueIsManual ? "Change" : "Not right?"}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="waive-editor">
+      <p className="field-hint">
+        {detail.totalDueMinor === null
+          ? "Nothing here was found in the statement's own summary. Type the total from the bill."
+          : "Overrides what was read, on this statement only. Worth checking against the PDF itself " +
+            "first — open it from The PDF tab."}
+      </p>
+      <div className="waive-editor-fields">
+        <label className="field">
+          <span>Bill total (₹)</span>
+          <input
+            className="filter-input"
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="13920.89"
+          />
+        </label>
+      </div>
+      {error && <p className="desc set-warn">{error}</p>}
+      <div className="waive-editor-actions">
+        <button
+          className="btn btn-sm btn-primary"
+          disabled={saving || !amount.trim()}
+          onClick={() => {
+            const rupees = Number.parseFloat(amount);
+            if (Number.isFinite(rupees) && rupees >= 0) save(Math.round(rupees * 100));
+          }}
+        >
+          Save
+        </button>
+        {detail.totalDueIsManual ? (
+          <button className="btn btn-sm btn-ghost btn-danger-text" disabled={saving} onClick={() => save(null)}>
+            Forget it
+          </button>
+        ) : null}
+        <button className="btn btn-sm btn-ghost" disabled={saving} onClick={() => setEditing(false)}>
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }

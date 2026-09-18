@@ -76,6 +76,7 @@ class _Detail {
   final DateTime? periodEnd;
   final DateTime? dueDate;
   final int? totalDueMinor;
+  final bool totalDueIsManual;
   final int? waivedMinor;
   final String? waivedNote;
   final bool hasFile;
@@ -88,6 +89,7 @@ class _Detail {
     this.periodEnd,
     this.dueDate,
     this.totalDueMinor,
+    this.totalDueIsManual = false,
     this.waivedMinor,
     this.waivedNote,
     required this.hasFile,
@@ -101,6 +103,7 @@ class _Detail {
         periodEnd: DateTime.tryParse((json['periodEnd'] as String?) ?? ''),
         dueDate: DateTime.tryParse((json['dueDate'] as String?) ?? ''),
         totalDueMinor: json['totalDueMinor'] as int?,
+        totalDueIsManual: json['totalDueIsManual'] as bool? ?? false,
         waivedMinor: json['waivedMinor'] as int?,
         waivedNote: json['waivedNote'] as String?,
         hasFile: json['hasFile'] as bool? ?? false,
@@ -240,6 +243,14 @@ class _StatementDetailScreenState extends State<StatementDetailScreen> with Sing
                           style: TextStyle(fontSize: 12, color: c.muted, height: 1.45),
                         ),
                       ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                      child: _BillEditor(
+                        statementId: widget.statementId,
+                        detail: detail,
+                        onChanged: _load,
+                      ),
+                    ),
                     if (detail.totalDueMinor != null)
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
@@ -380,6 +391,163 @@ class _StatementDetailScreenState extends State<StatementDetailScreen> with Sing
   }
 
   String _day(DateTime date) => DateFormat('d MMM yy').format(date);
+}
+
+/// The bill total, typed in or corrected by hand.
+///
+/// A reader is a best guess at a layout it has never proved it understands,
+/// and the two ways that guess fails are the same failure from here:
+/// nothing at all, or the wrong number. Both are fixed the same way - by
+/// being told the real one.
+class _BillEditor extends StatefulWidget {
+  const _BillEditor({required this.statementId, required this.detail, required this.onChanged});
+
+  final String statementId;
+  final _Detail detail;
+  final Future<void> Function() onChanged;
+
+  @override
+  State<_BillEditor> createState() => _BillEditorState();
+}
+
+class _BillEditorState extends State<_BillEditor> {
+  bool _editing = false;
+  late final _amount = TextEditingController(
+    text: widget.detail.totalDueMinor != null ? (widget.detail.totalDueMinor! / 100).toString() : '',
+  );
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _amount.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save(int? totalDueMinor) async {
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await ApiClient.instance.patch('/statements/${widget.statementId}/bill', {
+        'totalDueMinor': totalDueMinor,
+      });
+      if (!mounted) return;
+      setState(() => _editing = false);
+      await widget.onChanged();
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = error is ApiException ? error.message : "That didn't work.");
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final total = widget.detail.totalDueMinor;
+
+    if (!_editing && total == null) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          onPressed: () => setState(() => _editing = true),
+          icon: const Icon(Icons.edit_outlined, size: 16),
+          label: const Text("This statement's bill total wasn't read — enter it"),
+          style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 4)),
+        ),
+      );
+    }
+
+    if (!_editing) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+        margin: const EdgeInsets.only(bottom: 8),
+        decoration: BoxDecoration(
+          color: c.paper,
+          border: Border.all(color: c.line),
+          borderRadius: BorderRadius.circular(T.rSm),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              widget.detail.totalDueIsManual ? Icons.edit_outlined : Icons.receipt_long_outlined,
+              size: 16,
+              color: c.muted,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '${formatMoney(total!)} bill total'
+                '${widget.detail.totalDueIsManual ? ', entered by hand' : ', read from the statement'}',
+                style: TextStyle(fontSize: 12.5, color: c.ink70),
+              ),
+            ),
+            TextButton(
+              onPressed: () => setState(() => _editing = true),
+              child: Text(widget.detail.totalDueIsManual ? 'Change' : 'Not right?'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(11),
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(border: Border.all(color: c.line), borderRadius: BorderRadius.circular(T.rMd)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            total == null
+                ? "Nothing here was found in the statement's own summary. Type the total from the bill."
+                : 'Overrides what was read, on this statement only. Worth checking against the PDF '
+                    'itself first.',
+            style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _amount,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'Bill total', prefixText: '₹ '),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 6),
+            Text(_error!, style: TextStyle(fontSize: 12, color: c.debit)),
+          ],
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              FilledButton(
+                onPressed: _saving
+                    ? null
+                    : () {
+                        final rupees = double.tryParse(_amount.text.trim());
+                        if (rupees != null && rupees >= 0) _save((rupees * 100).round());
+                      },
+                child: const Text('Save'),
+              ),
+              const SizedBox(width: 8),
+              if (widget.detail.totalDueIsManual)
+                TextButton(
+                  onPressed: _saving ? null : () => _save(null),
+                  child: Text('Forget it', style: TextStyle(color: c.debit)),
+                ),
+              const Spacer(),
+              TextButton(
+                onPressed: _saving ? null : () => setState(() => _editing = false),
+                child: const Text('Cancel'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// The bill, less what a payment actually covered, is a real and permanent
