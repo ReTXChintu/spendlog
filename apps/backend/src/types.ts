@@ -52,6 +52,16 @@ export type EmiInstalmentStatus = (typeof EMI_INSTALMENT_STATUSES)[number];
 export const EMI_ROLES = ["PARENT", "INSTALMENT"] as const;
 export type EmiRole = (typeof EMI_ROLES)[number];
 
+// A loan has no purchase to convert - the money most often never arrived
+// as a transaction SpendLog saw at all, so there is no PARENT/INSTALMENT
+// split the way an EMI has one. Every payment linked to a loan is a
+// repayment, in full, the same as an EMI instalment is.
+export const LOAN_STATUSES = ["ACTIVE", "CLOSED", "CANCELLED"] as const;
+export type LoanStatus = (typeof LOAN_STATUSES)[number];
+
+export const LOAN_INSTALMENT_STATUSES = ["DUE", "PAID", "SKIPPED"] as const;
+export type LoanInstalmentStatus = (typeof LOAN_INSTALMENT_STATUSES)[number];
+
 export const COMMITMENT_KINDS = ["RENT", "SIP", "INSURANCE", "LOAN", "OTHER"] as const;
 export type CommitmentKind = (typeof COMMITMENT_KINDS)[number];
 

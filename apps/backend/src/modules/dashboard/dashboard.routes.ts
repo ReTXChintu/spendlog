@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { Types } from "mongoose";
 import { currentUserId, requireAuth } from "../../middleware/auth";
-import { CardStatement, EmiInstalment, EmiPlan, Perk, Transaction } from "../../models";
+import { CardStatement, EmiInstalment, EmiPlan, Loan, LoanInstalment, Perk, Transaction } from "../../models";
 import { istDayEnd, istDayKey, istDayStart, istMonthKey, istMonthStart } from "../../time";
 import { cardStatuses, pickCards } from "../cards/cards.status";
 import { budgetPace } from "../budget/budget.pace";
@@ -36,12 +36,13 @@ dashboardRouter.get("/", async (req, res) => {
   const yesterday = istDayKey(new Date(now.getTime() - 24 * 60 * 60 * 1000));
   const month = istMonthKey(now);
 
-  const [cards, pace, needsCategory, emis, owed, perks, statements, monthSoFar, bills, daily] =
+  const [cards, pace, needsCategory, emis, loans, owed, perks, statements, monthSoFar, bills, daily] =
     await Promise.all([
     cardStatuses(userId, now),
     budgetPace(userId, now),
     countNeedingACategory(userId, yesterday, month),
     activeEmis(userId),
+    activeLoans(userId),
     owedBalance(userId),
     Perk.find({ userId, isActive: true, usedAt: null }).populate("accountId"),
     statementsNeedingAttention(userId),
@@ -69,6 +70,7 @@ dashboardRouter.get("/", async (req, res) => {
     picks: pickCards(cards),
     needsCategory,
     emis,
+    loans,
     owed,
     expiringPerks: expiring,
     statements,
@@ -131,6 +133,30 @@ async function activeEmis(userId: Types.ObjectId) {
     plans: plans.slice(0, 4).map((plan) => ({
       ...plan.toJSON(),
       remainingMinor: remainingFor(plan._id),
+    })),
+  };
+}
+
+/** The same figures, for loans taken outside a card. See activeEmis. */
+async function activeLoans(userId: Types.ObjectId) {
+  const loans = await Loan.find({ userId, status: "ACTIVE" }).sort({ createdAt: 1 });
+  const instalments = await LoanInstalment.find({
+    loanId: { $in: loans.map((loan) => loan._id) },
+    status: "DUE",
+  });
+
+  const remainingFor = (loanId: Types.ObjectId) =>
+    instalments
+      .filter((instalment) => instalment.loanId.equals(loanId))
+      .reduce((total, instalment) => total + instalment.amountMinor, 0);
+
+  return {
+    count: loans.length,
+    monthlyMinor: loans.reduce((total, loan) => total + loan.monthlyAmountMinor, 0),
+    remainingMinor: instalments.reduce((total, instalment) => total + instalment.amountMinor, 0),
+    loans: loans.slice(0, 4).map((loan) => ({
+      ...loan.toJSON(),
+      remainingMinor: remainingFor(loan._id),
     })),
   };
 }

@@ -3,8 +3,10 @@ import { FilterQuery, Types } from "mongoose";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
-import { Account, Transaction, TransactionDoc, TransactionSourceEntry } from "../../models";
+import { Account, Loan, LoanInstalment, Transaction, TransactionDoc, TransactionSourceEntry } from "../../models";
 import { ingestRawMessage } from "../../parsing/ingest";
+import { attachToLoan } from "../loans/loans.matching";
+import { reopenLoanIfNeeded } from "../loans/loans.routes";
 import { tripForOccurredAt } from "../trips/trips.service";
 import { IST_OFFSET, istDayEnd, istDayKey, istDayStart } from "../../time";
 import { TRANSACTION_TYPES } from "../../types";
@@ -278,6 +280,9 @@ const updateTransactionSchema = z.object({
   // The fixed monthly cost this went towards. Paying early is the point
   // of marking the payment rather than ticking a box on a due date.
   commitmentId: z.string().nullable().optional(),
+  // Which loan this repays. null clears it and gives back whichever
+  // instalment it was claiming.
+  loanId: z.string().regex(OBJECT_ID).nullable().optional(),
   // Zero is meaningful: someone else's bill paid from the user's card, all
   // of which is owed back. null clears the split entirely.
   split: z
@@ -295,20 +300,75 @@ const updateTransactionSchema = z.object({
   pending: z.boolean().optional(),
 });
 
+/**
+ * Moves which loan (if any) a payment is claiming, undoing the old claim
+ * before making the new one.
+ *
+ * A plain $set would leave an instalment marked PAID by a transaction that
+ * no longer says it paid it - picking a different loan, or clearing this
+ * one, has to hand that instalment back to being due first. Returns an
+ * error message on a bad id, or null once it is done.
+ */
+async function applyLoanLink(
+  transactionId: Types.ObjectId,
+  userId: Types.ObjectId,
+  loanId: string | null
+): Promise<string | null> {
+  const transaction = await Transaction.findOne({ _id: transactionId, userId });
+  if (!transaction) return null; // Reported as 404 by the update just after this.
+
+  if (transaction.loanId) {
+    const claimed = await LoanInstalment.findOne({ transactionId: transaction._id });
+    if (claimed) {
+      claimed.status = "DUE";
+      claimed.transactionId = null;
+      claimed.paidAt = null;
+      await claimed.save();
+      // A loan that closed by finishing its schedule is not finished any
+      // more, now that one of its instalments is due again.
+      await reopenLoanIfNeeded(claimed.loanId);
+    }
+    transaction.loanId = null;
+  }
+
+  if (loanId) {
+    const loan = await Loan.findOne({ _id: loanId, userId });
+    if (!loan) return "Unknown loan";
+    await attachToLoan(transaction, loan._id);
+  } else {
+    await transaction.save();
+  }
+
+  return null;
+}
+
 transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   const parsed = updateTransactionSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
+  const userId = currentUserId(req);
+
   // Reject an id that isn't one of this user's own accounts, rather than
   // storing a dangling reference.
   if (parsed.data.accountId) {
-    const owned = await Account.exists({ _id: parsed.data.accountId, userId: currentUserId(req) });
+    const owned = await Account.exists({ _id: parsed.data.accountId, userId });
     if (!owned) return res.status(400).json({ error: "Unknown account" });
   }
 
+  // Which loan a payment repays is not a plain field the way cardPaymentFor
+  // is: picking one claims an instalment on it, and picking a different
+  // one - or clearing it - has to give back whichever instalment this
+  // transaction was claiming before. Handled as its own step, rather than
+  // folded into the $set below, because of that side effect.
+  if (parsed.data.loanId !== undefined) {
+    const error = await applyLoanLink(new Types.ObjectId(req.params.id), userId, parsed.data.loanId);
+    if (error) return res.status(400).json({ error });
+  }
+  const { loanId: _handledAbove, ...fields } = parsed.data;
+
   const updated = await Transaction.findOneAndUpdate(
-    { _id: req.params.id, userId: currentUserId(req) },
-    { $set: { ...parsed.data, editedAt: new Date() } },
+    { _id: req.params.id, userId },
+    { $set: { ...fields, editedAt: new Date() } },
     { new: true }
   )
     .populate("category")

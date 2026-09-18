@@ -7,6 +7,8 @@ import {
   EMI_INSTALMENT_STATUSES,
   EMI_PLAN_STATUSES,
   EMI_ROLES,
+  LOAN_INSTALMENT_STATUSES,
+  LOAN_STATUSES,
   PERK_KINDS,
   RULE_MATCH_TYPES,
   STATEMENT_KINDS,
@@ -22,6 +24,8 @@ import {
   EmiInstalmentStatus,
   EmiPlanStatus,
   EmiRole,
+  LoanInstalmentStatus,
+  LoanStatus,
   PerkKind,
   RuleMatchType,
   StatementKind,
@@ -372,6 +376,12 @@ export interface TransactionDoc {
   /// INSTALMENT. Only the parent is kept out of the totals.
   emiPlanId?: Types.ObjectId | null;
   emiRole?: EmiRole | null;
+  /// The loan this repays, once picked - by hand, or by matching a debit
+  /// against a due instalment the way an EMI's own payment is found. A
+  /// loan has no purchase to convert, so there is no PARENT to keep out of
+  /// the totals: every transaction linked here counts in full, because a
+  /// repayment is the actual spending.
+  loanId?: Types.ObjectId | null;
   /// On a credit that gives money back: how much of it belongs to which
   /// earlier purchases. A single credit often settles several cancelled
   /// orders, and only the allocated part stops counting as income.
@@ -484,6 +494,7 @@ const transactionSchema = new Schema<TransactionDoc>(
     refundedMinor: { type: Number, default: 0, min: 0 },
     emiPlanId: { type: Schema.Types.ObjectId, ref: "EmiPlan", default: null },
     emiRole: { type: String, enum: EMI_ROLES, default: null },
+    loanId: { type: Schema.Types.ObjectId, ref: "Loan", default: null },
     isTransfer: { type: Boolean, default: false },
     isSpecial: { type: Boolean, default: false },
     isSalary: { type: Boolean, default: false },
@@ -694,6 +705,105 @@ emiInstalmentSchema.index({ planId: 1, seq: 1 }, { unique: true });
 emiInstalmentSchema.index({ userId: 1, status: 1, dueDate: 1 });
 
 export const EmiInstalment = model<EmiInstalmentDoc>("EmiInstalment", emiInstalmentSchema);
+
+/**
+ * A loan taken outside a card - a bank's personal loan, an employer
+ * advance, money from a relative - tracked the same way an EMI is: a
+ * principal, a term, a monthly figure, and a schedule of instalments each
+ * a real payment can be matched to.
+ *
+ * Kept apart from EmiPlan rather than folded into it, because the one
+ * thing that makes an EMI an EMI - a purchase that was converted, with the
+ * purchase itself kept out of the totals once its instalments take over -
+ * has no equivalent here. A loan's principal very often never arrives as
+ * a transaction SpendLog has ever seen at all, so there is nothing to
+ * convert and nothing to keep out of anything.
+ */
+export interface LoanDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  /// Who lent it, or what it was for - "HDFC personal loan", "Dad".
+  label: string;
+  /// The account the repayments leave from, where there is one. Shown
+  /// beside the loan; nothing about counting depends on it.
+  accountId?: Types.ObjectId | null;
+  /// The credit that was the loan landing, if SpendLog ever saw one.
+  /// Entirely informational - a personal loan is very often cash or a
+  /// transfer from outside any tracked account, and this is never
+  /// required for the schedule below to work.
+  disbursedTransactionId?: Types.ObjectId | null;
+  principalMinor: number;
+  months: number;
+  /// What is actually repaid each month. Entered directly where the
+  /// paperwork says so, since a computed figure rarely matches to the
+  /// rupee once a lender's own rounding is in it.
+  monthlyAmountMinor: number;
+  totalPayableMinor: number;
+  interestRatePctAnnual?: number | null;
+  /// Charged once, up front, and not part of totalPayable.
+  processingFeeMinor?: number | null;
+  startDate: Date;
+  status: LoanStatus;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const loanSchema = new Schema<LoanDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    label: { type: String, required: true, maxlength: 80 },
+    accountId: { type: Schema.Types.ObjectId, ref: "Account", default: null },
+    disbursedTransactionId: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
+    principalMinor: { type: Number, required: true, min: 1 },
+    months: { type: Number, required: true, min: 1, max: 480 },
+    monthlyAmountMinor: { type: Number, required: true, min: 1 },
+    totalPayableMinor: { type: Number, required: true, min: 1 },
+    interestRatePctAnnual: { type: Number, default: null, min: 0 },
+    processingFeeMinor: { type: Number, default: null, min: 0 },
+    startDate: { type: Date, required: true },
+    status: { type: String, enum: LOAN_STATUSES, default: "ACTIVE" },
+  },
+  { timestamps: true, ...serialization }
+);
+
+export const Loan = model<LoanDoc>("Loan", loanSchema);
+
+export interface LoanInstalmentDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  loanId: Types.ObjectId;
+  /// 1-based, so "3 of 12" reads straight off it.
+  seq: number;
+  dueDate: Date;
+  amountMinor: number;
+  status: LoanInstalmentStatus;
+  /// The real debit, once one has arrived and been matched to it - or been
+  /// pointed at it by hand from that payment's own edit screen.
+  transactionId?: Types.ObjectId | null;
+  paidAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const loanInstalmentSchema = new Schema<LoanInstalmentDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    loanId: { type: Schema.Types.ObjectId, ref: "Loan", required: true, index: true },
+    seq: { type: Number, required: true, min: 1 },
+    dueDate: { type: Date, required: true },
+    amountMinor: { type: Number, required: true, min: 0 },
+    status: { type: String, enum: LOAN_INSTALMENT_STATUSES, default: "DUE" },
+    transactionId: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
+    paidAt: { type: Date, default: null },
+  },
+  { timestamps: true, ...serialization }
+);
+
+loanInstalmentSchema.index({ loanId: 1, seq: 1 }, { unique: true });
+// Matching an incoming debit looks for what is still owed, soonest first.
+loanInstalmentSchema.index({ userId: 1, status: 1, dueDate: 1 });
+
+export const LoanInstalment = model<LoanInstalmentDoc>("LoanInstalment", loanInstalmentSchema);
 
 export interface TripMember {
   userId: Types.ObjectId;
