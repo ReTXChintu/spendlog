@@ -36,6 +36,8 @@ interface Detail {
   periodEnd: string | null;
   totalDueMinor: number | null;
   minimumDueMinor: number | null;
+  waivedMinor: number | null;
+  waivedNote: string | null;
   statementSpendMinor: number;
   knownSpendMinor: number;
   hasFile: boolean;
@@ -111,6 +113,8 @@ export function StatementDetailModal({
         </div>
 
         {error && <p className="desc set-warn">{error}</p>}
+
+        {detail?.totalDueMinor ? <WaiveRow detail={detail} onChanged={() => { load(); onChanged(); }} /> : null}
 
         <div className="tabs tabs-inline" role="tablist">
           <button
@@ -310,6 +314,108 @@ function FilePane({ statementId, hasFile }: { statementId: string; hasFile: bool
           .
         </p>
       </object>
+    </div>
+  );
+}
+
+/**
+ * The bill, less what a payment actually covered, is a real and permanent
+ * gap whenever part of it was cashback or points rather than money - and
+ * SpendLog, which only ever sees money that moved, has no way to notice
+ * the difference on its own. This is where it is told.
+ */
+function WaiveRow({ detail, onChanged }: { detail: Detail; onChanged: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [amount, setAmount] = useState(detail.waivedMinor ? String(detail.waivedMinor / 100) : "");
+  const [note, setNote] = useState(detail.waivedNote ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save(waivedMinor: number | null) {
+    setSaving(true);
+    setError(null);
+    try {
+      await api.patch(`/statements/${detail.id}/waive`, { waivedMinor, note: note.trim() || null });
+      setEditing(false);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "That didn't work.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!editing && !detail.waivedMinor) {
+    return (
+      <button className="btn btn-sm btn-ghost waive-toggle" onClick={() => setEditing(true)}>
+        <Icon name="ic-percent" /> Part of this was cashback or points, not money
+      </button>
+    );
+  }
+
+  if (!editing) {
+    return (
+      <div className="waive-row">
+        <Icon name="ic-check" />
+        <span>
+          {formatMoney(detail.waivedMinor!)} covered{detail.waivedNote ? ` — ${detail.waivedNote}` : ""},
+          not still owed
+        </span>
+        <button className="btn btn-sm btn-ghost" onClick={() => setEditing(true)}>
+          Change
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="waive-editor">
+      <p className="field-hint">
+        The amount covered by cashback, reward points, or a fee the bank waived — the part of the bill
+        that a payment was never going to cover, because it was never money.
+      </p>
+      <div className="waive-editor-fields">
+        <label className="field">
+          <span>Covered (₹)</span>
+          <input
+            className="filter-input"
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="50"
+          />
+        </label>
+        <label className="field field-wide">
+          <span>Note</span>
+          <input
+            className="filter-input"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Cashback used at checkout"
+          />
+        </label>
+      </div>
+      {error && <p className="desc set-warn">{error}</p>}
+      <div className="waive-editor-actions">
+        <button
+          className="btn btn-sm btn-primary"
+          disabled={saving || !amount.trim()}
+          onClick={() => {
+            const rupees = Number.parseFloat(amount);
+            if (Number.isFinite(rupees) && rupees >= 0) save(Math.round(rupees * 100));
+          }}
+        >
+          Save
+        </button>
+        {detail.waivedMinor ? (
+          <button className="btn btn-sm btn-ghost btn-danger-text" disabled={saving} onClick={() => save(null)}>
+            Remove
+          </button>
+        ) : null}
+        <button className="btn btn-sm btn-ghost" disabled={saving} onClick={() => setEditing(false)}>
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }

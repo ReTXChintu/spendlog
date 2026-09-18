@@ -76,6 +76,8 @@ class _Detail {
   final DateTime? periodEnd;
   final DateTime? dueDate;
   final int? totalDueMinor;
+  final int? waivedMinor;
+  final String? waivedNote;
   final bool hasFile;
   final List<String> rows;
   final List<_Line> lines;
@@ -86,6 +88,8 @@ class _Detail {
     this.periodEnd,
     this.dueDate,
     this.totalDueMinor,
+    this.waivedMinor,
+    this.waivedNote,
     required this.hasFile,
     required this.rows,
     required this.lines,
@@ -97,6 +101,8 @@ class _Detail {
         periodEnd: DateTime.tryParse((json['periodEnd'] as String?) ?? ''),
         dueDate: DateTime.tryParse((json['dueDate'] as String?) ?? ''),
         totalDueMinor: json['totalDueMinor'] as int?,
+        waivedMinor: json['waivedMinor'] as int?,
+        waivedNote: json['waivedNote'] as String?,
         hasFile: json['hasFile'] as bool? ?? false,
         rows: ((json['rows'] as List?) ?? const []).map((row) => row.toString()).toList(),
         lines: ((json['lines'] as List?) ?? const [])
@@ -234,6 +240,15 @@ class _StatementDetailScreenState extends State<StatementDetailScreen> with Sing
                           style: TextStyle(fontSize: 12, color: c.muted, height: 1.45),
                         ),
                       ),
+                    if (detail.totalDueMinor != null)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                        child: _WaiveBanner(
+                          statementId: widget.statementId,
+                          detail: detail,
+                          onChanged: _load,
+                        ),
+                      ),
                     Expanded(
                       child: TabBarView(
                         controller: _tabs,
@@ -365,4 +380,161 @@ class _StatementDetailScreenState extends State<StatementDetailScreen> with Sing
   }
 
   String _day(DateTime date) => DateFormat('d MMM yy').format(date);
+}
+
+/// The bill, less what a payment actually covered, is a real and permanent
+/// gap whenever part of it was cashback or points rather than money -
+/// SpendLog only ever sees money that moved, and has no way to notice the
+/// difference on its own. This is where it is told.
+class _WaiveBanner extends StatefulWidget {
+  const _WaiveBanner({required this.statementId, required this.detail, required this.onChanged});
+
+  final String statementId;
+  final _Detail detail;
+  final Future<void> Function() onChanged;
+
+  @override
+  State<_WaiveBanner> createState() => _WaiveBannerState();
+}
+
+class _WaiveBannerState extends State<_WaiveBanner> {
+  bool _editing = false;
+  late final _amount = TextEditingController(
+    text: widget.detail.waivedMinor != null ? (widget.detail.waivedMinor! / 100).toString() : '',
+  );
+  late final _note = TextEditingController(text: widget.detail.waivedNote ?? '');
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _amount.dispose();
+    _note.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save(int? waivedMinor) async {
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await ApiClient.instance.patch('/statements/${widget.statementId}/waive', {
+        'waivedMinor': waivedMinor,
+        'note': _note.text.trim().isEmpty ? null : _note.text.trim(),
+      });
+      if (!mounted) return;
+      setState(() => _editing = false);
+      await widget.onChanged();
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = error is ApiException ? error.message : "That didn't work.");
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final waived = widget.detail.waivedMinor;
+
+    if (!_editing && waived == null) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          onPressed: () => setState(() => _editing = true),
+          icon: const Icon(Icons.percent, size: 16),
+          label: const Text('Part of this was cashback or points, not money'),
+          style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 4)),
+        ),
+      );
+    }
+
+    if (!_editing) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+        margin: const EdgeInsets.only(bottom: 8),
+        decoration: BoxDecoration(
+          color: c.credit.withValues(alpha: .08),
+          borderRadius: BorderRadius.circular(T.rSm),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.check_circle_outline, size: 16, color: c.credit),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '${formatMoney(waived!)} covered'
+                '${widget.detail.waivedNote != null ? ' — ${widget.detail.waivedNote}' : ''}, '
+                'not still owed',
+                style: TextStyle(fontSize: 12.5, color: c.ink70),
+              ),
+            ),
+            TextButton(
+              onPressed: () => setState(() => _editing = true),
+              child: const Text('Change'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(11),
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(border: Border.all(color: c.line), borderRadius: BorderRadius.circular(T.rMd)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'The amount covered by cashback, reward points, or a fee the bank waived - the part of '
+            'the bill that a payment was never going to cover, because it was never money.',
+            style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _amount,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'Covered', prefixText: '₹ '),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _note,
+            decoration: const InputDecoration(labelText: 'Note', hintText: 'Cashback used at checkout'),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 6),
+            Text(_error!, style: TextStyle(fontSize: 12, color: c.debit)),
+          ],
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              FilledButton(
+                onPressed: _saving
+                    ? null
+                    : () {
+                        final rupees = double.tryParse(_amount.text.trim());
+                        if (rupees != null && rupees >= 0) _save((rupees * 100).round());
+                      },
+                child: const Text('Save'),
+              ),
+              const SizedBox(width: 8),
+              if (widget.detail.waivedMinor != null)
+                TextButton(
+                  onPressed: _saving ? null : () => _save(null),
+                  child: Text('Remove', style: TextStyle(color: c.debit)),
+                ),
+              const Spacer(),
+              TextButton(
+                onPressed: _saving ? null : () => setState(() => _editing = false),
+                child: const Text('Cancel'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }
