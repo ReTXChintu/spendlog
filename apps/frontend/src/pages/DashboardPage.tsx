@@ -60,7 +60,7 @@ export function DashboardPage() {
 
   if (!data) return <section className="screen" />;
 
-  const { pace, daily, monthSoFar, needsCategory, emis, owed, expiringPerks, statements, bills } = data;
+  const { pace, daily, monthSoFar, needsCategory, emis, loans, owed, expiringPerks, statements, bills } = data;
   const change = monthSoFar.changeMinor;
 
   return (
@@ -227,6 +227,17 @@ export function DashboardPage() {
               <div className="rail-sub">
                 a month across {emis.count === 1 ? "one plan" : `${emis.count} plans`} ·{" "}
                 {formatMoneyShort(emis.remainingMinor)} still to pay
+              </div>
+            </div>
+          )}
+
+          {loans.count > 0 && (
+            <div className="card rail-card">
+              <div className="rail-title">Loans</div>
+              <div className="rail-figure num">{formatMoney(loans.monthlyMinor)}</div>
+              <div className="rail-sub">
+                a month across {loans.count === 1 ? "one loan" : `${loans.count} loans`} ·{" "}
+                {formatMoneyShort(loans.remainingMinor)} still to repay
               </div>
             </div>
           )}

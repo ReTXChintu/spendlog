@@ -158,6 +158,41 @@ export interface EmiPlan {
   remainingMinor: number;
 }
 
+/**
+ * A loan taken outside a card - see the backend model for why it is not
+ * simply an EmiPlan with no purchase behind it: there is no PARENT
+ * transaction to keep out of the totals, so every repayment counts in
+ * full the moment it is linked.
+ */
+export interface LoanInstalment {
+  id: string;
+  loanId: string;
+  seq: number;
+  dueDate: string;
+  amountMinor: number;
+  status: "DUE" | "PAID" | "SKIPPED";
+  transactionId: string | null;
+}
+
+export interface Loan {
+  id: string;
+  label: string;
+  accountId: string | null;
+  disbursedTransactionId: string | null;
+  principalMinor: number;
+  months: number;
+  monthlyAmountMinor: number;
+  totalPayableMinor: number;
+  interestRatePctAnnual: number | null;
+  processingFeeMinor: number | null;
+  startDate: string;
+  status: "ACTIVE" | "CLOSED" | "CANCELLED";
+  instalments: LoanInstalment[];
+  paidCount: number;
+  paidMinor: number;
+  remainingMinor: number;
+}
+
 export interface EmiUpcoming {
   totalMinor: number;
   instalments: (EmiInstalment & { planId: EmiPlan })[];
@@ -391,6 +426,9 @@ export interface Transaction {
   cardPaymentFor?: string | null;
   /** The fixed monthly cost this went towards. Still counts as spending. */
   commitmentId?: string | null;
+  /** The loan this repays. Counts as spending in full - a loan has no
+      purchase to keep out of the totals the way an EMI's parent does. */
+  loanId?: string | null;
   split: TransactionSplit | null;
   isSettlement: boolean;
   pending: boolean;
@@ -558,6 +596,7 @@ export interface DashboardData {
   picks: CardPicks;
   needsCategory: { yesterday: number; month: number };
   emis: { count: number; monthlyMinor: number; remainingMinor: number; plans: EmiPlan[] };
+  loans: { count: number; monthlyMinor: number; remainingMinor: number; loans: Loan[] };
   owed: { balanceMinor: number };
   expiringPerks: Perk[];
   statements: {

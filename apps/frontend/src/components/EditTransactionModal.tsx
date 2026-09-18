@@ -6,6 +6,7 @@ import {
   CardStatus,
   Category,
   FixedCommitment,
+  Loan,
   MerchantPreset,
   Transaction,
   TransactionType,
@@ -83,6 +84,8 @@ export function EditTransactionModal({
   const [cardPaymentFor, setCardPaymentFor] = useState(transaction?.cardPaymentFor ?? "");
   const [commitmentId, setCommitmentId] = useState(transaction?.commitmentId ?? "");
   const [commitments, setCommitments] = useState<FixedCommitment[]>([]);
+  const [loanId, setLoanId] = useState(transaction?.loanId ?? "");
+  const [loans, setLoans] = useState<Loan[]>([]);
   const [isSplit, setIsSplit] = useState(transaction?.split != null);
   const [myShare, setMyShare] = useState(
     transaction?.split ? (transaction.split.myShareMinor / 100).toFixed(2) : ""
@@ -124,6 +127,14 @@ export function EditTransactionModal({
       .get<FixedCommitment[]>("/budget/commitments")
       .then(setCommitments)
       .catch(() => setCommitments([]));
+    api
+      .get<Loan[]>("/loans")
+      // Active ones to pick from, plus whichever this payment already
+      // claims - a closed loan should not vanish from its own dropdown.
+      .then((all) =>
+        setLoans(all.filter((loan) => loan.status === "ACTIVE" || loan.id === transaction?.loanId))
+      )
+      .catch(() => setLoans([]));
   }, []);
 
   /** Fills the name and its usual category in one go. */
@@ -252,6 +263,7 @@ export function EditTransactionModal({
       isSalary: type === "CREDIT" ? isSalary : false,
       cardPaymentFor: type === "DEBIT" ? cardPaymentFor || null : null,
       commitmentId: type === "DEBIT" ? commitmentId || null : null,
+      loanId: type === "DEBIT" ? loanId || null : null,
       isSettlement,
       // Narrowed to the payer alone, or widened back to everyone on the trip.
       ...(transaction?.tripId ? { tripShareWith: tripJustMine ? [transaction.userId] : null } : {}),
@@ -540,6 +552,29 @@ export function EditTransactionModal({
                 <span className="field-hint">
                   Still counts as spending. Sending less than usual is fine — the dashboard says what
                   went short rather than treating it as unpaid.
+                </span>
+              </label>
+            </div>
+          )}
+
+          {/* A loan has no purchase to keep out of the totals the way an
+              EMI's does, so this always counts in full - the picker only
+              ever says which schedule the payment closes off next. */}
+          {type === "DEBIT" && loans.length > 0 && (
+            <div className="form-row form-row-wide">
+              <label className="field">
+                <span>Repaying a loan?</span>
+                <select value={loanId} onChange={(e) => setLoanId(e.target.value)}>
+                  <option value="">No — ordinary spending</option>
+                  {loans.map((loan) => (
+                    <option key={loan.id} value={loan.id}>
+                      {loan.label} · {formatMoney(loan.monthlyAmountMinor)} a month · {loan.paidCount} of{" "}
+                      {loan.months} paid
+                    </option>
+                  ))}
+                </select>
+                <span className="field-hint">
+                  Claims whichever instalment on it is next due, regardless of the exact amount here.
                 </span>
               </label>
             </div>

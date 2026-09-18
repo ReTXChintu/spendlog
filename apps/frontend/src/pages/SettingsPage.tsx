@@ -5,6 +5,7 @@ import { AccountPanel } from "../components/AccountPanel";
 import { CommitmentModal } from "../components/CommitmentModal";
 import { Icon } from "../components/Icon";
 import { LedgerStartCard } from "../components/LedgerStartCard";
+import { LoanModal } from "../components/LoanModal";
 import { StatementShelf } from "../components/StatementShelf";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { api } from "../lib/api";
@@ -18,6 +19,7 @@ import {
   Category,
   EmailConnectionStatus,
   FixedCommitment,
+  Loan,
   MerchantPreset,
   NETWORK_LABELS,
   accountLabel,
@@ -635,11 +637,19 @@ function BudgetTab() {
     null
   );
 
+  const [loans, setLoans] = useState<Loan[]>([]);
+  const [editingLoan, setEditingLoan] = useState<{ loan: Loan | null } | null>(null);
+
   const reloadCommitments = useCallback(() => {
     api.get<FixedCommitment[]>("/budget/commitments").then(setCommitments).catch(() => setCommitments([]));
   }, []);
 
+  const reloadLoans = useCallback(() => {
+    api.get<Loan[]>("/loans").then(setLoans).catch(() => setLoans([]));
+  }, []);
+
   useEffect(reloadCommitments, [reloadCommitments]);
+  useEffect(reloadLoans, [reloadLoans]);
   useEffect(() => {
     api.get<Category[]>("/categories").then(setCategories).catch(() => setCategories([]));
   }, []);
@@ -816,6 +826,61 @@ function BudgetTab() {
         </p>
       </div>
 
+      <div className="card set-card">
+        <div className="set-card-head">
+          <div className="set-card-icon">
+            <Icon name="ic-wallet" />
+          </div>
+          <div>
+            <h4>Loans</h4>
+            <p className="set-card-sub">
+              {loans.filter((loan) => loan.status === "ACTIVE").length === 0
+                ? "None yet"
+                : `${formatMoney(
+                    loans
+                      .filter((loan) => loan.status === "ACTIVE")
+                      .reduce((sum, loan) => sum + loan.monthlyAmountMinor, 0)
+                  )} a month`}
+            </p>
+          </div>
+        </div>
+
+        <p className="desc">
+          A bank's personal loan, an employer advance, money from a relative — anything with a fixed
+          term and a monthly repayment. Mark a payment against one from the transaction it shows up
+          as, or from here if it never produced a message to match.
+        </p>
+
+        {loans.length > 0 && (
+          <div className="account-list">
+            {loans.map((loan) => (
+              <button className="account-row" key={loan.id} onClick={() => setEditingLoan({ loan })}>
+                <span className="account-badge">
+                  <Icon name="ic-wallet" />
+                </span>
+                <span className="account-row-main">
+                  <span className="account-row-name">{loan.label}</span>
+                  <span className="account-row-sub">
+                    {loan.status !== "ACTIVE"
+                      ? loan.status === "CLOSED"
+                        ? "Closed"
+                        : "Cancelled"
+                      : `${formatMoney(loan.monthlyAmountMinor)} a month · ${loan.paidCount} of ${loan.months} paid · ${formatMoney(loan.remainingMinor)} left`}
+                  </span>
+                </span>
+                <span className="account-row-type">Edit</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="set-card-actions" style={{ marginTop: 12 }}>
+          <button className="btn btn-sm" onClick={() => setEditingLoan({ loan: null })}>
+            <Icon name="ic-plus" /> Add a loan
+          </button>
+        </div>
+      </div>
+
       {editingCommitment && (
         <CommitmentModal
           commitment={editingCommitment.commitment}
@@ -825,6 +890,17 @@ function BudgetTab() {
             reloadCommitments();
           }}
           onClose={() => setEditingCommitment(null)}
+        />
+      )}
+
+      {editingLoan && (
+        <LoanModal
+          loan={editingLoan.loan}
+          onSaved={() => {
+            setEditingLoan(null);
+            reloadLoans();
+          }}
+          onClose={() => setEditingLoan(null)}
         />
       )}
     </div>
