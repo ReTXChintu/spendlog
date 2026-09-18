@@ -492,3 +492,109 @@ describe("marking part of a bill as covered by cashback or points", () => {
     assert.equal(response.status, 401);
   });
 });
+
+describe("typing in a bill total, or correcting one that read wrong", () => {
+  async function makeBilledStatement(userId: Types.ObjectId, accountId: Types.ObjectId, totalDueMinor: number | null) {
+    return models.CardStatement.create({
+      userId,
+      accountId,
+      sourceRef: `msg-${crypto.randomUUID()}`,
+      status: "PARSED",
+      statementDate: istDayStart("2026-09-17"),
+      totalDueMinor,
+      lines: [],
+    });
+  }
+
+  it("fills in a total that was never read at all", async () => {
+    const user = await makeUser();
+    const card = await makeCard(user.id);
+    const statement = await makeBilledStatement(user.id, card._id, null);
+
+    const response = await call(`/statements/${statement.id}/bill`, user.token, {
+      method: "PATCH",
+      body: JSON.stringify({ totalDueMinor: 13_920_89 }),
+    });
+    assert.equal(response.status, 200);
+
+    const body = await json<{ totalDueMinor: number; totalDueIsManual: boolean }>(response);
+    assert.equal(body.totalDueMinor, 13_920_89);
+    assert.equal(body.totalDueIsManual, true);
+
+    const bills = await json<{ totalDueMinor: number; isEstimate: boolean }[]>(
+      await call("/statements/bills", user.token)
+    );
+    assert.equal(bills[0].totalDueMinor, 13_920_89);
+    assert.equal(bills[0].isEstimate, false, "typed in by hand, not guessed at");
+  });
+
+  it("corrects a total the reader got wrong", async () => {
+    const user = await makeUser();
+    const card = await makeCard(user.id);
+    const statement = await makeBilledStatement(user.id, card._id, 2917_89);
+
+    const response = await call(`/statements/${statement.id}/bill`, user.token, {
+      method: "PATCH",
+      body: JSON.stringify({ totalDueMinor: 13_920_89 }),
+    });
+    const body = await json<{ totalDueMinor: number }>(response);
+    assert.equal(body.totalDueMinor, 13_920_89);
+  });
+
+  it("clears back to nothing known on null", async () => {
+    const user = await makeUser();
+    const card = await makeCard(user.id);
+    const statement = await makeBilledStatement(user.id, card._id, 13_920_89);
+    await call(`/statements/${statement.id}/bill`, user.token, {
+      method: "PATCH",
+      body: JSON.stringify({ totalDueMinor: null }),
+    });
+
+    const response = await call(`/statements/${statement.id}`, user.token);
+    const body = await json<{ totalDueMinor: number | null; totalDueIsManual: boolean }>(response);
+    assert.equal(body.totalDueMinor, null);
+    assert.equal(body.totalDueIsManual, false);
+  });
+
+  it("pulls a waiver down rather than leave it bigger than the bill", async () => {
+    const user = await makeUser();
+    const card = await makeCard(user.id);
+    const statement = await makeBilledStatement(user.id, card._id, 1000_00);
+    await call(`/statements/${statement.id}/waive`, user.token, {
+      method: "PATCH",
+      body: JSON.stringify({ waivedMinor: 700_00 }),
+    });
+
+    const response = await call(`/statements/${statement.id}/bill`, user.token, {
+      method: "PATCH",
+      body: JSON.stringify({ totalDueMinor: 500_00 }),
+    });
+    const body = await json<{ waivedMinor: number }>(response);
+    assert.equal(body.waivedMinor, 500_00, "clamped down to the shrunk bill, not left dangling above it");
+  });
+
+  it("rejects a negative amount", async () => {
+    const user = await makeUser();
+    const card = await makeCard(user.id);
+    const statement = await makeBilledStatement(user.id, card._id, null);
+
+    const response = await call(`/statements/${statement.id}/bill`, user.token, {
+      method: "PATCH",
+      body: JSON.stringify({ totalDueMinor: -100 }),
+    });
+    assert.equal(response.status, 400);
+  });
+
+  it("turns nobody away without a token", async () => {
+    const user = await makeUser();
+    const card = await makeCard(user.id);
+    const statement = await makeBilledStatement(user.id, card._id, null);
+
+    const response = await fetch(`${baseUrl}/statements/${statement.id}/bill`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ totalDueMinor: 1000_00 }),
+    });
+    assert.equal(response.status, 401);
+  });
+});

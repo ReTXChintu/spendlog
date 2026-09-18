@@ -926,6 +926,12 @@ export interface CardStatementDoc {
   /// without going to look.
   fileBytes?: number | null;
   totalDueMinor?: number | null;
+  /// Whether totalDueMinor came from a person rather than a reader - typed
+  /// in because nothing was printed, or corrected because what was read
+  /// was wrong. Kept apart from the value itself so a resync knows not to
+  /// quietly put the wrong figure back: the whole point of typing it in
+  /// was that the read was wrong.
+  totalDueIsManual?: boolean;
   minimumDueMinor?: number | null;
   /// Part of the bill covered by something other than money leaving an
   /// account - cashback, reward points, a fee waived by the bank. The
@@ -971,6 +977,7 @@ const cardStatementSchema = new Schema<CardStatementDoc>(
     rows: { type: [String], default: [] },
     fileBytes: { type: Number, default: null },
     totalDueMinor: { type: Number, default: null },
+    totalDueIsManual: { type: Boolean, default: false },
     minimumDueMinor: { type: Number, default: null },
     waivedMinor: { type: Number, default: null, min: 0 },
     waivedNote: { type: String, default: null, maxlength: 120 },

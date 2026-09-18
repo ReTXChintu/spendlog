@@ -330,7 +330,13 @@ async function readOneStatement(params: {
         rows,
         periodStart: parsed.periodStart,
         periodEnd: parsed.periodEnd,
-        totalDueMinor: parsed.totalDueMinor,
+        // A figure typed in by hand outranks whatever this read finds. The
+        // reconciled short-circuit above already stops most re-reads from
+        // reaching here at all, but this is what protects a correction
+        // made on a statement that has not reconciled yet - a card that
+        // was only just linked, say - from being quietly put back to the
+        // wrong number the next time the mailbox is read.
+        ...(twin?.totalDueIsManual ? {} : { totalDueMinor: parsed.totalDueMinor }),
         minimumDueMinor: parsed.minimumDueMinor,
         lines: parsed.lines.map((line) => ({ ...line, resolution: "SKIPPED", transactionId: null })),
       },

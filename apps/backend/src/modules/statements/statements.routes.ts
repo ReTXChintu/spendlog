@@ -49,6 +49,7 @@ function summarise(statement: import("../../models").CardStatementDoc) {
     periodStart: statement.periodStart,
     periodEnd: statement.periodEnd,
     totalDueMinor: statement.totalDueMinor,
+    totalDueIsManual: statement.totalDueIsManual ?? false,
     minimumDueMinor: statement.minimumDueMinor,
     waivedMinor: statement.waivedMinor ?? null,
     waivedNote: statement.waivedNote ?? null,
@@ -409,6 +410,44 @@ statementsRouter.patch("/:id/lines/:lineId", validObjectIdParam("id"), async (re
 
 const assignSchema = z.object({
   accountId: z.string().regex(/^[0-9a-fA-F]{24}$/, "Not a card id"),
+});
+
+const billSchema = z.object({
+  // null says "forget the figure entirely", which falls back to whatever
+  // the statement's own rows come to - the same fallback a statement with
+  // nothing read on it ever had.
+  totalDueMinor: z.number().int().nonnegative().nullable(),
+});
+
+// PATCH /statements/:id/bill - type in the bill total, or correct one the
+// reader got wrong.
+//
+// A reader is a best guess at a layout it has never proved it understands,
+// and the one time that matters is exactly the time nothing here can catch
+// it: a total read as too small, or not read at all. This is the way out
+// of that - a figure typed in outranks whatever a reader finds from then
+// on, including on a mailbox that gets read again.
+statementsRouter.patch("/:id/bill", validObjectIdParam("id"), async (req, res) => {
+  const parsed = billSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+  const userId = currentUserId(req);
+  const statement = await CardStatement.findOne({ _id: req.params.id, userId });
+  if (!statement) return res.status(404).json({ error: "Not found" });
+
+  statement.totalDueMinor = parsed.data.totalDueMinor;
+  statement.totalDueIsManual = parsed.data.totalDueMinor !== null;
+
+  // A waiver bigger than the bill it is part of is not a state that means
+  // anything - clamped down rather than left to make the figures below it
+  // go negative, on the rare edit that shrinks a bill past what was
+  // already marked covered on it.
+  if (statement.waivedMinor && parsed.data.totalDueMinor !== null) {
+    statement.waivedMinor = Math.min(statement.waivedMinor, parsed.data.totalDueMinor);
+  }
+
+  await statement.save();
+  res.json(summarise(statement));
 });
 
 const waiveSchema = z.object({
