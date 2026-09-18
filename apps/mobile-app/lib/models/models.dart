@@ -66,6 +66,10 @@ class Account {
   /// way of reaching an account rather than a pot of its own, so its
   /// spending belongs to that account.
   final String? linkedAccountId;
+
+  /// For a credit card on a limit shared with another card: the card that
+  /// holds the limit. Its own creditLimitMinor is then ignored.
+  final String? sharesLimitWith;
   final int? creditLimitMinor;
   final int? spendLimitMinor;
   final int? statementDay;
@@ -86,6 +90,7 @@ class Account {
     this.issuer,
     this.cardNetwork,
     this.linkedAccountId,
+    this.sharesLimitWith,
     this.creditLimitMinor,
     this.spendLimitMinor,
     this.statementDay,
@@ -112,6 +117,7 @@ class Account {
         issuer: json['issuer'] as String?,
         cardNetwork: json['cardNetwork'] as String?,
         linkedAccountId: json['linkedAccountId'] as String?,
+        sharesLimitWith: json['sharesLimitWith'] as String?,
         creditLimitMinor: json['creditLimitMinor'] as int?,
         spendLimitMinor: json['spendLimitMinor'] as int?,
         statementDay: json['statementDay'] as int?,
@@ -198,6 +204,10 @@ class Transaction {
   final String? emiRole;
   final bool isTransfer;
 
+  /// A one-off the daily budget should not score a day against. Still
+  /// counted everywhere else, because the money still left.
+  final bool isSpecial;
+
   /// Marked by hand: the credit that opens a spending period.
   final bool isSalary;
 
@@ -236,6 +246,7 @@ class Transaction {
     this.emiPlanId,
     this.emiRole,
     required this.isTransfer,
+    this.isSpecial = false,
     this.isSalary = false,
     this.cardPaymentFor,
     this.commitmentId,
@@ -286,6 +297,7 @@ class Transaction {
         emiPlanId: json['emiPlanId'] as String?,
         emiRole: json['emiRole'] as String?,
         isTransfer: json['isTransfer'] as bool? ?? false,
+        isSpecial: json['isSpecial'] as bool? ?? false,
         isSalary: json['isSalary'] as bool? ?? false,
         cardPaymentFor: json['cardPaymentFor'] as String?,
         commitmentId: json['commitmentId'] as String?,
@@ -439,8 +451,15 @@ class CardStatus {
   /// the cycle now running will fall due.
   final DateTime? billDueOn;
 
-  /// The credit limit, less the outstanding bill, less this cycle.
+  /// The credit limit, less the outstanding bill, less this cycle. For a
+  /// card on a shared limit, the group's figure.
   final int? availableMinor;
+
+  /// The other cards this one shares a limit with, named.
+  final List<String> sharesLimitWith;
+
+  /// What the whole group has used, when there is one.
+  final int? groupUsedMinor;
 
   /// Whether spentMinor covers a billing cycle or a calendar month. A card
   /// with no statement day has no cycle to measure.
@@ -465,6 +484,8 @@ class CardStatus {
     this.outstandingIsEstimate = false,
     this.billDueOn,
     this.availableMinor,
+    this.sharesLimitWith = const [],
+    this.groupUsedMinor,
     this.periodIsCycle = true,
     required this.state,
   });
@@ -486,6 +507,9 @@ class CardStatus {
         outstandingIsEstimate: json['outstandingIsEstimate'] as bool? ?? false,
         billDueOn: json['billDueOn'] != null ? DateTime.parse(json['billDueOn'] as String) : null,
         availableMinor: json['availableMinor'] as int?,
+        sharesLimitWith:
+            (json['sharesLimitWith'] as List<dynamic>? ?? []).map((name) => name as String).toList(),
+        groupUsedMinor: json['groupUsedMinor'] as int?,
         periodIsCycle: json['periodIsCycle'] as bool? ?? true,
         state: json['state'] as String? ?? 'unset',
       );
@@ -595,6 +619,10 @@ class DailyBudget {
   final int todaySpentMinor;
   final int todayLeftMinor;
   final int daysOver;
+
+  /// One-offs and trips, kept out of the score and reported here.
+  final int keptOutMinor;
+  final int keptOutCount;
   final List<DailyBudgetDay> days;
 
   DailyBudget({
@@ -609,6 +637,8 @@ class DailyBudget {
     this.todaySpentMinor = 0,
     this.todayLeftMinor = 0,
     this.daysOver = 0,
+    this.keptOutMinor = 0,
+    this.keptOutCount = 0,
     this.days = const [],
   });
 
@@ -624,6 +654,8 @@ class DailyBudget {
         todaySpentMinor: json['todaySpentMinor'] as int? ?? 0,
         todayLeftMinor: json['todayLeftMinor'] as int? ?? 0,
         daysOver: json['daysOver'] as int? ?? 0,
+        keptOutMinor: json['keptOutMinor'] as int? ?? 0,
+        keptOutCount: json['keptOutCount'] as int? ?? 0,
         days: (json['days'] as List<dynamic>? ?? [])
             .map((row) => DailyBudgetDay.fromJson(row as Map<String, dynamic>))
             .toList(),

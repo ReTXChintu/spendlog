@@ -175,6 +175,34 @@ describe("the daily budget bucket", () => {
     assert.equal(result.bucketMinor, 600_00);
   });
 
+  it("keeps a one-off out of the score, and says so", async () => {
+    // A laptop is real spending and the month sees it. But a day is not a
+    // bad day for having had a laptop in it, and a daily budget that said
+    // otherwise would be one nobody kept to.
+    await withUser({ dailyBudgetMinor: 1000_00, salaryDay: 1 });
+    await spend("2026-09-01", 400);
+    await spend("2026-09-01", 80_000, { isSpecial: true });
+
+    const result = await bucket(on("2026-09-01"));
+    assert.equal(result.spentMinor, 400_00);
+    assert.equal(result.bucketMinor, 600_00);
+    assert.equal(result.keptOutMinor, 80_000_00);
+    assert.equal(result.keptOutCount, 1);
+  });
+
+  it("keeps a trip out of the score too", async () => {
+    await withUser({ dailyBudgetMinor: 1000_00, salaryDay: 1 });
+    await spend("2026-09-02", 300);
+    await spend("2026-09-02", 6000, { tripId: new Types.ObjectId() });
+    await spend("2026-09-03", 4500, { tripId: new Types.ObjectId() });
+
+    const result = await bucket(on("2026-09-03"));
+    assert.equal(result.spentMinor, 300_00);
+    assert.equal(result.keptOutMinor, 10_500_00);
+    assert.equal(result.keptOutCount, 2);
+    assert.equal(result.daysOver, 0, "a week away is not three bad days");
+  });
+
   it("groups a late-night payment into the IST day it happened on", async () => {
     // Half eleven at night in Delhi is six in the evening UTC, still the
     // same date; but half past midnight is seven in the evening UTC on the

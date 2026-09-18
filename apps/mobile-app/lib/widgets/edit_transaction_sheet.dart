@@ -61,6 +61,7 @@ class _EditSheetState extends State<_EditSheet> {
   String? _accountId;
   late DateTime _occurredAt;
   late bool _isTransfer;
+  late bool _isSpecial;
   late bool _isSalary;
   String? _cardPaymentFor;
   String? _commitmentId;
@@ -123,6 +124,7 @@ class _EditSheetState extends State<_EditSheet> {
     // is set to. Converted back to a real instant on save.
     _occurredAt = istWallClock(t?.occurredAt ?? DateTime.now());
     _isTransfer = t?.isTransfer ?? false;
+    _isSpecial = t?.isSpecial ?? false;
     _isSalary = t?.isSalary ?? false;
     _cardPaymentFor = t?.cardPaymentFor;
     _commitmentId = t?.commitmentId;
@@ -251,6 +253,7 @@ class _EditSheetState extends State<_EditSheet> {
       'accountId': _accountId,
       'occurredAt': fromIstWallClock(_occurredAt).toIso8601String(),
       'isTransfer': _isTransfer,
+      'isSpecial': _type == 'DEBIT' && _isSpecial,
       'isSalary': _type == 'CREDIT' && _isSalary,
       'cardPaymentFor': _type == 'DEBIT' ? _cardPaymentFor : null,
       'commitmentId': _type == 'DEBIT' ? _commitmentId : null,
@@ -605,6 +608,21 @@ class _EditSheetState extends State<_EditSheet> {
                 style: TextStyle(fontSize: 12.8, color: c.ink70),
               ),
             ),
+
+            // Real spending, counted everywhere - but a day is not a bad
+            // day for having had a laptop in it.
+            if (_type == 'DEBIT')
+              CheckboxListTile(
+                value: _isSpecial,
+                onChanged: (value) => setState(() => _isSpecial = value ?? false),
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                dense: true,
+                title: Text(
+                  'A one-off — keep it out of the daily budget only',
+                  style: TextStyle(fontSize: 12.8, color: c.ink70),
+                ),
+              ),
 
             // A bill payment usually produces one message, from the bank
             // being debited, with nothing on the card side to pair it with

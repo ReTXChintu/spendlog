@@ -89,6 +89,16 @@ export function DailyBucket({ daily }: { daily: DailyBudget }) {
           : `${daily.daysOver} of ${daily.daysCounted} days went over. At this rate the next salary ` +
             `starts ${formatMoney(-daily.bucketMinor)} down rather than up.`}
       </p>
+
+      {/* Said out loud, so the bucket never looks as though it simply
+          lost a purchase. */}
+      {(daily.keptOutMinor ?? 0) > 0 && (
+        <p className="field-hint">
+          {formatMoney(daily.keptOutMinor!)} across {daily.keptOutCount}{" "}
+          {daily.keptOutCount === 1 ? "one-off or trip payment" : "one-off and trip payments"} kept
+          out of the score. It still counts in the month.
+        </p>
+      )}
     </div>
   );
 }

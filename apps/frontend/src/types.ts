@@ -53,6 +53,9 @@ export interface Account {
   cardNetwork: string | null;
   /// For a debit card, the bank account it draws on.
   linkedAccountId: string | null;
+  /// For a credit card on a limit shared with another card: the card that
+  /// holds the limit. Its own creditLimitMinor is then ignored.
+  sharesLimitWith?: string | null;
   creditLimitMinor: number | null;
   spendLimitMinor: number | null;
   statementDay: number | null;
@@ -257,8 +260,13 @@ export interface CardStatus {
   /// When that bill has to be paid — not the same as dueOn, which is when
   /// the cycle now running will fall due.
   billDueOn?: string | null;
-  /// The credit limit, less the outstanding bill, less this cycle.
+  /// The credit limit, less the outstanding bill, less this cycle. For a
+  /// card on a shared limit, the group's figure.
   availableMinor?: number | null;
+  /// The other cards this one shares a limit with, named.
+  sharesLimitWith?: string[];
+  /// What the whole group has used, when there is one.
+  groupUsedMinor?: number | null;
   /// Whether spentMinor covers a billing cycle or a calendar month. A card
   /// with no statement day has no cycle to measure.
   periodIsCycle?: boolean;
@@ -315,6 +323,9 @@ export type DailyBudget =
       todaySpentMinor: number;
       todayLeftMinor: number;
       daysOver: number;
+      /** One-offs and trips, kept out of the score and reported here. */
+      keptOutMinor?: number;
+      keptOutCount?: number;
       days: DailyBudgetDay[];
     };
 
@@ -371,6 +382,9 @@ export interface Transaction {
   emiPlanId: string | null;
   emiRole: EmiRole | null;
   isTransfer: boolean;
+  /// A one-off the daily budget should not score a day against. Still
+  /// counted everywhere else, because the money still left.
+  isSpecial?: boolean;
   /** Marked by hand: the credit that opens a spending period. */
   isSalary?: boolean;
   /** The card whose bill this settled. Counts as nothing when set. */

@@ -78,6 +78,7 @@ export function EditTransactionModal({
   const cardAccounts = accounts.filter((account) => account.accountType === "CARD");
 
   const [isTransfer, setIsTransfer] = useState(transaction?.isTransfer ?? false);
+  const [isSpecial, setIsSpecial] = useState(transaction?.isSpecial ?? false);
   const [isSalary, setIsSalary] = useState(transaction?.isSalary ?? false);
   const [cardPaymentFor, setCardPaymentFor] = useState(transaction?.cardPaymentFor ?? "");
   const [commitmentId, setCommitmentId] = useState(transaction?.commitmentId ?? "");
@@ -247,6 +248,7 @@ export function EditTransactionModal({
       accountId: accountId || null,
       occurredAt: fromIstParts(date, time),
       isTransfer,
+      isSpecial: type === "DEBIT" ? isSpecial : false,
       isSalary: type === "CREDIT" ? isSalary : false,
       cardPaymentFor: type === "DEBIT" ? cardPaymentFor || null : null,
       commitmentId: type === "DEBIT" ? commitmentId || null : null,
@@ -485,6 +487,17 @@ export function EditTransactionModal({
               </span>
             </label>
           </div>
+
+          {/* Real spending, counted everywhere - but a day is not a bad day
+              for having had a laptop in it. */}
+          {type === "DEBIT" && (
+            <div className="form-row form-row-wide">
+              <label className="checkbox-row">
+                <input type="checkbox" checked={isSpecial} onChange={(e) => setIsSpecial(e.target.checked)} />
+                <span>A one-off — keep it out of the daily budget, but count it everywhere else</span>
+              </label>
+            </div>
+          )}
 
           {/* A bill payment usually produces one message, from the bank
               being debited, with nothing on the card side to pair it with —

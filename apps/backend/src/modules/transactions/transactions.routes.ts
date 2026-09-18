@@ -206,6 +206,8 @@ const createTransactionSchema = z.object({
   accountId: z.string().nullable().optional(),
   occurredAt: z.coerce.date(),
   isTransfer: z.boolean().optional(),
+  // A one-off the daily budget should not score a day against.
+  isSpecial: z.boolean().optional(),
   // Zero is meaningful: someone else's bill paid from the user's card, all
   // of which is owed back. null clears the split entirely.
   split: z
@@ -265,6 +267,8 @@ const updateTransactionSchema = z.object({
   accountId: z.string().nullable().optional(),
   occurredAt: z.coerce.date().optional(),
   isTransfer: z.boolean().optional(),
+  // A one-off the daily budget should not score a day against.
+  isSpecial: z.boolean().optional(),
   // Only a person can say which credit is the month's pay: it lands a day
   // either side of the day it is meant to, and a month with leave in it is
   // smaller than the figure in the profile.

@@ -57,6 +57,11 @@ export type DailyBudget =
       /// How many of the days counted went over. The bucket is one number
       /// and does not say whether it is one bad day or every day.
       daysOver: number;
+      /// Spending kept out of the score: one-offs marked as such, and
+      /// anything on a trip. Reported so the bucket never looks as though
+      /// it simply lost a purchase.
+      keptOutMinor: number;
+      keptOutCount: number;
       /// Day by day, oldest first, for a strip showing where it went.
       days: DailyBudgetDay[];
     };
@@ -117,7 +122,17 @@ export async function dailyBudget(userId: Types.ObjectId, now = new Date()): Pro
   // way the pace counts it: countedAmountMinor, which already knows that a
   // transfer between your own accounts is not spending and that a card
   // bill is the same money as the purchases it is made of.
-  const rows = await Transaction.aggregate<{ _id: string; total: number }>([
+  // Two piles from one pass: what scores against a day, and what is kept
+  // out of the score. A one-off marked as such, or anything spent on a
+  // trip, is real spending that the month still sees - but a day is not a
+  // bad day for having had a laptop or a week away in it, and a daily
+  // budget that said otherwise would be one nobody kept to.
+  //
+  // Expressions rather than query operators, because this sits inside
+  // $group. "Has a trip" is written as greater-than-null: any set value
+  // sorts above null in BSON, and a missing field does not.
+  const special = { $or: [{ $eq: ["$isSpecial", true] }, { $gt: ["$tripId", null] }] };
+  const rows = await Transaction.aggregate<{ _id: string | null; total: number; count: number }>([
     {
       $match: {
         userId,
@@ -128,15 +143,25 @@ export async function dailyBudget(userId: Types.ObjectId, now = new Date()): Pro
     },
     {
       $group: {
+        // Kept-out spending groups under null; everything else under its
+        // IST day.
         _id: {
-          $dateToString: { date: "$occurredAt", format: "%Y-%m-%d", timezone: IST_OFFSET },
+          $cond: [
+            special,
+            null,
+            { $dateToString: { date: "$occurredAt", format: "%Y-%m-%d", timezone: IST_OFFSET } },
+          ],
         },
         total: { $sum: "$countedAmountMinor" },
+        count: { $sum: 1 },
       },
     },
   ]);
 
-  const spentByDay = new Map(rows.map((row) => [row._id, row.total]));
+  const keptOut = rows.find((row) => row._id === null);
+  const spentByDay = new Map(
+    rows.filter((row) => row._id !== null).map((row) => [row._id as string, row.total])
+  );
   const budget = user.dailyBudgetMinor;
 
   // Every day from the start, not only the days something was spent on. A
@@ -165,6 +190,8 @@ export async function dailyBudget(userId: Types.ObjectId, now = new Date()): Pro
     todaySpentMinor: today?.spentMinor ?? 0,
     todayLeftMinor: budget - (today?.spentMinor ?? 0),
     daysOver: days.filter((day) => day.deltaMinor < 0).length,
+    keptOutMinor: keptOut?.total ?? 0,
+    keptOutCount: keptOut?.count ?? 0,
     days,
   };
 }

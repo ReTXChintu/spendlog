@@ -182,6 +182,14 @@ export interface AccountDoc {
   /// whose account SpendLog has never seen; then it is its own pot, the
   /// way cash is.
   linkedAccountId?: Types.ObjectId | null;
+  /// For a credit card whose limit is one pot shared with another card.
+  ///
+  /// Two cards from the same bank often draw on a single limit: spend on
+  /// either and the other has less. Points at the card that holds the
+  /// limit; creditLimitMinor on this one is then ignored. Each card keeps
+  /// its own cycle, its own statement and its own personal limit - only
+  /// the bank's ceiling is shared.
+  sharesLimitWith?: Types.ObjectId | null;
   creditLimitMinor?: number | null;
   /// What the user allows themselves on this card in a billing cycle, as
   /// distinct from creditLimitMinor, which is what the bank allows.
@@ -219,6 +227,7 @@ const accountSchema = new Schema<AccountDoc>(
     issuer: { type: String, default: null },
     cardNetwork: { type: String, default: null },
     linkedAccountId: { type: Schema.Types.ObjectId, ref: "Account", default: null },
+    sharesLimitWith: { type: Schema.Types.ObjectId, ref: "Account", default: null },
     creditLimitMinor: { type: Number, default: null },
     spendLimitMinor: { type: Number, default: null, min: 0 },
     statementDay: { type: Number, default: null, min: 1, max: 31 },
@@ -371,6 +380,12 @@ export interface TransactionDoc {
   /// the refund endpoints rather than set by hand.
   refundedMinor: number;
   isTransfer: boolean;
+  /// A one-off that should not be scored against a day. A laptop, a
+  /// flight, a wedding gift: real spending, counted everywhere else, but
+  /// a day is not a bad day for having had it. Kept out of the daily
+  /// budget's bucket alone; the month's total and the pace still see it,
+  /// because the money still left.
+  isSpecial: boolean;
   /// Whether this credit is the month's pay. Marked by hand and never
   /// guessed: it lands a day either side of the date it is meant to, and a
   /// month with leave taken in it is smaller than the figure in a profile.
@@ -470,6 +485,7 @@ const transactionSchema = new Schema<TransactionDoc>(
     emiPlanId: { type: Schema.Types.ObjectId, ref: "EmiPlan", default: null },
     emiRole: { type: String, enum: EMI_ROLES, default: null },
     isTransfer: { type: Boolean, default: false },
+    isSpecial: { type: Boolean, default: false },
     isSalary: { type: Boolean, default: false },
     cardPaymentFor: { type: Schema.Types.ObjectId, ref: "Account", default: null },
     commitmentId: { type: Schema.Types.ObjectId, ref: "FixedCommitment", default: null },

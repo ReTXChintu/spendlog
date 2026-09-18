@@ -107,6 +107,17 @@ class DailyBucket extends StatelessWidget {
                   'salary starts ${formatMoney(-daily.bucketMinor)} down rather than up.',
           style: TextStyle(fontSize: 11.5, height: 1.45, color: c.muted),
         ),
+        // Said out loud, so the bucket never looks as though it simply
+        // lost a purchase.
+        if (daily.keptOutMinor > 0) ...[
+          const SizedBox(height: 4),
+          Text(
+            '${formatMoney(daily.keptOutMinor)} across ${daily.keptOutCount} '
+            '${daily.keptOutCount == 1 ? 'one-off or trip payment' : 'one-off and trip payments'} '
+            'kept out of the score. It still counts in the month.',
+            style: TextStyle(fontSize: 11, height: 1.45, color: c.mutedLight),
+          ),
+        ],
       ],
     );
   }
