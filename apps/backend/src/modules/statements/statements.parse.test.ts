@@ -183,4 +183,95 @@ describe("parseStatementRows", () => {
     assert.equal(istDayKey(parsed.periodStart!), "2026-08-18");
     assert.equal(istDayKey(parsed.periodEnd!), "2026-09-12");
   });
+
+  describe("a summary card with no labels on it", () => {
+    // As extracted, byte for byte, from a real Jupiter "Edge" statement -
+    // only the name on the second row changed. The bill summary renders as
+    // a card rather than a table, and every label in it - "Total amount
+    // due", "Payment due date", all fourteen of them - extracts to
+    // nothing. What is left is bare figures, each paired with the date or
+    // the figure printed beside it.
+    const SUMMARY_ROWS = [
+      "17 AUG 2026 - 16 SEP 2026",
+      "A CARDHOLDER",
+      "Rs. 13,920.89 01 Oct 2026",
+      "Rs. 500.00 17/09/2026",
+      "Rs. 25,000 Rs. 11,079.11",
+      "Pay your bill now",
+      "17/08/2026 Rs. 11,003",
+      "Rs. 21,290.89",
+      "Rs. 0.00",
+      "Rs. 0.00",
+      "Rs. 0.00",
+      "Rs. 10,547",
+      "Rs. 7,826",
+      "Rs. 0.00",
+      "Rs. 13,920.89",
+      "Page 1 of 15",
+      "17 AUG 2026 - 16 SEP 2026",
+      "Rupay Transactions - 6623",
+      "16 Aug 26 SWIGGY BANGALORE kaIN Rs. 176.00",
+      "12:00 pm",
+    ];
+
+    it("reads the total due from the amount paired with its due date", () => {
+      const parsed = parseStatementRows(SUMMARY_ROWS);
+      assert.equal(parsed.totalDueMinor, 1392089);
+      assert.equal(istDayKey(parsed.dueDate!), "2026-10-01");
+    });
+
+    it("reads the statement date from the amount paired with it", () => {
+      // Not the billing period's own end date - the day the bank actually
+      // drew the bill, which "17/09/2026" is and "16 SEP 2026" is not by
+      // one day. A card learning its cycle from the wrong one would learn
+      // the wrong day of the month.
+      const parsed = parseStatementRows(SUMMARY_ROWS);
+      assert.equal(istDayKey(parsed.statementDate!), "2026-09-17");
+      assert.equal(parsed.minimumDueMinor, 50000);
+    });
+
+    it("never mistakes a transaction for one of these rows", () => {
+      // A transaction starts with its own date; a summary figure starts
+      // with the amount. The one case that could collide - an amount
+      // followed by something date-shaped - does not occur on a
+      // transaction row here, but the reader still has to find the real
+      // transaction table underneath the summary.
+      const parsed = parseStatementRows(SUMMARY_ROWS);
+      assert.equal(parsed.lines.length, 1);
+      assert.equal(parsed.lines[0].description, "SWIGGY BANGALORE kaIN");
+      assert.equal(parsed.lines[0].amountMinor, 17600);
+    });
+
+    it("leaves a statement that names its own figures alone", () => {
+      // The fallback only fires once the labelled search has failed. A
+      // statement with a real "Total Amount Due" label is never
+      // second-guessed by a paired-row coincidence.
+      const labelled = [
+        "Total Amount Due Rs. 4,785.25",
+        "Payment Due Date 07/10/2026",
+        "Statement Date 17/09/2026",
+        "Rs. 999.00 01 Jan 2099",
+      ];
+      const parsed = parseStatementRows(labelled);
+      assert.equal(parsed.totalDueMinor, 478525);
+      assert.equal(istDayKey(parsed.dueDate!), "2026-10-07");
+    });
+  });
+
+  describe("the fallback label searches", () => {
+    // Regression coverage for a corruption that reached HEAD: a word
+    // boundary (\b) in these two regexes had turned into a literal
+    // backspace character, which cannot appear in extracted text and so
+    // never matched anything - the fallback was silently dead on every
+    // statement that relied on it.
+    it("finds a statement date named by the bare word alone", () => {
+      const rows = ["Statement", "17/09/2026", "16 Aug 26 SWIGGY Rs. 176.00"];
+      assert.equal(istDayKey(parseStatementRows(rows).statementDate!), "2026-09-17");
+    });
+
+    it("finds a due date worded as pay by, without due date beside it", () => {
+      const rows = ["Pay by 07/10/2026", "16 Aug 26 SWIGGY Rs. 176.00"];
+      assert.equal(istDayKey(parseStatementRows(rows).dueDate!), "2026-10-07");
+    });
+  });
 });

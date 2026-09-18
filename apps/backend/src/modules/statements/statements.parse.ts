@@ -286,7 +286,7 @@ function looksLikeStrandedText(row: string): boolean {
   if (text.length < 6 || text.length > 90) return false;
   if (!/[A-Za-z]{3}/.test(text)) return false;
 
-  return !/^(page\s|hsn|note|domestic|international|date\s*&|transaction\s|total|important)/i.test(text);
+  return !/^(page\s|hsn|note|domestic|international|date\s*&|transaction\s|total\b|important)/i.test(text);
 }
 
 /**
@@ -335,8 +335,50 @@ function amountOnSummaryRow(row: string): number | null {
 // Letters rather than word characters in the middle. \w admits digits, so
 // "C 2,018.00 21 Jun, 2026" read its own minimum-due figure as the date and
 // the real date was never reached.
-const LOOSE_DATE_RE =
-  /(\d{1,2}[\s\-.,/]+[A-Za-z]{3,9}[\s\-.,/]+\d{2,4}|\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4})/;
+//
+// Named apart from LOOSE_DATE_RE because amountPairedWithDate, below,
+// needs to tell the two shapes apart - a summary card that names neither
+// figure still writes one as "01 Oct 2026" and the other as "17/09/2026",
+// and the shape is the only thing left to go on.
+const NAMED_DATE_ONLY = /\d{1,2}[\s\-.,/]+[A-Za-z]{3,9}[\s\-.,/]+\d{2,4}/;
+const SLASH_DATE_ONLY = /\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}/;
+const LOOSE_DATE_RE = new RegExp(`(${NAMED_DATE_ONLY.source}|${SLASH_DATE_ONLY.source})`);
+
+/**
+ * An amount and the date beside it, on a row that names neither.
+ *
+ * Seen on Jupiter's "Edge" card statement: the bill summary renders as a
+ * card rather than a table, and every label in it - "Total amount due",
+ * "Payment due date", all of them - extracts to nothing. What is left is
+ * four bare rows, each an amount followed by the date printed next to it:
+ * "Rs. 13,920.89 01 Oct 2026" is the total due and when it falls due, in
+ * that order, with nothing on the row saying so.
+ *
+ * Read by the shape of the date rather than by a label, because there is
+ * no label. The whole row has to match, which is what keeps a transaction
+ * out of this: one always starts with its own date, so a row that starts
+ * with an amount is never one of those. Restricted to the header, and
+ * reached only once the labelled search has come back empty - a statement
+ * that names its own figures is never second-guessed by this.
+ */
+const SUMMARY_CARD_ROWS = 20;
+
+function amountPairedWithDate(
+  rows: string[],
+  dateShape: RegExp
+): { amountMinor: number; date: Date } | null {
+  const pattern = new RegExp(`^(?:Rs\\.?|₹|INR)\\s*${AMOUNT_RE.source}\\s+(${dateShape.source})$`, "i");
+
+  for (let index = 0; index < Math.min(rows.length, SUMMARY_CARD_ROWS); index += 1) {
+    const match = rows[index].trim().match(pattern);
+    if (!match) continue;
+
+    const amountMinor = parseAmountToMinor(match[1]);
+    const date = parseStatementDate(match[2]);
+    if (amountMinor !== null && date) return { amountMinor, date };
+  }
+  return null;
+}
 
 function findLabelledDate(rows: string[], label: RegExp): Date | null {
   for (let index = 0; index < rows.length; index += 1) {
@@ -400,16 +442,28 @@ export function findCardLast4(rows: string[]): string | null {
  * alone, so nothing here is allowed to fail the whole parse.
  */
 export function parseStatementRows(rows: string[]): ParsedStatement {
-  const statementDate =
-    findLabelledDate(rows, /statement\s*(?:date|generated\s*on)/i) ?? findLabelledDate(rows, /statement/i);
+  let statementDate =
+    findLabelledDate(rows, /statement\s*(?:date|generated\s*on)/i) ?? findLabelledDate(rows, /\bstatement\b/i);
 
-  const dueDate =
-    findLabelledDate(rows, /(?:payment\s*)?due\s*date/i) ?? findLabelledDate(rows, /pay\s*by/i);
+  let minimumDueMinor = findLabelledAmount(rows, /min(?:imum)?\.?\s*(?:amount\s*)?due/i);
+
+  // The card-style summary, tried once the label search has found neither
+  // half of the pair it would have come from.
+  if (statementDate === null) {
+    const generatedOn = amountPairedWithDate(rows, SLASH_DATE_ONLY);
+    if (generatedOn) {
+      statementDate = generatedOn.date;
+      minimumDueMinor = minimumDueMinor ?? generatedOn.amountMinor;
+    }
+  }
 
   // The year the lines belong to, for issuers that print "02 Sep" with no
   // year on each row. A cycle can straddle new year, which the reconciler
   // sorts out by date proximity rather than this guess.
   const fallbackYear = statementDate?.getUTCFullYear();
+
+  let dueDate =
+    findLabelledDate(rows, /(?:payment\s*)?due\s*date/i) ?? findLabelledDate(rows, /\bpay\s*by\b/i);
 
   // The reader the headers point at, then every other one, then the
   // fallback. Picking by header is a good guess and not a promise: a bank
@@ -423,6 +477,24 @@ export function parseStatementRows(rows: string[]): ParsedStatement {
   const settled = reader.kind === "BANK" ? directionsFromBalance(lines) : lines;
   const dated = settled.map((line) => line.date.getTime());
 
+  // Tried in order, because the first wording that matches wins and the
+  // narrow ones have to go first. "Amount due" on its own is deliberately
+  // not here: it is a substring of "minimum amount due", and matching
+  // that row would report the minimum as the whole bill - which is the
+  // one wrong answer worse than none.
+  let totalDueMinor =
+    findLabelledAmount(rows, /total\s*(?:amount\s*)?(?:due|dues|payable|outstanding)/i) ??
+    findLabelledAmount(rows, /(?:net|grand)\s*(?:amount\s*)?(?:due|payable)/i) ??
+    findLabelledAmount(rows, /closing\s*balance/i);
+
+  if (totalDueMinor === null) {
+    const summary = amountPairedWithDate(rows, NAMED_DATE_ONLY);
+    if (summary) {
+      totalDueMinor = summary.amountMinor;
+      dueDate = dueDate ?? summary.date;
+    }
+  }
+
   return {
     issuer: reader.name,
     kind: reader.kind,
@@ -432,15 +504,7 @@ export function parseStatementRows(rows: string[]): ParsedStatement {
     dueDate,
     periodStart: dated.length ? new Date(Math.min(...dated)) : null,
     periodEnd: dated.length ? new Date(Math.max(...dated)) : null,
-    // Tried in order, because the first wording that matches wins and the
-    // narrow ones have to go first. "Amount due" on its own is deliberately
-    // not here: it is a substring of "minimum amount due", and matching
-    // that row would report the minimum as the whole bill - which is the
-    // one wrong answer worse than none.
-    totalDueMinor:
-      findLabelledAmount(rows, /total\s*(?:amount\s*)?(?:due|dues|payable|outstanding)/i) ??
-      findLabelledAmount(rows, /(?:net|grand)\s*(?:amount\s*)?(?:due|payable)/i) ??
-      findLabelledAmount(rows, /closing\s*balance/i),
-    minimumDueMinor: findLabelledAmount(rows, /min(?:imum)?\.?\s*(?:amount\s*)?due/i),
+    totalDueMinor,
+    minimumDueMinor,
   };
 }
