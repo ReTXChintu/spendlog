@@ -525,6 +525,44 @@ describe("what is actually left on the card", () => {
     assert.equal(status.availableMinor, 11_000_00);
   });
 
+  it("handles the statement that had neither a date nor a total, only rows", async () => {
+    // The Jupiter statement as it actually sits in the database: read by
+    // the generic reader, 134 lines reconciled, and both summary fields
+    // null. Yesterday's fix covered the total; today's covers the date;
+    // this is the two together, which is the case that was live.
+    const jupiter = await Account.create({
+      userId,
+      bankName: "Jupiter",
+      last4: "6623",
+      accountType: "CARD",
+      statementDay: 17,
+      creditLimitMinor: 25_000_00,
+    });
+
+    await CardStatement.create({
+      userId,
+      accountId: jupiter._id,
+      sourceRef: "m7#a7",
+      kind: "CARD",
+      status: "PARSED",
+      issuer: "generic",
+      statementDate: null,
+      totalDueMinor: null,
+      periodEnd: on("2026-09-13"),
+      receivedAt: on("2026-09-17"),
+      lines: [
+        { date: on("2026-09-01"), description: "a", amountMinor: 9000_00, type: "DEBIT", kind: "SPEND" },
+        { date: on("2026-09-08"), description: "b", amountMinor: 6000_00, type: "DEBIT", kind: "SPEND" },
+        { date: on("2026-09-12"), description: "c", amountMinor: 1000_00, type: "CREDIT", kind: "REVERSAL" },
+      ],
+    });
+
+    const [status] = await cardStatuses(userId, on("2026-09-18"));
+    assert.equal(status.outstandingMinor, 14_000_00);
+    assert.equal(status.outstandingIsEstimate, true);
+    assert.equal(status.availableMinor, 11_000_00);
+  });
+
   it("has no available figure without a credit limit to count from", async () => {
     await Account.create({
       userId,
