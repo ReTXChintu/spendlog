@@ -28,6 +28,18 @@ export interface UpcomingBill {
   /// Negative once the due date has gone past.
   daysUntilDue: number | null;
   paidMinor: number;
+  /// Covered by something other than a payment - cashback, reward points,
+  /// a fee the bank waived. SpendLog only ever sees money that actually
+  /// moved, so a bill settled partly this way looks exactly like one
+  /// nobody finished paying; this is marked by hand, because nothing else
+  /// can see the difference.
+  waivedMinor: number;
+  waivedNote: string | null;
+  /// What is genuinely still owed: the bill, less what was paid, less
+  /// what was waived. Never negative. This is the figure everything else
+  /// - the card bar, the to-do strip - should ask for, rather than
+  /// working paidMinor and waivedMinor out again for itself.
+  owedMinor: number;
   isPaid: boolean;
   /// Whether totalDueMinor is the figure the bank printed or one worked
   /// out from the statement's own rows. Said out loud rather than hidden,
@@ -140,6 +152,9 @@ export async function upcomingBills(userId: Types.ObjectId, now = new Date()): P
     const totalDueMinor = printedMinor > 0 ? printedMinor : billFromRows(statement.lines);
     if (totalDueMinor <= 0) continue;
 
+    const waivedMinor = statement.waivedMinor ?? 0;
+    const owedMinor = Math.max(0, totalDueMinor - paidMinor - waivedMinor);
+
     bills.push({
       statementId: statement._id.toString(),
       accountId,
@@ -150,7 +165,10 @@ export async function upcomingBills(userId: Types.ObjectId, now = new Date()): P
       dueDate: statement.dueDate ?? null,
       daysUntilDue: statement.dueDate ? daysBetween(now, statement.dueDate) : null,
       paidMinor,
-      isPaid: paidMinor >= totalDueMinor,
+      waivedMinor,
+      waivedNote: statement.waivedNote ?? null,
+      owedMinor,
+      isPaid: owedMinor <= 0,
       isEstimate: printedMinor <= 0,
     });
   }

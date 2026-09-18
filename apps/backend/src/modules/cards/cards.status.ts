@@ -126,10 +126,12 @@ export async function cardStatuses(userId: Types.ObjectId, now = new Date()): Pr
         )[0]?.total ?? 0;
 
       // What last month's bill is still holding, and so what is genuinely
-      // left. Cleared the moment a payment is marked against the card:
-      // paying the 14,000 gives the 14,000 back.
+      // left. Cleared the moment a payment is marked against the card, or
+      // the moment the remainder is marked as covered by cashback or
+      // points - owedMinor already nets both out, so this does not
+      // recompute a figure upcomingBills has already worked out.
       const bill = bills.get(card.id);
-      const outstandingMinor = bill ? Math.max(0, bill.totalDueMinor - bill.paidMinor) : null;
+      const outstandingMinor = bill ? bill.owedMinor : null;
 
       return {
         card,

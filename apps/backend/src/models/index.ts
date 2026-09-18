@@ -927,6 +927,17 @@ export interface CardStatementDoc {
   fileBytes?: number | null;
   totalDueMinor?: number | null;
   minimumDueMinor?: number | null;
+  /// Part of the bill covered by something other than money leaving an
+  /// account - cashback, reward points, a fee waived by the bank. The
+  /// bank's own statement nets this in already; SpendLog cannot, because
+  /// it only ever sees the payment that actually moved and that payment is
+  /// smaller by exactly this much. Marked by hand, since nothing arrives
+  /// to say so on its own.
+  waivedMinor?: number | null;
+  /// What the gap was, in the user's own words - "50 cashback", "goodwill
+  /// waiver". Shown beside the figure so a covered gap reads as accounted
+  /// for rather than as a mystery five months from now.
+  waivedNote?: string | null;
   lines: Types.DocumentArray<StatementLine>;
   /// Sum of the lines that are real spending, and what the ledger already
   /// held for the same card and period before this ran. The gap between
@@ -961,6 +972,8 @@ const cardStatementSchema = new Schema<CardStatementDoc>(
     fileBytes: { type: Number, default: null },
     totalDueMinor: { type: Number, default: null },
     minimumDueMinor: { type: Number, default: null },
+    waivedMinor: { type: Number, default: null, min: 0 },
+    waivedNote: { type: String, default: null, maxlength: 120 },
     lines: { type: [statementLineSchema], default: [] },
     statementSpendMinor: { type: Number, default: 0 },
     knownSpendMinor: { type: Number, default: 0 },

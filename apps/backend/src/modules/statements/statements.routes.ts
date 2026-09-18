@@ -50,6 +50,8 @@ function summarise(statement: import("../../models").CardStatementDoc) {
     periodEnd: statement.periodEnd,
     totalDueMinor: statement.totalDueMinor,
     minimumDueMinor: statement.minimumDueMinor,
+    waivedMinor: statement.waivedMinor ?? null,
+    waivedNote: statement.waivedNote ?? null,
     statementSpendMinor: statement.statementSpendMinor,
     knownSpendMinor: statement.knownSpendMinor,
     reconciledAt: statement.reconciledAt ?? null,
@@ -407,6 +409,45 @@ statementsRouter.patch("/:id/lines/:lineId", validObjectIdParam("id"), async (re
 
 const assignSchema = z.object({
   accountId: z.string().regex(/^[0-9a-fA-F]{24}$/, "Not a card id"),
+});
+
+const waiveSchema = z.object({
+  // null clears it, which is how somebody undoes a mistaken entry.
+  waivedMinor: z.number().int().nonnegative().nullable(),
+  note: z.string().max(120).nullable().optional(),
+});
+
+// PATCH /statements/:id/waive - record that part of the bill was covered
+// by something other than a payment: cashback, reward points, a fee the
+// bank waived.
+//
+// SpendLog only ever sees money that actually moved, so a bill settled
+// partly by points looks exactly like a bill nobody finished paying - the
+// gap is real and permanent no matter how long the ledger is watched.
+// This is the one place that gap can be explained rather than left to
+// read as unpaid forever.
+statementsRouter.patch("/:id/waive", validObjectIdParam("id"), async (req, res) => {
+  const parsed = waiveSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+
+  const userId = currentUserId(req);
+  const statement = await CardStatement.findOne({ _id: req.params.id, userId });
+  if (!statement) return res.status(404).json({ error: "Not found" });
+
+  if (parsed.data.waivedMinor !== null) {
+    if (!statement.totalDueMinor) {
+      return res.status(400).json({ error: "This statement has no bill to cover part of yet." });
+    }
+    if (parsed.data.waivedMinor > statement.totalDueMinor) {
+      return res.status(400).json({ error: "That is more than the bill itself." });
+    }
+  }
+
+  statement.waivedMinor = parsed.data.waivedMinor;
+  statement.waivedNote = parsed.data.waivedMinor === null ? null : (parsed.data.note?.trim() || null);
+  await statement.save();
+
+  res.json(summarise(statement));
 });
 
 // PATCH /statements/:id - say by hand which card this statement is for.

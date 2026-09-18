@@ -401,3 +401,94 @@ describe("statement routes", () => {
     });
   });
 });
+
+describe("marking part of a bill as covered by cashback or points", () => {
+  async function makeBilledStatement(userId: Types.ObjectId, accountId: Types.ObjectId, totalDueMinor: number) {
+    return models.CardStatement.create({
+      userId,
+      accountId,
+      sourceRef: `msg-${crypto.randomUUID()}`,
+      status: "PARSED",
+      statementDate: istDayStart("2026-09-17"),
+      totalDueMinor,
+      lines: [],
+    });
+  }
+
+  it("takes the gap off what the card still owes", async () => {
+    // The case it was asked for: a 40,155.57 bill paid down to 40,105.57
+    // because 50 rupees of it was cashback, not money. Reported as ₹50
+    // still owed until this exists to say otherwise.
+    const user = await makeUser();
+    const card = await makeCard(user.id);
+    const statement = await makeBilledStatement(user.id, card._id, 40155_57);
+
+    await models.Transaction.create({
+      userId: user.id,
+      cardPaymentFor: card._id,
+      type: "DEBIT",
+      amountMinor: 40105_57,
+      occurredAt: istDayStart("2026-09-20"),
+      description: "card bill paid",
+      source: "MANUAL",
+    });
+
+    const response = await call(`/statements/${statement.id}/waive`, user.token, {
+      method: "PATCH",
+      body: JSON.stringify({ waivedMinor: 50_00, note: "50 cashback" }),
+    });
+    assert.equal(response.status, 200);
+    const body = await json<{ waivedMinor: number; waivedNote: string }>(response);
+    assert.equal(body.waivedMinor, 50_00);
+    assert.equal(body.waivedNote, "50 cashback");
+
+    const bills = await json<{ owedMinor: number; isPaid: boolean }[]>(
+      await call("/statements/bills", user.token)
+    );
+    assert.equal(bills[0].owedMinor, 0);
+    assert.equal(bills[0].isPaid, true);
+  });
+
+  it("refuses to cover more than the bill itself", async () => {
+    const user = await makeUser();
+    const card = await makeCard(user.id);
+    const statement = await makeBilledStatement(user.id, card._id, 1000_00);
+
+    const response = await call(`/statements/${statement.id}/waive`, user.token, {
+      method: "PATCH",
+      body: JSON.stringify({ waivedMinor: 1000_01 }),
+    });
+    assert.equal(response.status, 400);
+  });
+
+  it("clears on null, for undoing a mistaken entry", async () => {
+    const user = await makeUser();
+    const card = await makeCard(user.id);
+    const statement = await makeBilledStatement(user.id, card._id, 1000_00);
+
+    await call(`/statements/${statement.id}/waive`, user.token, {
+      method: "PATCH",
+      body: JSON.stringify({ waivedMinor: 50_00, note: "oops" }),
+    });
+    const response = await call(`/statements/${statement.id}/waive`, user.token, {
+      method: "PATCH",
+      body: JSON.stringify({ waivedMinor: null }),
+    });
+    const body = await json<{ waivedMinor: number | null; waivedNote: string | null }>(response);
+    assert.equal(body.waivedMinor, null);
+    assert.equal(body.waivedNote, null);
+  });
+
+  it("turns nobody away without a token", async () => {
+    const user = await makeUser();
+    const card = await makeCard(user.id);
+    const statement = await makeBilledStatement(user.id, card._id, 1000_00);
+
+    const response = await fetch(`${baseUrl}/statements/${statement.id}/waive`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ waivedMinor: 50_00 }),
+    });
+    assert.equal(response.status, 401);
+  });
+});

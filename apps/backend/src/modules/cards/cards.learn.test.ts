@@ -358,6 +358,37 @@ describe("what is actually left on the card", () => {
     assert.equal(status.spentMinor, 3000_00);
   });
 
+  it("gives the limit back when the last of the bill was cashback, not money", async () => {
+    // The reported case: an ICICI bill paid down to fifty rupees short
+    // because fifty rupees of it was cashback used at the till, not money
+    // that left an account. Nothing SpendLog watches ever sees that fifty
+    // rupees, so the gap is permanent until it is marked as covered.
+    const hdfc = await cardWithBill(14_000_00);
+
+    await Transaction.create({
+      userId,
+      accountId: hdfc._id,
+      cardPaymentFor: hdfc._id,
+      type: "DEBIT",
+      amountMinor: 13_950_00,
+      occurredAt: on("2026-09-25"),
+      description: "card bill paid",
+      source: "MANUAL",
+    });
+
+    const before = (await cardStatuses(userId, on("2026-09-26")))[0];
+    assert.equal(before.outstandingMinor, 50_00, "fifty short, before it is explained");
+
+    const statement = await CardStatement.findOne({ userId, accountId: hdfc._id }).orFail();
+    statement.waivedMinor = 50_00;
+    statement.waivedNote = "50 cashback";
+    await statement.save();
+
+    const after = (await cardStatuses(userId, on("2026-09-26")))[0];
+    assert.equal(after.outstandingMinor, 0, "the fifty is accounted for, not still owed");
+    assert.equal(after.availableMinor, 25_000_00, "the whole limit is free again");
+  });
+
   it("counts a bill paid in two goes", async () => {
     const hdfc = await cardWithBill(14_000_00);
 
