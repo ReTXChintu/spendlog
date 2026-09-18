@@ -65,11 +65,13 @@ class _EditSheetState extends State<_EditSheet> {
   late bool _isSalary;
   String? _cardPaymentFor;
   String? _commitmentId;
+  String? _loanId;
 
   /// Fetched here rather than threaded through as a prop, because this
   /// sheet opens from several places and only one of them would have
   /// had them to hand.
   List<FixedCommitment> _commitments = [];
+  List<Loan> _loans = [];
   late bool _isSplit;
   late bool _isSettlement;
   /// On a trip, an expense is everyone's unless it says otherwise. The only
@@ -128,8 +130,10 @@ class _EditSheetState extends State<_EditSheet> {
     _isSalary = t?.isSalary ?? false;
     _cardPaymentFor = t?.cardPaymentFor;
     _commitmentId = t?.commitmentId;
+    _loanId = t?.loanId;
 
     _loadCommitments();
+    _loadLoans();
     _isSplit = t?.split != null;
     _isSettlement = t?.isSettlement ?? false;
     _tripJustMine = (t?.tripShareWith?.isNotEmpty ?? false);
@@ -257,6 +261,7 @@ class _EditSheetState extends State<_EditSheet> {
       'isSalary': _type == 'CREDIT' && _isSalary,
       'cardPaymentFor': _type == 'DEBIT' ? _cardPaymentFor : null,
       'commitmentId': _type == 'DEBIT' ? _commitmentId : null,
+      'loanId': _type == 'DEBIT' ? _loanId : null,
       'isSettlement': _isSettlement,
       // Narrowed to the payer alone, or widened back to everyone on the trip.
       if (widget.transaction?.tripId != null)
@@ -328,6 +333,7 @@ class _EditSheetState extends State<_EditSheet> {
         _tripJustMine = false;
         _cardPaymentFor = null;
         _commitmentId = null;
+        _loanId = null;
       } else {
         _isSalary = false;
       }
@@ -361,6 +367,25 @@ class _EditSheetState extends State<_EditSheet> {
       if (!mounted) return;
       setState(() => _commitments =
           result.map((c) => FixedCommitment.fromJson(c as Map<String, dynamic>)).toList());
+    } catch (_) {
+      // The picker simply does not appear.
+    }
+  }
+
+  /// A loan has no purchase to keep out of the totals the way an EMI's
+  /// does, so picking one here never changes what the payment counts as -
+  /// only which schedule it closes an instalment off on.
+  ///
+  /// Active loans, plus whichever this payment already claims - a closed
+  /// loan should not vanish from its own dropdown.
+  Future<void> _loadLoans() async {
+    try {
+      final result = await ApiClient.instance.get('/loans') as List<dynamic>;
+      if (!mounted) return;
+      final all = result.map((l) => Loan.fromJson(l as Map<String, dynamic>)).toList();
+      setState(
+        () => _loans = all.where((loan) => loan.status == 'ACTIVE' || loan.id == _loanId).toList(),
+      );
     } catch (_) {
       // The picker simply does not appear.
     }
@@ -678,6 +703,37 @@ class _EditSheetState extends State<_EditSheet> {
                     ),
                 ],
                 onChanged: _pickCommitment,
+              ),
+              const SizedBox(height: 8),
+            ],
+
+            // A loan has no purchase to keep out of the totals the way an
+            // EMI's does, so this always counts in full - the picker only
+            // ever says which schedule the payment closes off next.
+            if (_type == 'DEBIT' && _loans.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              DropdownButtonFormField<String?>(
+                initialValue: _loanId,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Repaying a loan?',
+                  helperText: 'Claims whichever instalment on it is next due, regardless of the '
+                      'exact amount here.',
+                  helperMaxLines: 3,
+                  isDense: true,
+                ),
+                items: [
+                  const DropdownMenuItem<String?>(value: null, child: Text('No - ordinary spending')),
+                  for (final loan in _loans)
+                    DropdownMenuItem<String?>(
+                      value: loan.id,
+                      child: Text(
+                        '${loan.label} - ${loan.paidCount} of ${loan.months} paid',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+                onChanged: (value) => setState(() => _loanId = value),
               ),
               const SizedBox(height: 8),
             ],

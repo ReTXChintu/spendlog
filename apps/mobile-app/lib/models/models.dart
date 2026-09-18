@@ -216,6 +216,10 @@ class Transaction {
 
   /// The fixed monthly cost this went towards. Still counts as spending.
   final String? commitmentId;
+
+  /// The loan this repays. Counts as spending in full - a loan has no
+  /// purchase to keep out of the totals the way an EMI's parent does.
+  final String? loanId;
   final TransactionSplit? split;
   final bool isSettlement;
   final bool pending;
@@ -250,6 +254,7 @@ class Transaction {
     this.isSalary = false,
     this.cardPaymentFor,
     this.commitmentId,
+    this.loanId,
     this.split,
     this.isSettlement = false,
     required this.pending,
@@ -301,6 +306,7 @@ class Transaction {
         isSalary: json['isSalary'] as bool? ?? false,
         cardPaymentFor: json['cardPaymentFor'] as String?,
         commitmentId: json['commitmentId'] as String?,
+        loanId: json['loanId'] as String?,
         split: json['split'] != null
             ? TransactionSplit.fromJson(json['split'] as Map<String, dynamic>)
             : null,
@@ -892,6 +898,46 @@ class EmiPlan {
       );
 }
 
+/// A loan taken outside a card. See the backend model for why it is not
+/// simply an EmiPlan with no purchase behind it - there is no PARENT
+/// transaction here to keep out of the totals, so every repayment counts
+/// in full the moment it is linked.
+class Loan {
+  final String id;
+  final String label;
+  final int principalMinor;
+  final int months;
+  final int monthlyAmountMinor;
+  final int totalPayableMinor;
+  final int paidCount;
+  final int remainingMinor;
+  final String status;
+
+  Loan({
+    required this.id,
+    required this.label,
+    required this.principalMinor,
+    required this.months,
+    required this.monthlyAmountMinor,
+    required this.totalPayableMinor,
+    required this.paidCount,
+    required this.remainingMinor,
+    required this.status,
+  });
+
+  factory Loan.fromJson(Map<String, dynamic> json) => Loan(
+        id: json['id'] as String,
+        label: json['label'] as String? ?? 'Loan',
+        principalMinor: json['principalMinor'] as int,
+        months: json['months'] as int,
+        monthlyAmountMinor: json['monthlyAmountMinor'] as int,
+        totalPayableMinor: json['totalPayableMinor'] as int,
+        paidCount: json['paidCount'] as int? ?? 0,
+        remainingMinor: json['remainingMinor'] as int? ?? 0,
+        status: json['status'] as String? ?? 'ACTIVE',
+      );
+}
+
 class EmailConnectionStatus {
   final String id;
   final String email;
@@ -1254,6 +1300,9 @@ class DashboardData {
   final int emiCount;
   final int emiMonthlyMinor;
   final int emiRemainingMinor;
+  final int loanCount;
+  final int loanMonthlyMinor;
+  final int loanRemainingMinor;
   final int owedBalanceMinor;
   final List<Perk> expiringPerks;
   final List<StuckStatement> stuckStatements;
@@ -1270,6 +1319,9 @@ class DashboardData {
     required this.emiCount,
     required this.emiMonthlyMinor,
     required this.emiRemainingMinor,
+    required this.loanCount,
+    required this.loanMonthlyMinor,
+    required this.loanRemainingMinor,
     required this.owedBalanceMinor,
     required this.expiringPerks,
     required this.stuckStatements,
@@ -1280,6 +1332,7 @@ class DashboardData {
   factory DashboardData.fromJson(Map<String, dynamic> json) {
     final needs = json['needsCategory'] as Map<String, dynamic>? ?? {};
     final emis = json['emis'] as Map<String, dynamic>? ?? {};
+    final loans = json['loans'] as Map<String, dynamic>? ?? {};
     final statements = json['statements'] as Map<String, dynamic>? ?? {};
 
     return DashboardData(
@@ -1294,6 +1347,9 @@ class DashboardData {
       emiCount: emis['count'] as int? ?? 0,
       emiMonthlyMinor: emis['monthlyMinor'] as int? ?? 0,
       emiRemainingMinor: emis['remainingMinor'] as int? ?? 0,
+      loanCount: loans['count'] as int? ?? 0,
+      loanMonthlyMinor: loans['monthlyMinor'] as int? ?? 0,
+      loanRemainingMinor: loans['remainingMinor'] as int? ?? 0,
       owedBalanceMinor: (json['owed'] as Map<String, dynamic>? ?? {})['balanceMinor'] as int? ?? 0,
       expiringPerks: (json['expiringPerks'] as List<dynamic>? ?? [])
           .map((perk) => Perk.fromJson(perk as Map<String, dynamic>))

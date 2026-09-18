@@ -175,6 +175,16 @@ class DashboardScreenState extends State<DashboardScreen> {
             ),
           ],
 
+          if (data.loanCount > 0) ...[
+            const SizedBox(height: 12),
+            _SummaryCard(
+              label: 'Loans',
+              figure: formatMoney(data.loanMonthlyMinor),
+              sub: 'a month across ${data.loanCount == 1 ? 'one loan' : '${data.loanCount} loans'} · '
+                  '${formatMoneyShort(data.loanRemainingMinor)} still to repay',
+            ),
+          ],
+
           if (data.owedBalanceMinor != 0) ...[
             const SizedBox(height: 12),
             _SummaryCard(

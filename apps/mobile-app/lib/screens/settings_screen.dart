@@ -1,4 +1,5 @@
 import 'dart:io' show Platform;
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -46,6 +47,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   List<MerchantPreset> _presets = [];
   List<Category> _categories = [];
   List<FixedCommitment> _commitments = [];
+  List<Loan> _loans = [];
   int? _salaryMinor;
   int? _salaryDay;
   int? _dailyBudgetMinor;
@@ -215,6 +217,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
         ApiClient.instance.get('/budget/profile'),
         ApiClient.instance.get('/budget/commitments'),
         ApiClient.instance.get('/categories'),
+        ApiClient.instance.get('/loans'),
       ]);
       if (!mounted) return;
 
@@ -228,6 +231,9 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
             .toList();
         _categories = (results[2] as List<dynamic>)
             .map((c) => Category.fromJson(c as Map<String, dynamic>))
+            .toList();
+        _loans = (results[3] as List<dynamic>)
+            .map((l) => Loan.fromJson(l as Map<String, dynamic>))
             .toList();
       });
     } catch (_) {
@@ -259,8 +265,21 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     if (saved == true) await _loadYou();
   }
 
+  Future<void> _editLoan([Loan? loan]) async {
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => _LoanDialog(loan: loan),
+    );
+    if (saved == true) await _loadYou();
+  }
+
   Future<void> _removeCommitment(FixedCommitment commitment) async {
     await ApiClient.instance.delete('/budget/commitments/${commitment.id}').catchError((_) => null);
+    await _loadYou();
+  }
+
+  Future<void> _removeLoan(Loan loan) async {
+    await ApiClient.instance.delete('/loans/${loan.id}').catchError((_) => null);
     await _loadYou();
   }
 
@@ -837,6 +856,53 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
             ),
           ),
         ],
+        const SizedBox(height: 14),
+        _SettingsCard(
+          icon: Icons.account_balance_outlined,
+          title: 'Loans',
+          subtitle: _loans.where((loan) => loan.status == 'ACTIVE').isEmpty
+              ? 'None yet'
+              : '${formatMoney(_loans.where((loan) => loan.status == 'ACTIVE').fold<int>(0, (sum, l) => sum + l.monthlyAmountMinor))} a month',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "A bank's personal loan, an employer advance, money from a relative — anything "
+                'with a fixed term and a monthly repayment. Mark a payment against one from the '
+                'transaction itself, or from here if it never produced a message to match.',
+                style: TextStyle(fontSize: 13, height: 1.5, color: context.c.ink70),
+              ),
+              if (_loans.isNotEmpty) const SizedBox(height: 6),
+              for (final loan in _loans)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  onTap: () => _editLoan(loan),
+                  title: Text(loan.label, style: const TextStyle(fontSize: 13.5)),
+                  subtitle: Text(
+                    loan.status != 'ACTIVE'
+                        ? loan.status == 'CLOSED'
+                            ? 'Closed'
+                            : 'Cancelled'
+                        : '${loan.paidCount} of ${loan.months} paid · '
+                            '${formatMoney(loan.remainingMinor)} left',
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(formatMoney(loan.monthlyAmountMinor), style: kNum.copyWith(fontSize: 13)),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 17),
+                        onPressed: () => _removeLoan(loan),
+                      ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 6),
+              OutlinedButton(onPressed: () => _editLoan(), child: const Text('Add a loan')),
+            ],
+          ),
+        ),
       ];
 
   /// Who you are signed in as, and how to stop being.
@@ -1331,6 +1397,237 @@ class _CommitmentDialogState extends State<_CommitmentDialog> {
         FilledButton(
           onPressed: _saving ? null : _save,
           child: Text(widget.commitment == null ? 'Add' : 'Save'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Add a loan, or rename one already added.
+///
+/// Unlike an EMI, there is no purchase to read a principal off - the money
+/// most often never arrived as a transaction SpendLog has ever seen, so
+/// everything here is typed in rather than taken from a debit already on
+/// the ledger. Editing an existing loan only renames it; the schedule of
+/// one already running cannot be changed, the same as an EMI plan cannot
+/// be re-amortised after the fact.
+class _LoanDialog extends StatefulWidget {
+  /// null means "add a new one".
+  final Loan? loan;
+
+  const _LoanDialog({this.loan});
+
+  @override
+  State<_LoanDialog> createState() => _LoanDialogState();
+}
+
+class _LoanDialogState extends State<_LoanDialog> {
+  late final _label = TextEditingController(text: widget.loan?.label ?? '');
+  late final _principal = TextEditingController(
+    text: widget.loan != null ? (widget.loan!.principalMinor ~/ 100).toString() : '',
+  );
+  late final _months = TextEditingController(text: widget.loan?.months.toString() ?? '12');
+  late final _monthly = TextEditingController(
+    text: widget.loan != null ? (widget.loan!.monthlyAmountMinor / 100).toStringAsFixed(2) : '',
+  );
+  late final _rate = TextEditingController();
+  DateTime _startDate = DateTime.now();
+
+  bool _saving = false;
+  String? _error;
+
+  bool get _isNew => widget.loan == null;
+
+  @override
+  void dispose() {
+    _label.dispose();
+    _principal.dispose();
+    _months.dispose();
+    _monthly.dispose();
+    _rate.dispose();
+    super.dispose();
+  }
+
+  /// The reducing-balance formula the server uses, for the preview.
+  int _computedMonthlyMinor() {
+    final principalMinor = ((double.tryParse(_principal.text.trim()) ?? 0) * 100).round();
+    final months = int.tryParse(_months.text.trim()) ?? 0;
+    if (months <= 0) return 0;
+
+    final annual = double.tryParse(_rate.text.trim());
+    if (annual == null || annual <= 0) return (principalMinor / months).round();
+
+    final r = annual / 12 / 100;
+    final growth = math.pow(1 + r, months);
+    return (principalMinor * r * growth / (growth - 1)).round();
+  }
+
+  Future<void> _pickStartDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _startDate,
+      firstDate: DateTime(2015),
+      lastDate: DateTime.now().add(const Duration(days: 1)),
+    );
+    if (picked != null) setState(() => _startDate = picked);
+  }
+
+  Future<void> _save() async {
+    if (_label.text.trim().isEmpty) {
+      setState(() => _error = "Give it a name — who it's from, or what it's for.");
+      return;
+    }
+
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    final navigator = Navigator.of(context);
+
+    try {
+      if (_isNew) {
+        final principalMinor = ((double.tryParse(_principal.text.trim()) ?? 0) * 100).round();
+        final months = int.tryParse(_months.text.trim()) ?? 0;
+        final monthlyMinor = _monthly.text.trim().isNotEmpty
+            ? (double.parse(_monthly.text.trim()) * 100).round()
+            : _computedMonthlyMinor();
+
+        if (principalMinor <= 0) {
+          setState(() {
+            _error = 'Enter the amount borrowed.';
+            _saving = false;
+          });
+          return;
+        }
+        if (monthlyMinor <= 0) {
+          setState(() {
+            _error = 'The monthly amount needs to be more than zero.';
+            _saving = false;
+          });
+          return;
+        }
+
+        await ApiClient.instance.post('/loans', {
+          'label': _label.text.trim(),
+          'principalMinor': principalMinor,
+          'months': months,
+          'monthlyAmountMinor': monthlyMinor,
+          'interestRatePctAnnual': _rate.text.trim().isEmpty ? null : double.tryParse(_rate.text.trim()),
+          'startDate': _startDate.toIso8601String(),
+        });
+      } else {
+        await ApiClient.instance.patch('/loans/${widget.loan!.id}', {'label': _label.text.trim()});
+      }
+      navigator.pop(true);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _error = error is ApiException ? error.message : "That didn't work.";
+          _saving = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _closeEarly() async {
+    setState(() => _saving = true);
+    final navigator = Navigator.of(context);
+    try {
+      await ApiClient.instance.patch('/loans/${widget.loan!.id}', {'status': 'CLOSED'});
+      navigator.pop(true);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _error = error is ApiException ? error.message : "That didn't work.";
+          _saving = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(_isNew ? 'Add a loan' : 'Rename loan'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _label,
+              autofocus: _isNew,
+              decoration: const InputDecoration(
+                labelText: "Who it's from, or what it's for",
+                hintText: 'HDFC personal loan',
+              ),
+            ),
+            if (_isNew) ...[
+              const SizedBox(height: 10),
+              TextField(
+                controller: _principal,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(labelText: 'Amount borrowed', prefixText: '₹ '),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _months,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Months', hintText: '24'),
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _monthly,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(
+                  labelText: 'Monthly repayment',
+                  prefixText: '₹ ',
+                  hintText: _computedMonthlyMinor() > 0 ? (_computedMonthlyMinor() / 100).toStringAsFixed(2) : null,
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _rate,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(labelText: 'Interest rate (% a year)', hintText: 'Optional'),
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 10),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Started on'),
+                subtitle: Text(formatShortDate(_startDate)),
+                trailing: const Icon(Icons.calendar_today_outlined, size: 18),
+                onTap: _pickStartDate,
+              ),
+              Text(
+                'Take the monthly figure off the paperwork if you can — a calculated one rarely '
+                "lands to the rupee once the lender's own rounding is in it.",
+                style: TextStyle(fontSize: 11.5, height: 1.4, color: context.c.mutedLight),
+              ),
+            ] else ...[
+              const SizedBox(height: 8),
+              Text(
+                '${widget.loan!.paidCount} of ${widget.loan!.months} paid, '
+                '${formatMoney(widget.loan!.remainingMinor)} left. The schedule itself cannot be '
+                'changed once a loan is added.',
+                style: TextStyle(fontSize: 11.5, height: 1.4, color: context.c.mutedLight),
+              ),
+            ],
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(_error!, style: TextStyle(fontSize: 12, color: context.c.debit)),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        if (!_isNew && widget.loan!.status == 'ACTIVE')
+          TextButton(onPressed: _saving ? null : _closeEarly, child: const Text('Close early')),
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: Text(_isNew ? 'Add' : 'Save'),
         ),
       ],
     );
