@@ -59,28 +59,49 @@ function billFromRows(lines: { amountMinor: number; type: TransactionType }[]): 
   return Math.max(0, net);
 }
 
+/**
+ * When a statement was drawn, as best it can be known.
+ *
+ * The same order the model files a statement under a month by, and for
+ * the same reason: a statement never counts as a bill from one month and
+ * sorts as though it were from another.
+ */
+function drawnOn(statement: {
+  statementDate?: Date | null;
+  periodEnd?: Date | null;
+  receivedAt?: Date | null;
+}): Date | null {
+  return statement.statementDate ?? statement.periodEnd ?? statement.receivedAt ?? null;
+}
+
 /** How far back to look for a bill still worth mentioning. */
 const STALE_AFTER_DAYS = 60;
 
 export async function upcomingBills(userId: Types.ObjectId, now = new Date()): Promise<UpcomingBill[]> {
   const since = new Date(now.getTime() - STALE_AFTER_DAYS * 24 * 60 * 60 * 1000);
 
-  const statements = await CardStatement.find({
-    userId,
-    kind: "CARD",
-    status: "PARSED",
-    // Deliberately not filtered on totalDueMinor. A statement whose total
-    // could not be read is still a bill, and skipping it here was what
-    // made one disappear from the card it belongs to.
-    statementDate: { $gte: since },
-  })
-    .sort({ statementDate: -1 })
-    .limit(20);
+  // Deliberately filtered on neither totalDueMinor nor statementDate. A
+  // statement whose total could not be read is still a bill, and one whose
+  // date could not be read is still a bill - and each of those filters,
+  // in turn, was what made a real bill vanish from the card it belongs to.
+  // Dated here the way the model files it: its own date, then the close
+  // of its period, then the day its mail arrived. Sorted in hand for the
+  // same reason, since Mongo cannot sort on "whichever of three is set".
+  const statements = (
+    await CardStatement.find({ userId, kind: "CARD", status: "PARSED" })
+      .sort({ createdAt: -1 })
+      .limit(60)
+  )
+    .map((statement) => ({ statement, drawnOn: drawnOn(statement) }))
+    .filter((row): row is { statement: typeof row.statement; drawnOn: Date } =>
+      row.drawnOn !== null && row.drawnOn.getTime() >= since.getTime()
+    )
+    .sort((left, right) => right.drawnOn.getTime() - left.drawnOn.getTime());
 
   if (statements.length === 0) return [];
 
   const accounts = await Account.find({
-    _id: { $in: statements.map((statement) => statement.accountId).filter(Boolean) },
+    _id: { $in: statements.map(({ statement }) => statement.accountId).filter(Boolean) },
   });
   const nameById = new Map(
     accounts.map((account) => [account._id.toString(), account.nickname?.trim() || account.bankName])
@@ -92,7 +113,7 @@ export async function upcomingBills(userId: Types.ObjectId, now = new Date()): P
   const seen = new Set<string>();
   const bills: UpcomingBill[] = [];
 
-  for (const statement of statements) {
+  for (const { statement, drawnOn: statementDate } of statements) {
     const accountId = statement.accountId?.toString();
     if (!accountId || seen.has(accountId)) continue;
     seen.add(accountId);
@@ -105,7 +126,7 @@ export async function upcomingBills(userId: Types.ObjectId, now = new Date()): P
           userId,
           cardPaymentFor: statement.accountId,
           type: "DEBIT",
-          occurredAt: { $gte: statement.statementDate ?? since },
+          occurredAt: { $gte: statementDate },
         },
       },
       { $group: { _id: null, total: { $sum: "$amountMinor" } } },
@@ -125,7 +146,7 @@ export async function upcomingBills(userId: Types.ObjectId, now = new Date()): P
       cardName: nameById.get(accountId) ?? "A card",
       totalDueMinor,
       minimumDueMinor: statement.minimumDueMinor ?? null,
-      statementDate: statement.statementDate ?? null,
+      statementDate,
       dueDate: statement.dueDate ?? null,
       daysUntilDue: statement.dueDate ? daysBetween(now, statement.dueDate) : null,
       paidMinor,
