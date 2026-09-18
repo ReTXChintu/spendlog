@@ -38,6 +38,7 @@ export function AccountModal({
   const [last4, setLast4] = useState(account?.last4 ?? "");
   const [accountType, setAccountType] = useState<AccountType>(account?.accountType ?? "BANK");
   const [linkedAccountId, setLinkedAccountId] = useState(account?.linkedAccountId ?? "");
+  const [sharesLimitWith, setSharesLimitWith] = useState(account?.sharesLimitWith ?? "");
   const [issuer, setIssuer] = useState(account?.issuer ?? "");
   const [cardNetwork, setCardNetwork] = useState(account?.cardNetwork ?? "");
   const [creditLimit, setCreditLimit] = useState(
@@ -93,6 +94,8 @@ export function AccountModal({
       // Only ever sent for a debit card, and null rather than "" so the
       // server stores an absence rather than rejecting an empty id.
       linkedAccountId: accountType === "DEBIT" ? linkedAccountId || null : null,
+      // Likewise only ever sent for a credit card.
+      sharesLimitWith: accountType === "CARD" ? sharesLimitWith || null : null,
       issuer: issuer.trim() || null,
       // Stored in the canonical spelling, so every screen reading it back
       // gets the same word whatever was typed before the picker existed.
@@ -164,6 +167,12 @@ export function AccountModal({
   const isCard = accountType === "CARD";
   const isDebit = accountType === "DEBIT";
   const banks = others.filter((candidate) => candidate.accountType === "BANK");
+  // Cards this one could share a limit with: another credit card, and one
+  // that is not itself drawing on a third - the server flattens a chain,
+  // but offering the head of it is clearer than offering a link in it.
+  const limitHolders = others.filter(
+    (candidate) => candidate.accountType === "CARD" && !candidate.sharesLimitWith
+  );
   // Cash has no issuer and no last four digits; asking for them would only
   // invite a wrong answer.
   const isCash = accountType === "CASH";
@@ -269,6 +278,25 @@ export function AccountModal({
                 {banks.length === 0
                   ? "Add the bank account first, then come back and link this card to it."
                   : "What this card spends is that account's money, so it is counted there and shows on that account's statement. Leave it unlinked if SpendLog has never seen the account."}
+              </span>
+            </label>
+          )}
+
+          {isCard && limitHolders.length > 0 && (
+            <label className="field field-wide">
+              <span>Shares its limit with</span>
+              <select value={sharesLimitWith} onChange={(e) => setSharesLimitWith(e.target.value)}>
+                <option value="">Nothing — it has a limit of its own</option>
+                {limitHolders.map((holder) => (
+                  <option key={holder.id} value={holder.id}>
+                    {accountLabel(holder)}
+                  </option>
+                ))}
+              </select>
+              <span className="field-hint">
+                Two cards from one bank often draw on a single limit: spend on either and the other
+                has less. Pick the card that holds the limit, and the credit limit above is ignored
+                for this one. Its cycle, statement and your own limit stay its own.
               </span>
             </label>
           )}

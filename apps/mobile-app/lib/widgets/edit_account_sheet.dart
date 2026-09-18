@@ -62,6 +62,7 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
 
   late String _type;
   String? _linkedAccountId;
+  String? _sharesLimitWith;
   late bool _isActive;
   String? _mergeInto;
 
@@ -89,6 +90,7 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
     _dueDay = TextEditingController(text: a?.dueDay?.toString() ?? '');
     _type = a?.accountType ?? 'BANK';
     _linkedAccountId = a?.linkedAccountId;
+    _sharesLimitWith = a?.sharesLimitWith;
     _isActive = a?.isActive ?? true;
   }
 
@@ -144,6 +146,8 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
       // Only ever sent for a debit card, so switching a card away from
       // debit clears the link rather than leaving it dangling.
       'linkedAccountId': _type == 'DEBIT' ? _linkedAccountId : null,
+      // Likewise only ever sent for a credit card.
+      'sharesLimitWith': _type == 'CARD' ? _sharesLimitWith : null,
       'cardNetwork': _cardNetwork.text.trim().isEmpty ? null : _cardNetwork.text.trim(),
       'creditLimitMinor': limit == null ? null : limit * 100,
       'spendLimitMinor': _intOrNull(_spendLimit) == null ? null : _intOrNull(_spendLimit)! * 100,
@@ -315,6 +319,30 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
                     DropdownMenuItem(value: bank.id, child: Text(bank.label)),
                 ],
                 onChanged: (value) => setState(() => _linkedAccountId = value),
+              ),
+            ],
+
+            // Two cards from one bank often draw on a single limit: spend on
+            // either and the other has less. The card named holds the
+            // limit; this one's own is then ignored. Only cards not
+            // themselves drawing on a third are offered - the server
+            // flattens a chain, but offering its head is clearer.
+            if (_type == 'CARD' &&
+                widget.accounts.any((a) =>
+                    a.accountType == 'CARD' && a.id != widget.account?.id && a.sharesLimitWith == null)) ...[
+              const SizedBox(height: 14),
+              Text('Shares its limit with',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: c.muted)),
+              const SizedBox(height: 6),
+              DropdownButtonFormField<String?>(
+                initialValue: _sharesLimitWith,
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('Nothing — a limit of its own')),
+                  for (final holder in widget.accounts.where((a) =>
+                      a.accountType == 'CARD' && a.id != widget.account?.id && a.sharesLimitWith == null))
+                    DropdownMenuItem(value: holder.id, child: Text(holder.label)),
+                ],
+                onChanged: (value) => setState(() => _sharesLimitWith = value),
               ),
             ],
 

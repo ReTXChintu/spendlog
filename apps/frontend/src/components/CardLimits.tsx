@@ -135,6 +135,13 @@ function CardBar({ card }: { card: CardStatus }) {
               <i className="card-limit-dot is-spend" />
               {formatMoney(spentMinor)} this cycle
             </span>
+            {(card.sharesLimitWith?.length ?? 0) > 0 && (
+              <span className="card-limit-key">
+                <Icon name="ic-link" />
+                limit shared with {card.sharesLimitWith!.join(", ")}
+                {card.groupUsedMinor != null && ` · ${formatMoney(card.groupUsedMinor)} used between them`}
+              </span>
+            )}
           </div>
         </>
       )}

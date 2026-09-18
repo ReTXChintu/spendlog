@@ -492,6 +492,39 @@ describe("what is actually left on the card", () => {
     assert.equal(status.availableMinor, 25_000_00);
   });
 
+  it("still counts a bill whose statement date could not be read", async () => {
+    // The other way a real bill vanished. The bills lookup required a
+    // statement date, and a reader that cannot find the "Statement Date"
+    // label leaves it null - so the statement was filtered out before the
+    // rows fallback ever ran. Dated from the close of its period instead,
+    // the same way the model files it under a month.
+    const hdfc = await Account.create({
+      userId,
+      bankName: "Jupiter",
+      last4: "6623",
+      accountType: "CARD",
+      statementDay: 17,
+      creditLimitMinor: 25_000_00,
+    });
+
+    await CardStatement.create({
+      userId,
+      accountId: hdfc._id,
+      sourceRef: "m5#a5",
+      kind: "CARD",
+      status: "PARSED",
+      statementDate: null,
+      periodEnd: on("2026-09-16"),
+      receivedAt: on("2026-09-17"),
+      totalDueMinor: 14_000_00,
+      lines: [],
+    });
+
+    const [status] = await cardStatuses(userId, on("2026-09-18"));
+    assert.equal(status.outstandingMinor, 14_000_00);
+    assert.equal(status.availableMinor, 11_000_00);
+  });
+
   it("has no available figure without a credit limit to count from", async () => {
     await Account.create({
       userId,
@@ -503,5 +536,80 @@ describe("what is actually left on the card", () => {
 
     const [status] = await cardStatuses(userId, on("2026-09-20"));
     assert.equal(status.availableMinor, null);
+  });
+});
+
+describe("two cards on one limit", () => {
+  async function card(fields: Record<string, unknown>) {
+    return Account.create({ userId, accountType: "CARD", statementDay: 17, ...fields });
+  }
+
+  async function spend(accountId: Types.ObjectId, day: string, rupees: number) {
+    await Transaction.create({
+      userId,
+      accountId,
+      type: "DEBIT",
+      amountMinor: rupees * 100,
+      occurredAt: on(day),
+      description: `spend on ${day}`,
+      source: "MANUAL",
+    });
+  }
+
+  it("answers both cards with the one pot, less what either has used", async () => {
+    // Two HDFC cards on a single 1,00,000 limit. Spend on either and the
+    // other has less, which is what the bank does.
+    const regalia = await card({ bankName: "HDFC", nickname: "Regalia", last4: "1111", creditLimitMinor: 100_000_00 });
+    const millennia = await card({ bankName: "HDFC", nickname: "Millennia", last4: "2222", sharesLimitWith: regalia._id });
+
+    await spend(regalia._id, "2026-09-20", 30_000);
+    await spend(millennia._id, "2026-09-21", 10_000);
+
+    const statuses = await cardStatuses(userId, on("2026-09-22"));
+    const byName = new Map(statuses.map((status) => [status.name, status]));
+
+    for (const name of ["Regalia", "Millennia"]) {
+      const status = byName.get(name)!;
+      assert.equal(status.creditLimitMinor, 100_000_00, `${name} sees the shared limit`);
+      assert.equal(status.groupUsedMinor, 40_000_00, `${name} sees what both have used`);
+      assert.equal(status.availableMinor, 60_000_00, `${name} has the pot less both`);
+    }
+
+    // Each still knows its own spending, which is what its own personal
+    // limit is measured against.
+    assert.equal(byName.get("Regalia")!.spentMinor, 30_000_00);
+    assert.equal(byName.get("Millennia")!.spentMinor, 10_000_00);
+
+    assert.deepEqual(byName.get("Regalia")!.sharesLimitWith, ["Millennia"]);
+    assert.deepEqual(byName.get("Millennia")!.sharesLimitWith, ["Regalia"]);
+  });
+
+  it("counts a member's unpaid bill against the pot too", async () => {
+    const regalia = await card({ bankName: "HDFC", nickname: "Regalia", last4: "1111", creditLimitMinor: 100_000_00 });
+    const millennia = await card({ bankName: "HDFC", nickname: "Millennia", last4: "2222", sharesLimitWith: regalia._id });
+
+    await CardStatement.create({
+      userId,
+      accountId: millennia._id,
+      sourceRef: "m6#a6",
+      kind: "CARD",
+      status: "PARSED",
+      statementDate: on("2026-09-17"),
+      totalDueMinor: 25_000_00,
+      lines: [],
+    });
+    await spend(regalia._id, "2026-09-20", 5000);
+
+    const [first] = await cardStatuses(userId, on("2026-09-22"));
+    assert.equal(first.availableMinor, 70_000_00, "100,000 less a 25,000 bill less 5,000");
+  });
+
+  it("leaves a card with a limit of its own alone", async () => {
+    await card({ bankName: "Axis", last4: "3333", creditLimitMinor: 50_000_00 });
+
+    const [status] = await cardStatuses(userId, on("2026-09-22"));
+    assert.deepEqual(status.sharesLimitWith, []);
+    assert.equal(status.groupUsedMinor, null);
+    assert.equal(status.availableMinor, 50_000_00);
   });
 });

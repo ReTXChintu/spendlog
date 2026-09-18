@@ -167,6 +167,12 @@ class CardLimits extends StatelessWidget {
                   c,
                 ),
               _key(tint, '${formatMoney(card.spentMinor)} this cycle', c),
+              if (card.sharesLimitWith.isNotEmpty)
+                Text(
+                  'limit shared with ${card.sharesLimitWith.join(', ')}'
+                      '${card.groupUsedMinor != null ? ' · ${formatMoney(card.groupUsedMinor!)} used between them' : ''}',
+                  style: TextStyle(fontSize: 11, color: c.muted),
+                ),
             ],
           ),
         ],

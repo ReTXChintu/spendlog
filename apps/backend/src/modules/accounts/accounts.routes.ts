@@ -156,6 +156,11 @@ const accountFields = {
     .regex(/^[0-9a-fA-F]{24}$/)
     .nullable()
     .optional(),
+  sharesLimitWith: z
+    .string()
+    .regex(/^[0-9a-fA-F]{24}$/)
+    .nullable()
+    .optional(),
   creditLimitMinor: z.number().int().nonnegative().nullable().optional(),
   spendLimitMinor: z.number().int().nonnegative().nullable().optional(),
   statementDay: z.number().int().min(1).max(31).nullable().optional(),
@@ -197,9 +202,59 @@ accountsRouter.post("/", async (req, res) => {
   const link = await resolveLink(userId, parsed.data);
   if (typeof link === "string") return res.status(400).json({ error: link });
 
-  const created = await Account.create({ userId, ...parsed.data, last4, linkedAccountId: link });
+  const shares = await resolveSharedLimit(userId, null, parsed.data);
+  if (typeof shares === "string") return res.status(400).json({ error: shares });
+
+  const created = await Account.create({
+    userId,
+    ...parsed.data,
+    last4,
+    linkedAccountId: link,
+    sharesLimitWith: shares,
+  });
   res.status(201).json(created);
 });
+
+/**
+ * The card whose limit this card draws on, checked before it is stored.
+ *
+ * Only a credit card shares a limit, and only with another credit card of
+ * this user's. Chains are flattened rather than followed: if the card
+ * named already shares its limit with a third, this one is pointed at the
+ * third directly, so every member of a group names the same holder and
+ * nothing has to walk a list at read time. A card cannot share with
+ * itself, and a card that others share with cannot itself be pointed
+ * elsewhere - that would strand them.
+ *
+ * Returns the id to store, null for no sharing, or a sentence saying why not.
+ */
+async function resolveSharedLimit(
+  userId: Types.ObjectId,
+  selfId: Types.ObjectId | null,
+  fields: { accountType?: string; sharesLimitWith?: string | null }
+): Promise<Types.ObjectId | null | string> {
+  if (fields.sharesLimitWith === undefined) return null;
+  if (fields.sharesLimitWith === null) return null;
+
+  if (fields.accountType !== undefined && fields.accountType !== "CARD") {
+    return "Only a credit card shares a limit.";
+  }
+  if (selfId && selfId.toString() === fields.sharesLimitWith) {
+    return "A card cannot share a limit with itself.";
+  }
+
+  const holder = await Account.findOne({ _id: fields.sharesLimitWith, userId, accountType: "CARD" });
+  if (!holder) return "That is not one of your credit cards.";
+
+  if (selfId) {
+    const dependants = await Account.countDocuments({ userId, sharesLimitWith: selfId });
+    if (dependants > 0) {
+      return "Other cards share this card's limit. Point them elsewhere first.";
+    }
+  }
+
+  return holder.sharesLimitWith ?? holder._id;
+}
 
 /**
  * The bank account a debit card draws on, checked before it is stored.
@@ -251,12 +306,19 @@ accountsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   });
   if (typeof link === "string") return res.status(400).json({ error: link });
 
+  const shares = await resolveSharedLimit(userId, account._id, {
+    accountType: parsed.data.accountType ?? account.accountType,
+    sharesLimitWith: parsed.data.sharesLimitWith,
+  });
+  if (typeof shares === "string") return res.status(400).json({ error: shares });
+
   const updated = await Account.findOneAndUpdate(
     { _id: req.params.id, userId },
     {
       $set: {
         ...parsed.data,
         ...(parsed.data.linkedAccountId === undefined ? {} : { linkedAccountId: link }),
+        ...(parsed.data.sharesLimitWith === undefined ? {} : { sharesLimitWith: shares }),
       },
     },
     { new: true, runValidators: true }

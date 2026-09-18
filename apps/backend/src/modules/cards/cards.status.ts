@@ -57,7 +57,17 @@ export interface CardStatus {
   billDueOn: Date | null;
   /// The credit limit, less the outstanding bill, less this cycle. What is
   /// actually left to spend. Null without a credit limit to count from.
+  ///
+  /// For a card that shares its limit, this is the group's figure: the one
+  /// limit, less every member's bill and every member's cycle. Spend on
+  /// either card and both show less, which is what the bank does.
   availableMinor: number | null;
+  /// The other cards this one shares a limit with, named. Empty for a card
+  /// with a limit of its own.
+  sharesLimitWith: string[];
+  /// What the group as a whole has used, when there is a group. Null
+  /// otherwise, so a screen can tell "this card's share" from "the pot".
+  groupUsedMinor: number | null;
   /// Whether spentMinor covers a billing cycle or a calendar month. A card
   /// with no statement day has no cycle to measure, and a period of
   /// "nothing" used to report nothing spent.
@@ -85,8 +95,8 @@ export async function cardStatuses(userId: Types.ObjectId, now = new Date()): Pr
     outstandingByCard(userId, now),
   ]);
 
-  const rows = await Promise.all(
-    cards.map(async (card): Promise<CardStatus> => {
+  const measured = await Promise.all(
+    cards.map(async (card) => {
       const cycle = cycleFor(card, now);
 
       // The cycle where the card has one, and the calendar month where it
@@ -121,11 +131,51 @@ export async function cardStatuses(userId: Types.ObjectId, now = new Date()): Pr
       const bill = bills.get(card.id);
       const outstandingMinor = bill ? Math.max(0, bill.totalDueMinor - bill.paidMinor) : null;
 
-      const creditLimitMinor = card.creditLimitMinor ?? null;
+      return {
+        card,
+        cycle,
+        from,
+        to,
+        spentMinor,
+        bill,
+        outstandingMinor,
+        usedMinor: (outstandingMinor ?? 0) + spentMinor,
+      };
+    })
+  );
+
+  // The bank's ceiling, which may be one pot shared by several cards. Each
+  // card is answered with its group's limit less everything every member
+  // has used - the holder's limit, because a card that shares has none of
+  // its own. Worked out after every card's own figures exist, since a
+  // group's total is the sum of its members' and cannot be had sooner.
+  const holderOf = (card: (typeof measured)[number]["card"]) =>
+    (card.sharesLimitWith ?? card._id).toString();
+  const usedByHolder = new Map<string, number>();
+  const membersByHolder = new Map<string, string[]>();
+  for (const row of measured) {
+    const holder = holderOf(row.card);
+    usedByHolder.set(holder, (usedByHolder.get(holder) ?? 0) + row.usedMinor);
+    membersByHolder.set(holder, [
+      ...(membersByHolder.get(holder) ?? []),
+      row.card.nickname?.trim() || row.card.bankName,
+    ]);
+  }
+  const byId = new Map(measured.map((row) => [row.card.id, row.card]));
+
+  const rows = measured.map(({ card, cycle, from, to, spentMinor, bill, outstandingMinor }): CardStatus => {
+    {
+      const holder = holderOf(card);
+      const holderCard = byId.get(holder) ?? card;
+      const members = membersByHolder.get(holder) ?? [];
+      const shared = members.length > 1;
+
+      const creditLimitMinor = holderCard.creditLimitMinor ?? null;
+      const groupUsedMinor = shared ? (usedByHolder.get(holder) ?? 0) : null;
       const availableMinor =
         creditLimitMinor === null
           ? null
-          : Math.max(0, creditLimitMinor - (outstandingMinor ?? 0) - spentMinor);
+          : Math.max(0, creditLimitMinor - (groupUsedMinor ?? (outstandingMinor ?? 0) + spentMinor));
 
       const limitMinor = card.spendLimitMinor ?? null;
       const state: CardState = !limitMinor
@@ -155,13 +205,17 @@ export async function cardStatuses(userId: Types.ObjectId, now = new Date()): Pr
         outstandingIsEstimate: bill?.isEstimate ?? false,
         billDueOn: bill?.dueDate ?? null,
         availableMinor,
+        sharesLimitWith: shared
+          ? members.filter((name) => name !== (card.nickname?.trim() || card.bankName))
+          : [],
+        groupUsedMinor,
         periodIsCycle: cycle !== null,
         periodStart: from,
         periodEnd: to,
         state,
       };
-    })
-  );
+    }
+  });
 
   // A card at its limit is not the answer however long its float, so the
   // limit outranks it. Nothing is filtered out, though - "why is it not
