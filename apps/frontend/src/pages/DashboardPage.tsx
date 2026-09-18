@@ -85,8 +85,31 @@ export function DashboardPage() {
 
       <div className="layout-2">
         <div>
+          {/* Three groups, in the order the questions come. Today: what can I
+              spend and which card. Cards: where each one stands. This month:
+              how the month is going. It was one long run of sections and
+              the figures for different timescales sat next to each other as
+              though they were comparable. */}
+          <h2 className="dash-group">Today</h2>
+
+          {daily && <DailyBucket daily={daily} />}
+
           <div className="section-block">
-            <h3>This month so far</h3>
+            <h3>Which card today</h3>
+            <p className="section-sub">
+              The card that gives you longest before the money actually has to leave, on each network.
+            </p>
+            <CardPicker picks={data.picks} />
+          </div>
+
+          <h2 className="dash-group">Cards</h2>
+
+          <CardLimits cards={data.cards} />
+
+          <h2 className="dash-group">This month</h2>
+
+          <div className="section-block">
+            <h3>So far</h3>
             <p className="section-sub">
               Day {monthSoFar.dayOfMonth}, against the same point last month — not the whole of it, which
               would look like overspending every time.
@@ -104,18 +127,6 @@ export function DashboardPage() {
               </Link>
             </div>
           </div>
-
-          <CardLimits cards={data.cards} />
-
-          <div className="section-block">
-            <h3>Which card today</h3>
-            <p className="section-sub">
-              The card that gives you longest before the money actually has to leave, on each network.
-            </p>
-            <CardPicker picks={data.picks} />
-          </div>
-
-          {daily && <DailyBucket daily={daily} />}
 
           {pace.configured ? (
             <div className="section-block">
@@ -202,29 +213,13 @@ export function DashboardPage() {
               <h3>Spending pace</h3>
               <p className="section-sub">
                 Tell SpendLog what lands each month and when, and it can say how much a day is left before
-                the next one. <Link to="/settings?tab=you">Set your salary</Link>.
+                the next one. <Link to="/settings?tab=budget">Set your salary</Link>.
               </p>
             </div>
           )}
         </div>
 
         <div className="rail">
-          {expiringPerks.length > 0 && (
-            <div className="card rail-card">
-              <div className="rail-title">Expiring soon</div>
-              {expiringPerks.map((perk) => (
-                <Link className="rail-row" key={perk.id} to="/perks">
-                  <span>{perk.title}</span>
-                  <span className={`rail-badge${(perk.daysLeft ?? 0) <= 3 ? " is-urgent" : ""}`}>
-                    {perk.daysLeft === 0
-                      ? "today"
-                      : `${perk.daysLeft}${perk.daysLeft === 1 ? " day" : " days"}`}
-                  </span>
-                </Link>
-              ))}
-            </div>
-          )}
-
           {emis.count > 0 && (
             <div className="card rail-card">
               <div className="rail-title">EMIs running</div>
@@ -318,7 +313,7 @@ function TodoStrip({
 
   if (stuckStatements > 0) {
     jobs.push({
-      to: "/settings?tab=connections",
+      to: "/settings?tab=accounts",
       icon: "ic-alert",
       text: `${stuckStatements} ${stuckStatements === 1 ? "statement" : "statements"} could not be read`,
       urgent: true,

@@ -667,25 +667,6 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
             ),
           ),
         ],
-        const SizedBox(height: 14),
-        _SettingsCard(
-          icon: Icons.receipt_long_outlined,
-          title: 'Card statements',
-          subtitle: 'The monthly PDF, from the same mailbox',
-          child: _CardBody(
-            text: 'An alert only arrives for what the bank chose to announce. The statement is its own '
-                'complete list, so reading it finds the annual fees, finance charges and anything that '
-                'happened while the phone was off.\n\n'
-                'What they find is filed under each card, in Accounts.'
-                '${_statementResult != null ? '\n\n$_statementResult' : ''}',
-            actions: [
-              OutlinedButton(
-                onPressed: _readingStatements || connection == null ? null : _readStatements,
-                child: Text(_readingStatements ? 'Reading…' : 'Read statements'),
-              ),
-            ],
-          ),
-        ),
       ];
   }
 
@@ -706,14 +687,25 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
         const SizedBox(height: 14),
         // A card's statements are that card's paperwork, so they live with
         // it rather than under the mailbox they arrived through.
+        // Read here as well as seen here. It was read from Connections,
+        // beside the mailbox, and seen from this tab - one button in one
+        // tab whose result appeared in another, which is the thing a tab
+        // must never ask of you.
         _SettingsCard(
           icon: Icons.receipt_long_outlined,
           title: 'Statements',
           subtitle: 'Filed under each card, by month',
           child: _CardBody(
-            text: 'Every statement that has arrived, what was read off it, and the PDF itself. '
-                'Open one to see each transaction on it and overrule anything SpendLog got wrong.',
+            text: 'The monthly PDF from your mailbox. An alert only arrives for what the bank chose to '
+                'announce; the statement is the complete list, so reading it finds the fees, the '
+                'finance charges and anything that happened while the phone was off. Open one to see '
+                'each transaction on it and overrule anything SpendLog got wrong.'
+                '${_statementResult != null ? '\n\n$_statementResult' : ''}',
             actions: [
+              OutlinedButton(
+                onPressed: _readingStatements || _connections.isEmpty ? null : _readStatements,
+                child: Text(_readingStatements ? 'Reading…' : 'Read statements'),
+              ),
               OutlinedButton(onPressed: _openStatements, child: const Text('Open statements')),
             ],
           ),

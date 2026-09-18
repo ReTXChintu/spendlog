@@ -98,6 +98,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
   String? _selectedId;
   bool _error = false;
   int _unfiled = 0;
+  bool _reading = false;
 
   @override
   void initState() {
@@ -184,6 +185,33 @@ class _AccountsScreenState extends State<AccountsScreen> {
     }
   }
 
+  /// Read the mailbox for new statements, from the screen they get filed on.
+  Future<void> _readStatements() async {
+    if (_reading) return;
+    setState(() => _reading = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final result = await ApiClient.instance.post('/statements/sync') as Map<String, dynamic>;
+      final scanned = result['scanned'] as int? ?? 0;
+      final read = result['read'] as int? ?? 0;
+      final added = result['added'] as int? ?? 0;
+      final unidentified = result['unidentified'] as int? ?? 0;
+      messenger.showSnackBar(SnackBar(
+        content: Text(scanned == 0
+            ? 'No statements found in the mailbox.'
+            : 'Read $read of $scanned. $added transactions added'
+                '${unidentified > 0 ? ', $unidentified on an unknown card' : ''}.'),
+      ));
+      await _load();
+    } catch (error) {
+      messenger.showSnackBar(SnackBar(
+        content: Text(error is ApiException ? error.message : "That didn't work just now."),
+      ));
+    } finally {
+      if (mounted) setState(() => _reading = false);
+    }
+  }
+
   Future<void> _open({Account? account}) async {
     final changed = await showEditAccountSheet(
       context,
@@ -206,6 +234,13 @@ class _AccountsScreenState extends State<AccountsScreen> {
         ),
         shape: Border(bottom: BorderSide(color: c.line)),
         actions: [
+          IconButton(
+            tooltip: 'Read statements from the mailbox',
+            onPressed: _reading ? null : _readStatements,
+            icon: _reading
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.sync),
+          ),
           IconButton(
             tooltip: 'Add a card or account',
             onPressed: () => _open(),

@@ -104,34 +104,14 @@ class DashboardScreenState extends State<DashboardScreen> {
             onOpenPerks: _openPerks,
           ),
 
-          _Heading(
-            title: 'This month so far',
-            sub: 'Day ${data.monthSoFar.dayOfMonth}, against the same point last month — not the whole '
-                'of it, which would look like overspending every time.',
-          ),
-          const SizedBox(height: 10),
-          _MonthSoFarBlock(month: data.monthSoFar),
-
-          if (data.cards.isNotEmpty) ...[
-            const SizedBox(height: 24),
-            _Heading(
-              title: 'Where the cards stand',
-              sub: _cardsSub(data.cards),
-            ),
-            const SizedBox(height: 12),
-            CardLimits(cards: data.cards, onOpenAccounts: widget.onOpenSettings),
-          ],
-
-          const SizedBox(height: 24),
-          const _Heading(
-            title: 'Which card today',
-            sub: 'The card that gives you longest before the money actually has to leave.',
-          ),
-          const SizedBox(height: 12),
-          CardPicker(picks: data.picks, onOpenAccounts: widget.onOpenSettings),
+          // Three groups, in the order the questions come. Today: what can
+          // I spend and which card. Cards: where each one stands. This
+          // month: how the month is going. It was one long run of sections
+          // and the figures for different timescales sat next to each other
+          // as though they were comparable.
+          const _Group('Today'),
 
           if (data.daily.configured) ...[
-            const SizedBox(height: 24),
             _Heading(
               title: 'Daily budget',
               sub: '${formatMoney(data.daily.dailyBudgetMinor)} a day, over ${data.daily.daysCounted} '
@@ -140,7 +120,35 @@ class DashboardScreenState extends State<DashboardScreen> {
             ),
             const SizedBox(height: 12),
             DailyBucket(daily: data.daily),
+            const SizedBox(height: 24),
           ],
+
+          const _Heading(
+            title: 'Which card today',
+            sub: 'The card that gives you longest before the money actually has to leave.',
+          ),
+          const SizedBox(height: 12),
+          CardPicker(picks: data.picks, onOpenAccounts: widget.onOpenSettings),
+
+          if (data.cards.isNotEmpty) ...[
+            const _Group('Cards'),
+            _Heading(
+              title: 'Where the cards stand',
+              sub: _cardsSub(data.cards),
+            ),
+            const SizedBox(height: 12),
+            CardLimits(cards: data.cards, onOpenAccounts: widget.onOpenSettings),
+          ],
+
+          const _Group('This month'),
+
+          _Heading(
+            title: 'So far',
+            sub: 'Day ${data.monthSoFar.dayOfMonth}, against the same point last month — not the whole '
+                'of it, which would look like overspending every time.',
+          ),
+          const SizedBox(height: 10),
+          _MonthSoFarBlock(month: data.monthSoFar),
 
           const SizedBox(height: 24),
           if (data.pace.configured) ...[
@@ -176,6 +184,38 @@ class DashboardScreenState extends State<DashboardScreen> {
               colour: data.owedBalanceMinor > 0 ? c.credit : c.debit,
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+/// A label between runs of sections: Today, Cards, This month. So figures
+/// on different timescales stop reading as one list.
+class _Group extends StatelessWidget {
+  const _Group(this.title);
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Padding(
+      padding: const EdgeInsets.only(top: 26, bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title.toUpperCase(),
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.1,
+              color: c.muted,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Divider(height: 1, color: c.line),
         ],
       ),
     );

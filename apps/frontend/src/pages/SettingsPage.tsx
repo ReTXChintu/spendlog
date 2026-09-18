@@ -108,8 +108,6 @@ function ConnectionsTab() {
   const [connections, setConnections] = useState<EmailConnectionStatus[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [syncing, setSyncing] = useState(false);
-  const [statementSync, setStatementSync] = useState<string | null>(null);
-  const [scanning, setScanning] = useState(false);
   const [apkAvailable, setApkAvailable] = useState<boolean | null>(null);
   const [searchParams] = useSearchParams();
   const gmailStatus = searchParams.get("gmail");
@@ -144,32 +142,6 @@ function ConnectionsTab() {
       reload();
     } finally {
       setSyncing(false);
-    }
-  }
-
-  async function scanStatements() {
-    setScanning(true);
-    setStatementSync(null);
-    try {
-      const result = await api.post<{
-        scanned: number;
-        read: number;
-        locked: number;
-        unidentified: number;
-        added: number;
-      }>("/statements/sync");
-
-      setStatementSync(
-        result.scanned === 0
-          ? "No statements found in the mailbox."
-          : `Read ${result.read} of ${result.scanned}. ${result.added} transactions added` +
-              `${result.locked > 0 ? `, ${result.locked} still locked` : ""}` +
-              `${result.unidentified > 0 ? `, ${result.unidentified} on an unknown card` : ""}.`
-      );
-    } catch (error) {
-      setStatementSync(error instanceof Error ? error.message : "That didn't work.");
-    } finally {
-      setScanning(false);
     }
   }
 
@@ -243,33 +215,6 @@ function ConnectionsTab() {
       <div className="card set-card">
         <div className="set-card-head">
           <div className="set-card-icon">
-            <Icon name="ic-receipt" />
-          </div>
-          <div>
-            <h4>Card statements</h4>
-            <p className="set-card-sub">The monthly PDF, from the same mailbox</p>
-          </div>
-        </div>
-        <p className="desc">
-          An alert only arrives for what the bank chose to announce. The statement is its own complete
-          list, so reading it finds the annual fees, finance charges and anything that happened while the
-          phone was off.
-        </p>
-        {statementSync && <p className="desc">{statementSync}</p>}
-        <div className="set-card-actions">
-          <button className="btn btn-sm" onClick={scanStatements} disabled={scanning || !connection}>
-            <Icon name="ic-sync" />
-            {scanning ? "Reading…" : "Read statements"}
-          </button>
-        </div>
-        <p className="field-hint">
-          What they found is filed under each card, in Accounts and cards.
-        </p>
-      </div>
-
-      <div className="card set-card">
-        <div className="set-card-head">
-          <div className="set-card-icon">
             <Icon name="ic-message" />
           </div>
           <div>
@@ -334,6 +279,14 @@ function AccountsTab() {
   const [loaded, setLoaded] = useState(false);
   const [unfiled, setUnfiled] = useState(0);
 
+  // Reading statements lives here, beside the cards they get filed under,
+  // rather than in Connections beside the mailbox they arrive through. It
+  // was there, and the result was that you pressed the button in one tab
+  // and went to another to see what it did - which is the one thing a tab
+  // should never ask of you.
+  const [scanning, setScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<string | null>(null);
+
   const reload = useCallback(() => {
     api
       .get<AccountOverview[]>("/accounts/overview")
@@ -355,6 +308,33 @@ function AccountsTab() {
   }, []);
 
   useEffect(reload, [reload]);
+
+  async function scanStatements() {
+    setScanning(true);
+    setScanResult(null);
+    try {
+      const result = await api.post<{
+        scanned: number;
+        read: number;
+        locked: number;
+        unidentified: number;
+        added: number;
+      }>("/statements/sync");
+
+      setScanResult(
+        result.scanned === 0
+          ? "No statements found in the mailbox."
+          : `Read ${result.read} of ${result.scanned}. ${result.added} transactions added` +
+              `${result.locked > 0 ? `, ${result.locked} still locked` : ""}` +
+              `${result.unidentified > 0 ? `, ${result.unidentified} on an unknown card` : ""}.`
+      );
+      reload();
+    } catch (error) {
+      setScanResult(error instanceof Error ? error.message : "That didn't work.");
+    } finally {
+      setScanning(false);
+    }
+  }
 
   const wanted = searchParams.get("account");
   const showingUnfiled = wanted === UNFILED;
@@ -397,7 +377,11 @@ function AccountsTab() {
             <button className="btn btn-sm btn-primary" onClick={() => setEditing({ account: null })}>
               <Icon name="ic-plus" /> Add an account
             </button>
+            <button className="btn btn-sm" onClick={scanStatements} disabled={scanning}>
+              <Icon name="ic-sync" /> {scanning ? "Reading…" : "Read statements"}
+            </button>
           </div>
+          {scanResult && <p className="field-hint">{scanResult}</p>}
         </div>
 
         {editing && (
@@ -418,6 +402,17 @@ function AccountsTab() {
   return (
     <div className="accounts-layout">
       <div className="accounts-bar">
+        {/* The one action that changes what is under every card. Up here,
+            in the same tab as the cards, so what it finds is one scroll
+            away rather than one tab away. */}
+        <div className="accounts-toolbar">
+          <button className="btn btn-sm" onClick={scanStatements} disabled={scanning}>
+            <Icon name="ic-sync" /> {scanning ? "Reading…" : "Read statements"}
+          </button>
+          <span className="accounts-toolbar-note">
+            {scanResult ?? "Reads the monthly PDFs from your mailbox and files each under its card."}
+          </span>
+        </div>
         <div className="accounts-rail" role="tablist" aria-label="Accounts">
           {accounts.map((account) => (
             <button
