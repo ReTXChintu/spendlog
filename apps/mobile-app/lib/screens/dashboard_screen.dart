@@ -114,9 +114,7 @@ class DashboardScreenState extends State<DashboardScreen> {
           if (data.daily.configured) ...[
             _Heading(
               title: 'Daily budget',
-              sub: '${formatMoney(data.daily.dailyBudgetMinor)} a day, over ${data.daily.daysCounted} '
-                  '${data.daily.daysCounted == 1 ? 'day' : 'days'} so far. Starts again '
-                  '${data.daily.resetsOnSalary ? 'when you are paid' : 'on the 1st'}.',
+              sub: '${formatMoney(data.daily.dailyBudgetMinor)} a day.',
             ),
             const SizedBox(height: 12),
             DailyBucket(daily: data.daily),

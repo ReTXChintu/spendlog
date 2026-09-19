@@ -1161,22 +1161,14 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
   padding:2px 7px;border-radius:100px;background:var(--brand-50);color:var(--brand-dark);
   white-space:nowrap}
 
-/* The daily budget bucket, and the day-by-day strip under it. */
-.bucket-headline{display:flex;flex-wrap:wrap;gap:10px 26px;padding:13px 15px;border-radius:var(--radius-md);
-  border:1px solid var(--line);background:var(--surface);margin-bottom:10px}
-.bucket-headline.is-saved{border-color:color-mix(in srgb,var(--credit) 45%,var(--line))}
-.bucket-headline.is-burnt{border-color:color-mix(in srgb,var(--debit) 45%,var(--line))}
-.bucket-headline.is-saved .budget-figure{color:var(--credit)}
-.bucket-headline.is-burnt .budget-figure{color:var(--debit)}
-.bucket-of{display:block;font-size:11px;color:var(--muted);margin-top:1px}
-
-.bucket-strip{display:flex;align-items:stretch;gap:2px;height:42px;padding:0 1px;
-  border-radius:var(--radius-sm);background:var(--track);overflow:hidden}
-.bucket-day{flex:1 1 0;min-width:2px;display:flex;flex-direction:column}
-.bucket-half{flex:1 1 50%;display:flex;align-items:flex-end;justify-content:center}
-.bucket-half.is-lower{align-items:flex-start}
-.bucket-bar{width:100%;max-width:9px;border-radius:2px;background:var(--credit)}
-.bucket-bar.is-over{background:var(--debit)}
+/* The daily budget: one figure, one line under it. */
+.bucket-simple{padding:16px;border-radius:var(--radius-md);border:1px solid var(--line);
+  background:var(--surface)}
+.bucket-simple-figure{font-size:26px;font-weight:800;line-height:1.1}
+.bucket-simple.is-saved .bucket-simple-figure{color:var(--credit)}
+.bucket-simple.is-burnt .bucket-simple-figure{color:var(--debit)}
+.bucket-simple-label{font-size:12px;font-weight:600;color:var(--muted);margin-top:2px}
+.bucket-simple-sub{font-size:12.5px;color:var(--ink-70);margin-top:8px}
 
 /* Dashboard groups: Today / Cards / This month. A label between runs of
    sections, so figures on different timescales stop reading as one list. */
