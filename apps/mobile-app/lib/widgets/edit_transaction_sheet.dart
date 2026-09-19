@@ -100,13 +100,21 @@ class _EditSheetState extends State<_EditSheet> {
     return null;
   }
 
-  /// Says what the split will do, in the same terms the balance uses.
+  /// Says what the split will do, in the same terms the balance uses - but
+  /// the terms flip with the direction: on a payment the rest is owed back
+  /// to the user, on a credit the rest was already theirs and is not new
+  /// income.
   String get _owedHint {
     final total = ((double.tryParse(_amount.text.trim()) ?? 0) * 100).round();
     final share = ((double.tryParse(_myShare.text.trim()) ?? 0) * 100).round();
-    final owed = total - share;
-    if (owed <= 0) return 'All of it counts as your own spending.';
-    return '${formatMoney(owed)} counts as owed back to you, not as spending.';
+    final notMine = total - share;
+
+    if (_type == 'DEBIT') {
+      if (notMine <= 0) return 'All of it counts as your own spending.';
+      return '${formatMoney(notMine)} counts as owed back to you, not as spending.';
+    }
+    if (notMine <= 0) return 'All of it counts as income.';
+    return "${formatMoney(notMine)} doesn't count as income - it's money coming back to you.";
   }
 
   @override
@@ -758,25 +766,35 @@ class _EditSheetState extends State<_EditSheet> {
                 ),
               ),
 
-            if (_type == 'DEBIT')
-            CheckboxListTile(
-              value: _isSplit,
-              onChanged: (value) => setState(() {
-                _isSplit = value ?? false;
-                // Anchored to the full bill, since the point of a split is
-                // usually that the share is some way below it.
-                if (_isSplit && _myShare.text.trim().isEmpty) _myShare.text = _amount.text;
-              }),
-              contentPadding: EdgeInsets.zero,
-              controlAffinity: ListTileControlAffinity.leading,
-              dense: true,
-              title: Text(
-                'Split — only part of this was mine',
-                style: TextStyle(fontSize: 12.8, color: c.ink70),
+            // The same control either way round: some of the money that
+            // moved was never really the user's. On a payment, the rest is
+            // owed back - a table's bill paid on one card. On a credit, the
+            // rest is money that was always theirs coming back rather than
+            // new income - a roommate settling rent and something else in
+            // one transfer. Hidden once Settling up is ticked: that one is
+            // whole-transaction and would win outright, quietly ignoring
+            // the share entered here.
+            if (!_isSettlement)
+              CheckboxListTile(
+                value: _isSplit,
+                onChanged: (value) => setState(() {
+                  _isSplit = value ?? false;
+                  // Anchored to the full amount, since the point of a
+                  // split is usually that the share is some way below it.
+                  if (_isSplit && _myShare.text.trim().isEmpty) _myShare.text = _amount.text;
+                }),
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                dense: true,
+                title: Text(
+                  _type == 'DEBIT'
+                      ? 'Split — only part of this was mine'
+                      : 'Split — only part of this is really mine',
+                  style: TextStyle(fontSize: 12.8, color: c.ink70),
+                ),
               ),
-            ),
 
-            if (_isSplit && _type == 'DEBIT') ...[
+            if (_isSplit) ...[
               const SizedBox(height: 6),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -800,7 +818,10 @@ class _EditSheetState extends State<_EditSheet> {
                       child: TextField(
                         controller: _groupLabel,
                         style: TextStyle(color: c.ink),
-                        decoration: _inputDecoration(context, hint: 'Goa trip'),
+                        decoration: _inputDecoration(
+                          context,
+                          hint: _type == 'DEBIT' ? 'Goa trip' : 'Roommate reimbursement',
+                        ),
                       ),
                     ),
                   ),
@@ -825,17 +846,21 @@ class _EditSheetState extends State<_EditSheet> {
                 ),
               ),
 
-            CheckboxListTile(
-              value: _isSettlement,
-              onChanged: (value) => setState(() => _isSettlement = value ?? false),
-              contentPadding: EdgeInsets.zero,
-              controlAffinity: ListTileControlAffinity.leading,
-              dense: true,
-              title: Text(
-                'Settling up — paying back, or being paid back, for bills already recorded',
-                style: TextStyle(fontSize: 12.8, color: c.ink70),
+            // Whole-transaction and all-or-nothing, so it is hidden once
+            // Split is ticked rather than shown beside it - see the note
+            // above Split for why.
+            if (!_isSplit)
+              CheckboxListTile(
+                value: _isSettlement,
+                onChanged: (value) => setState(() => _isSettlement = value ?? false),
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                dense: true,
+                title: Text(
+                  'Settling up — paying back, or being paid back, for bills already recorded',
+                  style: TextStyle(fontSize: 12.8, color: c.ink70),
+                ),
               ),
-            ),
 
             if (_error != null) ...[
               const SizedBox(height: 6),

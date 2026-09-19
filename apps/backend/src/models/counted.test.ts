@@ -27,6 +27,15 @@ describe("resolveCountedAmount", () => {
     assert.deepEqual(result, { countedAmountMinor: 0, countedReason: "SPLIT" });
   });
 
+  it("counts only the user's share of a credit too, not just a payment", () => {
+    // The roommate case: 6,000 comes in, 4,000 of it is rent they fronted
+    // coming back rather than new money, and only 2,000 is real income.
+    // Nothing here reads type, on purpose - a share is a share whichever
+    // way the money moved.
+    const result = resolveCountedAmount({ amountMinor: 600000, split: { myShareMinor: 200000 } });
+    assert.deepEqual(result, { countedAmountMinor: 200000, countedReason: "SPLIT" });
+  });
+
   it("never counts more than the bank actually moved", () => {
     const result = resolveCountedAmount({
       amountMinor: 100000,

@@ -168,14 +168,21 @@ export function EditTransactionModal({
     (preset) => preset.merchant.toLowerCase() === merchant.trim().toLowerCase()
   );
 
-  // Says what the split will do, in the same terms the balance uses.
+  // Says what the split will do, in the same terms the balance uses — but
+  // the terms flip with the direction: on a payment the rest is owed back
+  // to the user, on a credit the rest was already theirs and is not new
+  // income.
   const shareMinor = Math.round(Number.parseFloat(myShare || "0") * 100);
   const totalMinor = Math.round(Number.parseFloat(amount || "0") * 100);
-  const owedBackMinor = Math.max(0, totalMinor - shareMinor);
+  const notMineMinor = Math.max(0, totalMinor - shareMinor);
   const owedHint =
-    owedBackMinor > 0
-      ? `₹${(owedBackMinor / 100).toFixed(2)} counts as owed back to you, not as spending.`
-      : "All of it counts as your own spending.";
+    type === "DEBIT"
+      ? notMineMinor > 0
+        ? `₹${(notMineMinor / 100).toFixed(2)} counts as owed back to you, not as spending.`
+        : "All of it counts as your own spending."
+      : notMineMinor > 0
+        ? `₹${(notMineMinor / 100).toFixed(2)} doesn't count as income — it's money coming back to you.`
+        : "All of it counts as income.";
 
   // Said before the payment is filed rather than after: the point of a
   // limit is to change the next decision, not to report on the last one.
@@ -595,23 +602,33 @@ export function EditTransactionModal({
             </div>
           )}
 
-          {type === "DEBIT" && (
-          <div className="form-row form-row-wide">
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={isSplit}
-                onChange={(e) => {
-                  setIsSplit(e.target.checked);
-                  // Most of the time the point of splitting is that the
-                  // share is less than the bill; starting from the full
-                  // amount at least anchors it.
-                  if (e.target.checked && !myShare) setMyShare(amount);
-                }}
-              />
-              <span>Split — only part of this was mine</span>
-            </label>
-          </div>
+          {/* The same control either way round: some of the money that
+              moved was never really the user's. On a payment, the rest is
+              owed back — a table's bill paid on one card. On a credit, the
+              rest is money that was always theirs coming back rather than
+              new income — a roommate settling rent and something else in
+              one transfer. Not settling up, which is all-or-nothing: this
+              is for the one credit that is genuinely part income and part
+              reimbursement. */}
+          {!isSettlement && (
+            <div className="form-row form-row-wide">
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={isSplit}
+                  onChange={(e) => {
+                    setIsSplit(e.target.checked);
+                    // Most of the time the point of splitting is that the
+                    // share is less than the total; starting from the full
+                    // amount at least anchors it.
+                    if (e.target.checked && !myShare) setMyShare(amount);
+                  }}
+                />
+                <span>
+                  {type === "DEBIT" ? "Split — only part of this was mine" : "Split — only part of this is really mine"}
+                </span>
+              </label>
+            </div>
           )}
 
           {isSplit && (
@@ -635,7 +652,7 @@ export function EditTransactionModal({
                 <input
                   id="e-group"
                   className="filter-input"
-                  placeholder="Goa trip"
+                  placeholder={type === "DEBIT" ? "Goa trip" : "Roommate reimbursement"}
                   value={groupLabel}
                   onChange={(e) => setGroupLabel(e.target.value)}
                 />
@@ -664,18 +681,25 @@ export function EditTransactionModal({
             </div>
           )}
 
-          <div className="form-row form-row-wide">
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={isSettlement}
-                onChange={(e) => setIsSettlement(e.target.checked)}
-              />
-              <span>
-                Settling up — paying back, or being paid back, for bills already recorded
-              </span>
-            </label>
-          </div>
+          {/* Whole-transaction and all-or-nothing, so it is hidden once
+              Split is ticked rather than shown beside it — the resolver
+              would let this win outright and quietly ignore the share
+              entered above, which is not what either checkbox looks like
+              it is doing. */}
+          {!isSplit && (
+            <div className="form-row form-row-wide">
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={isSettlement}
+                  onChange={(e) => setIsSettlement(e.target.checked)}
+                />
+                <span>
+                  Settling up — paying back, or being paid back, for bills already recorded
+                </span>
+              </label>
+            </div>
+          )}
         </div>
 
         {error && <p className="form-error">{error}</p>}
