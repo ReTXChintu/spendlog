@@ -57,9 +57,9 @@ export type DailyBudget =
       /// How many of the days counted went over. The bucket is one number
       /// and does not say whether it is one bad day or every day.
       daysOver: number;
-      /// Spending kept out of the score: one-offs marked as such, and
-      /// anything on a trip. Reported so the bucket never looks as though
-      /// it simply lost a purchase.
+      /// Spending kept out of the score: one-offs marked as such, anything on
+      /// a trip, and payments towards a fixed commitment. Reported so the
+      /// bucket never looks as though it simply lost a purchase.
       keptOutMinor: number;
       keptOutCount: number;
       /// Day by day, oldest first, for a strip showing where it went.
@@ -123,15 +123,22 @@ export async function dailyBudget(userId: Types.ObjectId, now = new Date()): Pro
   // transfer between your own accounts is not spending and that a card
   // bill is the same money as the purchases it is made of.
   // Two piles from one pass: what scores against a day, and what is kept
-  // out of the score. A one-off marked as such, or anything spent on a
-  // trip, is real spending that the month still sees - but a day is not a
-  // bad day for having had a laptop or a week away in it, and a daily
-  // budget that said otherwise would be one nobody kept to.
+  // out of the score. A one-off marked as such, anything spent on a trip,
+  // or a payment towards a fixed commitment (rent, a subscription, an
+  // EMI) is real spending that the month still sees - but a day is not a
+  // bad day for having had a laptop, a week away, or the rent land in it,
+  // and a daily budget that said otherwise would be one nobody kept to.
+  // Rent especially: "what a day should cost" is set with day-to-day
+  // spending in mind, and a single rent payment would otherwise wipe out
+  // the whole bucket on the day it lands.
   //
   // Expressions rather than query operators, because this sits inside
-  // $group. "Has a trip" is written as greater-than-null: any set value
-  // sorts above null in BSON, and a missing field does not.
-  const special = { $or: [{ $eq: ["$isSpecial", true] }, { $gt: ["$tripId", null] }] };
+  // $group. "Has a trip" / "has a commitment" is written as
+  // greater-than-null: any set value sorts above null in BSON, and a
+  // missing field does not.
+  const special = {
+    $or: [{ $eq: ["$isSpecial", true] }, { $gt: ["$tripId", null] }, { $gt: ["$commitmentId", null] }],
+  };
   const rows = await Transaction.aggregate<{ _id: string | null; total: number; count: number }>([
     {
       $match: {

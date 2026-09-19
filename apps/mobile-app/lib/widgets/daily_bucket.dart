@@ -61,8 +61,8 @@ class DailyBucket extends StatelessWidget {
         if (daily.keptOutMinor > 0) ...[
           const SizedBox(height: 6),
           Text(
-            '${formatMoney(daily.keptOutMinor)} in one-offs and trips kept out of this - still '
-            'counted in the month.',
+            '${formatMoney(daily.keptOutMinor)} in one-offs, trips and fixed costs kept out of '
+            'this - still counted in the month.',
             style: TextStyle(fontSize: 11, height: 1.4, color: c.mutedLight),
           ),
         ],

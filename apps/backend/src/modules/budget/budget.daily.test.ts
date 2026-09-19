@@ -203,6 +203,21 @@ describe("the daily budget bucket", () => {
     assert.equal(result.daysOver, 0, "a week away is not three bad days");
   });
 
+  it("keeps a fixed commitment payment out of the score too", async () => {
+    // Rent landing on the 1st should not wipe out the day's allowance -
+    // "what a day should cost" is set with day-to-day spending in mind,
+    // and rent is already accounted for on its own.
+    await withUser({ dailyBudgetMinor: 1000_00, salaryDay: 1 });
+    await spend("2026-09-01", 400);
+    await spend("2026-09-01", 11_500, { commitmentId: new Types.ObjectId() });
+
+    const result = await bucket(on("2026-09-01"));
+    assert.equal(result.spentMinor, 400_00);
+    assert.equal(result.bucketMinor, 600_00);
+    assert.equal(result.keptOutMinor, 11_500_00);
+    assert.equal(result.keptOutCount, 1);
+  });
+
   it("groups a late-night payment into the IST day it happened on", async () => {
     // Half eleven at night in Delhi is six in the evening UTC, still the
     // same date; but half past midnight is seven in the evening UTC on the
