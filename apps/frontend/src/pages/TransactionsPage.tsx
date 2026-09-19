@@ -16,6 +16,8 @@ import {
   BudgetPace,
   CardStatus,
   Category,
+  DailyBudget,
+  DailyBudgetDay,
   DayGroup,
   EmailConnectionStatus,
   Transaction,
@@ -58,6 +60,7 @@ export function TransactionsPage() {
   const [refundFor, setRefundFor] = useState<Transaction | null>(null);
   const [cards, setCards] = useState<CardStatus[]>([]);
   const [pace, setPace] = useState<BudgetPace | null>(null);
+  const [daily, setDaily] = useState<DailyBudget | null>(null);
   // Rows picked for merging. Empty means selection mode is off.
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selecting, setSelecting] = useState(false);
@@ -136,24 +139,39 @@ export function TransactionsPage() {
       // The ledger still works without the rail populated.
     }
 
-    // Card cycles and the spending pace: the strip above the list. Both
-    // are advisory, so neither is allowed to stop the ledger loading.
+    // Card cycles, the spending pace, and the daily savings bucket: all
+    // advisory, so none of them is allowed to stop the ledger loading.
     try {
-      const [cardStatus, budgetPace] = await Promise.all([
+      const [cardStatus, budgetPace, dailyBudget] = await Promise.all([
         api.get<CardStatus[]>("/cards"),
         api.get<BudgetPace>("/budget/pace"),
+        api.get<DailyBudget>("/budget/daily"),
       ]);
       setCards(cardStatus);
       setPace(budgetPace);
+      setDaily(dailyBudget);
     } catch {
       setCards([]);
       setPace(null);
+      setDaily(null);
     }
   }, []);
 
   useEffect(() => {
     loadContext();
   }, [loadContext]);
+
+  // Keyed by IST day, so a day header can show what that day did to the
+  // savings bucket alongside what it already shows for spend/income. Only
+  // covers the current pay period — `by-day` can page further back than
+  // that, and those older days simply show no second row.
+  const dailyByDate = useMemo(() => {
+    const map = new Map<string, DailyBudgetDay>();
+    if (daily?.configured) {
+      for (const day of daily.days) map.set(day.day, day);
+    }
+    return map;
+  }, [daily]);
 
   async function loadMore() {
     if (!nextBefore) return;
@@ -443,7 +461,9 @@ export function TransactionsPage() {
             )
           ) : (
             <>
-              {days.map((day) => (
+              {days.map((day) => {
+                const bucketDay = dailyByDate.get(day.date);
+                return (
                 <div className="day-group" key={day.date}>
                   <div className="day-header">
                     <span className="day-label">{formatDayLabel(day.date)}</span>
@@ -453,6 +473,16 @@ export function TransactionsPage() {
                       {day.incomeMinor > 0 && <span className="income num">+ {formatMoney(day.incomeMinor)}</span>}
                     </span>
                   </div>
+                  {bucketDay && (
+                    <div className="day-bucket-row">
+                      <span className="day-bucket-label">savings</span>
+                      <span className={`num ${bucketDay.deltaMinor >= 0 ? "to-savings" : "from-savings"}`}>
+                        {bucketDay.deltaMinor >= 0
+                          ? `+ ${formatMoney(bucketDay.deltaMinor)} put by`
+                          : `− ${formatMoney(-bucketDay.deltaMinor)} drawn out`}
+                      </span>
+                    </div>
+                  )}
                   {day.transactions.map((transaction) => (
                     <TransactionRow
                       key={transaction.id}
@@ -467,7 +497,8 @@ export function TransactionsPage() {
                     />
                   ))}
                 </div>
-              ))}
+                );
+              })}
 
               {hasMore && (
                 <div className="load-more">

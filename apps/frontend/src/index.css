@@ -240,6 +240,10 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
 .day-totals .spend{color:var(--debit);font-family:var(--font-mono);font-weight:700}
 .day-totals .income{color:var(--credit);font-family:var(--font-mono);font-weight:700}
 .day-totals .dsep{color:var(--muted-light)}
+.day-bucket-row{display:flex;align-items:baseline;justify-content:flex-end;gap:8px;padding:0 2px 8px 2px;font-size:11.5px}
+.day-bucket-label{color:var(--muted-light);text-transform:uppercase;letter-spacing:0.04em;font-weight:600}
+.day-bucket-row .to-savings{color:var(--credit);font-family:var(--font-mono);font-weight:700}
+.day-bucket-row .from-savings{color:var(--debit);font-family:var(--font-mono);font-weight:700}
 
 .row-wrap{position:relative}
 .row{display:grid;grid-template-columns:40px 1fr auto;gap:13px;align-items:center;padding:12px 4px;border-bottom:1px solid var(--line)}

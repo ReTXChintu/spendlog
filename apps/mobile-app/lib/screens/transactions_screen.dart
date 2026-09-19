@@ -43,6 +43,7 @@ class TransactionsScreenState extends State<TransactionsScreen> {
 
   List<CardStatus> _cards = [];
   BudgetPace? _pace;
+  DailyBudget? _daily;
 
   String _query = '';
   String? _categoryId;
@@ -101,12 +102,14 @@ class TransactionsScreenState extends State<TransactionsScreen> {
       // The ledger still works without the rollup and the chips.
     }
 
-    // Card cycles and the spending pace, for the strip above the list.
-    // Both are advisory, so neither stops the ledger loading.
+    // Card cycles, the spending pace, and the daily savings bucket, for the
+    // strip above the list. All advisory, so none of them stops the ledger
+    // loading.
     try {
       final extras = await Future.wait([
         ApiClient.instance.get('/cards'),
         ApiClient.instance.get('/budget/pace'),
+        ApiClient.instance.get('/budget/daily'),
       ]);
       if (!mounted) return;
       setState(() {
@@ -114,6 +117,7 @@ class TransactionsScreenState extends State<TransactionsScreen> {
             .map((c) => CardStatus.fromJson(c as Map<String, dynamic>))
             .toList();
         _pace = BudgetPace.fromJson(extras[1] as Map<String, dynamic>);
+        _daily = DailyBudget.fromJson(extras[2] as Map<String, dynamic>);
       });
     } catch (_) {
       // Advisory only.
@@ -195,6 +199,16 @@ class TransactionsScreenState extends State<TransactionsScreen> {
 
   Future<void> _refreshAll({bool keepVisible = false}) =>
       Future.wait([load(keepVisible: keepVisible), _loadContext()]);
+
+  /// Keyed by IST day, so a day header can show what that day did to the
+  /// savings bucket alongside spend/income. Only covers the current pay
+  /// period — `by-day` can page further back than that, and those older
+  /// days simply show no second row.
+  Map<String, DailyBudgetDay> get _bucketByDate {
+    final daily = _daily;
+    if (daily == null || !daily.configured) return const {};
+    return {for (final day in daily.days) day.day: day};
+  }
 
   void _search(String value) {
     _debounce?.cancel();
@@ -480,7 +494,7 @@ class TransactionsScreenState extends State<TransactionsScreen> {
               onReview: () => _setFilter(() => _categoryId = 'none'),
             ),
           for (final day in _days!) ...[
-            _DayHeader(day: day),
+            _DayHeader(day: day, bucketDay: _bucketByDate[day.date]),
             for (final transaction in day.transactions)
               TransactionTile(
                 transaction: transaction,
@@ -604,43 +618,77 @@ class _NudgeStrip extends StatelessWidget {
 
 class _DayHeader extends StatelessWidget {
   final DayGroup day;
-  const _DayHeader({required this.day});
+  final DailyBudgetDay? bucketDay;
+  const _DayHeader({required this.day, this.bucketDay});
 
   @override
   Widget build(BuildContext context) {
+    final bucketDay = this.bucketDay;
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 4),
       padding: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: context.c.ink, width: 2)),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            formatDayLabel(day.date),
-            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: context.c.ink),
-          ),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              if (day.spendMinor > 0)
-                Text(
-                  '−${formatMoney(day.spendMinor)}',
-                  style: kNum.copyWith(fontSize: 12.8, fontWeight: FontWeight.w700, color: context.c.debit),
-                ),
-              if (day.spendMinor > 0 && day.incomeMinor > 0)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: Text('·', style: TextStyle(color: context.c.mutedLight)),
-                ),
-              if (day.incomeMinor > 0)
-                Text(
-                  '+${formatMoney(day.incomeMinor)}',
-                  style: kNum.copyWith(fontSize: 12.8, fontWeight: FontWeight.w700, color: context.c.credit),
-                ),
+              Text(
+                formatDayLabel(day.date),
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: context.c.ink),
+              ),
+              Row(
+                children: [
+                  if (day.spendMinor > 0)
+                    Text(
+                      '−${formatMoney(day.spendMinor)}',
+                      style: kNum.copyWith(fontSize: 12.8, fontWeight: FontWeight.w700, color: context.c.debit),
+                    ),
+                  if (day.spendMinor > 0 && day.incomeMinor > 0)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: Text('·', style: TextStyle(color: context.c.mutedLight)),
+                    ),
+                  if (day.incomeMinor > 0)
+                    Text(
+                      '+${formatMoney(day.incomeMinor)}',
+                      style: kNum.copyWith(fontSize: 12.8, fontWeight: FontWeight.w700, color: context.c.credit),
+                    ),
+                ],
+              ),
             ],
           ),
+          if (bucketDay != null) ...[
+            const SizedBox(height: 4),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Text(
+                  'SAVINGS  ',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.4,
+                    color: context.c.mutedLight,
+                  ),
+                ),
+                Text(
+                  bucketDay.deltaMinor >= 0
+                      ? '+ ${formatMoney(bucketDay.deltaMinor)} put by'
+                      : '− ${formatMoney(-bucketDay.deltaMinor)} drawn out',
+                  style: kNum.copyWith(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    color: bucketDay.deltaMinor >= 0 ? context.c.credit : context.c.debit,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
