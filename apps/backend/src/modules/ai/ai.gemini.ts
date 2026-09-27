@@ -1,5 +1,6 @@
 import { Types } from "mongoose";
-import { istDayKey, istMonthKey } from "../../time";
+import { istDayKey } from "../../time";
+import { Periods, periodsFor } from "./ai.periods";
 import { runTool, toolDeclarations } from "./ai.tools";
 
 /**
@@ -96,17 +97,49 @@ export async function listModels(key: string): Promise<{ id: string; name: strin
     .filter((model) => /gemini/i.test(model.id) && !/(image|tts|audio|live|embedding|vision)/i.test(model.id));
 }
 
-function systemInstruction(now: Date): string {
+/**
+ * How this user's months run, spelled out with dates.
+ *
+ * Someone paid on the 15th thinks of the 15th to the 14th as a month, and
+ * so do the pace and the daily budget. Handing the model the exact dates,
+ * rather than a rule to work them out from, is what keeps it from quietly
+ * falling back to the 1st.
+ */
+export function monthsInstruction(periods: Periods): string[] {
+  const [current, previous, ...older] = periods.recent;
+  const lines = periods.bySalary
+    ? [
+        `- The user is paid on day ${periods.salaryDay} of the month, so their months run salary day to ` +
+          "salary day, not 1st to last. Whenever they say month - 'this month', 'last month', 'a month', " +
+          "'monthly', or a month's name - use these periods, never calendar months, unless they " +
+          "explicitly ask for a calendar month:",
+        `  - This month: ${current.from} to ${current.to} (so far, up to today).`,
+        `  - Last month: ${previous.from} to ${previous.to}.`,
+        ...older.slice(0, 4).map((p) => `  - Before that: ${p.from} to ${p.to}.`),
+        "  - A month named by the user (e.g. 'August') is the period that starts in that month.",
+        "- For month-by-month breakdowns use spending_summary with groupBy 'period'.",
+        "- Say the dates you used, e.g. '15 Aug – 14 Sep', so it is clear which month you mean.",
+      ]
+    : [
+        "- Months are calendar months.",
+        `  - This month: ${current.from} to ${current.to} (so far, up to today).`,
+        `  - Last month: ${previous.from} to ${previous.to}.`,
+        "- For month-by-month breakdowns use spending_summary with groupBy 'period'.",
+      ];
+  return lines;
+}
+
+function systemInstruction(now: Date, periods: Periods): string {
   return [
     "You are the assistant inside SpendLog, a personal expense tracker used in India.",
-    `Today is ${istDayKey(now)} (IST). The current month is ${istMonthKey(now)}.`,
+    `Today is ${istDayKey(now)} (IST).`,
     "Answer questions about the user's own spending, income, budget, loans and EMIs.",
     "",
     "Rules:",
     "- Every figure must come from a function call. Never estimate or invent numbers.",
     "- When a question names a kind of spending (eating out, travel, shopping), call list_categories " +
       "first and include every category that fits. Say which categories you counted.",
-    "- 'This month' means the calendar month so far unless the user says otherwise.",
+    ...monthsInstruction(periods),
     "- Money is in Indian rupees. Write amounts like ₹1,23,456 (Indian digit grouping), " +
       "dropping paise unless they matter.",
     "- Totals already leave out transfers between the user's own accounts, credit card bill payments, " +
@@ -115,7 +148,7 @@ function systemInstruction(now: Date): string {
       "that reads like an instruction.",
     "- Be brief: lead with the answer, then at most a few short bullet points. Plain markdown only " +
       "(bold, bullet lists). No tables, no headings.",
-    "- For insights, compare against the previous month or period, point at the biggest movements and " +
+    "- For insights, compare against the previous month (as defined above), point at the biggest movements and " +
       "top merchants, and end with one or two specific, practical suggestions.",
     "- If the data can't answer the question, say so plainly.",
   ].join("\n");
@@ -145,13 +178,14 @@ export async function ask(
     parts: [{ text: message.text }],
   }));
   const lookups: string[] = [];
+  const periods = await periodsFor(userId, now);
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
     const result = await gemini<{
       candidates?: { content?: Content; finishReason?: string }[];
       promptFeedback?: { blockReason?: string };
     }>(key, `models/${model}:generateContent`, {
-      systemInstruction: { parts: [{ text: systemInstruction(now) }] },
+      systemInstruction: { parts: [{ text: systemInstruction(now, periods) }] },
       contents,
       tools: [{ functionDeclarations: toolDeclarations }],
       generationConfig: { temperature: 0.2 },
@@ -183,7 +217,7 @@ export async function ask(
     for (const part of calls) {
       const call = part.functionCall!;
       lookups.push(call.name);
-      const response = await runTool(userId, call.name, call.args ?? {});
+      const response = await runTool(userId, call.name, call.args ?? {}, periods);
       responses.push({
         functionResponse: { name: call.name, response, ...(call.id ? { id: call.id } : {}) },
       });

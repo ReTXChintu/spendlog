@@ -14,6 +14,8 @@ let baseUrl: string;
 let signToken: (user: { id: string; email: string }) => string;
 let models: typeof import("../../models");
 let tools: typeof import("./ai.tools");
+let periods: typeof import("./ai.periods");
+let gemini: typeof import("./ai.gemini");
 
 const realFetch = globalThis.fetch;
 
@@ -25,15 +27,19 @@ before(async () => {
   mongod = await MongoMemoryServer.create();
   await mongoose.connect(mongod.getUri("spendlog_ai_test"));
 
-  const [{ app }, auth, loaded, loadedTools] = await Promise.all([
+  const [{ app }, auth, loaded, loadedTools, loadedPeriods, loadedGemini] = await Promise.all([
     import("../../app"),
     import("../../middleware/auth"),
     import("../../models"),
     import("./ai.tools"),
+    import("./ai.periods"),
+    import("./ai.gemini"),
   ]);
   signToken = auth.signSessionToken;
   models = loaded;
   tools = loadedTools;
+  periods = loadedPeriods;
+  gemini = loadedGemini;
 
   server = http.createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -172,6 +178,74 @@ describe("the assistant's lookups", () => {
     const user = await makeUser();
     const result = await tools.runTool(user.id, "drop_database", {});
     assert.ok(result.error);
+  });
+});
+
+describe("the assistant's months", () => {
+  const now = new Date("2026-09-19T12:00:00+05:30");
+
+  it("runs salary day to salary day for someone with a pay day", async () => {
+    const user = await makeUser();
+    await models.User.updateOne({ _id: user.id }, { salaryDay: 15 });
+
+    const { bySalary, recent } = await periods.periodsFor(user.id, now);
+    assert.equal(bySalary, true);
+    assert.deepEqual([recent[0].from, recent[0].to], ["2026-09-15", "2026-10-14"]);
+    assert.deepEqual([recent[1].from, recent[1].to], ["2026-08-15", "2026-09-14"]);
+    assert.deepEqual([recent[2].from, recent[2].to], ["2026-07-15", "2026-08-14"]);
+  });
+
+  it("opens this month on the day pay actually landed", async () => {
+    const user = await makeUser();
+    await models.User.updateOne({ _id: user.id }, { salaryDay: 15 });
+    await models.Transaction.create({
+      userId: user.id,
+      type: "CREDIT",
+      amountMinor: 80_000_00,
+      currency: "INR",
+      source: "MANUAL",
+      isSalary: true,
+      occurredAt: new Date("2026-09-13T10:00:00+05:30"),
+    });
+
+    const { recent } = await periods.periodsFor(user.id, now);
+    assert.equal(recent[0].from, "2026-09-13");
+    assert.deepEqual([recent[1].from, recent[1].to], ["2026-08-15", "2026-09-12"], "no gap, no overlap");
+  });
+
+  it("falls back to calendar months with no pay day", async () => {
+    const user = await makeUser();
+    const { bySalary, recent } = await periods.periodsFor(user.id, now);
+    assert.equal(bySalary, false);
+    assert.deepEqual([recent[0].from, recent[0].to], ["2026-09-01", "2026-09-30"]);
+    assert.deepEqual([recent[1].from, recent[1].to], ["2026-08-01", "2026-08-31"]);
+  });
+
+  it("breaks totals down by the user's own months", async () => {
+    const user = await makeUser();
+    await models.User.updateOne({ _id: user.id }, { salaryDay: 15 });
+    await spend(user.id, 100, "2026-08-20"); // August's period
+    await spend(user.id, 200, "2026-09-10"); // still August's period
+    await spend(user.id, 400, "2026-09-16"); // September's
+
+    const result = await tools.runTool(
+      user.id,
+      "spending_summary",
+      { from: "2026-08-15", to: "2026-09-19", groupBy: "period" },
+      await periods.periodsFor(user.id, now)
+    );
+    assert.deepEqual(result.groups, [
+      { name: "2026-08-15 to 2026-09-14", totalRupees: 300, count: 2 },
+      { name: "2026-09-15 to 2026-10-14", totalRupees: 400, count: 1 },
+    ]);
+  });
+
+  it("tells the model the dates of this month and last", async () => {
+    const user = await makeUser();
+    await models.User.updateOne({ _id: user.id }, { salaryDay: 15 });
+    const text = gemini.monthsInstruction(await periods.periodsFor(user.id, now)).join("\n");
+    assert.match(text, /This month: 2026-09-15 to 2026-10-14/);
+    assert.match(text, /Last month: 2026-08-15 to 2026-09-14/);
   });
 });
 

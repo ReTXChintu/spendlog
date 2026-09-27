@@ -8,10 +8,11 @@ import {
   LoanInstalment,
   Transaction,
 } from "../../models";
-import { IST_OFFSET, istDayEnd, istDayKey, istDayStart, istMonthKey, istMonthStart } from "../../time";
+import { IST_OFFSET, istDayEnd, istDayKey, istDayStart } from "../../time";
 import { budgetPace } from "../budget/budget.pace";
 import { dailyBudget } from "../budget/budget.daily";
 import { loanProgress } from "../loans/loans.routes";
+import { Periods, periodsFor } from "./ai.periods";
 
 /**
  * What the assistant is allowed to look at, as functions it can call.
@@ -74,8 +75,11 @@ export const toolDeclarations: FunctionDeclaration[] = [
         },
         groupBy: {
           type: "STRING",
-          enum: ["none", "category", "merchant", "month", "day", "account"],
-          description: "How to break the total down. Defaults to none.",
+          enum: ["none", "category", "merchant", "period", "month", "day", "account"],
+          description:
+            "How to break the total down. Defaults to none. 'period' is the user's own months " +
+            "(salary day to salary day) and is what to use for any month-by-month comparison; " +
+            "'month' is calendar months, only when the user asks for calendar months.",
         },
         categories: categoriesParam,
         merchant: { type: "STRING", description: "Only merchants whose name contains this text." },
@@ -134,16 +138,16 @@ function asNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-/** A date argument, defaulting to the start or end of this month. */
+/** A date argument, or the fallback when it is missing or malformed. */
 function dayArg(value: unknown, fallback: string): string {
   const text = asString(value);
   return text && /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : fallback;
 }
 
-function range(args: Args): { from: string; to: string; start: Date; end: Date } {
-  const today = istDayKey(new Date());
-  const from = dayArg(args.from, istDayKey(istMonthStart(istMonthKey(new Date()))));
-  const to = dayArg(args.to, today);
+/** The dates asked for, defaulting to the user's current month so far. */
+function range(args: Args, periods: Periods): { from: string; to: string; start: Date; end: Date } {
+  const from = dayArg(args.from, periods.recent[0].from);
+  const to = dayArg(args.to, istDayKey(new Date()));
   return { from, to, start: istDayStart(from), end: istDayEnd(to) };
 }
 
@@ -194,8 +198,8 @@ async function listCategories(userId: Types.ObjectId) {
   };
 }
 
-async function spendingSummary(userId: Types.ObjectId, args: Args) {
-  const { from, to, start, end } = range(args);
+async function spendingSummary(userId: Types.ObjectId, args: Args, periods: Periods) {
+  const { from, to, start, end } = range(args, periods);
   const type = args.type === "CREDIT" ? "CREDIT" : "DEBIT";
   const groupBy = asString(args.groupBy) ?? "none";
   const categories = await resolveCategories(userId, args.categories);
@@ -210,10 +214,26 @@ async function spendingSummary(userId: Types.ObjectId, args: Args) {
   if (categories.filter) match.categoryId = categories.filter;
   if (merchant) match.merchant = literal(merchant);
 
+  // The user's own months that overlap the range, keyed by their first day.
+  // Anything older than the periods worked out lands under "earlier".
+  const overlapping = periods.recent.filter((p) => p.start <= end && p.end > start);
+  const periodKey = overlapping.length
+    ? {
+        $switch: {
+          branches: overlapping.map((p) => ({
+            case: { $and: [{ $gte: ["$occurredAt", p.start] }, { $lt: ["$occurredAt", p.end] }] },
+            then: p.from,
+          })),
+          default: "earlier",
+        },
+      }
+    : "earlier";
+
   const keys: Record<string, unknown> = {
     none: null,
     category: "$categoryId",
     merchant: { $toLower: { $ifNull: ["$merchant", "(no merchant)"] } },
+    period: periodKey,
     month: { $dateToString: { format: "%Y-%m", date: "$occurredAt", timezone: IST_OFFSET } },
     day: { $dateToString: { format: "%Y-%m-%d", date: "$occurredAt", timezone: IST_OFFSET } },
     account: "$accountId",
@@ -229,13 +249,19 @@ async function spendingSummary(userId: Types.ObjectId, args: Args) {
         count: { $sum: 1 },
       },
     },
-    { $sort: groupBy === "month" || groupBy === "day" ? { _id: 1 } : { amountMinor: -1 } },
+    { $sort: ["period", "month", "day"].includes(groupBy) ? { _id: 1 } : { amountMinor: -1 } },
   ];
   const rows = await Transaction.aggregate<{ _id: unknown; label: string | null; amountMinor: number; count: number }>(
     pipeline
   );
 
   const names = await groupNames(userId, groupBy, rows.map((row) => row._id));
+  if (groupBy === "period") {
+    names.set("earlier", "earlier");
+    for (const p of overlapping) names.set(p.from, `${p.from} to ${p.to}`);
+    // "earlier" sorts after the dates as text; it belongs first.
+    rows.sort((a, b) => (a._id === "earlier" ? -1 : b._id === "earlier" ? 1 : 0));
+  }
   const total = rows.reduce((sum, row) => sum + row.amountMinor, 0);
   const count = rows.reduce((sum, row) => sum + row.count, 0);
 
@@ -285,8 +311,8 @@ function accountName(account: { nickname?: string | null; bankName: string; last
   return `${account.bankName}${account.last4 ? ` ••${account.last4}` : ""} (${account.accountType.toLowerCase()})`;
 }
 
-async function findTransactions(userId: Types.ObjectId, args: Args) {
-  const { from, to, start, end } = range(args);
+async function findTransactions(userId: Types.ObjectId, args: Args, periods: Periods) {
+  const { from, to, start, end } = range(args, periods);
   const categories = await resolveCategories(userId, args.categories);
   const merchant = asString(args.merchant);
   const text = asString(args.text);
@@ -425,16 +451,27 @@ async function loansAndEmis(userId: Types.ObjectId) {
   };
 }
 
-/** Runs one call the model asked for. Never throws: an error is an answer too. */
-export async function runTool(userId: Types.ObjectId, name: string, args: Args): Promise<Record<string, unknown>> {
+/**
+ * Runs one call the model asked for. Never throws: an error is an answer too.
+ *
+ * `periods` is passed in by a conversation that already worked them out
+ * for its prompt, so the dates the model was told and the dates a lookup
+ * defaults to are the same ones.
+ */
+export async function runTool(
+  userId: Types.ObjectId,
+  name: string,
+  args: Args,
+  periods?: Periods
+): Promise<Record<string, unknown>> {
   try {
     switch (name) {
       case "list_categories":
         return await listCategories(userId);
       case "spending_summary":
-        return await spendingSummary(userId, args);
+        return await spendingSummary(userId, args, periods ?? (await periodsFor(userId)));
       case "find_transactions":
-        return await findTransactions(userId, args);
+        return await findTransactions(userId, args, periods ?? (await periodsFor(userId)));
       case "budget_status":
         return await budgetStatus(userId);
       case "loans_and_emis":
