@@ -2,6 +2,7 @@ import { Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { RequireAuth } from "./components/RequireAuth";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
+import { AskPage } from "./pages/AskPage";
 import { AuthCallbackPage } from "./pages/AuthCallbackPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { PerksPage } from "./pages/PerksPage";
@@ -30,6 +31,7 @@ export default function App() {
         <Route path="/trips" element={<TripsPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/ask" element={<AskPage />} />
       </Route>
     </Routes>
   );

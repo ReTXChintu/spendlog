@@ -8,6 +8,7 @@ import { budgetPace } from "../budget/budget.pace";
 import { dailyBudget } from "../budget/budget.daily";
 import { perkIsLive } from "../perks/perks.match";
 import { upcomingBills } from "../statements/statements.bills";
+import { loanProgress } from "../loans/loans.routes";
 
 export const dashboardRouter = Router();
 dashboardRouter.use(requireAuth);
@@ -140,24 +141,21 @@ async function activeEmis(userId: Types.ObjectId) {
 /** The same figures, for loans taken outside a card. See activeEmis. */
 async function activeLoans(userId: Types.ObjectId) {
   const loans = await Loan.find({ userId, status: "ACTIVE" }).sort({ createdAt: 1 });
-  const instalments = await LoanInstalment.find({
-    loanId: { $in: loans.map((loan) => loan._id) },
-    status: "DUE",
-  });
+  const instalments = await LoanInstalment.find({ loanId: { $in: loans.map((loan) => loan._id) } });
 
-  const remainingFor = (loanId: Types.ObjectId) =>
-    instalments
-      .filter((instalment) => instalment.loanId.equals(loanId))
-      .reduce((total, instalment) => total + instalment.amountMinor, 0);
+  const withProgress = loans.map((loan) => ({
+    ...loan.toJSON(),
+    ...loanProgress(instalments.filter((instalment) => instalment.loanId.equals(loan._id))),
+  }));
 
   return {
     count: loans.length,
     monthlyMinor: loans.reduce((total, loan) => total + loan.monthlyAmountMinor, 0),
-    remainingMinor: instalments.reduce((total, instalment) => total + instalment.amountMinor, 0),
-    loans: loans.slice(0, 4).map((loan) => ({
-      ...loan.toJSON(),
-      remainingMinor: remainingFor(loan._id),
-    })),
+    remainingMinor: withProgress.reduce((total, loan) => total + loan.remainingMinor, 0),
+    // Soonest due first: the one to have money ready for.
+    loans: withProgress.sort(
+      (a, b) => (a.nextDue?.dueDate.getTime() ?? Infinity) - (b.nextDue?.dueDate.getTime() ?? Infinity)
+    ),
   };
 }
 

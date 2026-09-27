@@ -4,10 +4,11 @@ import { CardLimits } from "../components/CardLimits";
 import { DailyBucket } from "../components/DailyBucket";
 import { CardPicker } from "../components/CardPicker";
 import { Icon } from "../components/Icon";
+import { LoanModal } from "../components/LoanModal";
 import { StateBlock } from "../components/States";
 import { api } from "../lib/api";
-import { formatMoney, formatMoneyShort } from "../lib/format";
-import { DashboardData, FixedCommitment, UpcomingBill } from "../types";
+import { formatMoney, formatMoneyShort, formatShortDate } from "../lib/format";
+import { DashboardData, FixedCommitment, Loan, UpcomingBill } from "../types";
 
 /**
  * The landing screen: what you need to know now.
@@ -23,6 +24,7 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const [data, setData] = useState<DashboardData | null>(null);
   const [failed, setFailed] = useState(false);
+  const [editingLoan, setEditingLoan] = useState<Loan | null>(null);
 
   const load = useCallback(() => {
     api
@@ -68,6 +70,9 @@ export function DashboardPage() {
       <div className="screen-header">
         <h1 className="screen-title">Dashboard</h1>
         <div className="screen-actions">
+          <button className="btn btn-sm" onClick={() => navigate("/ask")}>
+            <Icon name="ic-question" /> Ask about my money
+          </button>
           <button className="btn btn-sm" onClick={() => navigate("/perks")}>
             <Icon name="ic-percent" /> What do I have here?
           </button>
@@ -217,6 +222,47 @@ export function DashboardPage() {
               </p>
             </div>
           )}
+
+          {loans.count > 0 && (
+            <>
+              <h2 className="dash-group">Loans</h2>
+              <div className="section-block">
+                <h3>{formatMoney(loans.monthlyMinor)} a month</h3>
+                <p className="section-sub">
+                  Across {loans.count === 1 ? "one loan" : `${loans.count} loans`} ·{" "}
+                  {formatMoney(loans.remainingMinor)} still to repay. Soonest due first.
+                </p>
+                <div className="loan-list">
+                  {loans.loans.map((loan) => (
+                    <button className="loan-row" key={loan.id} onClick={() => setEditingLoan(loan)}>
+                      <div className="loan-row-top">
+                        <span className="loan-row-name">{loan.label}</span>
+                        <span className="loan-row-left num">{formatMoney(loan.remainingMinor)} left</span>
+                      </div>
+                      <div className="emi-progress">
+                        <div
+                          className="emi-progress-fill"
+                          style={{ width: `${Math.round((loan.paidCount / Math.max(1, loan.months)) * 100)}%` }}
+                        />
+                      </div>
+                      <div className="loan-row-sub">
+                        <span>
+                          {loan.paidCount} of {loan.months} paid · {formatMoney(loan.monthlyAmountMinor)} a month
+                        </span>
+                        {loan.nextDue && (
+                          <span>
+                            Next {formatShortDate(loan.nextDue.dueDate)}
+                            {loan.nextDue.amountMinor !== loan.monthlyAmountMinor &&
+                              ` · ${formatMoney(loan.nextDue.amountMinor)}`}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="rail">
@@ -227,17 +273,6 @@ export function DashboardPage() {
               <div className="rail-sub">
                 a month across {emis.count === 1 ? "one plan" : `${emis.count} plans`} ·{" "}
                 {formatMoneyShort(emis.remainingMinor)} still to pay
-              </div>
-            </div>
-          )}
-
-          {loans.count > 0 && (
-            <div className="card rail-card">
-              <div className="rail-title">Loans</div>
-              <div className="rail-figure num">{formatMoney(loans.monthlyMinor)}</div>
-              <div className="rail-sub">
-                a month across {loans.count === 1 ? "one loan" : `${loans.count} loans`} ·{" "}
-                {formatMoneyShort(loans.remainingMinor)} still to repay
               </div>
             </div>
           )}
@@ -260,6 +295,17 @@ export function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {editingLoan && (
+        <LoanModal
+          loan={editingLoan}
+          onSaved={() => {
+            setEditingLoan(null);
+            load();
+          }}
+          onClose={() => setEditingLoan(null)}
+        />
+      )}
     </section>
   );
 }

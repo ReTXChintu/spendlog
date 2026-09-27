@@ -10,6 +10,7 @@ const NAV = [
   { to: "/perks", label: "Perks", icon: "ic-percent" },
   { to: "/trips", label: "Trips", icon: "ic-calendar" },
   { to: "/analytics", label: "Analytics", icon: "ic-trend" },
+  { to: "/ask", label: "Ask", icon: "ic-spark" },
   { to: "/settings", label: "Settings", icon: "ic-filter" },
 ];
 

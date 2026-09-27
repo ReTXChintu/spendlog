@@ -187,10 +187,27 @@ export interface Loan {
   processingFeeMinor: number | null;
   startDate: string;
   status: "ACTIVE" | "CLOSED" | "CANCELLED";
-  instalments: LoanInstalment[];
+  /** Absent on the dashboard's copy, which only needs where it stands. */
+  instalments?: LoanInstalment[];
   paidCount: number;
   paidMinor: number;
   remainingMinor: number;
+  nextDue: { seq: number; dueDate: string; amountMinor: number } | null;
+}
+
+export interface AiSettings {
+  hasKey: boolean;
+  /** Last four characters of the saved key. The key itself never comes back. */
+  keyHint: string | null;
+  /** null means the app's default. */
+  model: string | null;
+  defaultModel: string;
+  canStoreKey: boolean;
+}
+
+export interface AiMessage {
+  role: "user" | "model";
+  text: string;
 }
 
 export interface EmiUpcoming {

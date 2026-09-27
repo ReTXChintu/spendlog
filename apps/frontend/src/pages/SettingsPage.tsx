@@ -14,6 +14,7 @@ import { formatMoney } from "../lib/format";
 import {
   Account,
   AccountOverview,
+  AiSettings,
   BudgetProfile,
   CardNetwork,
   Category,
@@ -37,6 +38,7 @@ const TABS = [
   { id: "accounts", label: "Accounts and cards", icon: "ic-wallet" },
   { id: "budget", label: "Budget", icon: "ic-calendar" },
   { id: "presets", label: "Presets", icon: "ic-bolt" },
+  { id: "ai", label: "AI assistant", icon: "ic-spark" },
   { id: "you", label: "You", icon: "ic-lock" },
   { id: "about", label: "About", icon: "ic-info" },
 ] as const;
@@ -44,7 +46,7 @@ const TABS = [
 type TabId = (typeof TABS)[number]["id"];
 
 /**
- * Settings, in six tabs, each of which answers one question completely.
+ * Settings, in tabs, each of which answers one question completely.
  *
  * It was five, and every one of them touched everything. Statements — the
  * paperwork of a particular card — sat under Connections because that is
@@ -99,6 +101,7 @@ export function SettingsPage() {
       {tab === "accounts" && <AccountsTab />}
       {tab === "budget" && <BudgetTab />}
       {tab === "presets" && <PresetsTab />}
+      {tab === "ai" && <AiTab />}
       {tab === "you" && <YouTab />}
       {tab === "about" && <AboutTab />}
     </section>
@@ -902,6 +905,169 @@ function BudgetTab() {
           }}
           onClose={() => setEditingLoan(null)}
         />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The assistant's key and model.
+ *
+ * The key is the user's own, so the quota and the bill are theirs too -
+ * SpendLog only forwards. Once saved it never comes back to the browser;
+ * this screen only ever knows its last four characters.
+ */
+function AiTab() {
+  const [settings, setSettings] = useState<AiSettings | null>(null);
+  const [models, setModels] = useState<{ id: string; name: string }[]>([]);
+  const [key, setKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const loadModels = useCallback(() => {
+    api
+      .get<{ id: string; name: string }[]>("/ai/models")
+      .then(setModels)
+      .catch(() => setModels([]));
+  }, []);
+
+  useEffect(() => {
+    api
+      .get<AiSettings>("/ai/settings")
+      .then((next) => {
+        setSettings(next);
+        if (next.hasKey) loadModels();
+      })
+      .catch(() => setError("Couldn't load the assistant's settings."));
+  }, [loadModels]);
+
+  async function save(body: { apiKey?: string | null; model?: string | null }, done: string) {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const next = await api.put<AiSettings>("/ai/settings", body);
+      setSettings(next);
+      setKey("");
+      setNotice(done);
+      if (next.hasKey) loadModels();
+      else setModels([]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save that.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!settings) {
+    return <div className="settings-grid">{error && <p className="form-error">{error}</p>}</div>;
+  }
+
+  return (
+    <div className="settings-grid">
+      <div className="card set-card">
+        <div className="set-card-head">
+          <div className="set-card-icon">
+            <Icon name="ic-spark" />
+          </div>
+          <div>
+            <h4>Gemini API key</h4>
+            <p className="set-card-sub">
+              {settings.hasKey ? `Saved — ends in ${settings.keyHint}` : "Not set"}
+            </p>
+          </div>
+        </div>
+
+        <p className="desc">
+          Ask questions like “how much did I spend on eating out this month?” and get answers from your own
+          transactions. Get a free key from{" "}
+          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">
+            Google AI Studio
+          </a>
+          . Your question and the figures needed to answer it are sent to Google with your key; the key is
+          stored encrypted and never shown again.
+        </p>
+
+        {!settings.canStoreKey ? (
+          <p className="field-hint">
+            This server has no encryption key set, so it can't store an API key yet.
+          </p>
+        ) : (
+          <form
+            className="budget-setup"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (key.trim()) save({ apiKey: key.trim() }, "Key saved.");
+            }}
+          >
+            <label className="field ai-key-field">
+              <span>{settings.hasKey ? "Replace with a new key" : "Paste your key"}</span>
+              <input
+                className="filter-input"
+                type="password"
+                autoComplete="off"
+                spellCheck={false}
+                value={key}
+                onChange={(e) => setKey(e.target.value)}
+                placeholder="AIza…"
+              />
+            </label>
+            <button className="btn btn-sm btn-primary" type="submit" disabled={busy || !key.trim()}>
+              {busy ? "Checking…" : "Save"}
+            </button>
+            {settings.hasKey && (
+              <button
+                className="btn btn-sm btn-ghost btn-danger-text"
+                type="button"
+                disabled={busy}
+                onClick={() => save({ apiKey: null }, "Key removed.")}
+              >
+                Remove
+              </button>
+            )}
+          </form>
+        )}
+
+        {error && <p className="form-error">{error}</p>}
+        {notice && !error && <p className="field-hint">{notice}</p>}
+      </div>
+
+      {settings.hasKey && (
+        <div className="card set-card">
+          <div className="set-card-head">
+            <div className="set-card-icon">
+              <Icon name="ic-bolt" />
+            </div>
+            <div>
+              <h4>Model</h4>
+              <p className="set-card-sub">{settings.model ?? `Default (${settings.defaultModel})`}</p>
+            </div>
+          </div>
+          <p className="desc">
+            The default is Google's current Flash model: quick, and well inside the free tier. A Pro model
+            thinks harder and uses more of your quota.
+          </p>
+          <label className="field">
+            <span>Answer with</span>
+            <select
+              className="filter-input"
+              value={settings.model ?? ""}
+              disabled={busy}
+              onChange={(e) => save({ model: e.target.value || null }, "Model saved.")}
+            >
+              <option value="">Default ({settings.defaultModel})</option>
+              {settings.model && !models.some((model) => model.id === settings.model) && (
+                <option value={settings.model}>{settings.model}</option>
+              )}
+              {models.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.name} ({model.id})
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       )}
     </div>
   );

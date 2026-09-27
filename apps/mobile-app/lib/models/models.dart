@@ -912,6 +912,12 @@ class Loan {
   final int paidCount;
   final int remainingMinor;
   final String status;
+  final double? interestRatePctAnnual;
+  final DateTime? startDate;
+  final String? accountId;
+
+  /// The earliest instalment still due, or null once nothing is.
+  final LoanNextDue? nextDue;
 
   Loan({
     required this.id,
@@ -923,18 +929,46 @@ class Loan {
     required this.paidCount,
     required this.remainingMinor,
     required this.status,
+    this.interestRatePctAnnual,
+    this.startDate,
+    this.accountId,
+    this.nextDue,
   });
 
-  factory Loan.fromJson(Map<String, dynamic> json) => Loan(
-        id: json['id'] as String,
-        label: json['label'] as String? ?? 'Loan',
-        principalMinor: json['principalMinor'] as int,
-        months: json['months'] as int,
-        monthlyAmountMinor: json['monthlyAmountMinor'] as int,
-        totalPayableMinor: json['totalPayableMinor'] as int,
-        paidCount: json['paidCount'] as int? ?? 0,
-        remainingMinor: json['remainingMinor'] as int? ?? 0,
-        status: json['status'] as String? ?? 'ACTIVE',
+  factory Loan.fromJson(Map<String, dynamic> json) {
+    final next = json['nextDue'];
+    final start = json['startDate'] as String?;
+
+    return Loan(
+      id: json['id'] as String,
+      label: json['label'] as String? ?? 'Loan',
+      principalMinor: json['principalMinor'] as int? ?? 0,
+      months: json['months'] as int? ?? 0,
+      monthlyAmountMinor: json['monthlyAmountMinor'] as int? ?? 0,
+      totalPayableMinor: json['totalPayableMinor'] as int? ?? 0,
+      paidCount: json['paidCount'] as int? ?? 0,
+      remainingMinor: json['remainingMinor'] as int? ?? 0,
+      status: json['status'] as String? ?? 'ACTIVE',
+      interestRatePctAnnual: (json['interestRatePctAnnual'] as num?)?.toDouble(),
+      startDate: start == null ? null : DateTime.tryParse(start),
+      accountId: json['accountId'] as String?,
+      nextDue: next is Map<String, dynamic> ? LoanNextDue.fromJson(next) : null,
+    );
+  }
+}
+
+/// The next instalment on a loan: which one, when, and how much.
+class LoanNextDue {
+  final int seq;
+  final DateTime dueDate;
+  final int amountMinor;
+
+  LoanNextDue({required this.seq, required this.dueDate, required this.amountMinor});
+
+  factory LoanNextDue.fromJson(Map<String, dynamic> json) => LoanNextDue(
+        seq: json['seq'] as int? ?? 0,
+        dueDate: DateTime.tryParse(json['dueDate'] as String? ?? '') ?? DateTime.now(),
+        amountMinor: json['amountMinor'] as int? ?? 0,
       );
 }
 
@@ -1303,6 +1337,9 @@ class DashboardData {
   final int loanCount;
   final int loanMonthlyMinor;
   final int loanRemainingMinor;
+
+  /// Each active loan, soonest due first.
+  final List<Loan> loans;
   final int owedBalanceMinor;
   final List<Perk> expiringPerks;
   final List<StuckStatement> stuckStatements;
@@ -1322,6 +1359,7 @@ class DashboardData {
     required this.loanCount,
     required this.loanMonthlyMinor,
     required this.loanRemainingMinor,
+    required this.loans,
     required this.owedBalanceMinor,
     required this.expiringPerks,
     required this.stuckStatements,
@@ -1350,6 +1388,9 @@ class DashboardData {
       loanCount: loans['count'] as int? ?? 0,
       loanMonthlyMinor: loans['monthlyMinor'] as int? ?? 0,
       loanRemainingMinor: loans['remainingMinor'] as int? ?? 0,
+      loans: (loans['loans'] as List<dynamic>? ?? [])
+          .map((loan) => Loan.fromJson(loan as Map<String, dynamic>))
+          .toList(),
       owedBalanceMinor: (json['owed'] as Map<String, dynamic>? ?? {})['balanceMinor'] as int? ?? 0,
       expiringPerks: (json['expiringPerks'] as List<dynamic>? ?? [])
           .map((perk) => Perk.fromJson(perk as Map<String, dynamic>))
@@ -1363,4 +1404,76 @@ class DashboardData {
       monthSoFar: MonthSoFar.fromJson(json['monthSoFar'] as Map<String, dynamic>? ?? {}),
     );
   }
+}
+
+/// Whether the AI assistant has a Gemini key to use, and which model.
+///
+/// The key itself never comes back - only its last four characters, so
+/// somebody with two keys can tell which one is saved.
+class AiSettings {
+  final bool hasKey;
+  final String? keyHint;
+
+  /// null means the server's default.
+  final String? model;
+  final String defaultModel;
+
+  /// False when the server has no encryption secret to store keys with.
+  final bool canStoreKey;
+
+  AiSettings({
+    required this.hasKey,
+    this.keyHint,
+    this.model,
+    required this.defaultModel,
+    required this.canStoreKey,
+  });
+
+  factory AiSettings.fromJson(Map<String, dynamic> json) {
+    final model = json['model'] as String?;
+    return AiSettings(
+      hasKey: json['hasKey'] as bool? ?? false,
+      keyHint: json['keyHint'] as String?,
+      model: model == null || model.isEmpty ? null : model,
+      defaultModel: json['defaultModel'] as String? ?? '',
+      canStoreKey: json['canStoreKey'] as bool? ?? true,
+    );
+  }
+}
+
+/// A Gemini model the saved key can use.
+class AiModel {
+  final String id;
+  final String name;
+
+  AiModel({required this.id, required this.name});
+
+  factory AiModel.fromJson(Map<String, dynamic> json) => AiModel(
+        id: json['id'] as String,
+        name: json['name'] as String? ?? json['id'] as String,
+      );
+}
+
+/// One turn of a conversation with the assistant. `role` is "user" or
+/// "model", which is what Gemini itself calls the two sides.
+class AiMessage {
+  final String role;
+  final String text;
+
+  /// The assistant's answer never arrived; `text` is why.
+  final bool failed;
+
+  /// What the assistant looked up to answer, for a line under the answer.
+  final List<String> lookups;
+
+  const AiMessage({
+    required this.role,
+    required this.text,
+    this.failed = false,
+    this.lookups = const [],
+  });
+
+  bool get isUser => role == 'user';
+
+  Map<String, dynamic> toJson() => {'role': role, 'text': text};
 }

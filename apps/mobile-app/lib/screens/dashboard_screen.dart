@@ -8,6 +8,7 @@ import '../services/reminder_service.dart';
 import '../widgets/card_limits.dart';
 import '../widgets/card_picker.dart';
 import '../widgets/daily_bucket.dart';
+import '../widgets/loan_dialog.dart';
 import '../widgets/state_block.dart';
 import 'perks_screen.dart';
 
@@ -68,6 +69,10 @@ class DashboardScreenState extends State<DashboardScreen> {
   Future<void> _openPerks() async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PerksScreen()));
     await load();
+  }
+
+  Future<void> _editLoan(Loan loan) async {
+    if (await LoanDialog.show(context, loan: loan)) await load();
   }
 
   @override
@@ -173,16 +178,6 @@ class DashboardScreenState extends State<DashboardScreen> {
             ),
           ],
 
-          if (data.loanCount > 0) ...[
-            const SizedBox(height: 12),
-            _SummaryCard(
-              label: 'Loans',
-              figure: formatMoney(data.loanMonthlyMinor),
-              sub: 'a month across ${data.loanCount == 1 ? 'one loan' : '${data.loanCount} loans'} · '
-                  '${formatMoneyShort(data.loanRemainingMinor)} still to repay',
-            ),
-          ],
-
           if (data.owedBalanceMinor != 0) ...[
             const SizedBox(height: 12),
             _SummaryCard(
@@ -190,6 +185,28 @@ class DashboardScreenState extends State<DashboardScreen> {
               figure: formatMoney(data.owedBalanceMinor.abs()),
               sub: data.owedBalanceMinor > 0 ? 'owed to you' : 'you owe',
               colour: data.owedBalanceMinor > 0 ? c.credit : c.debit,
+            ),
+          ],
+
+          // Each loan by name, rather than one total. A loan was otherwise
+          // only ever seen in Settings, and the question it raises - when
+          // is the next one and how much - is a today question.
+          if (data.loans.isNotEmpty) ...[
+            const _Group('Loans'),
+            _Heading(
+              title: '${formatMoney(data.loanMonthlyMinor)} a month',
+              sub: '${formatMoneyShort(data.loanRemainingMinor)} still to repay across '
+                  '${data.loanCount == 1 ? 'one loan' : '${data.loanCount} loans'}. Tap one to change it.',
+            ),
+            const SizedBox(height: 12),
+            for (final loan in data.loans) _LoanRow(loan: loan, onTap: () => _editLoan(loan)),
+          ] else if (data.loanCount > 0) ...[
+            const SizedBox(height: 12),
+            _SummaryCard(
+              label: 'Loans',
+              figure: formatMoney(data.loanMonthlyMinor),
+              sub: 'a month across ${data.loanCount == 1 ? 'one loan' : '${data.loanCount} loans'} · '
+                  '${formatMoneyShort(data.loanRemainingMinor)} still to repay',
             ),
           ],
         ],
@@ -587,6 +604,95 @@ class _SummaryCard extends StatelessWidget {
           const SizedBox(height: 2),
           Text(sub, style: TextStyle(fontSize: 12, height: 1.45, color: c.muted)),
         ],
+      ),
+    );
+  }
+}
+
+/// One loan: how far through it is, and what comes out next and when.
+class _LoanRow extends StatelessWidget {
+  final Loan loan;
+  final VoidCallback onTap;
+
+  const _LoanRow({required this.loan, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final progress = loan.months > 0 ? (loan.paidCount / loan.months).clamp(0.0, 1.0) : 0.0;
+    final next = loan.nextDue;
+
+    // Past its date and still not marked: either it was missed, or it was
+    // paid and never matched. Worth a different colour either way.
+    final overdue = next != null &&
+        istWallClock(next.dueDate).toIso8601String().substring(0, 10).compareTo(istToday()) < 0;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(T.rMd),
+        child: Ink(
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 12),
+          decoration: BoxDecoration(
+            color: c.surface,
+            border: Border.all(color: c.line),
+            borderRadius: BorderRadius.circular(T.rMd),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      loan.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: c.ink),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(formatMoney(loan.monthlyAmountMinor), style: kNum.copyWith(fontSize: 13.5)),
+                  const SizedBox(width: 4),
+                  Text('a month', style: TextStyle(fontSize: 11.5, color: c.muted)),
+                ],
+              ),
+              const SizedBox(height: 8),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(100),
+                child: LinearProgressIndicator(
+                  value: progress,
+                  minHeight: 5,
+                  backgroundColor: c.track,
+                  valueColor: AlwaysStoppedAnimation(c.brand),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 10,
+                runSpacing: 2,
+                children: [
+                  Text(
+                    '${loan.paidCount} of ${loan.months} paid · ${formatMoneyShort(loan.remainingMinor)} left',
+                    style: TextStyle(fontSize: 11.5, color: c.muted),
+                  ),
+                  if (next != null)
+                    Text(
+                      overdue
+                          ? '${formatMoneyShort(next.amountMinor)} was due ${formatShortDate(next.dueDate)}'
+                          : 'Next ${formatMoneyShort(next.amountMinor)} on ${formatShortDate(next.dueDate)}',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: overdue ? FontWeight.w700 : FontWeight.w600,
+                        color: overdue ? c.warn : c.ink70,
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -92,6 +92,14 @@ export interface UserDoc {
   /// what actually protects it is the counter beside it rather than the
   /// hash. Never leaves the server in any form; see the toJSON transform.
   vaultPin?: VaultPin | null;
+  /// The user's own Gemini API key, encrypted with the same key statement
+  /// passwords are. Their key, their quota: SpendLog never pays for or
+  /// sees the questions except to forward them. Never leaves the server.
+  geminiApiKeyEnc?: string | null;
+  /// Last four characters, so settings can say which key is saved.
+  geminiApiKeyHint?: string | null;
+  /// Which Gemini model answers. Null means the app's default.
+  geminiModel?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -125,6 +133,9 @@ const userSchema = new Schema<UserDoc>(
     dailyBudgetMinor: { type: Number, default: null, min: 0 },
     ledgerFrom: { type: String, default: null },
     vaultPin: { type: vaultPinSchema, default: null },
+    geminiApiKeyEnc: { type: String, default: null },
+    geminiApiKeyHint: { type: String, default: null },
+    geminiModel: { type: String, default: null },
   },
   {
     timestamps: true,
@@ -138,6 +149,8 @@ const userSchema = new Schema<UserDoc>(
         serialization.toJSON.transform(doc, ret);
         ret.hasVaultPin = Boolean(ret.vaultPin);
         delete ret.vaultPin;
+        ret.hasGeminiKey = Boolean(ret.geminiApiKeyEnc);
+        delete ret.geminiApiKeyEnc;
         return ret;
       },
     },

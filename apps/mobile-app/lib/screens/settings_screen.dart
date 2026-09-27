@@ -1,5 +1,4 @@
 import 'dart:io' show Platform;
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -13,6 +12,7 @@ import '../services/update_service.dart';
 import '../theme.dart';
 import '../utils/format.dart';
 import '../version.dart';
+import '../widgets/loan_dialog.dart';
 import 'accounts_screen.dart';
 import 'statements_screen.dart';
 import 'login_screen.dart';
@@ -22,11 +22,16 @@ class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
   @override
-  State<SettingsScreen> createState() => _SettingsScreenState();
+  State<SettingsScreen> createState() => SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProviderStateMixin {
+/// Public so the shell can turn to the assistant's card when the Ask
+/// screen sends somebody here to add a key.
+class SettingsScreenState extends State<SettingsScreen> with SingleTickerProviderStateMixin {
   late final TabController _tabs = TabController(length: 6, vsync: this);
+
+  /// The tab the AI assistant card sits on.
+  static const _assistantTab = 4;
 
   List<EmailConnectionStatus> _connections = [];
   bool _smsGranted = false;
@@ -66,6 +71,15 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   int _ledgerStale = 0;
   bool _purgingLedger = false;
 
+  /// null until the server has said whether a key is saved.
+  AiSettings? _ai;
+  List<AiModel> _aiModels = [];
+  final _aiKey = TextEditingController();
+  bool _aiKeyVisible = false;
+  bool _aiSaving = false;
+  String? _aiNote;
+  bool _aiNoteIsError = false;
+
   @override
   void initState() {
     super.initState();
@@ -73,6 +87,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     _loadYou();
     _loadPresets();
     _loadLedger();
+    _loadAi();
     if (Platform.isAndroid) {
       _refreshSmsStatus();
       _loadReminders();
@@ -82,7 +97,107 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   @override
   void dispose() {
     _tabs.dispose();
+    _aiKey.dispose();
     super.dispose();
+  }
+
+  /// Turn to the AI assistant card, freshly loaded - the Ask screen sends
+  /// people here when there is no key yet.
+  void showAssistant() {
+    _tabs.animateTo(_assistantTab);
+    _loadAi();
+  }
+
+  Future<void> _loadAi() async {
+    try {
+      final json = await ApiClient.instance.get('/ai/settings') as Map<String, dynamic>;
+      if (!mounted) return;
+      final settings = AiSettings.fromJson(json);
+      setState(() => _ai = settings);
+      await _loadAiModels(settings);
+    } catch (_) {
+      // The card says it is loading and stays that way.
+    }
+  }
+
+  /// The models this key can use. Only asked for once a key is saved -
+  /// the list comes from Google, under that key.
+  Future<void> _loadAiModels(AiSettings settings) async {
+    if (!settings.hasKey) {
+      if (mounted) setState(() => _aiModels = []);
+      return;
+    }
+    try {
+      final result = await ApiClient.instance.get('/ai/models') as List<dynamic>;
+      if (!mounted) return;
+      setState(() => _aiModels =
+          result.map((m) => AiModel.fromJson(m as Map<String, dynamic>)).toList());
+    } catch (_) {
+      // The picker offers the default alone, which always works.
+      if (mounted) setState(() => _aiModels = []);
+    }
+  }
+
+  /// Every change to the assistant's settings goes through here, so the
+  /// card shows what the server now holds rather than what was asked for.
+  Future<void> _putAi(Map<String, dynamic> body, String done) async {
+    setState(() {
+      _aiSaving = true;
+      _aiNote = null;
+    });
+    try {
+      final json = await ApiClient.instance.put('/ai/settings', body) as Map<String, dynamic>;
+      if (!mounted) return;
+      final settings = AiSettings.fromJson(json);
+      setState(() {
+        _ai = settings;
+        _aiNote = done;
+        _aiNoteIsError = false;
+      });
+      if (body.containsKey('apiKey')) {
+        _aiKey.clear();
+        await _loadAiModels(settings);
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _aiNote = error is ApiException ? error.message : "Couldn't save that just now.";
+        _aiNoteIsError = true;
+      });
+    } finally {
+      if (mounted) setState(() => _aiSaving = false);
+    }
+  }
+
+  Future<void> _saveAiKey() async {
+    final key = _aiKey.text.trim();
+    if (key.isEmpty) return;
+    // The server tries the key against Google before keeping it, so a
+    // mistyped one is turned away here rather than at the first question.
+    await _putAi({'apiKey': key}, 'Saved. Ask away from the dashboard.');
+  }
+
+  Future<void> _removeAiKey() async {
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove the key?'),
+        content: const Text(
+          'The assistant stops working until a key is added again. Nothing else changes, and the '
+          'key itself still works with Google.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Keep it')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (sure != true) return;
+    await _putAi({'apiKey': null}, 'Removed.');
+  }
+
+  Future<void> _openAiStudio() async {
+    await launchUrl(Uri.parse('https://aistudio.google.com/apikey'), mode: LaunchMode.externalApplication);
   }
 
   /// Where the ledger starts, and the month a button would open up next.
@@ -266,11 +381,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   }
 
   Future<void> _editLoan([Loan? loan]) async {
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (_) => _LoanDialog(loan: loan),
-    );
-    if (saved == true) await _loadYou();
+    if (await LoanDialog.show(context, loan: loan)) await _loadYou();
   }
 
   Future<void> _removeCommitment(FixedCommitment commitment) async {
@@ -907,6 +1018,8 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
 
   /// Who you are signed in as, and how to stop being.
   List<Widget> _youTab() => [
+        _aiCard(),
+        const SizedBox(height: 14),
         _SettingsCard(
           icon: Icons.lock_outline,
           title: 'Account',
@@ -943,6 +1056,138 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
           ),
         ),
       ];
+
+  /// The AI assistant: a Gemini key of your own, and which model it uses.
+  ///
+  /// The key is theirs rather than SpendLog's, so what it costs and what
+  /// Google sees is between them and Google - which is why the card says
+  /// plainly what gets sent.
+  Widget _aiCard() {
+    final c = context.c;
+    final ai = _ai;
+    final canStore = ai?.canStoreKey ?? true;
+
+    // A saved model the list no longer offers still has to be an item, or
+    // the dropdown has nothing to show as selected.
+    final models = [
+      ..._aiModels,
+      if (ai?.model != null && !_aiModels.any((m) => m.id == ai!.model))
+        AiModel(id: ai!.model!, name: ai.model!),
+    ];
+
+    return _SettingsCard(
+      icon: Icons.auto_awesome_outlined,
+      title: 'AI assistant',
+      subtitle: ai == null
+          ? 'Loading…'
+          : ai.hasKey
+              ? 'Key ending ••${ai.keyHint ?? '????'}'
+              : 'No key yet',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 12),
+          if (ai != null) ...[
+            _StatusPill(label: ai.hasKey ? 'Ready' : 'Not set up', on: ai.hasKey),
+            const SizedBox(height: 8),
+          ],
+          Text(
+            'Ask about your money in plain words — "how much went on eating out this month?" — '
+            'from the dashboard, and get an answer worked out from your own figures.\n\n'
+            'It runs on Google Gemini with a key of your own. Get one free from Google AI Studio '
+            '(aistudio.google.com/apikey) and paste it here. Your questions, and the figures needed '
+            'to answer them, are sent to Google under that key. The key is stored encrypted and '
+            'never shown again.',
+            style: TextStyle(fontSize: 13, height: 1.5, color: c.ink70),
+          ),
+          if (!canStore) ...[
+            const SizedBox(height: 10),
+            Text(
+              "The server isn't set up to store keys yet, so one can't be saved here.",
+              style: TextStyle(fontSize: 12.5, height: 1.45, color: c.warn),
+            ),
+          ],
+          const SizedBox(height: 12),
+          TextField(
+            controller: _aiKey,
+            enabled: canStore && !_aiSaving,
+            obscureText: !_aiKeyVisible,
+            autocorrect: false,
+            enableSuggestions: false,
+            decoration: InputDecoration(
+              labelText: ai?.hasKey ?? false ? 'Replace the key' : 'Gemini API key',
+              hintText: 'Paste it here',
+              suffixIcon: IconButton(
+                icon: Icon(_aiKeyVisible ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 19),
+                onPressed: () => setState(() => _aiKeyVisible = !_aiKeyVisible),
+              ),
+            ),
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton(
+                onPressed: !canStore || _aiSaving || _aiKey.text.trim().isEmpty ? null : _saveAiKey,
+                child: Text(_aiSaving ? 'Checking…' : 'Save key'),
+              ),
+              if (ai?.hasKey ?? false)
+                OutlinedButton(
+                  onPressed: _aiSaving ? null : _removeAiKey,
+                  style: OutlinedButton.styleFrom(foregroundColor: c.debit),
+                  child: const Text('Remove'),
+                ),
+              TextButton(onPressed: _openAiStudio, child: const Text('Get a free key')),
+            ],
+          ),
+          if (ai != null && ai.hasKey) ...[
+            const SizedBox(height: 14),
+            DropdownButtonFormField<String?>(
+              // Rebuilt when the list arrives, since initialValue is only
+              // read the first time.
+              key: ValueKey('${ai.model}-${models.length}'),
+              initialValue: ai.model,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Model',
+                helperText: 'The default is quick and fine for most questions.',
+                helperMaxLines: 2,
+              ),
+              items: [
+                DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text(
+                    ai.defaultModel.isEmpty ? 'Default' : 'Default (${ai.defaultModel})',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                for (final model in models)
+                  DropdownMenuItem<String?>(
+                    value: model.id,
+                    child: Text(model.name, overflow: TextOverflow.ellipsis),
+                  ),
+              ],
+              onChanged: _aiSaving
+                  ? null
+                  : (value) {
+                      if (value == ai.model) return;
+                      _putAi({'model': value}, 'Model changed.');
+                    },
+            ),
+          ],
+          if (_aiNote != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              _aiNote!,
+              style: TextStyle(fontSize: 12.5, height: 1.45, color: _aiNoteIsError ? c.debit : c.muted),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 
   /// What the button offers next. ThemeService cycles light, dark, system.
   String _nextThemeLabel() {
@@ -1397,237 +1642,6 @@ class _CommitmentDialogState extends State<_CommitmentDialog> {
         FilledButton(
           onPressed: _saving ? null : _save,
           child: Text(widget.commitment == null ? 'Add' : 'Save'),
-        ),
-      ],
-    );
-  }
-}
-
-/// Add a loan, or rename one already added.
-///
-/// Unlike an EMI, there is no purchase to read a principal off - the money
-/// most often never arrived as a transaction SpendLog has ever seen, so
-/// everything here is typed in rather than taken from a debit already on
-/// the ledger. Editing an existing loan only renames it; the schedule of
-/// one already running cannot be changed, the same as an EMI plan cannot
-/// be re-amortised after the fact.
-class _LoanDialog extends StatefulWidget {
-  /// null means "add a new one".
-  final Loan? loan;
-
-  const _LoanDialog({this.loan});
-
-  @override
-  State<_LoanDialog> createState() => _LoanDialogState();
-}
-
-class _LoanDialogState extends State<_LoanDialog> {
-  late final _label = TextEditingController(text: widget.loan?.label ?? '');
-  late final _principal = TextEditingController(
-    text: widget.loan != null ? (widget.loan!.principalMinor ~/ 100).toString() : '',
-  );
-  late final _months = TextEditingController(text: widget.loan?.months.toString() ?? '12');
-  late final _monthly = TextEditingController(
-    text: widget.loan != null ? (widget.loan!.monthlyAmountMinor / 100).toStringAsFixed(2) : '',
-  );
-  late final _rate = TextEditingController();
-  DateTime _startDate = DateTime.now();
-
-  bool _saving = false;
-  String? _error;
-
-  bool get _isNew => widget.loan == null;
-
-  @override
-  void dispose() {
-    _label.dispose();
-    _principal.dispose();
-    _months.dispose();
-    _monthly.dispose();
-    _rate.dispose();
-    super.dispose();
-  }
-
-  /// The reducing-balance formula the server uses, for the preview.
-  int _computedMonthlyMinor() {
-    final principalMinor = ((double.tryParse(_principal.text.trim()) ?? 0) * 100).round();
-    final months = int.tryParse(_months.text.trim()) ?? 0;
-    if (months <= 0) return 0;
-
-    final annual = double.tryParse(_rate.text.trim());
-    if (annual == null || annual <= 0) return (principalMinor / months).round();
-
-    final r = annual / 12 / 100;
-    final growth = math.pow(1 + r, months);
-    return (principalMinor * r * growth / (growth - 1)).round();
-  }
-
-  Future<void> _pickStartDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _startDate,
-      firstDate: DateTime(2015),
-      lastDate: DateTime.now().add(const Duration(days: 1)),
-    );
-    if (picked != null) setState(() => _startDate = picked);
-  }
-
-  Future<void> _save() async {
-    if (_label.text.trim().isEmpty) {
-      setState(() => _error = "Give it a name — who it's from, or what it's for.");
-      return;
-    }
-
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-    final navigator = Navigator.of(context);
-
-    try {
-      if (_isNew) {
-        final principalMinor = ((double.tryParse(_principal.text.trim()) ?? 0) * 100).round();
-        final months = int.tryParse(_months.text.trim()) ?? 0;
-        final monthlyMinor = _monthly.text.trim().isNotEmpty
-            ? (double.parse(_monthly.text.trim()) * 100).round()
-            : _computedMonthlyMinor();
-
-        if (principalMinor <= 0) {
-          setState(() {
-            _error = 'Enter the amount borrowed.';
-            _saving = false;
-          });
-          return;
-        }
-        if (monthlyMinor <= 0) {
-          setState(() {
-            _error = 'The monthly amount needs to be more than zero.';
-            _saving = false;
-          });
-          return;
-        }
-
-        await ApiClient.instance.post('/loans', {
-          'label': _label.text.trim(),
-          'principalMinor': principalMinor,
-          'months': months,
-          'monthlyAmountMinor': monthlyMinor,
-          'interestRatePctAnnual': _rate.text.trim().isEmpty ? null : double.tryParse(_rate.text.trim()),
-          'startDate': _startDate.toIso8601String(),
-        });
-      } else {
-        await ApiClient.instance.patch('/loans/${widget.loan!.id}', {'label': _label.text.trim()});
-      }
-      navigator.pop(true);
-    } catch (error) {
-      if (mounted) {
-        setState(() {
-          _error = error is ApiException ? error.message : "That didn't work.";
-          _saving = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _closeEarly() async {
-    setState(() => _saving = true);
-    final navigator = Navigator.of(context);
-    try {
-      await ApiClient.instance.patch('/loans/${widget.loan!.id}', {'status': 'CLOSED'});
-      navigator.pop(true);
-    } catch (error) {
-      if (mounted) {
-        setState(() {
-          _error = error is ApiException ? error.message : "That didn't work.";
-          _saving = false;
-        });
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(_isNew ? 'Add a loan' : 'Rename loan'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _label,
-              autofocus: _isNew,
-              decoration: const InputDecoration(
-                labelText: "Who it's from, or what it's for",
-                hintText: 'HDFC personal loan',
-              ),
-            ),
-            if (_isNew) ...[
-              const SizedBox(height: 10),
-              TextField(
-                controller: _principal,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Amount borrowed', prefixText: '₹ '),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _months,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Months', hintText: '24'),
-                onChanged: (_) => setState(() {}),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _monthly,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: InputDecoration(
-                  labelText: 'Monthly repayment',
-                  prefixText: '₹ ',
-                  hintText: _computedMonthlyMinor() > 0 ? (_computedMonthlyMinor() / 100).toStringAsFixed(2) : null,
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _rate,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Interest rate (% a year)', hintText: 'Optional'),
-                onChanged: (_) => setState(() {}),
-              ),
-              const SizedBox(height: 10),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Started on'),
-                subtitle: Text(formatShortDate(_startDate)),
-                trailing: const Icon(Icons.calendar_today_outlined, size: 18),
-                onTap: _pickStartDate,
-              ),
-              Text(
-                'Take the monthly figure off the paperwork if you can — a calculated one rarely '
-                "lands to the rupee once the lender's own rounding is in it.",
-                style: TextStyle(fontSize: 11.5, height: 1.4, color: context.c.mutedLight),
-              ),
-            ] else ...[
-              const SizedBox(height: 8),
-              Text(
-                '${widget.loan!.paidCount} of ${widget.loan!.months} paid, '
-                '${formatMoney(widget.loan!.remainingMinor)} left. The schedule itself cannot be '
-                'changed once a loan is added.',
-                style: TextStyle(fontSize: 11.5, height: 1.4, color: context.c.mutedLight),
-              ),
-            ],
-            if (_error != null) ...[
-              const SizedBox(height: 8),
-              Text(_error!, style: TextStyle(fontSize: 12, color: context.c.debit)),
-            ],
-          ],
-        ),
-      ),
-      actions: [
-        if (!_isNew && widget.loan!.status == 'ACTIVE')
-          TextButton(onPressed: _saving ? null : _closeEarly, child: const Text('Close early')),
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
-        FilledButton(
-          onPressed: _saving ? null : _save,
-          child: Text(_isNew ? 'Add' : 'Save'),
         ),
       ],
     );

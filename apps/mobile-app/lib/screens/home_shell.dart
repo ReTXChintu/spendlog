@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/sms_service.dart';
 import '../theme.dart';
 import 'analytics_screen.dart';
+import 'ask_screen.dart';
 import 'dashboard_screen.dart';
 import 'settings_screen.dart';
 import 'transactions_screen.dart';
@@ -24,6 +25,9 @@ class _HomeShellState extends State<HomeShell> {
   // it shows is a count of jobs the other tabs are where you do.
   final _dashboard = GlobalKey<DashboardScreenState>();
 
+  // So the Ask screen can send somebody straight to the assistant's card.
+  final _settings = GlobalKey<SettingsScreenState>();
+
   @override
   void initState() {
     super.initState();
@@ -41,6 +45,21 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
+  /// The assistant, pushed over the tabs rather than made a sixth one: it
+  /// is something you go to with a question, not somewhere you check.
+  Future<void> _openAsk() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AskScreen(
+          onOpenSettings: () {
+            setState(() => _index = 4);
+            _settings.currentState?.showAssistant();
+          },
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final screens = [
@@ -52,7 +71,7 @@ class _HomeShellState extends State<HomeShell> {
       TransactionsScreen(onOpenSettings: () => setState(() => _index = 4)),
       const TripsScreen(),
       const AnalyticsScreen(),
-      const SettingsScreen(),
+      SettingsScreen(key: _settings),
     ];
 
     return Scaffold(
@@ -70,6 +89,20 @@ class _HomeShellState extends State<HomeShell> {
             ),
           ],
         ),
+        actions: [
+          if (_index == 0)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: TextButton.icon(
+                onPressed: _openAsk,
+                icon: Icon(Icons.auto_awesome_outlined, size: 18, color: context.c.brand),
+                label: Text(
+                  'Ask AI',
+                  style: TextStyle(fontWeight: FontWeight.w700, color: context.c.brandDark),
+                ),
+              ),
+            ),
+        ],
         shape: Border(bottom: BorderSide(color: context.c.line)),
       ),
       body: IndexedStack(index: _index, children: screens),
