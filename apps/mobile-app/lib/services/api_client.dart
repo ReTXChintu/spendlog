@@ -91,8 +91,14 @@ class ApiClient {
     return _decode(res);
   }
 
-  Future<void> delete(String path) async {
-    final res = await http.delete(Uri.parse('$_baseUrl$path'), headers: await _headers());
+  /// A body is rare on a delete, but forgetting stored card details is a
+  /// change the PIN has to cover, and the PIN travels in the body.
+  Future<void> delete(String path, [Map<String, dynamic>? body]) async {
+    final res = await http.delete(
+      Uri.parse('$_baseUrl$path'),
+      headers: await _headers(),
+      body: body != null ? jsonEncode(body) : null,
+    );
     _decode(res);
   }
 

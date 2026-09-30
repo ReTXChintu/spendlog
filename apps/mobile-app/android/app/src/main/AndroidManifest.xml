@@ -14,6 +14,12 @@
          clock, which is wiped on reboot. Without this the daily nudge
          quietly stops the first time the phone restarts. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <!-- Keeping a person's phone number when they are picked for a split.
+         The system contact picker hands over a name with no permission at
+         all, but the number behind it needs this. Asked for only at the
+         moment of picking, and SpendLog reads just the one contact chosen;
+         refusing still adds the person, by name. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS"/>
 
     <application
         android:label="SpendLog"

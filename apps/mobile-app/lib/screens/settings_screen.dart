@@ -12,6 +12,7 @@ import '../services/update_service.dart';
 import '../theme.dart';
 import '../utils/format.dart';
 import '../version.dart';
+import '../widgets/commitment_amount.dart';
 import '../widgets/loan_dialog.dart';
 import 'accounts_screen.dart';
 import 'statements_screen.dart';
@@ -951,7 +952,7 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(formatMoney(commitment.amountMinor), style: kNum.copyWith(fontSize: 13)),
+                        CommitmentAmount(commitment: commitment, fontSize: 13),
                         IconButton(
                           icon: const Icon(Icons.close, size: 17),
                           onPressed: () => _removeCommitment(commitment),

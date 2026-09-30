@@ -3,6 +3,7 @@ import '../models/models.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/format.dart';
+import 'commitment_amount.dart';
 
 /// What is left to spend before the next salary, and how fast it is going.
 ///
@@ -173,10 +174,7 @@ class _BudgetBlockState extends State<BudgetBlock> {
                   decoration: commitment.isPaid ? TextDecoration.lineThrough : null,
                 ),
               ),
-              secondary: Text(
-                formatMoney(commitment.amountMinor),
-                style: kNum.copyWith(fontSize: 12.8, color: c.ink70),
-              ),
+              secondary: CommitmentAmount(commitment: commitment),
             ),
           ),
         Align(

@@ -18,8 +18,33 @@ Future<bool?> showRefundSheet(BuildContext context, {required Transaction refund
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(T.rLg)),
     ),
-    builder: (_) => _RefundSheet(refund: refund),
+    // Lifted over the keyboard, which the search box now brings up.
+    builder: (sheetContext) => Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(sheetContext).viewInsets.bottom),
+      child: _RefundSheet(refund: refund),
+    ),
   );
+}
+
+/// Whether a purchase matches what was typed into the refund picker's
+/// search: its merchant, its note, or its amount however it was written -
+/// "499", "499.00", "₹499" and "1,499" all find ₹1,499.00.
+bool refundCandidateMatches(Transaction candidate, String query) {
+  final wanted = query.trim().toLowerCase();
+  if (wanted.isEmpty) return true;
+
+  final rupees = (candidate.amountMinor / 100).toStringAsFixed(2);
+  final haystack = [
+    candidate.merchant ?? '',
+    candidate.note ?? '',
+    rupees,
+    formatMoney(candidate.amountMinor, candidate.currency),
+  ].join(' ').toLowerCase();
+  if (haystack.contains(wanted)) return true;
+
+  // Typed as an amount, with or without the symbol and the grouping.
+  final bare = wanted.replaceAll(RegExp(r'[₹,\s]'), '');
+  return bare.isNotEmpty && RegExp(r'^[\d.]+$').hasMatch(bare) && rupees.contains(bare);
 }
 
 class _RefundSheet extends StatefulWidget {
@@ -39,6 +64,53 @@ class _RefundSheetState extends State<_RefundSheet> {
   bool _saving = false;
   String? _error;
 
+  /// Narrows what is on screen only. A purchase ticked and then searched
+  /// out of view is still ticked, and still in the totals below.
+  String _query = '';
+
+  /// Filtered once per keystroke rather than on every build: there can be
+  /// a few hundred candidates, and the list reads this once per row.
+  List<Transaction> _visible = [];
+
+  void _filter() {
+    _visible = (_candidates ?? const []).where((c) => refundCandidateMatches(c, _query)).toList();
+  }
+
+  /// Ticked, but searched out of view.
+  int get _hiddenPicks {
+    if (_query.trim().isEmpty) return 0;
+    final shown = _visible.map((c) => c.id).toSet();
+    return _picked.keys.where((id) => !shown.contains(id)).length;
+  }
+
+  Widget _searchField() {
+    final c = context.c;
+    return TextField(
+      onChanged: (value) => setState(() {
+        _query = value;
+        _filter();
+      }),
+      style: TextStyle(fontSize: 13.5, color: c.ink),
+      decoration: InputDecoration(
+        hintText: 'Search by merchant, note or amount',
+        hintStyle: TextStyle(color: c.mutedLight),
+        prefixIcon: Icon(Icons.search, size: 18, color: c.muted),
+        isDense: true,
+        filled: true,
+        fillColor: c.surface,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(T.rSm),
+          borderSide: BorderSide(color: c.lineStrong),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(T.rSm),
+          borderSide: BorderSide(color: c.brand),
+        ),
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -54,10 +126,17 @@ class _RefundSheetState extends State<_RefundSheet> {
           await ApiClient.instance.get('/transactions/${widget.refund.id}/refund-candidates')
               as List<dynamic>;
       if (!mounted) return;
-      setState(() => _candidates =
-          result.map((t) => Transaction.fromJson(t as Map<String, dynamic>)).toList());
+      setState(() {
+        _candidates = result.map((t) => Transaction.fromJson(t as Map<String, dynamic>)).toList();
+        _filter();
+      });
     } catch (_) {
-      if (mounted) setState(() => _candidates = []);
+      if (mounted) {
+        setState(() {
+          _candidates = [];
+          _filter();
+        });
+      }
     }
   }
 
@@ -142,78 +221,99 @@ class _RefundSheetState extends State<_RefundSheet> {
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 child: Text(
-                  'No payment in the six months before this credit to match it against.',
+                  'No payment in the month before this credit to match it against.',
                   style: TextStyle(fontSize: 12.5, height: 1.45, color: c.muted),
                 ),
               )
-            else
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 280),
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: _candidates!.length,
-                  itemBuilder: (context, i) {
-                    final candidate = _candidates![i];
-                    final isPicked = _picked.containsKey(candidate.id);
-                    return GestureDetector(
-                      onTap: () => _toggle(candidate),
-                      child: Container(
-                        margin: const EdgeInsets.only(bottom: 6),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: isPicked ? c.brand50 : c.surface,
-                          border: Border.all(color: isPicked ? c.brand : c.line),
-                          borderRadius: BorderRadius.circular(T.rMd),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              isPicked ? Icons.check_circle : Icons.circle_outlined,
-                              size: 18,
-                              color: isPicked ? c.brand : c.mutedLight,
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    candidate.merchant ?? 'Unknown',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 13.4,
-                                      color: c.ink,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    formatDateTime(candidate.occurredAt),
-                                    style: TextStyle(fontSize: 11.8, color: c.muted),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Text(
-                              isPicked
-                                  ? formatMoney(_picked[candidate.id]!)
-                                  : formatMoney(candidate.amountMinor),
-                              style: kNum.copyWith(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 13.4,
-                                color: isPicked ? c.brandDark : c.ink,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
+            else ...[
+              _searchField(),
+              const SizedBox(height: 8),
+              if (_hiddenPicks > 0)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    '$_hiddenPicks ticked ${_hiddenPicks == 1 ? 'purchase is' : 'purchases are'} '
+                    'hidden by the search, and still counted.',
+                    style: TextStyle(fontSize: 11.5, color: c.brandDark),
+                  ),
                 ),
-              ),
+              if (_visible.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  child: Text(
+                    'Nothing here matches "${_query.trim()}".',
+                    style: TextStyle(fontSize: 12.5, height: 1.45, color: c.muted),
+                  ),
+                )
+              else
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 300),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: _visible.length,
+                    itemBuilder: (context, i) {
+                      final candidate = _visible[i];
+                      final isPicked = _picked.containsKey(candidate.id);
+                      return GestureDetector(
+                        onTap: () => _toggle(candidate),
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 6),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: isPicked ? c.brand50 : c.surface,
+                            border: Border.all(color: isPicked ? c.brand : c.line),
+                            borderRadius: BorderRadius.circular(T.rMd),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                isPicked ? Icons.check_circle : Icons.circle_outlined,
+                                size: 18,
+                                color: isPicked ? c.brand : c.mutedLight,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      candidate.merchant ?? 'Unknown',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 13.4,
+                                        color: c.ink,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      formatDateTime(candidate.occurredAt),
+                                      style: TextStyle(fontSize: 11.8, color: c.muted),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                isPicked
+                                    ? formatMoney(_picked[candidate.id]!)
+                                    : formatMoney(candidate.amountMinor),
+                                style: kNum.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13.4,
+                                  color: isPicked ? c.brandDark : c.ink,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+            ],
             if (_picked.isNotEmpty) ...[
               const SizedBox(height: 12),
               Container(

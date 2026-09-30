@@ -175,6 +175,26 @@ class RefundAllocation {
       );
 }
 
+/// One person's part of a transaction. On a payment, what they owe the
+/// user for it; on a credit, what they paid back.
+class PersonShare {
+  final String contactId;
+  final int amountMinor;
+
+  const PersonShare({required this.contactId, required this.amountMinor});
+
+  factory PersonShare.fromJson(Map<String, dynamic> json) {
+    // A bare id normally, but a populated contact reads the same way.
+    final contact = json['contactId'];
+    return PersonShare(
+      contactId: contact is Map<String, dynamic> ? contact['id'] as String : contact as String,
+      amountMinor: json['amountMinor'] as int? ?? 0,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {'contactId': contactId, 'amountMinor': amountMinor};
+}
+
 class Transaction {
   final String id;
   final int amountMinor;
@@ -222,6 +242,10 @@ class Transaction {
   final String? loanId;
   final TransactionSplit? split;
   final bool isSettlement;
+
+  /// Who else it was for or from. Only ever set on a split or on settling
+  /// up - on anything else nobody owes anybody for it.
+  final List<PersonShare> people;
   final bool pending;
   final DateTime occurredAt;
   /// Set when a person corrected the transaction by hand, so the list can
@@ -257,6 +281,7 @@ class Transaction {
     this.loanId,
     this.split,
     this.isSettlement = false,
+    this.people = const [],
     required this.pending,
     required this.occurredAt,
     this.editedAt,
@@ -311,6 +336,9 @@ class Transaction {
             ? TransactionSplit.fromJson(json['split'] as Map<String, dynamic>)
             : null,
         isSettlement: json['isSettlement'] as bool? ?? false,
+        people: (json['people'] as List<dynamic>? ?? [])
+            .map((p) => PersonShare.fromJson(p as Map<String, dynamic>))
+            .toList(),
         pending: json['pending'] as bool? ?? false,
         occurredAt: DateTime.parse(json['occurredAt'] as String),
         editedAt: json['editedAt'] != null ? DateTime.parse(json['editedAt'] as String) : null,
@@ -524,7 +552,15 @@ class CardStatus {
 class FixedCommitment {
   final String id;
   final String name;
+
+  /// The figure from now on.
   final int amountMinor;
+
+  /// What this period's payment is measured against. Differs from
+  /// amountMinor when the amount was changed after this period's payment
+  /// had already gone out: a raise starts with the next payment, and the
+  /// one already sent was not short.
+  final int thisPeriodAmountMinor;
   final int dayOfMonth;
   final bool isPaid;
 
@@ -547,6 +583,7 @@ class FixedCommitment {
     required this.id,
     required this.name,
     required this.amountMinor,
+    int? thisPeriodAmountMinor,
     required this.dayOfMonth,
     required this.isPaid,
     this.paidMinor = 0,
@@ -555,12 +592,22 @@ class FixedCommitment {
     this.merchant,
     this.categoryId,
     this.categoryName,
-  });
+  }) : thisPeriodAmountMinor = thisPeriodAmountMinor ?? amountMinor;
+
+  /// Whether this period and the next are different amounts.
+  bool get changesNextPeriod => thisPeriodAmountMinor != amountMinor;
+
+  /// "₹2,000 this month · ₹3,000 from next", or just the amount when the
+  /// two are the same.
+  String get amountLabel => changesNextPeriod
+      ? '${formatMoneyShort(thisPeriodAmountMinor)} this month · ${formatMoneyShort(amountMinor)} from next'
+      : formatMoney(amountMinor);
 
   factory FixedCommitment.fromJson(Map<String, dynamic> json) => FixedCommitment(
         id: json['id'] as String,
         name: json['name'] as String,
         amountMinor: json['amountMinor'] as int,
+        thisPeriodAmountMinor: json['thisPeriodAmountMinor'] as int?,
         dayOfMonth: json['dayOfMonth'] as int,
         isPaid: json['isPaid'] as bool? ?? false,
         paidMinor: json['paidMinor'] as int? ?? 0,
@@ -1476,4 +1523,136 @@ class AiMessage {
   bool get isUser => role == 'user';
 
   Map<String, dynamic> toJson() => {'role': role, 'text': text};
+}
+
+/// Someone money moves between, and where the two of you stand.
+///
+/// Kept on the server rather than read off the phone each time, so the
+/// same person on the web and on the phone has the same balance.
+class Contact {
+  final String id;
+  final String name;
+  final String? phone;
+
+  /// Positive: they owe you. Negative: you owe them.
+  final int balanceMinor;
+
+  /// Lent to them or paid for them, all told.
+  final int givenMinor;
+
+  /// What has come back from them.
+  final int returnedMinor;
+  final int transactionCount;
+  final DateTime? lastAt;
+
+  Contact({
+    required this.id,
+    required this.name,
+    this.phone,
+    this.balanceMinor = 0,
+    this.givenMinor = 0,
+    this.returnedMinor = 0,
+    this.transactionCount = 0,
+    this.lastAt,
+  });
+
+  bool get owesYou => balanceMinor > 0;
+  bool get youOwe => balanceMinor < 0;
+
+  factory Contact.fromJson(Map<String, dynamic> json) => Contact(
+        id: json['id'] as String,
+        name: json['name'] as String? ?? 'Someone',
+        phone: json['phone'] as String?,
+        balanceMinor: json['balanceMinor'] as int? ?? 0,
+        givenMinor: json['givenMinor'] as int? ?? 0,
+        returnedMinor: json['returnedMinor'] as int? ?? 0,
+        transactionCount: json['transactionCount'] as int? ?? 0,
+        lastAt: json['lastAt'] != null ? DateTime.tryParse(json['lastAt'] as String) : null,
+      );
+}
+
+/// Everyone, with the two totals that answer "who owes what".
+class ContactBalance {
+  final int owedToYouMinor;
+  final int youOweMinor;
+  final List<Contact> contacts;
+
+  ContactBalance({this.owedToYouMinor = 0, this.youOweMinor = 0, this.contacts = const []});
+
+  factory ContactBalance.fromJson(Map<String, dynamic> json) => ContactBalance(
+        owedToYouMinor: json['owedToYouMinor'] as int? ?? 0,
+        youOweMinor: json['youOweMinor'] as int? ?? 0,
+        contacts: (json['contacts'] as List<dynamic>? ?? [])
+            .map((c) => Contact.fromJson(c as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+/// One transaction a person is on, and their part of it: positive when it
+/// added to what they owe, negative when it paid some of it back.
+class ContactHistoryEntry {
+  final Transaction transaction;
+  final int amountMinor;
+
+  ContactHistoryEntry({required this.transaction, required this.amountMinor});
+
+  factory ContactHistoryEntry.fromJson(Map<String, dynamic> json) => ContactHistoryEntry(
+        transaction: Transaction.fromJson(json['transaction'] as Map<String, dynamic>),
+        amountMinor: json['amountMinor'] as int? ?? 0,
+      );
+}
+
+class ContactDetail {
+  final Contact contact;
+  final List<ContactHistoryEntry> history;
+
+  ContactDetail({required this.contact, this.history = const []});
+
+  factory ContactDetail.fromJson(Map<String, dynamic> json) => ContactDetail(
+        contact: Contact.fromJson(json),
+        history: (json['history'] as List<dynamic>? ?? [])
+            .map((h) => ContactHistoryEntry.fromJson(h as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+/// What a bank or cash account should hold now: the balance typed in,
+/// plus everything seen moving through it since.
+class ExpectedBalance {
+  final int openingMinor;
+  final DateTime since;
+  final int inMinor;
+  final int outMinor;
+  final int expectedMinor;
+  final int transactionCount;
+
+  ExpectedBalance({
+    required this.openingMinor,
+    required this.since,
+    this.inMinor = 0,
+    this.outMinor = 0,
+    required this.expectedMinor,
+    this.transactionCount = 0,
+  });
+
+  factory ExpectedBalance.fromJson(Map<String, dynamic> json) => ExpectedBalance(
+        openingMinor: json['openingMinor'] as int? ?? 0,
+        since: DateTime.tryParse(json['since'] as String? ?? '') ?? DateTime.now(),
+        inMinor: json['inMinor'] as int? ?? 0,
+        outMinor: json['outMinor'] as int? ?? 0,
+        expectedMinor: json['expectedMinor'] as int? ?? 0,
+        transactionCount: json['transactionCount'] as int? ?? 0,
+      );
+}
+
+/// What the gap between the bank's figure and the expected one most
+/// likely means, in a sentence.
+String describeBalanceCheck({required int expectedMinor, required int bankMinor}) {
+  final gap = bankMinor - expectedMinor;
+  if (gap == 0) return 'Matches — nothing missing.';
+  if (gap < 0) {
+    return "${formatMoney(-gap)} less than expected — likely a payment SpendLog hasn't seen.";
+  }
+  return '${formatMoney(gap)} more than expected — likely money in that hasn\'t been recorded, '
+      'or a payment counted twice.';
 }

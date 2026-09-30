@@ -3,8 +3,22 @@ import '../models/models.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/format.dart';
+import '../utils/split.dart';
 import 'emi_sheet.dart';
+import 'person_picker_sheet.dart';
 import 'refund_sheet.dart';
+
+/// One person on a transaction, with their part as it is being typed.
+class _Person {
+  final String contactId;
+  String name;
+  final TextEditingController amount;
+
+  _Person({required this.contactId, required this.name, int? amountMinor})
+      : amount = TextEditingController(
+          text: amountMinor == null ? '' : (amountMinor / 100).toStringAsFixed(2),
+        );
+}
 
 /// Full manual edit, and the same form used to add a transaction by hand.
 ///
@@ -80,6 +94,14 @@ class _EditSheetState extends State<_EditSheet> {
   late final TextEditingController _myShare;
   late final TextEditingController _groupLabel;
 
+  /// Who else it was for or from. Only sent while it is a split or
+  /// settling up, which is the only time anybody can owe anything for it.
+  final List<_Person> _people = [];
+
+  /// Whether the parts are still the even split. Typing one by hand stops
+  /// the others being redone under it every time the amount changes.
+  bool _autoSplit = true;
+
   List<MerchantPreset> _presets = [];
   List<CardStatus> _cards = [];
 
@@ -151,6 +173,79 @@ class _EditSheetState extends State<_EditSheet> {
       text: t?.split != null ? (t!.split!.myShareMinor / 100).toStringAsFixed(2) : '',
     );
     _groupLabel = TextEditingController(text: t?.split?.groupLabel ?? '');
+
+    for (final share in t?.people ?? const <PersonShare>[]) {
+      _people.add(_Person(contactId: share.contactId, name: 'Someone', amountMinor: share.amountMinor));
+    }
+    // Parts saved before are the user's own, not an even split to redo.
+    _autoSplit = _people.isEmpty;
+    if (_people.isNotEmpty) _loadNames();
+  }
+
+  /// The transaction only knows who by id.
+  Future<void> _loadNames() async {
+    try {
+      final json = await ApiClient.instance.get('/contacts') as Map<String, dynamic>;
+      if (!mounted) return;
+      final names = {for (final c in ContactBalance.fromJson(json).contacts) c.id: c.name};
+      setState(() {
+        for (final person in _people) {
+          person.name = names[person.contactId] ?? person.name;
+        }
+      });
+    } catch (_) {
+      // "Someone" until the next open.
+    }
+  }
+
+  /// How much of it can be put down to other people: everything but your
+  /// share on a split, and all of it when settling up.
+  int get _shareableMinor {
+    final total = parseRupees(_amount.text) ?? 0;
+    if (_isSettlement) return total;
+    if (!_isSplit) return 0;
+    final share = parseRupees(_myShare.text) ?? 0;
+    return (total - share).clamp(0, total);
+  }
+
+  int get _assignedMinor =>
+      _people.fold(0, (sum, person) => sum + (parseRupees(person.amount.text) ?? 0));
+
+  void _resplit() {
+    final parts = splitEvenly(_shareableMinor, _people.length);
+    for (var i = 0; i < _people.length; i++) {
+      _people[i].amount.text = (parts[i] / 100).toStringAsFixed(2);
+    }
+  }
+
+  /// The amount, the share or the kind of transaction changed: an even
+  /// split follows along, a hand-typed one is left alone.
+  void _figuresChanged() {
+    setState(() {
+      if (_autoSplit) _resplit();
+    });
+  }
+
+  Future<void> _addPerson() async {
+    final picked = await showPersonPicker(
+      context,
+      exclude: _people.map((person) => person.contactId).toSet(),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _people.add(_Person(contactId: picked.id, name: picked.name));
+      _autoSplit = true;
+      _resplit();
+    });
+  }
+
+  void _removePerson(_Person person) {
+    setState(() {
+      _people.remove(person);
+      person.amount.dispose();
+      _autoSplit = true;
+      _resplit();
+    });
   }
 
   Future<void> _loadCards() async {
@@ -209,6 +304,9 @@ class _EditSheetState extends State<_EditSheet> {
     _note.dispose();
     _myShare.dispose();
     _groupLabel.dispose();
+    for (final person in _people) {
+      person.amount.dispose();
+    }
     super.dispose();
   }
 
@@ -251,6 +349,26 @@ class _EditSheetState extends State<_EditSheet> {
       return;
     }
 
+    // Who it was with only counts while there is a part that was not the
+    // user's own; otherwise the list goes empty, which clears it.
+    final withPeople = _isSplit || _isSettlement;
+    final people = <Map<String, dynamic>>[];
+    if (withPeople) {
+      for (final person in _people) {
+        final minor = parseRupees(person.amount.text);
+        if (minor == null || minor <= 0) {
+          setState(() => _error = 'Give ${person.name} an amount, or take them off.');
+          return;
+        }
+        people.add(PersonShare(contactId: person.contactId, amountMinor: minor).toJson());
+      }
+      if (_assignedMinor > _shareableMinor) {
+        setState(() => _error = '${formatMoney(_assignedMinor)} is put down to people, but only '
+            "${formatMoney(_shareableMinor)} of it wasn't yours.");
+        return;
+      }
+    }
+
     setState(() {
       _saving = true;
       _error = null;
@@ -280,6 +398,7 @@ class _EditSheetState extends State<_EditSheet> {
               'groupLabel': _groupLabel.text.trim().isEmpty ? null : _groupLabel.text.trim(),
             }
           : null,
+      'people': people,
     };
 
     try {
@@ -291,7 +410,11 @@ class _EditSheetState extends State<_EditSheet> {
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       setState(() {
-        _error = "Couldn't save that change.";
+        // The server's own sentence when it has one - "only ₹800 of it
+        // wasn't yours" says what to fix. A validation dump does not.
+        _error = e is ApiException && !e.message.startsWith('{')
+            ? e.message
+            : "Couldn't save that change.";
         _saving = false;
       });
     }
@@ -402,6 +525,110 @@ class _EditSheetState extends State<_EditSheet> {
   List<Account> get _cardAccounts =>
       widget.accounts.where((account) => account.accountType == 'CARD').toList();
 
+  /// Who the part that was not yours belongs to, and how much each.
+  Widget _who() {
+    final c = context.c;
+    final shareable = _shareableMinor;
+    final assigned = _assignedMinor;
+    final over = assigned > shareable;
+
+    final title = _type == 'CREDIT'
+        ? 'Who paid you back?'
+        : (_isSettlement ? 'Who did you pay back?' : 'Who owes you for this?');
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, bottom: 6),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: c.paper,
+          border: Border.all(color: c.line),
+          borderRadius: BorderRadius.circular(T.rMd),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: c.ink)),
+            const SizedBox(height: 2),
+            Text(
+              _people.isEmpty
+                  ? 'Optional. Naming them keeps a running balance with each person.'
+                  : 'Split evenly to start with - change any amount.',
+              style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
+            ),
+            const SizedBox(height: 10),
+            for (final person in _people)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: InputChip(
+                        avatar: PersonAvatar(name: person.name, radius: 11),
+                        label: Text(person.name, overflow: TextOverflow.ellipsis),
+                        onDeleted: () => _removePerson(person),
+                        deleteButtonTooltipMessage: 'Take ${person.name} off',
+                        backgroundColor: c.surface,
+                        side: BorderSide(color: c.lineStrong),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    SizedBox(
+                      width: 130,
+                      child: TextField(
+                        controller: person.amount,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        onChanged: (_) => setState(() => _autoSplit = false),
+                        style: kNum.copyWith(fontWeight: FontWeight.w700, color: c.ink),
+                        decoration: _inputDecoration(context, hint: '0.00', prefix: '₹ '),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _saving ? null : _addPerson,
+                  icon: const Icon(Icons.person_add_alt, size: 16),
+                  label: const Text('Add person'),
+                ),
+                if (_people.length > 1 && !_autoSplit)
+                  TextButton(
+                    onPressed: () => setState(() {
+                      _autoSplit = true;
+                      _resplit();
+                    }),
+                    child: const Text('Split evenly'),
+                  ),
+              ],
+            ),
+            if (_people.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                '${formatMoney(assigned)} of ${formatMoney(shareable)} assigned',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: over ? c.debit : (assigned == shareable ? c.credit : c.muted),
+                ),
+              ),
+              if (over)
+                Text(
+                  "That's more than the part that wasn't yours.",
+                  style: TextStyle(fontSize: 11.5, color: c.debit),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.c;
@@ -442,6 +669,7 @@ class _EditSheetState extends State<_EditSheet> {
               child: TextField(
                 controller: _amount,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                onChanged: (_) => _figuresChanged(),
                 style: kNum.copyWith(fontWeight: FontWeight.w700, color: c.ink),
                 decoration: _inputDecoration(context, prefix: '₹ ', hint: '0.00'),
               ),
@@ -777,12 +1005,13 @@ class _EditSheetState extends State<_EditSheet> {
             if (!_isSettlement)
               CheckboxListTile(
                 value: _isSplit,
-                onChanged: (value) => setState(() {
+                onChanged: (value) {
                   _isSplit = value ?? false;
                   // Anchored to the full amount, since the point of a
                   // split is usually that the share is some way below it.
                   if (_isSplit && _myShare.text.trim().isEmpty) _myShare.text = _amount.text;
-                }),
+                  _figuresChanged();
+                },
                 contentPadding: EdgeInsets.zero,
                 controlAffinity: ListTileControlAffinity.leading,
                 dense: true,
@@ -805,7 +1034,7 @@ class _EditSheetState extends State<_EditSheet> {
                       child: TextField(
                         controller: _myShare,
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        onChanged: (_) => setState(() {}),
+                        onChanged: (_) => _figuresChanged(),
                         style: kNum.copyWith(fontWeight: FontWeight.w700, color: c.ink),
                         decoration: _inputDecoration(context, hint: '0.00', prefix: '₹ '),
                       ),
@@ -829,6 +1058,20 @@ class _EditSheetState extends State<_EditSheet> {
               ),
               const SizedBox(height: 8),
               Text(_owedHint, style: TextStyle(fontSize: 12, color: c.muted, height: 1.45)),
+              // Money lent is a split where none of it was yours - one tap
+              // rather than typing a zero.
+              if (_type == 'DEBIT' && (parseRupees(_myShare.text) ?? -1) != 0)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () {
+                      _myShare.text = '0.00';
+                      _figuresChanged();
+                    },
+                    icon: const Icon(Icons.handshake_outlined, size: 16),
+                    label: const Text('Lent — none of it was mine'),
+                  ),
+                ),
               const SizedBox(height: 6),
             ],
 
@@ -852,7 +1095,10 @@ class _EditSheetState extends State<_EditSheet> {
             if (!_isSplit)
               CheckboxListTile(
                 value: _isSettlement,
-                onChanged: (value) => setState(() => _isSettlement = value ?? false),
+                onChanged: (value) {
+                  _isSettlement = value ?? false;
+                  _figuresChanged();
+                },
                 contentPadding: EdgeInsets.zero,
                 controlAffinity: ListTileControlAffinity.leading,
                 dense: true,
@@ -861,6 +1107,8 @@ class _EditSheetState extends State<_EditSheet> {
                   style: TextStyle(fontSize: 12.8, color: c.ink70),
                 ),
               ),
+
+            if (_isSplit || _isSettlement) _who(),
 
             if (_error != null) ...[
               const SizedBox(height: 6),

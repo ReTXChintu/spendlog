@@ -1,15 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/api_client.dart';
+import '../services/vault_session.dart';
 import '../theme.dart';
 
-/// The full card details, behind a PIN.
+/// The full card or bank account details, behind a PIN.
 ///
-/// Locked is the resting state and the only one that survives leaving the
-/// screen — there is no unlock that lasts, because the server checks the
-/// PIN on the request that reveals and on no other. Shown details put
-/// themselves away after a minute, so a card number is not left on a phone
-/// somebody sets down.
+/// One PIN entry opens every account at once, through [VaultSession]: the
+/// details stay readable for a few minutes, across every card and account
+/// on the screen, and then lock themselves - sooner if the app goes to the
+/// background. While it is open, changing or removing details does not ask
+/// for the PIN again; while it is locked, anything that reads or changes
+/// details asks first.
 ///
 /// There is no CVV here and no field for one. It is the single value that
 /// turns a stolen number into someone else's purchase, and its owner knows
@@ -21,6 +23,7 @@ class CardVaultPanel extends StatefulWidget {
     required this.last4,
     required this.hasDetails,
     required this.onChanged,
+    this.isBank = false,
   });
 
   final String accountId;
@@ -28,19 +31,21 @@ class CardVaultPanel extends StatefulWidget {
   final bool hasDetails;
   final VoidCallback onChanged;
 
+  /// A bank account: an account number, IFSC and holder rather than a
+  /// card number, expiry and name on card.
+  final bool isBank;
+
   @override
   State<CardVaultPanel> createState() => _CardVaultPanelState();
 }
 
-/// How long a revealed card stays on screen.
-const _hideAfter = Duration(minutes: 1);
-
 class _CardVaultPanelState extends State<CardVaultPanel> {
+  final VaultSession _session = VaultSession.instance;
+
   bool _hasPin = false;
   bool _available = true;
   DateTime? _lockedUntil;
 
-  Map<String, dynamic>? _revealed;
   bool _busy = false;
   String? _error;
 
@@ -53,9 +58,8 @@ class _CardVaultPanelState extends State<CardVaultPanel> {
   @override
   void didUpdateWidget(covariant CardVaultPanel old) {
     super.didUpdateWidget(old);
-    // Back to locked when the card changes underneath, so switching tabs
-    // never carries one card's details onto another's panel.
-    if (old.accountId != widget.accountId) setState(() => _revealed = null);
+    // An error about one account should not follow onto the next.
+    if (old.accountId != widget.accountId) setState(() => _error = null);
   }
 
   Future<void> _status() async {
@@ -72,41 +76,48 @@ class _CardVaultPanelState extends State<CardVaultPanel> {
     }
   }
 
-  Future<void> _reveal(String pin) async {
+  String _failure(Object error) => error is ApiException ? error.message : "That didn't work.";
+
+  /// Unlocks every account at once, not only this one.
+  Future<void> _unlock() async {
+    final pin = await _askPin(action: 'Show');
+    if (pin == null) return;
+
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      final json = await ApiClient.instance
-          .post('/vault/cards/${widget.accountId}/reveal', {'pin': pin}) as Map<String, dynamic>;
-      if (!mounted) return;
-      setState(() => _revealed = json);
-
-      Future.delayed(_hideAfter, () {
-        if (mounted) setState(() => _revealed = null);
-      });
+      await _session.unlock(pin);
     } catch (error) {
-      if (mounted) {
-        setState(() => _error = error is ApiException ? error.message : "That didn't work.");
-      }
+      if (mounted) setState(() => _error = _failure(error));
       await _status();
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
+  Future<String?> _askPin({required String action}) =>
+      showDialog<String>(context: context, builder: (_) => _PinDialog(action: action));
+
   @override
   Widget build(BuildContext context) {
+    return ListenableBuilder(listenable: _session, builder: (context, _) => _panel());
+  }
+
+  Widget _panel() {
     final c = context.c;
     final lockedOut = _lockedUntil != null && _lockedUntil!.isAfter(DateTime.now());
+    final unlocked = _session.isUnlocked;
+    final details = _session.detailsFor(widget.accountId);
+    final what = widget.isBank ? 'account' : 'card';
 
     return Container(
       margin: const EdgeInsets.only(top: 14),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: c.paper,
-        border: Border.all(color: _revealed != null ? c.brand : c.line),
+        border: Border.all(color: details != null ? c.brand : c.line),
         borderRadius: BorderRadius.circular(T.rMd),
       ),
       child: Column(
@@ -114,10 +125,10 @@ class _CardVaultPanelState extends State<CardVaultPanel> {
         children: [
           Row(
             children: [
-              Icon(Icons.lock_outline, size: 16, color: c.muted),
+              Icon(unlocked ? Icons.lock_open_outlined : Icons.lock_outline, size: 16, color: c.muted),
               const SizedBox(width: 8),
-              const Text('Card details',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+              Text(widget.isBank ? 'Account details' : 'Card details',
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
               const Spacer(),
               Text(
                 '•••• ${widget.last4 ?? '••••'}',
@@ -128,21 +139,29 @@ class _CardVaultPanelState extends State<CardVaultPanel> {
           const SizedBox(height: 10),
           if (!_available)
             Text(
-              'The server has no encryption key set, so card details cannot be stored yet.',
+              'The server has no encryption key set, so $what details cannot be stored yet.',
               style: TextStyle(fontSize: 11.5, height: 1.45, color: c.muted),
             )
           else if (!_hasPin)
             _hint(
-              'Card details are kept encrypted and shown only after a PIN.',
+              widget.isBank
+                  ? 'Account details are kept encrypted and shown only after a PIN.'
+                  : 'Card details are kept encrypted and shown only after a PIN.',
               action: OutlinedButton(onPressed: _setPin, child: const Text('Set a PIN')),
             )
-          else if (_revealed != null)
-            _shown(_revealed!)
-          else if (!widget.hasDetails)
+          else if (details != null)
+            _shown(details)
+          else if (unlocked || !widget.hasDetails)
             _hint(
-              'Nothing stored for this card yet. The number, expiry and name are encrypted; '
-              'the CVV is never kept.',
-              action: OutlinedButton(onPressed: _edit, child: const Text('Add card details')),
+              widget.isBank
+                  ? 'Nothing stored for this account yet. The account number, IFSC and holder are '
+                      'encrypted.'
+                  : 'Nothing stored for this card yet. The number, expiry and name are encrypted; '
+                      'the CVV is never kept.',
+              action: OutlinedButton(
+                onPressed: () => _edit(null),
+                child: Text(widget.isBank ? 'Add account details' : 'Add card details'),
+              ),
             )
           else if (lockedOut)
             Text(
@@ -150,12 +169,19 @@ class _CardVaultPanelState extends State<CardVaultPanel> {
               '${TimeOfDay.fromDateTime(_lockedUntil!).format(context)}.',
               style: TextStyle(fontSize: 12, color: c.warn),
             )
-          else
+          else ...[
             OutlinedButton.icon(
-              onPressed: _busy ? null : _askPin,
+              onPressed: _busy ? null : _unlock,
               icon: const Icon(Icons.visibility_outlined, size: 17),
               label: Text(_busy ? 'Checking…' : 'Show details'),
             ),
+            const SizedBox(height: 6),
+            Text(
+              'One PIN shows every card and account for five minutes.',
+              style: TextStyle(fontSize: 11, color: c.mutedLight),
+            ),
+          ],
+          if (unlocked && details == null && _hasPin && _available) _unlockedNote(),
           if (_error != null) ...[
             const SizedBox(height: 8),
             Text(_error!, style: TextStyle(fontSize: 11.5, color: c.debit)),
@@ -174,32 +200,60 @@ class _CardVaultPanelState extends State<CardVaultPanel> {
         ],
       );
 
-  Widget _shown(Map<String, dynamic> card) {
+  /// How long the vault stays open, and the way to shut it now.
+  Widget _unlockedNote() {
     final c = context.c;
-    final number = (card['number'] as String?) ?? '';
+    final minutes = _session.minutesLeft;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              'Unlocked for $minutes more ${minutes == 1 ? 'minute' : 'minutes'}'
+              '${widget.isBank ? '.' : '. No CVV is stored.'}',
+              style: TextStyle(fontSize: 11, color: c.mutedLight),
+            ),
+          ),
+          TextButton.icon(
+            onPressed: _session.lock,
+            icon: const Icon(Icons.lock_outline, size: 15),
+            label: const Text('Lock'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _shown(VaultDetails details) {
+    final isBank = widget.isBank;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _field('Card number', _spaced(number), mono: true, copyable: number),
-        _field('Expires', (card['expiry'] as String?) ?? '—'),
-        _field('Name on card', (card['nameOnCard'] as String?) ?? '—'),
-        if ((card['note'] as String?)?.isNotEmpty ?? false) _field('Note', card['note'] as String),
-        const SizedBox(height: 6),
-        Row(
+        if (isBank) ...[
+          _field('Account number', details.number, mono: true, copyable: details.number),
+          _field('IFSC', details.ifsc ?? '—', mono: details.ifsc != null, copyable: details.ifsc),
+          _field('Account holder', details.nameOnCard ?? '—'),
+        ] else ...[
+          _field('Card number', _spaced(details.number), mono: true, copyable: details.number),
+          _field('Expires', details.expiry ?? '—'),
+          _field('Name on card', details.nameOnCard ?? '—'),
+        ],
+        if (details.note?.isNotEmpty ?? false) _field('Note', details.note!),
+        Wrap(
+          spacing: 4,
           children: [
-            TextButton.icon(
-              onPressed: () => setState(() => _revealed = null),
-              icon: const Icon(Icons.lock_outline, size: 16),
-              label: const Text('Hide'),
+            TextButton(onPressed: () => _edit(details), child: const Text('Change')),
+            TextButton(
+              onPressed: _busy ? null : _remove,
+              style: TextButton.styleFrom(foregroundColor: context.c.debit),
+              child: const Text('Remove'),
             ),
-            TextButton(onPressed: _edit, child: const Text('Replace')),
           ],
         ),
-        Text(
-          'Hides itself in a minute. No CVV is stored.',
-          style: TextStyle(fontSize: 11, color: c.mutedLight),
-        ),
+        _unlockedNote(),
       ],
     );
   }
@@ -232,7 +286,7 @@ class _CardVaultPanelState extends State<CardVaultPanel> {
                       : const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                 ),
               ),
-              if (copyable != null)
+              if (copyable != null && copyable.isNotEmpty)
                 IconButton(
                   visualDensity: VisualDensity.compact,
                   icon: const Icon(Icons.copy_outlined, size: 16),
@@ -255,31 +309,79 @@ class _CardVaultPanelState extends State<CardVaultPanel> {
   String _spaced(String number) =>
       number.replaceAllMapped(RegExp(r'.{4}'), (match) => '${match.group(0)} ').trim();
 
-  Future<void> _askPin() async {
-    final pin = await showDialog<String>(context: context, builder: (_) => const _PinDialog());
-    if (pin != null) await _reveal(pin);
-  }
-
   Future<void> _setPin() async {
     final set = await showDialog<bool>(context: context, builder: (_) => const _SetPinDialog());
     if (set == true) await _status();
   }
 
-  Future<void> _edit() async {
-    final saved = await showModalBottomSheet<bool>(
+  Future<void> _edit(VaultDetails? existing) async {
+    final pin = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => _EditCardSheet(accountId: widget.accountId),
+      builder: (_) => _EditDetailsSheet(
+        accountId: widget.accountId,
+        isBank: widget.isBank,
+        existing: existing,
+        sessionPin: _session.pin,
+      ),
     );
-    if (saved == true) {
-      if (mounted) setState(() => _revealed = null);
+    if (pin == null) return;
+
+    // Saved. Show what the server now holds - and if the PIN had to be
+    // typed for this, that was the one entry: open the vault with it.
+    try {
+      if (_session.isUnlocked) {
+        await _session.refresh(widget.accountId);
+      } else {
+        await _session.unlock(pin);
+      }
+    } catch (_) {
+      // Saved either way; the details are one tap on Show away.
+    }
+    widget.onChanged();
+  }
+
+  Future<void> _remove() async {
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(widget.isBank ? 'Remove these account details?' : 'Remove these card details?'),
+        content: const Text(
+          'The stored number and everything with it is deleted. The account itself and its '
+          'transactions stay.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Keep')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (sure != true || !mounted) return;
+
+    final pin = _session.pin ?? await _askPin(action: 'Remove');
+    if (pin == null) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await ApiClient.instance.delete('/vault/cards/${widget.accountId}', {'pin': pin});
+      _session.forget(widget.accountId);
       widget.onChanged();
+    } catch (error) {
+      if (mounted) setState(() => _error = _failure(error));
+      await _status();
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 }
 
 class _PinDialog extends StatefulWidget {
-  const _PinDialog();
+  const _PinDialog({required this.action});
+
+  final String action;
 
   @override
   State<_PinDialog> createState() => _PinDialogState();
@@ -311,7 +413,7 @@ class _PinDialogState extends State<_PinDialog> {
           TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(_pin.text),
-            child: const Text('Show'),
+            child: Text(widget.action),
           ),
         ],
       );
@@ -346,6 +448,8 @@ class _SetPinDialogState extends State<_SetPinDialog> {
     });
     try {
       await ApiClient.instance.put('/vault/pin', {'pin': _pin.text});
+      // Whatever was open was opened with the old PIN.
+      VaultSession.instance.lock();
       if (mounted) Navigator.of(context).pop(true);
     } catch (error) {
       if (mounted) {
@@ -369,12 +473,13 @@ class _SetPinDialogState extends State<_SetPinDialog> {
                 keyboardType: TextInputType.number,
                 maxLength: 6,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(labelText: label, counterText: ''),
               ),
             const SizedBox(height: 8),
             Text(
-              'Four to six digits, and the same PIN unlocks every card. Five wrong tries locks it '
-              'for fifteen minutes.',
+              'Four to six digits, and the same PIN unlocks every card and account. Five wrong '
+              'tries locks it for fifteen minutes.',
               style: TextStyle(fontSize: 11.5, height: 1.4, color: context.c.muted),
             ),
             if (_error != null) ...[
@@ -393,47 +498,74 @@ class _SetPinDialogState extends State<_SetPinDialog> {
       );
 }
 
-class _EditCardSheet extends StatefulWidget {
-  const _EditCardSheet({required this.accountId});
+/// Adding or replacing one account's details. Pops with the PIN that was
+/// used when it saved, and with nothing when it did not.
+class _EditDetailsSheet extends StatefulWidget {
+  const _EditDetailsSheet({
+    required this.accountId,
+    required this.isBank,
+    this.existing,
+    this.sessionPin,
+  });
 
   final String accountId;
+  final bool isBank;
+  final VaultDetails? existing;
+
+  /// The unlocked vault's PIN. When there is one, the sheet does not ask.
+  final String? sessionPin;
 
   @override
-  State<_EditCardSheet> createState() => _EditCardSheetState();
+  State<_EditDetailsSheet> createState() => _EditDetailsSheetState();
 }
 
-class _EditCardSheetState extends State<_EditCardSheet> {
-  final _number = TextEditingController();
-  final _expiry = TextEditingController();
-  final _name = TextEditingController();
-  final _note = TextEditingController();
+class _EditDetailsSheetState extends State<_EditDetailsSheet> {
+  late final _number = TextEditingController(text: widget.existing?.number ?? '');
+  late final _expiry = TextEditingController(text: widget.existing?.expiry ?? '');
+  late final _ifsc = TextEditingController(text: widget.existing?.ifsc ?? '');
+  late final _name = TextEditingController(text: widget.existing?.nameOnCard ?? '');
+  late final _note = TextEditingController(text: widget.existing?.note ?? '');
   final _pin = TextEditingController();
+  late String? _sessionPin = widget.sessionPin;
   String? _error;
   bool _busy = false;
 
   @override
   void dispose() {
-    for (final controller in [_number, _expiry, _name, _note, _pin]) {
+    for (final controller in [_number, _expiry, _ifsc, _name, _note, _pin]) {
       controller.dispose();
     }
     super.dispose();
   }
 
+  String? _orNull(TextEditingController controller) {
+    final text = controller.text.trim();
+    return text.isEmpty ? null : text;
+  }
+
   Future<void> _save() async {
+    final pin = _sessionPin ?? _pin.text;
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
       await ApiClient.instance.put('/vault/cards/${widget.accountId}', {
-        'pin': _pin.text,
-        'number': _number.text,
-        'expiry': _expiry.text.isEmpty ? null : _expiry.text,
-        'nameOnCard': _name.text.isEmpty ? null : _name.text,
-        'note': _note.text.isEmpty ? null : _note.text,
+        'pin': pin,
+        'number': _number.text.trim(),
+        if (!widget.isBank) 'expiry': _orNull(_expiry),
+        if (widget.isBank) 'ifsc': _orNull(_ifsc),
+        'nameOnCard': _orNull(_name),
+        'note': _orNull(_note),
       });
-      if (mounted) Navigator.of(context).pop(true);
+      if (mounted) Navigator.of(context).pop(pin);
     } catch (error) {
+      // The PIN the vault was opened with has stopped working - changed
+      // on another device, say. Lock it and ask for the PIN here instead.
+      if (error is ApiException && error.statusCode == 403 && _sessionPin != null) {
+        VaultSession.instance.lock();
+        _sessionPin = null;
+      }
       if (mounted) {
         setState(() => _error = error is ApiException ? error.message : "That didn't work.");
       }
@@ -445,6 +577,7 @@ class _EditCardSheetState extends State<_EditCardSheet> {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final isBank = widget.isBank;
 
     return Padding(
       padding: EdgeInsets.fromLTRB(16, 18, 16, MediaQuery.of(context).viewInsets.bottom + 20),
@@ -453,31 +586,44 @@ class _EditCardSheetState extends State<_EditCardSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Card details', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+            Text(isBank ? 'Account details' : 'Card details',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
             const SizedBox(height: 14),
             TextField(
               controller: _number,
               keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Card number',
-                hintText: '5252 2525 2525 6623',
+              decoration: InputDecoration(
+                labelText: isBank ? 'Account number' : 'Card number',
+                hintText: isBank ? '50100123456789' : '5252 2525 2525 6623',
               ),
             ),
             const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
-                  child: TextField(
-                    controller: _expiry,
-                    decoration: const InputDecoration(labelText: 'Expires', hintText: '08/29'),
-                  ),
+                  child: isBank
+                      ? TextField(
+                          controller: _ifsc,
+                          textCapitalization: TextCapitalization.characters,
+                          maxLength: 11,
+                          decoration: const InputDecoration(
+                            labelText: 'IFSC',
+                            hintText: 'HDFC0001234',
+                            counterText: '',
+                          ),
+                        )
+                      : TextField(
+                          controller: _expiry,
+                          decoration: const InputDecoration(labelText: 'Expires', hintText: '08/29'),
+                        ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: TextField(
                     controller: _name,
-                    textCapitalization: TextCapitalization.characters,
-                    decoration: const InputDecoration(labelText: 'Name on card'),
+                    textCapitalization:
+                        isBank ? TextCapitalization.words : TextCapitalization.characters,
+                    decoration: InputDecoration(labelText: isBank ? 'Account holder' : 'Name on card'),
                   ),
                 ),
               ],
@@ -487,19 +633,23 @@ class _EditCardSheetState extends State<_EditCardSheet> {
               controller: _note,
               decoration: const InputDecoration(labelText: 'Note'),
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _pin,
-              obscureText: true,
-              keyboardType: TextInputType.number,
-              maxLength: 6,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(labelText: 'Your PIN', counterText: ''),
-            ),
+            if (_sessionPin == null) ...[
+              const SizedBox(height: 12),
+              TextField(
+                controller: _pin,
+                obscureText: true,
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: const InputDecoration(labelText: 'Your PIN', counterText: ''),
+              ),
+            ],
             const SizedBox(height: 6),
             Text(
-              'There is no CVV field, on purpose — it is the one thing that makes a stolen number '
-              'spendable, and you already know yours.',
+              isBank
+                  ? 'Stored encrypted, and shown only after your PIN.'
+                  : 'There is no CVV field, on purpose — it is the one thing that makes a stolen '
+                      'number spendable, and you already know yours.',
               style: TextStyle(fontSize: 11.5, height: 1.45, color: c.muted),
             ),
             if (_error != null) ...[

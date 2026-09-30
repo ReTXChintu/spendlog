@@ -9,6 +9,18 @@ String formatMoney(int amountMinor, [String currency = 'INR']) {
   return formatter.format(amountMinor / 100);
 }
 
+/// Rupees as typed - "1,499.50", "₹ 2000", "-350" - to paise. Null when it
+/// is not a number, and for a negative one unless [allowNegative]: only a
+/// balance can be below zero, an amount never is.
+int? parseRupees(String text, {bool allowNegative = false}) {
+  final cleaned = text.replaceAll(RegExp(r'[₹,\s]'), '');
+  if (cleaned.isEmpty) return null;
+  final value = double.tryParse(cleaned);
+  if (value == null || value.isNaN || value.isInfinite) return null;
+  if (value < 0 && !allowNegative) return null;
+  return (value * 100).round();
+}
+
 /// Compact form for tiles and the month rollup: ₹42,318 with no paise.
 String formatMoneyShort(int amountMinor, [String currency = 'INR']) {
   final formatter = NumberFormat.currency(

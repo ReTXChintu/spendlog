@@ -3,6 +3,7 @@ import '../models/models.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/format.dart';
+import '../widgets/account_balance_panel.dart';
 import '../widgets/card_vault_panel.dart';
 import '../widgets/edit_account_sheet.dart';
 import '../widgets/state_block.dart';
@@ -62,6 +63,11 @@ class _Overview {
   final _Bill? bill;
   final bool hasCardDetails;
 
+  /// Whether this can hold a balance at all (a bank account or cash), and
+  /// what it should hold now when a starting balance has been given.
+  final bool tracksBalance;
+  final ExpectedBalance? balance;
+
   /// What a debit card draws on, named rather than referenced.
   final String? linkedAccount;
 
@@ -74,6 +80,8 @@ class _Overview {
     this.cycle,
     this.bill,
     required this.hasCardDetails,
+    this.tracksBalance = false,
+    this.balance,
     this.linkedAccount,
     this.debitCards = const [],
   });
@@ -83,6 +91,10 @@ class _Overview {
         cycle: json['cycle'] == null ? null : _Cycle.fromJson(json['cycle'] as Map<String, dynamic>),
         bill: json['bill'] == null ? null : _Bill.fromJson(json['bill'] as Map<String, dynamic>),
         hasCardDetails: json['hasCardDetails'] as bool? ?? false,
+        tracksBalance: json['tracksBalance'] as bool? ?? false,
+        balance: json['balance'] is Map<String, dynamic>
+            ? ExpectedBalance.fromJson(json['balance'] as Map<String, dynamic>)
+            : null,
         linkedAccount: json['linkedAccount'] as String?,
         debitCards: ((json['debitCards'] as List?) ?? const [])
             .map((card) => (
@@ -435,6 +447,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
     // empty box on a debit card's page.
     final isCard = account.accountType == 'CARD';
     final isDebit = account.accountType == 'DEBIT';
+    final isBank = account.accountType == 'BANK';
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -497,6 +510,17 @@ class _AccountsScreenState extends State<AccountsScreen> {
           ),
           const SizedBox(height: 14),
 
+          // First among the figures when there is one: it is the only one
+          // here that says whether anything has gone missing.
+          if (row.tracksBalance)
+            AccountBalancePanel(
+              key: ValueKey('balance-${account.id}'),
+              accountId: account.id,
+              balance: row.balance,
+              isCash: account.accountType == 'CASH',
+              onChanged: _load,
+            ),
+
           if (isCard && row.cycle != null)
             _meter(row.cycle!, account)
           else
@@ -534,12 +558,15 @@ class _AccountsScreenState extends State<AccountsScreen> {
             ),
           ],
 
-          if (isCard || isDebit)
+          // A bank account's number and IFSC are asked for as often as a
+          // card's number is - every time someone sends you money.
+          if (isCard || isDebit || isBank)
             CardVaultPanel(
               key: ValueKey(account.id),
               accountId: account.id,
               last4: account.last4,
               hasDetails: row.hasCardDetails,
+              isBank: isBank,
               onChanged: _load,
             ),
 

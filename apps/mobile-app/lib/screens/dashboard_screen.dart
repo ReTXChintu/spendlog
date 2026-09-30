@@ -7,9 +7,11 @@ import '../utils/format.dart';
 import '../services/reminder_service.dart';
 import '../widgets/card_limits.dart';
 import '../widgets/card_picker.dart';
+import '../widgets/commitment_amount.dart';
 import '../widgets/daily_bucket.dart';
 import '../widgets/loan_dialog.dart';
 import '../widgets/state_block.dart';
+import 'people_screen.dart';
 import 'perks_screen.dart';
 
 /// The landing screen: what you need to know now.
@@ -34,6 +36,11 @@ class DashboardScreenState extends State<DashboardScreen> {
   DashboardData? _data;
   bool _failed = false;
 
+  /// Who owes what, fetched on its own after the dashboard. It is one line
+  /// on this screen, and a slow or failed answer should cost that line and
+  /// nothing else.
+  ContactBalance? _people;
+
   @override
   void initState() {
     super.initState();
@@ -54,9 +61,24 @@ class DashboardScreenState extends State<DashboardScreen> {
       // this is where the count becomes known - every open and every pull
       // to refresh. Nothing waits on it.
       unawaited(ReminderService.instance.updateFollowUps(data.needsCategoryYesterday));
+      unawaited(_loadPeople());
     } catch (_) {
       if (mounted) setState(() => _failed = true);
     }
+  }
+
+  Future<void> _loadPeople() async {
+    try {
+      final json = await ApiClient.instance.get('/contacts') as Map<String, dynamic>;
+      if (mounted) setState(() => _people = ContactBalance.fromJson(json));
+    } catch (_) {
+      // The card falls back to the split-bill total from the dashboard.
+    }
+  }
+
+  Future<void> _openPeople() async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PeopleScreen()));
+    await load();
   }
 
   Future<void> _togglePaid(FixedCommitment commitment, bool paid) async {
@@ -77,8 +99,6 @@ class DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.c;
-
     if (_failed) {
       return StateBlock(
         icon: Icons.wifi_off,
@@ -178,15 +198,10 @@ class DashboardScreenState extends State<DashboardScreen> {
             ),
           ],
 
-          if (data.owedBalanceMinor != 0) ...[
-            const SizedBox(height: 12),
-            _SummaryCard(
-              label: 'Split bills',
-              figure: formatMoney(data.owedBalanceMinor.abs()),
-              sub: data.owedBalanceMinor > 0 ? 'owed to you' : 'you owe',
-              colour: data.owedBalanceMinor > 0 ? c.credit : c.debit,
-            ),
-          ],
+          // Always here, since it is the way in to People: the question
+          // "who still owes me for that dinner" has nowhere else to go.
+          SizedBox(height: data.emiCount > 0 ? 12 : 24),
+          _PeopleCard(people: _people, splitBalanceMinor: data.owedBalanceMinor, onTap: _openPeople),
 
           // Each loan by name, rather than one total. A loan was otherwise
           // only ever seen in Settings, and the question it raises - when
@@ -552,15 +567,101 @@ class _PaceBlock extends StatelessWidget {
                   decoration: commitment.isPaid ? TextDecoration.lineThrough : null,
                 ),
               ),
-              secondary: Text(
-                commitment.isPartial
-                    ? '${formatMoneyShort(commitment.paidMinor)}/${formatMoneyShort(commitment.amountMinor)}'
-                    : formatMoney(commitment.amountMinor),
-                style: kNum.copyWith(fontSize: 12.8, color: c.ink70),
-              ),
+              // Partly paid is measured against this period's figure: a
+              // raise agreed after the rent went out does not make that
+              // rent short.
+              secondary: commitment.isPartial
+                  ? Text(
+                      '${formatMoneyShort(commitment.paidMinor)}/'
+                      '${formatMoneyShort(commitment.thisPeriodAmountMinor)}',
+                      style: kNum.copyWith(fontSize: 12.8, color: c.ink70),
+                    )
+                  : CommitmentAmount(commitment: commitment),
             ),
         ],
       ],
+    );
+  }
+}
+
+/// Who owes what, by person, as one tappable line.
+class _PeopleCard extends StatelessWidget {
+  final ContactBalance? people;
+
+  /// The dashboard's own split-bill balance, for before anyone has been
+  /// named on a bill - or when the people list could not be fetched.
+  final int splitBalanceMinor;
+  final VoidCallback onTap;
+
+  const _PeopleCard({required this.people, required this.splitBalanceMinor, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final owed = people?.owedToYouMinor ?? 0;
+    final owe = people?.youOweMinor ?? 0;
+
+    final String figure;
+    final String sub;
+    Color? colour;
+    if (owed > 0) {
+      figure = formatMoney(owed);
+      colour = c.credit;
+      sub = owe > 0 ? 'owed to you · you owe ${formatMoney(owe)}' : 'owed to you';
+    } else if (owe > 0) {
+      figure = formatMoney(owe);
+      colour = c.debit;
+      sub = 'you owe';
+    } else if (splitBalanceMinor != 0) {
+      figure = formatMoney(splitBalanceMinor.abs());
+      colour = splitBalanceMinor > 0 ? c.credit : c.debit;
+      sub = '${splitBalanceMinor > 0 ? 'owed to you' : 'you owe'} on split bills - say who, on each one';
+    } else {
+      figure = 'Who owes what';
+      sub = 'Money lent and bills split, kept by person.';
+    }
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(T.rMd),
+      child: Ink(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: c.surface,
+          border: Border.all(color: c.line),
+          borderRadius: BorderRadius.circular(T.rMd),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'PEOPLE',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5,
+                      color: c.muted,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    figure,
+                    style: colour == null
+                        ? TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: c.ink)
+                        : kNum.copyWith(fontSize: 20, fontWeight: FontWeight.w800, color: colour),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(sub, style: TextStyle(fontSize: 12, height: 1.45, color: c.muted)),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right, color: c.mutedLight),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -569,9 +670,8 @@ class _SummaryCard extends StatelessWidget {
   final String label;
   final String figure;
   final String sub;
-  final Color? colour;
 
-  const _SummaryCard({required this.label, required this.figure, required this.sub, this.colour});
+  const _SummaryCard({required this.label, required this.figure, required this.sub});
 
   @override
   Widget build(BuildContext context) {
@@ -599,7 +699,7 @@ class _SummaryCard extends StatelessWidget {
           const SizedBox(height: 5),
           Text(
             figure,
-            style: kNum.copyWith(fontSize: 20, fontWeight: FontWeight.w800, color: colour ?? c.ink),
+            style: kNum.copyWith(fontSize: 20, fontWeight: FontWeight.w800, color: c.ink),
           ),
           const SizedBox(height: 2),
           Text(sub, style: TextStyle(fontSize: 12, height: 1.45, color: c.muted)),
