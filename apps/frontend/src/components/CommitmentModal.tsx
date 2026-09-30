@@ -107,6 +107,7 @@ export function CommitmentModal({
             <span className="field-hint">
               What it costs <em>you</em>. On a bill you pay whole and split with others, that is your
               share, not the whole cheque.
+              {commitment && " Changed after this month's payment went out, the new amount starts with the next one."}
             </span>
           </label>
 

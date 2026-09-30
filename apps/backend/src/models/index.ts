@@ -218,6 +218,13 @@ export interface AccountDoc {
   /// rather than asked for each month, so a statement can be read the
   /// moment it arrives. Never leaves the server.
   statementPassword?: string | null;
+  /// What the account held at a known moment, typed in off the bank's app
+  /// or a statement. Everything that moves through the account after it is
+  /// added and taken away to say what it should hold now - and a gap
+  /// between that and the bank's figure is a transaction SpendLog never
+  /// saw. Signed, so an overdrawn account can be said as it is.
+  openingBalanceMinor?: number | null;
+  openingBalanceAt?: Date | null;
   isActive: boolean;
   color?: string | null;
   createdAt: Date;
@@ -252,6 +259,8 @@ const accountSchema = new Schema<AccountDoc>(
     // AES-256-GCM ciphertext, never the password itself, and never
     // returned by the API. See modules/statements/statements.crypto.ts.
     statementPassword: { type: String, default: null },
+    openingBalanceMinor: { type: Number, default: null },
+    openingBalanceAt: { type: Date, default: null },
     isActive: { type: Boolean, default: true },
     color: { type: String, default: null },
   },
@@ -402,6 +411,8 @@ export interface TransactionDoc {
   /// On a purchase: how much of it has since come back. Kept in step by
   /// the refund endpoints rather than set by hand.
   refundedMinor: number;
+  /// Who else this was for or from, and how much. See PersonShare.
+  people: PersonShare[];
   isTransfer: boolean;
   /// A one-off that should not be scored against a day. A laptop, a
   /// flight, a wedding gift: real spending, counted everywhere else, but
@@ -464,6 +475,27 @@ const refundAllocationSchema = new Schema<RefundAllocation>(
   { _id: false }
 );
 
+/**
+ * One person's part in a transaction that was not wholly the user's own.
+ *
+ * On a payment it is what they owe back: their part of a split bill, or
+ * money lent outright. On money coming in it is what they paid back. Their
+ * running balance is the first less the second, which is the figure that
+ * says who still owes what.
+ */
+export interface PersonShare {
+  contactId: Types.ObjectId;
+  amountMinor: number;
+}
+
+const personShareSchema = new Schema<PersonShare>(
+  {
+    contactId: { type: Schema.Types.ObjectId, ref: "Contact", required: true },
+    amountMinor: { type: Number, required: true, min: 1 },
+  },
+  { _id: false }
+);
+
 const transactionSplitSchema = new Schema<TransactionSplit>(
   {
     myShareMinor: { type: Number, required: true, min: 0 },
@@ -505,6 +537,7 @@ const transactionSchema = new Schema<TransactionDoc>(
     tripShareWith: { type: [Schema.Types.ObjectId], default: null },
     refundOf: { type: [refundAllocationSchema], default: [] },
     refundedMinor: { type: Number, default: 0, min: 0 },
+    people: { type: [personShareSchema], default: [] },
     emiPlanId: { type: Schema.Types.ObjectId, ref: "EmiPlan", default: null },
     emiRole: { type: String, enum: EMI_ROLES, default: null },
     loanId: { type: Schema.Types.ObjectId, ref: "Loan", default: null },
@@ -574,6 +607,8 @@ transactionSchema.index({ sourceRef: 1 });
 // Totting up what has come back against a purchase, and finding the
 // refunds to unlink when one is deleted.
 transactionSchema.index({ "refundOf.transactionId": 1 });
+// A person's history, and everyone's balance, both start from here.
+transactionSchema.index({ userId: 1, "people.contactId": 1 });
 // A trip's totals read every member's transactions, so this is not scoped
 // by user the way the other indexes are.
 transactionSchema.index({ tripId: 1, occurredAt: -1 });
@@ -935,8 +970,24 @@ export interface FixedCommitmentDoc {
   /// deliberate choice with a cost: a commitment paid but not ticked is
   /// counted twice. Hence the list living where it will be seen.
   paidForPeriod?: string | null;
+  /// What the amount was before it last changed, and the period that old
+  /// figure still applies to. A SIP raised from 2,000 to 3,000 after this
+  /// month's 2,000 has gone out is met for this month; the 3,000 starts
+  /// with the next one. Once that period is over this pair means nothing.
+  previousAmountMinor?: number | null;
+  previousAmountPeriod?: string | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/** What a commitment costs in the period with this key. */
+export function commitmentAmountFor(
+  commitment: Pick<FixedCommitmentDoc, "amountMinor" | "previousAmountMinor" | "previousAmountPeriod">,
+  periodKey: string
+): number {
+  return commitment.previousAmountPeriod === periodKey && commitment.previousAmountMinor != null
+    ? commitment.previousAmountMinor
+    : commitment.amountMinor;
 }
 
 const fixedCommitmentSchema = new Schema<FixedCommitmentDoc>(
@@ -950,6 +1001,8 @@ const fixedCommitmentSchema = new Schema<FixedCommitmentDoc>(
     categoryId: { type: Schema.Types.ObjectId, ref: "Category", default: null },
     isActive: { type: Boolean, default: true },
     paidForPeriod: { type: String, default: null },
+    previousAmountMinor: { type: Number, default: null, min: 0 },
+    previousAmountPeriod: { type: String, default: null },
   },
   { timestamps: true, ...serialization }
 );
@@ -1279,9 +1332,14 @@ export interface CardVaultDoc {
   accountId: Types.ObjectId;
   /// iv.tag.ciphertext, base64, one field each. Separate rather than one
   /// blob so a note can be changed without rewriting the card number.
+  /// The card number, or for a bank account the account number.
   number: string;
   expiry?: string | null;
+  /// The name on the card, or the account holder's name.
   nameOnCard?: string | null;
+  /// A bank account's branch code. Not secret in itself, but it sits next
+  /// to the account number and is only any use with it.
+  ifsc?: string | null;
   note?: string | null;
   /// Shown while locked, and the only part that is not encrypted.
   last4: string;
@@ -1296,6 +1354,7 @@ const cardVaultSchema = new Schema<CardVaultDoc>(
     number: { type: String, required: true },
     expiry: { type: String, default: null },
     nameOnCard: { type: String, default: null },
+    ifsc: { type: String, default: null },
     note: { type: String, default: null },
     last4: { type: String, required: true },
   },
@@ -1309,7 +1368,7 @@ const cardVaultSchema = new Schema<CardVaultDoc>(
       // route builds its own response out of the decrypted values.
       transform: (doc: unknown, ret: Record<string, unknown>) => {
         serialization.toJSON.transform(doc, ret);
-        for (const secret of ["number", "expiry", "nameOnCard", "note"]) delete ret[secret];
+        for (const secret of ["number", "expiry", "nameOnCard", "ifsc", "note"]) delete ret[secret];
         return ret;
       },
     },
@@ -1384,3 +1443,39 @@ const perkImportSchema = new Schema<PerkImportDoc>(
 perkImportSchema.index({ userId: 1, createdAt: -1 });
 
 export const PerkImport = model<PerkImportDoc>("PerkImport", perkImportSchema);
+
+/**
+ * Someone the user lends to, splits with, or is paid back by.
+ *
+ * Picked off the phone's contacts or typed in, and kept here rather than
+ * read from the phone each time: a person's balance has to be the same
+ * person on the web as on the phone, and a contact renamed on the phone
+ * should not orphan what they owe.
+ */
+export interface ContactDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  name: string;
+  /// Digits only, the last ten for an Indian number, so the same person
+  /// picked twice - once as +91 98xxx, once as 098xxx - is found again.
+  phone?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const contactSchema = new Schema<ContactDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    name: { type: String, required: true, trim: true, maxlength: 80 },
+    phone: { type: String, default: null },
+  },
+  { timestamps: true, ...serialization }
+);
+
+contactSchema.index(
+  { userId: 1, phone: 1 },
+  { unique: true, partialFilterExpression: { phone: { $type: "string" } } }
+);
+
+export const Contact = model<ContactDoc>("Contact", contactSchema);
+

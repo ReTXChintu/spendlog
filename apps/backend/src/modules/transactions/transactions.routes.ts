@@ -5,6 +5,7 @@ import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
 import { Account, Loan, LoanInstalment, Transaction, TransactionDoc, TransactionSourceEntry } from "../../models";
 import { ingestRawMessage } from "../../parsing/ingest";
+import { checkPeople, shareablePart } from "../contacts/contacts.people";
 import { attachToLoan } from "../loans/loans.matching";
 import { reopenLoanIfNeeded } from "../loans/loans.routes";
 import { tripForOccurredAt } from "../trips/trips.service";
@@ -195,6 +196,13 @@ transactionsRouter.get("/:id", validObjectIdParam("id"), async (req, res) => {
   res.json(tx);
 });
 
+// Who else a transaction was for or from, and how much each. See
+// contacts.people.ts for which transactions can carry this at all.
+const personShareBody = z.object({
+  contactId: z.string().regex(OBJECT_ID),
+  amountMinor: z.number().int().positive(),
+});
+
 // Mirrors the edit form field for field: the same form adds a transaction
 // and corrects one, so it has to accept the same shape — including the
 // nulls it sends for fields the user left blank.
@@ -220,6 +228,7 @@ const createTransactionSchema = z.object({
     .nullable()
     .optional(),
   isSettlement: z.boolean().optional(),
+  people: z.array(personShareBody).max(20).optional(),
 });
 
 // POST /transactions — manual entry (cash spends, or anything the auto
@@ -235,6 +244,18 @@ transactionsRouter.post("/", async (req, res) => {
     if (!owned) return res.status(400).json({ error: "Unknown account" });
   }
 
+  const people = parsed.data.people ?? [];
+  const peopleProblem = await checkPeople(
+    currentUserId(req),
+    {
+      amountMinor: parsed.data.amountMinor,
+      isSettlement: parsed.data.isSettlement ?? false,
+      split: parsed.data.split ?? null,
+    },
+    people
+  );
+  if (peopleProblem) return res.status(400).json({ error: peopleProblem });
+
   const created = await Transaction.create({
     userId: currentUserId(req),
     amountMinor: parsed.data.amountMinor,
@@ -249,6 +270,7 @@ transactionsRouter.post("/", async (req, res) => {
     isTransfer: parsed.data.isTransfer ?? false,
     split: parsed.data.split ?? null,
     isSettlement: parsed.data.isSettlement ?? false,
+    people,
     source: "MANUAL",
   });
 
@@ -298,6 +320,8 @@ const updateTransactionSchema = z.object({
   // null means everyone on the trip; a list narrows it.
   tripShareWith: z.array(z.string().regex(OBJECT_ID)).max(20).nullable().optional(),
   pending: z.boolean().optional(),
+  // Who it was for or from. An empty list takes everyone off it.
+  people: z.array(personShareBody).max(20).optional(),
 });
 
 /**
@@ -355,6 +379,34 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
     if (!owned) return res.status(400).json({ error: "Unknown account" });
   }
 
+  // People are checked against what the transaction will be once this
+  // edit lands, since the same edit often turns the split on and names
+  // who it was with. An edit that takes the split away takes the people
+  // with it; one that only shrinks the room for them has to say who.
+  const existing = await Transaction.findOne({ _id: req.params.id, userId });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  const next = {
+    amountMinor: parsed.data.amountMinor ?? existing.amountMinor,
+    isSettlement: parsed.data.isSettlement ?? existing.isSettlement,
+    split: parsed.data.split !== undefined ? parsed.data.split : existing.split,
+  };
+  let people: { contactId: string; amountMinor: number }[] | undefined = parsed.data.people;
+  if (people === undefined && existing.people.length > 0) {
+    if (shareablePart(next) === 0) people = [];
+    else {
+      const kept = existing.people.map((person) => ({
+        contactId: person.contactId.toString(),
+        amountMinor: person.amountMinor,
+      }));
+      const problem = await checkPeople(userId, next, kept);
+      if (problem) return res.status(400).json({ error: `${problem} Update who it was for too.` });
+    }
+  }
+  if (people !== undefined) {
+    const problem = await checkPeople(userId, next, people);
+    if (problem) return res.status(400).json({ error: problem });
+  }
+
   // Which loan a payment repays is not a plain field the way cardPaymentFor
   // is: picking one claims an instalment on it, and picking a different
   // one - or clearing it - has to give back whichever instalment this
@@ -364,11 +416,11 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
     const error = await applyLoanLink(new Types.ObjectId(req.params.id), userId, parsed.data.loanId);
     if (error) return res.status(400).json({ error });
   }
-  const { loanId: _handledAbove, ...fields } = parsed.data;
+  const { loanId: _handledAbove, people: _checkedAbove, ...fields } = parsed.data;
 
   const updated = await Transaction.findOneAndUpdate(
     { _id: req.params.id, userId },
-    { $set: { ...fields, editedAt: new Date() } },
+    { $set: { ...fields, ...(people !== undefined ? { people } : {}), editedAt: new Date() } },
     { new: true }
   )
     .populate("category")
@@ -494,24 +546,35 @@ transactionsRouter.post("/:id/refund-of", validObjectIdParam("id"), async (req, 
 });
 
 // GET /transactions/:id/refund-candidates — payments this credit could be
-// giving money back from: same account where known, no more than six
-// months earlier, and at least as large as the credit.
+// giving money back from: every payment in the 30 days before it, and
+// further back (up to six months) only the likely ones - the same amount,
+// or the same merchant - so an old order's refund can still be found
+// without the list turning into half a year of payments.
 transactionsRouter.get("/:id/refund-candidates", validObjectIdParam("id"), async (req, res) => {
   const userId = currentUserId(req);
   const refund = await Transaction.findOne({ _id: req.params.id, userId });
   if (!refund) return res.status(404).json({ error: "Not found" });
 
-  const sixMonths = 183 * 24 * 60 * 60 * 1000;
+  const day = 24 * 60 * 60 * 1000;
+  const monthBefore = new Date(refund.occurredAt.getTime() - 30 * day);
+  const sixMonthsBefore = new Date(refund.occurredAt.getTime() - 183 * day);
+
+  const likely: Record<string, unknown>[] = [{ amountMinor: refund.amountMinor }];
+  if (refund.merchant) likely.push({ merchant: refund.merchant });
+
   const candidates = await Transaction.find({
     userId,
     type: "DEBIT",
     // Deliberately no lower bound on the amount: one credit settling three
     // cancelled orders is larger than any of them, which is the whole
     // point. A refund still cannot predate the purchase it came from.
-    occurredAt: { $lte: refund.occurredAt, $gte: new Date(refund.occurredAt.getTime() - sixMonths) },
+    $or: [
+      { occurredAt: { $lte: refund.occurredAt, $gte: monthBefore } },
+      { occurredAt: { $lt: monthBefore, $gte: sixMonthsBefore }, $or: likely },
+    ],
   })
     .sort({ occurredAt: -1 })
-    .limit(40)
+    .limit(400)
     .populate("category")
     .populate("account").populate("trip");
 

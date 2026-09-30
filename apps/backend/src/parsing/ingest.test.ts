@@ -31,7 +31,10 @@ beforeEach(async () => {
 });
 
 async function makeUser(): Promise<Types.ObjectId> {
-  const user = await User.create({ email: `u${Date.now()}@example.com`, name: "Test" });
+  // The messages below are from September 2026. Left to default, the
+  // ledger starts in whatever month the test runs, and from October on
+  // every one of them would be turned away as before the ledger began.
+  const user = await User.create({ email: `u${Date.now()}@example.com`, name: "Test", ledgerFrom: "2026-01" });
   return user._id;
 }
 

@@ -1,5 +1,5 @@
-import { Types } from "mongoose";
-import { FixedCommitment, Transaction, User } from "../../models";
+import { HydratedDocument, Types } from "mongoose";
+import { FixedCommitment, FixedCommitmentDoc, Transaction, User, commitmentAmountFor } from "../../models";
 
 /// How far back to look for the credit that opened this period. Wide
 /// enough for pay that came early or late, narrow enough that last
@@ -45,6 +45,70 @@ export async function currentBudgetPeriod(
   // and a caller wanting to say "paid on the 2nd" cannot tell that from a
   // start date that would have been the 1st either way.
   return { ...period, salaryPaidOn: lastSalary };
+}
+
+/**
+ * The period a fixed commitment is paid in, right now.
+ *
+ * The same period the pace measures, so a tick, a changed amount and the
+ * pace's "still to go out" all agree on which month they mean - including
+ * when pay landed a day early and opened the period on the day it did.
+ * Without a pay day, the calendar month.
+ */
+export async function commitmentPeriod(userId: Types.ObjectId, now = new Date()): Promise<BudgetPeriod> {
+  const user = await User.findById(userId).select("salaryDay").orFail();
+  return user.salaryDay ? currentBudgetPeriod(userId, user.salaryDay, now) : budgetPeriodFor(1, now);
+}
+
+/** What has gone out towards one commitment in a period, on what counts. */
+export async function paidTowards(
+  userId: Types.ObjectId,
+  commitmentId: Types.ObjectId,
+  period: Pick<BudgetPeriod, "start" | "end">
+): Promise<number> {
+  const [row] = await Transaction.aggregate<{ total: number }>([
+    {
+      $match: {
+        userId,
+        commitmentId,
+        type: "DEBIT",
+        occurredAt: { $gte: period.start, $lt: period.end },
+      },
+    },
+    { $group: { _id: null, total: { $sum: "$countedAmountMinor" } } },
+  ]);
+  return row?.total ?? 0;
+}
+
+/**
+ * Records a new amount on a commitment, deciding which payment it starts
+ * with. Sets the fields on the document; the caller saves it.
+ *
+ * Already met this period at what it cost - paid in full, or ticked - and
+ * the new amount starts with the next period, this one keeping the figure
+ * it was paid at. Not yet met, and the new amount is what it costs now.
+ */
+export async function changeCommitmentAmount(
+  commitment: HydratedDocument<FixedCommitmentDoc>,
+  newAmountMinor: number,
+  now = new Date()
+): Promise<void> {
+  if (newAmountMinor === commitment.amountMinor) return;
+
+  const period = await commitmentPeriod(commitment.userId, now);
+  const costsNow = commitmentAmountFor(commitment, period.key);
+  const met =
+    commitment.paidForPeriod === period.key ||
+    (costsNow > 0 && (await paidTowards(commitment.userId, commitment._id, period)) >= costsNow);
+
+  if (met && newAmountMinor !== costsNow) {
+    commitment.previousAmountMinor = costsNow;
+    commitment.previousAmountPeriod = period.key;
+  } else {
+    commitment.previousAmountMinor = null;
+    commitment.previousAmountPeriod = null;
+  }
+  commitment.amountMinor = newAmountMinor;
 }
 
 /**
@@ -142,16 +206,20 @@ export async function budgetPace(userId: Types.ObjectId, now = new Date()) {
     // A hand-tick still means "consider this settled", for anything paid
     // in a way the app will never see.
     const ticked = commitment.paidForPeriod === period.key;
+    // A raise made after this period's payment went out starts next time,
+    // so this period is measured against what it was when it was paid.
+    const dueMinor = commitmentAmountFor(commitment, period.key);
 
     return {
       commitment,
       paidMinor,
       ticked,
-      isPaid: ticked || paidMinor >= commitment.amountMinor,
+      dueMinor,
+      isPaid: ticked || paidMinor >= dueMinor,
       // Only what is still to go out. Holding back the whole amount once
       // part of it has been sent would count that part twice, since it is
       // already in the spending above.
-      shortfallMinor: ticked ? 0 : Math.max(0, commitment.amountMinor - paidMinor),
+      shortfallMinor: ticked ? 0 : Math.max(0, dueMinor - paidMinor),
     };
   });
 
@@ -205,9 +273,13 @@ export async function budgetPace(userId: Types.ObjectId, now = new Date()) {
       isPaid: row.isPaid,
       paidMinor: row.paidMinor,
       shortfallMinor: row.shortfallMinor,
+      // What this period costs, which differs from amountMinor only when
+      // the amount changed after this period was paid. amountMinor is then
+      // what the next one will be.
+      thisPeriodAmountMinor: row.dueMinor,
       // Part of it sent and part not, which is the case worth a sentence
       // rather than a tick box.
-      isPartial: row.paidMinor > 0 && row.paidMinor < row.commitment.amountMinor && !row.ticked,
+      isPartial: row.paidMinor > 0 && row.paidMinor < row.dueMinor && !row.ticked,
     })),
     shortfallNote: shortfallNote(commitmentState, remainingMinor),
     configured: true as const,
@@ -246,7 +318,7 @@ function clusterStart(salaries: { occurredAt: Date }[]): Date | null {
  * the rest.
  */
 function shortfallNote(
-  rows: { commitment: { name: string; amountMinor: number }; paidMinor: number; shortfallMinor: number }[],
+  rows: { commitment: { name: string }; dueMinor: number; paidMinor: number; shortfallMinor: number }[],
   remainingMinor: number
 ): string | null {
   const short = rows.filter((row) => row.paidMinor > 0 && row.shortfallMinor > 0);
@@ -258,7 +330,7 @@ function shortfallNote(
   const what =
     short.length === 1
       ? `${short[0].commitment.name} went out at ${rupees(short[0].paidMinor)} of the usual ` +
-        `${rupees(short[0].commitment.amountMinor)}`
+        `${rupees(short[0].dueMinor)}`
       : `${short.length} fixed costs went out short, by ${rupees(total)} between them`;
 
   return remainingMinor < total

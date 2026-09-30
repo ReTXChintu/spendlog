@@ -5,6 +5,7 @@ import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { AskPage } from "./pages/AskPage";
 import { AuthCallbackPage } from "./pages/AuthCallbackPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { PeoplePage } from "./pages/PeoplePage";
 import { PerksPage } from "./pages/PerksPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -32,6 +33,7 @@ export default function App() {
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/ask" element={<AskPage />} />
+        <Route path="/people" element={<PeoplePage />} />
       </Route>
     </Routes>
   );

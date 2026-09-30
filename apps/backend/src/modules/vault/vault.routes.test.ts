@@ -270,5 +270,83 @@ describe("the card vault", () => {
       ...body({ pin: "4321" }),
     });
     assert.equal(response.status, 404);
+
+    const everything = await json<unknown[]>(await call("/vault/reveal", { method: "POST", ...body({ pin: "4321" }) }));
+    assert.deepEqual(everything, []);
+  });
+});
+
+describe("bank account details, and one PIN for everything", () => {
+  async function bankAccount() {
+    const bank = await models.Account.create({ userId, bankName: "HDFC Bank", last4: "4821", accountType: "BANK" });
+    return bank._id;
+  }
+
+  it("stores an account number and IFSC for a bank account", async () => {
+    await setPin();
+    const bankId = await bankAccount();
+
+    const saved = await call(`/vault/cards/${bankId}`, {
+      method: "PUT",
+      ...body({ pin: "4321", number: "50100 123456 4821", ifsc: "hdfc0001234", nameOnCard: "BISWAJIT PANDA" }),
+    });
+    assert.equal(saved.status, 200);
+
+    const revealed = await json<Record<string, string>>(
+      await call(`/vault/cards/${bankId}/reveal`, { method: "POST", ...body({ pin: "4321" }) })
+    );
+    assert.equal(revealed.number, "501001234564821");
+    assert.equal(revealed.ifsc, "HDFC0001234");
+    assert.equal(revealed.expiry, null);
+  });
+
+  it("refuses an IFSC that isn't one", async () => {
+    await setPin();
+    const bankId = await bankAccount();
+    const response = await call(`/vault/cards/${bankId}`, {
+      method: "PUT",
+      ...body({ pin: "4321", number: "501001234564821", ifsc: "HDFC1234" }),
+    });
+    assert.equal(response.status, 400);
+  });
+
+  it("refuses details for an account that has none, like cash", async () => {
+    await setPin();
+    const cash = await models.Account.create({ userId, bankName: "Cash", accountType: "CASH" });
+    const response = await call(`/vault/cards/${cash._id}`, {
+      method: "PUT",
+      ...body({ pin: "4321", number: "123456789" }),
+    });
+    assert.equal(response.status, 400);
+  });
+
+  it("opens every card and account for one PIN", async () => {
+    await setPin();
+    await store();
+    const bankId = await bankAccount();
+    await call(`/vault/cards/${bankId}`, {
+      method: "PUT",
+      ...body({ pin: "4321", number: "501001234564821" }),
+    });
+
+    const response = await call("/vault/reveal", { method: "POST", ...body({ pin: "4321" }) });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store, private");
+    const all = await json<{ accountId: string; number: string }[]>(response);
+    assert.deepEqual(
+      all.map((row) => [row.accountId, row.number]).sort(),
+      [
+        [accountId.toString(), "5252252525256623"],
+        [bankId.toString(), "501001234564821"],
+      ].sort()
+    );
+  });
+
+  it("opens nothing for a wrong PIN, and counts it", async () => {
+    await setPin();
+    await store();
+    const response = await call("/vault/reveal", { method: "POST", ...body({ pin: "0000" }) });
+    assert.equal(response.status, 403);
+    assert.match((await json<Err>(response)).error, /attempts left/);
   });
 });

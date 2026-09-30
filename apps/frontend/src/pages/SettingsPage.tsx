@@ -24,6 +24,7 @@ import {
   MerchantPreset,
   NETWORK_LABELS,
   accountLabel,
+  commitmentAmountLabel,
 } from "../types";
 
 /** A stored network in the words a person would use for it. */
@@ -803,7 +804,7 @@ function BudgetTab() {
                   <span className="account-row-name">{commitment.name}</span>
                   <span className="account-row-sub">
                     {[
-                      `${formatMoney(commitment.amountMinor)} on the ${commitment.dayOfMonth}${ordinal(
+                      `${commitmentAmountLabel(commitment, formatMoney)} on the ${commitment.dayOfMonth}${ordinal(
                         commitment.dayOfMonth
                       )}`,
                       commitment.merchant,

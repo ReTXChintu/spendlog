@@ -7,6 +7,7 @@ import { Account, CardVault, Transaction } from "../../models";
 import { cardStatuses } from "../cards/cards.status";
 import { istMonthKey, istMonthStart } from "../../time";
 import { upcomingBills } from "../statements/statements.bills";
+import { expectedBalances, tracksBalance } from "./accounts.balance";
 import { ACCOUNT_TYPES } from "../../types";
 
 export const accountsRouter = Router();
@@ -45,6 +46,7 @@ accountsRouter.get("/overview", async (req, res) => {
     upcomingBills(userId),
     spentThisMonth(userId, now),
   ]);
+  const balances = await expectedBalances(userId, accounts);
 
   const statusFor = new Map(statuses.map((status) => [status.accountId, status]));
   const nameFor = new Map(
@@ -101,6 +103,10 @@ accountsRouter.get("/overview", async (req, res) => {
             }
           : null,
         hasCardDetails: vaultFor.has(id),
+        /// Whether this account can have a starting balance at all, and
+        /// what it should hold now if it has one.
+        tracksBalance: tracksBalance(account),
+        balance: balances.get(id) ?? null,
         /// What a debit card draws on, named rather than referenced - the
         /// panel says "draws on HDFC Savings", and an id would mean the
         /// client holding the whole list to turn it into that.
@@ -167,9 +173,27 @@ const accountFields = {
   dueDay: z.number().int().min(1).max(31).nullable().optional(),
   isActive: z.boolean().optional(),
   color: z.string().max(20).nullable().optional(),
+  /// Null clears it. Without a moment given, the balance is as of now.
+  openingBalanceMinor: z.number().int().min(-1_000_000_000_00).max(1_000_000_000_00).nullable().optional(),
+  openingBalanceAt: z.coerce.date().nullable().optional(),
 };
 
 const createAccountSchema = z.object(accountFields);
+
+/**
+ * A starting balance always has a moment it was true at. Typed in off the
+ * bank's app with no date, that moment is now; cleared, the moment goes
+ * with it.
+ */
+function withBalanceMoment<T extends { openingBalanceMinor?: number | null; openingBalanceAt?: Date | null }>(
+  data: T
+): T {
+  if (data.openingBalanceMinor === null) return { ...data, openingBalanceAt: null };
+  if (data.openingBalanceMinor !== undefined && !data.openingBalanceAt) {
+    return { ...data, openingBalanceAt: new Date() };
+  }
+  return data;
+}
 
 // POST /accounts — for an account no message has revealed yet, typically
 // cash or a bank that never texts.
@@ -207,7 +231,7 @@ accountsRouter.post("/", async (req, res) => {
 
   const created = await Account.create({
     userId,
-    ...parsed.data,
+    ...withBalanceMoment(parsed.data),
     last4,
     linkedAccountId: link,
     sharesLimitWith: shares,
@@ -316,7 +340,7 @@ accountsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
     { _id: req.params.id, userId },
     {
       $set: {
-        ...parsed.data,
+        ...withBalanceMoment(parsed.data),
         ...(parsed.data.linkedAccountId === undefined ? {} : { linkedAccountId: link }),
         ...(parsed.data.sharesLimitWith === undefined ? {} : { sharesLimitWith: shares }),
       },

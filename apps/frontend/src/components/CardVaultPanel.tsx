@@ -1,15 +1,15 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../lib/api";
+import { OpenedDetails, lockVault, replaceDetails, unlockVault, useVaultSession } from "../lib/vaultSession";
 import { Icon } from "./Icon";
 
 /**
- * The full card details, behind a PIN.
+ * A card's or bank account's full details, behind the one PIN.
  *
- * Locked is the resting state and the only state that survives a reload —
- * there is no unlock that lasts, because the server checks the PIN on the
- * request that reveals and on no other. Shown details clear themselves
- * after a minute, so a card number is not left on a screen someone walks
- * away from.
+ * One PIN guards every card and account, and one entry of it opens them
+ * all for a few minutes (see lib/vaultSession.ts) - so going through three
+ * cards is one prompt, not three. The server still checks the PIN on the
+ * request that reveals; nothing is kept past a reload.
  *
  * There is no CVV here and no field for one. It is the one value that
  * turns a stolen number into someone else's purchase, and its owner knows
@@ -23,34 +23,27 @@ interface VaultStatus {
   available: boolean;
 }
 
-interface Revealed {
-  number: string;
-  expiry: string | null;
-  nameOnCard: string | null;
-  note: string | null;
-  last4: string;
-}
-
-/** How long a revealed card stays on screen. */
-const HIDE_AFTER_MS = 60_000;
-
-type Mode = "locked" | "shown" | "editing" | "pin";
-
 export function CardVaultPanel({
   accountId,
   last4,
   hasDetails,
+  isBank = false,
   onChanged,
 }: {
   accountId: string;
   last4: string | null;
   hasDetails: boolean;
+  /** A bank account keeps an account number and IFSC rather than a card's number and expiry. */
+  isBank?: boolean;
   onChanged: () => void;
 }) {
+  const session = useVaultSession();
+  const opened = session?.details.get(accountId) ?? null;
+
   const [status, setStatus] = useState<VaultStatus | null>(null);
-  const [mode, setMode] = useState<Mode>("locked");
+  const [editing, setEditing] = useState(false);
+  const [settingPin, setSettingPin] = useState(false);
   const [pin, setPin] = useState("");
-  const [revealed, setRevealed] = useState<Revealed | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -61,46 +54,37 @@ export function CardVaultPanel({
       .catch(() => setStatus(null));
   }, [accountId]);
 
-  // Back to locked when the card changes underneath, so switching tabs
-  // never carries one card's details onto another's panel.
+  // A different account underneath is a different form.
   useEffect(() => {
-    setMode("locked");
-    setRevealed(null);
+    setEditing(false);
     setPin("");
     setError(null);
   }, [accountId]);
 
-  useEffect(() => {
-    if (!revealed) return;
-    const timer = setTimeout(() => {
-      setRevealed(null);
-      setMode("locked");
-    }, HIDE_AFTER_MS);
-    return () => clearTimeout(timer);
-  }, [revealed]);
-
-  async function reveal() {
+  async function unlock() {
     setBusy(true);
     setError(null);
     try {
-      setRevealed(await api.post<Revealed>(`/vault/cards/${accountId}/reveal`, { pin }));
-      setMode("shown");
+      await unlockVault(pin);
       setPin("");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "That didn't work.");
+      api.get<VaultStatus>("/vault").then(setStatus).catch(() => undefined);
     } finally {
       setBusy(false);
     }
   }
+
+  const what = isBank ? "Account details" : "Card details";
 
   if (!status) return null;
 
   if (!status.available) {
     return (
       <div className="vault">
-        <VaultHead last4={last4} locked />
+        <VaultHead title={what} last4={last4} isBank={isBank} locked />
         <p className="field-hint">
-          The server has no STATEMENT_ENCRYPTION_KEY set, so card details cannot be stored yet.
+          The server has no STATEMENT_ENCRYPTION_KEY set, so details cannot be stored yet.
         </p>
       </div>
     );
@@ -109,21 +93,22 @@ export function CardVaultPanel({
   if (!status.hasPin) {
     return (
       <div className="vault">
-        <VaultHead last4={last4} locked />
-        {mode === "pin" ? (
+        <VaultHead title={what} last4={last4} isBank={isBank} locked />
+        {settingPin ? (
           <SetPin
             onDone={() => {
-              setMode("locked");
+              setSettingPin(false);
               api.get<VaultStatus>("/vault").then(setStatus);
             }}
-            onCancel={() => setMode("locked")}
+            onCancel={() => setSettingPin(false)}
           />
         ) : (
           <>
             <p className="field-hint">
-              Card details are kept encrypted and shown only after a PIN. Choose one to start.
+              Card and account details are kept encrypted and shown only after a PIN — one PIN for all of
+              them. Choose one to start.
             </p>
-            <button className="btn btn-sm" onClick={() => setMode("pin")}>
+            <button className="btn btn-sm" onClick={() => setSettingPin(true)}>
               Set a PIN
             </button>
           </>
@@ -132,63 +117,42 @@ export function CardVaultPanel({
     );
   }
 
-  if (mode === "editing") {
+  if (editing) {
     return (
       <div className="vault">
-        <VaultHead last4={last4} locked={false} />
+        <VaultHead title={what} last4={last4} isBank={isBank} locked={false} />
         <EditDetails
           accountId={accountId}
+          isBank={isBank}
+          sessionPin={session?.pin ?? null}
           onSaved={() => {
-            setMode("locked");
+            setEditing(false);
             onChanged();
           }}
-          onCancel={() => setMode("locked")}
+          onCancel={() => setEditing(false)}
         />
       </div>
     );
   }
 
-  if (mode === "shown" && revealed) {
+  if (opened) {
     return (
       <div className="vault is-open">
-        <VaultHead last4={last4} locked={false} />
-
-        <dl className="vault-fields">
-          <div>
-            <dt>Card number</dt>
-            <dd className="vault-number">{spaced(revealed.number)}</dd>
-          </div>
-          <div>
-            <dt>Expires</dt>
-            <dd>{revealed.expiry || "—"}</dd>
-          </div>
-          <div>
-            <dt>Name on card</dt>
-            <dd>{revealed.nameOnCard || "—"}</dd>
-          </div>
-          {revealed.note && (
-            <div className="vault-note">
-              <dt>Note</dt>
-              <dd>{revealed.note}</dd>
-            </div>
-          )}
-        </dl>
-
+        <VaultHead title={what} last4={last4} isBank={isBank} locked={false} />
+        <DetailFields details={opened} isBank={isBank} />
         <div className="set-card-actions">
-          <button
-            className="btn btn-sm btn-ghost"
-            onClick={() => {
-              setRevealed(null);
-              setMode("locked");
-            }}
-          >
-            <Icon name="ic-lock" /> Hide
+          <button className="btn btn-sm btn-ghost" onClick={lockVault}>
+            <Icon name="ic-lock" /> Lock all
           </button>
-          <button className="btn btn-sm btn-ghost" onClick={() => setMode("editing")}>
+          <button className="btn btn-sm btn-ghost" onClick={() => setEditing(true)}>
             Replace
           </button>
         </div>
-        <p className="field-hint">Hides itself in a minute. No CVV is stored.</p>
+        <p className="field-hint">
+          Every card and account is open until{" "}
+          {new Date(session!.locksAt).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}.
+          {!isBank && " No CVV is stored."}
+        </p>
       </div>
     );
   }
@@ -197,16 +161,17 @@ export function CardVaultPanel({
 
   return (
     <div className="vault">
-      <VaultHead last4={last4} locked />
+      <VaultHead title={what} last4={last4} isBank={isBank} locked={!session} />
 
       {!hasDetails ? (
         <>
           <p className="field-hint">
-            Nothing stored for this card yet. The number, expiry and name are encrypted; the CVV is
-            never kept.
+            {isBank
+              ? "Nothing stored for this account yet. The account number, IFSC and holder's name are encrypted."
+              : "Nothing stored for this card yet. The number, expiry and name are encrypted; the CVV is never kept."}
           </p>
-          <button className="btn btn-sm" onClick={() => setMode("editing")}>
-            Add card details
+          <button className="btn btn-sm" onClick={() => setEditing(true)}>
+            {isBank ? "Add account details" : "Add card details"}
           </button>
         </>
       ) : lockedOut ? (
@@ -223,7 +188,7 @@ export function CardVaultPanel({
           className="vault-pin"
           onSubmit={(event) => {
             event.preventDefault();
-            if (pin) reveal();
+            if (pin) unlock();
           }}
         >
           <input
@@ -237,8 +202,9 @@ export function CardVaultPanel({
             onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
           />
           <button className="btn btn-sm" type="submit" disabled={busy || pin.length < 4}>
-            {busy ? "Checking…" : "Show"}
+            {busy ? "Checking…" : "Unlock all"}
           </button>
+          <span className="field-hint">Opens every card and account for five minutes.</span>
         </form>
       )}
 
@@ -247,14 +213,81 @@ export function CardVaultPanel({
   );
 }
 
-function VaultHead({ last4, locked }: { last4: string | null; locked: boolean }) {
+function DetailFields({ details, isBank }: { details: OpenedDetails; isBank: boolean }) {
+  return (
+    <dl className="vault-fields">
+      <div>
+        <dt>{isBank ? "Account number" : "Card number"}</dt>
+        <dd className="vault-number">
+          {isBank ? details.number : spaced(details.number)} <CopyButton text={details.number} />
+        </dd>
+      </div>
+      {isBank ? (
+        <div>
+          <dt>IFSC</dt>
+          <dd className="vault-number">
+            {details.ifsc || "—"} {details.ifsc && <CopyButton text={details.ifsc} />}
+          </dd>
+        </div>
+      ) : (
+        <div>
+          <dt>Expires</dt>
+          <dd>{details.expiry || "—"}</dd>
+        </div>
+      )}
+      <div>
+        <dt>{isBank ? "Account holder" : "Name on card"}</dt>
+        <dd>{details.nameOnCard || "—"}</dd>
+      </div>
+      {details.note && (
+        <div className="vault-note">
+          <dt>Note</dt>
+          <dd>{details.note}</dd>
+        </div>
+      )}
+    </dl>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      className="link-button vault-copy"
+      onClick={() => {
+        navigator.clipboard
+          ?.writeText(text)
+          .then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          })
+          .catch(() => undefined);
+      }}
+    >
+      {copied ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
+function VaultHead({
+  title,
+  last4,
+  isBank,
+  locked,
+}: {
+  title: string;
+  last4: string | null;
+  isBank: boolean;
+  locked: boolean;
+}) {
   return (
     <div className="vault-head">
       <span className="vault-title">
-        <Icon name="ic-lock" /> Card details
+        <Icon name="ic-lock" /> {title}
       </span>
       <span className="vault-masked">
-        •••• •••• •••• {last4 ?? "••••"}
+        {isBank ? "•••••••" : "•••• •••• ••••"} {last4 ?? "••••"}
         {locked && <span className="vault-state">Locked</span>}
       </span>
     </div>
@@ -329,7 +362,7 @@ function SetPin({ onDone, onCancel }: { onDone: () => void; onCancel: () => void
         </button>
       </div>
       <p className="field-hint">
-        Four to six digits, and the same PIN unlocks every card. Five wrong tries locks it for
+        Four to six digits, and the same PIN unlocks every card and account. Five wrong tries locks it for
         fifteen minutes.
       </p>
     </form>
@@ -338,10 +371,15 @@ function SetPin({ onDone, onCancel }: { onDone: () => void; onCancel: () => void
 
 function EditDetails({
   accountId,
+  isBank,
+  sessionPin,
   onSaved,
   onCancel,
 }: {
   accountId: string;
+  isBank: boolean;
+  /** Already unlocked: no second prompt for the same PIN. */
+  sessionPin: string | null;
   onSaved: () => void;
   onCancel: () => void;
 }) {
@@ -349,21 +387,32 @@ function EditDetails({
   const [number, setNumber] = useState("");
   const [expiry, setExpiry] = useState("");
   const [nameOnCard, setNameOnCard] = useState("");
+  const [ifsc, setIfsc] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const usePin = sessionPin ?? pin;
+  const digits = number.replace(/\D/g, "").length;
 
   async function save() {
     setBusy(true);
     setError(null);
     try {
       await api.put(`/vault/cards/${accountId}`, {
-        pin,
+        pin: usePin,
         number,
-        expiry: expiry || null,
+        expiry: isBank ? null : expiry || null,
         nameOnCard: nameOnCard || null,
+        ifsc: isBank ? ifsc || null : null,
         note: note || null,
       });
+      // Keep the open session's copy current, so what was just saved is
+      // what shows without asking for the PIN again.
+      if (sessionPin) {
+        const fresh = await api.post<OpenedDetails>(`/vault/cards/${accountId}/reveal`, { pin: sessionPin });
+        replaceDetails(accountId, { ...fresh, accountId });
+      }
       onSaved();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "That didn't work.");
@@ -381,31 +430,45 @@ function EditDetails({
       }}
     >
       <label className="field">
-        <span>Card number</span>
+        <span>{isBank ? "Account number" : "Card number"}</span>
         <input
           className="filter-input"
           inputMode="numeric"
           autoComplete="off"
-          placeholder="5252 2525 2525 6623"
+          placeholder={isBank ? "50100123456789" : "5252 2525 2525 6623"}
           value={number}
           onChange={(event) => setNumber(event.target.value)}
         />
       </label>
 
       <div className="vault-edit-row">
+        {isBank ? (
+          <label className="field">
+            <span>IFSC</span>
+            <input
+              className="filter-input"
+              autoComplete="off"
+              placeholder="HDFC0001234"
+              maxLength={11}
+              value={ifsc}
+              onChange={(event) => setIfsc(event.target.value.toUpperCase())}
+            />
+          </label>
+        ) : (
+          <label className="field">
+            <span>Expires</span>
+            <input
+              className="filter-input"
+              autoComplete="off"
+              placeholder="08/29"
+              maxLength={7}
+              value={expiry}
+              onChange={(event) => setExpiry(event.target.value)}
+            />
+          </label>
+        )}
         <label className="field">
-          <span>Expires</span>
-          <input
-            className="filter-input"
-            autoComplete="off"
-            placeholder="08/29"
-            maxLength={7}
-            value={expiry}
-            onChange={(event) => setExpiry(event.target.value)}
-          />
-        </label>
-        <label className="field">
-          <span>Name on card</span>
+          <span>{isBank ? "Account holder" : "Name on card"}</span>
           <input
             className="filter-input"
             autoComplete="off"
@@ -420,24 +483,26 @@ function EditDetails({
         <input
           className="filter-input"
           autoComplete="off"
-          placeholder="Anything else worth remembering"
+          placeholder={isBank ? "Branch, customer ID, anything worth remembering" : "Anything else worth remembering"}
           value={note}
           onChange={(event) => setNote(event.target.value)}
         />
       </label>
 
-      <label className="field">
-        <span>Your PIN</span>
-        <input
-          className="filter-input"
-          type="password"
-          inputMode="numeric"
-          autoComplete="off"
-          maxLength={6}
-          value={pin}
-          onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
-        />
-      </label>
+      {!sessionPin && (
+        <label className="field">
+          <span>Your PIN</span>
+          <input
+            className="filter-input"
+            type="password"
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={6}
+            value={pin}
+            onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
+          />
+        </label>
+      )}
 
       {error && <p className="desc set-warn">{error}</p>}
 
@@ -445,7 +510,7 @@ function EditDetails({
         <button
           className="btn btn-sm btn-primary"
           type="submit"
-          disabled={busy || pin.length < 4 || number.length < 12}
+          disabled={busy || usePin.length < 4 || digits < (isBank ? 6 : 12)}
         >
           {busy ? "Saving…" : "Save"}
         </button>
@@ -453,10 +518,12 @@ function EditDetails({
           Cancel
         </button>
       </div>
-      <p className="field-hint">
-        There is no CVV field, on purpose — it is the one thing that makes a stolen number
-        spendable, and you already know yours.
-      </p>
+      {!isBank && (
+        <p className="field-hint">
+          There is no CVV field, on purpose — it is the one thing that makes a stolen number spendable, and
+          you already know yours.
+        </p>
+      )}
     </form>
   );
 }

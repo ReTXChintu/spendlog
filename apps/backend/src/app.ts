@@ -9,6 +9,7 @@ import { accountsRouter } from "./modules/accounts/accounts.routes";
 import { aiRouter } from "./modules/ai/ai.routes";
 import { authRouter } from "./modules/auth/auth.routes";
 import { categoriesRouter } from "./modules/categories/categories.routes";
+import { contactsRouter } from "./modules/contacts/contacts.routes";
 import { analyticsRouter } from "./modules/analytics/analytics.routes";
 import { budgetRouter } from "./modules/budget/budget.routes";
 import { cardsRouter } from "./modules/cards/cards.routes";
@@ -62,6 +63,7 @@ app.use("/ledger", ledgerRouter);
 app.use("/perks", perksRouter);
 app.use("/dashboard", dashboardRouter);
 app.use("/ai", aiRouter);
+app.use("/contacts", contactsRouter);
 
 app.use((_req, res) => res.status(404).json({ error: "Not found" }));
 

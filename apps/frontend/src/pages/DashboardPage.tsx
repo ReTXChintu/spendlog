@@ -8,7 +8,7 @@ import { LoanModal } from "../components/LoanModal";
 import { StateBlock } from "../components/States";
 import { api } from "../lib/api";
 import { formatMoney, formatMoneyShort, formatShortDate } from "../lib/format";
-import { DashboardData, FixedCommitment, Loan, UpcomingBill } from "../types";
+import { DashboardData, FixedCommitment, Loan, UpcomingBill, commitmentAmountLabel } from "../types";
 
 /**
  * The landing screen: what you need to know now.
@@ -205,8 +205,10 @@ export function DashboardPage() {
                       </span>
                       <span className="num">
                         {commitment.isPartial
-                          ? `${formatMoney(commitment.paidMinor ?? 0)} of ${formatMoney(commitment.amountMinor)}`
-                          : formatMoney(commitment.amountMinor)}
+                          ? `${formatMoney(commitment.paidMinor ?? 0)} of ${formatMoney(
+                              commitment.thisPeriodAmountMinor ?? commitment.amountMinor
+                            )}`
+                          : commitmentAmountLabel(commitment, formatMoney)}
                       </span>
                     </label>
                   ))}
@@ -283,7 +285,9 @@ export function DashboardPage() {
               <div className={`rail-figure num ${owed.balanceMinor > 0 ? "credit" : "debit"}`}>
                 {formatMoney(Math.abs(owed.balanceMinor))}
               </div>
-              <div className="rail-sub">{owed.balanceMinor > 0 ? "owed to you" : "you owe"}</div>
+              <div className="rail-sub">
+                {owed.balanceMinor > 0 ? "owed to you" : "you owe"} · <Link to="/people">see who</Link>
+              </div>
             </div>
           )}
 

@@ -30,6 +30,7 @@ export function RefundModal({
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -86,6 +87,22 @@ export function RefundModal({
     });
   }
 
+  /**
+   * A month of payments is a long list, so it can be narrowed by name, note
+   * or amount. Whatever is already ticked stays in view whatever is typed,
+   * so a filter never hides what the refund is about to be linked to.
+   */
+  const needle = query.trim().toLowerCase();
+  const shown = (candidates ?? []).filter((candidate) => {
+    if (!needle || candidate.id in picked) return true;
+    const text = [candidate.merchant, candidate.note, candidate.account?.bankName, candidate.account?.nickname]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    const amount = (candidate.amountMinor / 100).toFixed(2);
+    return text.includes(needle) || amount.includes(needle.replace(/[₹,\s]/g, ""));
+  });
+
   function setAmount(id: string, rupees: string) {
     const parsed = Math.round(Number.parseFloat(rupees || "0") * 100);
     setPicked((current) => ({ ...current, [id]: Number.isFinite(parsed) ? Math.max(0, parsed) : 0 }));
@@ -114,10 +131,23 @@ export function RefundModal({
         {candidates === null ? (
           <p className="field-hint">Looking for payments it could have come from…</p>
         ) : candidates.length === 0 ? (
-          <p className="field-hint">No payment in the six months before this credit to match it against.</p>
+          <p className="field-hint">No payment in the month before this credit to match it against.</p>
         ) : (
+          <>
+          <input
+            className="filter-input refund-search"
+            type="search"
+            placeholder={`Search ${candidates.length} payments by name or amount`}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="Search payments"
+          />
+          <p className="field-hint">
+            Every payment from the 30 days before it, plus older ones for the same amount or merchant.
+          </p>
           <div className="refund-list">
-            {candidates.map((candidate) => {
+            {shown.length === 0 && <p className="field-hint">Nothing matches “{query.trim()}”.</p>}
+            {shown.map((candidate) => {
               const isPicked = candidate.id in picked;
               return (
                 <div
@@ -152,6 +182,7 @@ export function RefundModal({
               );
             })}
           </div>
+          </>
         )}
 
         {chosenIds.length > 0 && (

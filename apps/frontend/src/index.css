@@ -590,7 +590,8 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
 
 .badge-refunded{background:var(--credit-50);color:var(--credit)}
 
-.refund-list{display:flex;flex-direction:column;gap:6px;margin:14px 0 4px 0;max-height:280px;overflow-y:auto}
+.refund-list{display:flex;flex-direction:column;gap:6px;margin:10px 0 4px 0;max-height:340px;overflow-y:auto}
+.refund-search{width:100%;margin:14px 0 6px 0}
 .refund-option{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:10px 12px;
   background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md)}
 .refund-option:hover{border-color:var(--line-strong)}
@@ -997,6 +998,28 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
 .account-row-label svg{width:15px;height:15px;color:var(--muted)}
 .account-row-value{flex-shrink:0}
 
+/* ------------------------------------------------------------- the balance */
+/* The same quiet box as the vault below it; the figure is the point. */
+.balance-panel{margin-top:14px;padding:14px 15px;background:var(--paper);border:1px solid var(--line);
+  border-radius:var(--radius-md);display:flex;flex-direction:column;gap:10px}
+.balance-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.balance-actions{display:flex;gap:6px;flex-wrap:wrap}
+.balance-empty{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.balance-empty .desc{margin:0;flex:1;min-width:220px}
+.balance-figure{display:flex;flex-direction:column;gap:4px}
+.balance-figure .figure-value{font-size:24px}
+.balance-form{display:flex;flex-direction:column;gap:10px}
+.balance-form .filter-input{max-width:260px}
+.balance-asof{border:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px;font-size:13px}
+.balance-asof legend{font-size:12px;font-weight:600;color:var(--ink-70);margin-bottom:4px;padding:0}
+.balance-asof label{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.balance-asof .filter-input{width:auto}
+.balance-verdict{display:flex;gap:8px;align-items:flex-start;margin:0;font-size:13px;line-height:1.5;
+  padding:9px 11px;border-radius:var(--radius-sm)}
+.balance-verdict svg{width:15px;height:15px;flex-shrink:0;margin-top:2px}
+.balance-verdict.is-match{background:var(--credit-50);color:var(--credit)}
+.balance-verdict.is-gap{background:var(--warn-bg);color:var(--warn)}
+
 /* --------------------------------------------------------------- the vault */
 /* Locked is the resting state. Nothing here survives a reload, because the
    PIN is checked on the request that reveals and on no other. */
@@ -1025,6 +1048,7 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
 .vault-fields dd{margin:0;font-size:14px;font-weight:600}
 .vault-number{font-family:var(--font-mono);font-size:16px !important;letter-spacing:.06em;
   word-break:break-all}
+.vault-copy{font-family:var(--font-sans);font-size:11.5px;letter-spacing:0;margin-left:6px}
 
 .vault-edit{display:flex;flex-direction:column;gap:11px}
 .vault-edit-row{display:grid;grid-template-columns:1fr 1fr;gap:11px}
@@ -1204,6 +1228,73 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
 .waive-editor{margin:10px 0;padding:11px;border:1px solid var(--line);border-radius:var(--radius-md)}
 .waive-editor-fields{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0}
 .waive-editor-actions{display:flex;gap:8px;margin-top:8px}
+
+/* ---------- people: who owes what ----------
+   Owed-to-you reads in the credit colour, owing in the debit colour -
+   the same meaning those colours have everywhere else in the app. */
+.people-totals{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:18px}
+.people-totals .value.credit{color:var(--credit)}
+.people-totals .value.debit{color:var(--debit)}
+.people-layout{align-items:start;grid-template-columns:minmax(260px,400px) minmax(0,1fr)}
+@media (max-width:900px){.people-layout{grid-template-columns:1fr}}
+.people-list{display:flex;flex-direction:column;gap:8px}
+.people-card{display:flex;align-items:center;gap:12px;padding:11px 14px;background:var(--surface);
+  border:1px solid var(--line);border-radius:var(--radius-md);text-align:left;width:100%;cursor:pointer;
+  font:inherit;color:inherit}
+.people-card:hover{border-color:var(--line-strong)}
+.people-card.is-selected{border-color:var(--brand);box-shadow:0 0 0 1px var(--brand)}
+.people-card:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.people-card-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.people-card-name{font-size:13.8px;font-weight:700;color:var(--ink)}
+.people-card-sub{font-size:11.8px;color:var(--muted)}
+.people-avatar{width:30px;height:30px;border-radius:50%;flex-shrink:0;display:inline-flex;align-items:center;
+  justify-content:center;background:var(--brand-50);color:var(--brand-dark);font-weight:700;font-size:13px}
+.people-tag{font-size:12px;font-weight:700;padding:3px 9px;border-radius:100px;background:var(--track);
+  color:var(--muted);white-space:nowrap}
+.people-tag.is-owed{background:var(--credit-50);color:var(--credit)}
+.people-tag.is-owing{background:var(--debit-50);color:var(--debit)}
+.people-hint{max-width:60ch;line-height:1.55}
+.people-add-form{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px;padding:14px}
+.people-add-form .field-hint{flex-basis:100%}
+.people-detail{padding:16px;display:flex;flex-direction:column;gap:12px}
+.people-detail-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.people-detail-head h3{margin:0 0 3px 0}
+.people-edit{display:flex;gap:8px;flex-wrap:wrap}
+.people-history{display:flex;flex-direction:column}
+.people-history-row{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line)}
+.people-history-row:last-child{border-bottom:none}
+.people-history-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.people-history-name{font-size:13.4px;font-weight:600;color:var(--ink)}
+.people-history-sub{font-size:11.5px;color:var(--muted)}
+.people-history-row .num{font-weight:700;font-family:var(--font-mono)}
+.people-history-row .num.debit{color:var(--debit)}
+.people-history-row .num.credit{color:var(--credit)}
+
+/* The picker inside the transaction form. */
+.people-picker{display:flex;flex-direction:column;gap:8px;padding:12px;border:1px solid var(--line);
+  border-radius:var(--radius-md);background:var(--paper)}
+.people-picker-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.people-picker-title{font-size:13px;font-weight:700;color:var(--ink)}
+.people-row{display:flex;align-items:center;gap:10px}
+.people-name{flex:1;min-width:0;font-size:13.4px;font-weight:600;overflow-wrap:anywhere}
+.people-row .amount-input{width:140px}
+.people-add{position:relative}
+.people-add .filter-input{width:100%}
+.people-menu{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:20;background:var(--surface);
+  border:1px solid var(--line-strong);border-radius:var(--radius-md);padding:4px;display:flex;flex-direction:column;
+  box-shadow:0 8px 24px rgba(15,23,42,.12);max-height:260px;overflow-y:auto}
+.people-option{display:flex;align-items:center;gap:10px;padding:8px 9px;border:none;background:none;font:inherit;
+  font-size:13px;color:var(--ink);text-align:left;border-radius:var(--radius-sm);cursor:pointer}
+.people-option:hover,.people-option:focus-visible{background:var(--row-hover)}
+.people-option.is-new{color:var(--brand-dark);font-weight:600}
+.people-option.is-new svg{width:14px;height:14px}
+.people-option-balance{margin-left:auto;font-size:11.5px;font-weight:600}
+.people-option-balance.credit{color:var(--credit)}
+.people-option-balance.debit{color:var(--debit)}
+.icon-button{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:none;
+  background:none;color:var(--muted);border-radius:var(--radius-sm);cursor:pointer;flex-shrink:0}
+.icon-button:hover{background:var(--track);color:var(--ink)}
+.icon-button svg{width:14px;height:14px}
 
 /* ---------- ask (the AI assistant) ----------
    A thread that fills the screen's width, the composer pinned under it.

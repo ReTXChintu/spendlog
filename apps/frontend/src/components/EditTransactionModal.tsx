@@ -8,12 +8,14 @@ import {
   FixedCommitment,
   Loan,
   MerchantPreset,
+  PersonShare,
   Transaction,
   TransactionType,
   accountLabel,
   categoriesFor,
 } from "../types";
 import { Icon } from "./Icon";
+import { PeoplePicker } from "./PeoplePicker";
 
 /** Splits an ISO instant into the two values the date/time inputs want. */
 /**
@@ -92,6 +94,7 @@ export function EditTransactionModal({
   );
   const [groupLabel, setGroupLabel] = useState(transaction?.split?.groupLabel ?? "");
   const [isSettlement, setIsSettlement] = useState(transaction?.isSettlement ?? false);
+  const [people, setPeople] = useState<PersonShare[]>(transaction?.people ?? []);
   // On a trip, an expense is everyone's unless it says otherwise. The only
   // narrowing worth a control is "this one was just mine".
   const [tripJustMine, setTripJustMine] = useState((transaction?.tripShareWith?.length ?? 0) > 0);
@@ -275,6 +278,8 @@ export function EditTransactionModal({
       // Narrowed to the payer alone, or widened back to everyone on the trip.
       ...(transaction?.tripId ? { tripShareWith: tripJustMine ? [transaction.userId] : null } : {}),
       split: isSplit ? { myShareMinor: Math.round(Number.parseFloat(myShare || "0") * 100), groupLabel: groupLabel.trim() || null } : null,
+      // Only a split or a settling-up has anyone else in it.
+      people: isSplit || isSettlement ? people.filter((person) => person.amountMinor > 0) : [],
     };
 
     try {
@@ -660,9 +665,25 @@ export function EditTransactionModal({
 
               <div className="form-row form-row-wide">
                 <p className="field-hint">
-                  {owedHint}
+                  {owedHint}{" "}
+                  {type === "DEBIT" && shareMinor !== 0 && (
+                    <button type="button" className="link-button" onClick={() => setMyShare("0")}>
+                      Lent — none of it was mine
+                    </button>
+                  )}
                 </p>
               </div>
+
+              {notMineMinor > 0 && (
+                <div className="form-row form-row-wide">
+                  <PeoplePicker
+                    title={type === "DEBIT" ? "Who owes you for this?" : "Who paid you back?"}
+                    roomMinor={notMineMinor}
+                    value={people}
+                    onChange={setPeople}
+                  />
+                </div>
+              )}
             </>
           )}
 
@@ -698,6 +719,17 @@ export function EditTransactionModal({
                   Settling up — paying back, or being paid back, for bills already recorded
                 </span>
               </label>
+            </div>
+          )}
+
+          {isSettlement && totalMinor > 0 && (
+            <div className="form-row form-row-wide">
+              <PeoplePicker
+                title={type === "CREDIT" ? "Who paid you back?" : "Who did you pay back?"}
+                roomMinor={totalMinor}
+                value={people}
+                onChange={setPeople}
+              />
             </div>
           )}
         </div>

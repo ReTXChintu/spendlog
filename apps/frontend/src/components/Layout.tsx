@@ -9,6 +9,7 @@ const NAV = [
   { to: "/transactions", label: "Transactions", icon: "ic-receipt" },
   { to: "/perks", label: "Perks", icon: "ic-percent" },
   { to: "/trips", label: "Trips", icon: "ic-calendar" },
+  { to: "/people", label: "People", icon: "ic-people" },
   { to: "/analytics", label: "Analytics", icon: "ic-trend" },
   { to: "/ask", label: "Ask", icon: "ic-spark" },
   { to: "/settings", label: "Settings", icon: "ic-filter" },

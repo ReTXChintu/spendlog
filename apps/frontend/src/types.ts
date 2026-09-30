@@ -107,6 +107,18 @@ export interface AccountOverview extends Account {
   linkedAccount: string | null;
   /// For a bank account, the debit cards that reach it.
   debitCards?: { id: string; name: string; last4: string | null; network: string | null }[];
+  /// Bank and cash accounts can carry a starting balance.
+  tracksBalance?: boolean;
+  /// What it should hold now, from the starting balance and everything
+  /// since. Null until a starting balance is given.
+  balance?: {
+    openingMinor: number;
+    since: string;
+    inMinor: number;
+    outMinor: number;
+    expectedMinor: number;
+    transactionCount: number;
+  } | null;
 }
 
 /** What to call an account on screen: the name given to it, else the bank's. */
@@ -340,6 +352,21 @@ export interface FixedCommitment {
   paidMinor?: number;
   shortfallMinor?: number;
   isPartial?: boolean;
+  /** What this period costs. Differs from amountMinor only when the amount
+      changed after this period was already paid; amountMinor is then what
+      the next period will cost. */
+  thisPeriodAmountMinor?: number;
+}
+
+/** "₹3,000" normally; "₹2,000 this month · ₹3,000 from next" mid-change. */
+export function commitmentAmountLabel(
+  commitment: Pick<FixedCommitment, "amountMinor" | "thisPeriodAmountMinor">,
+  format: (minor: number) => string
+): string {
+  const now = commitment.thisPeriodAmountMinor ?? commitment.amountMinor;
+  return now === commitment.amountMinor
+    ? format(commitment.amountMinor)
+    : `${format(now)} this month · ${format(commitment.amountMinor)} from next`;
 }
 
 /** One day of the daily budget: what went out, and what it left behind. */
@@ -448,6 +475,9 @@ export interface Transaction {
   loanId?: string | null;
   split: TransactionSplit | null;
   isSettlement: boolean;
+  /** Who else it was for or from. On a payment, what each owes back; on
+      money in, what each paid back. */
+  people?: PersonShare[];
   pending: boolean;
   occurredAt: string;
   editedAt: string | null;
@@ -455,6 +485,35 @@ export interface Transaction {
   sources: TransactionSourceEntry[];
   category: Category | null;
   account: Account | null;
+}
+
+export interface PersonShare {
+  contactId: string;
+  amountMinor: number;
+}
+
+/** Someone money moves between, and where things stand with them. */
+export interface Contact {
+  id: string;
+  name: string;
+  phone: string | null;
+  /** Positive: they owe you. Negative: you owe them. */
+  balanceMinor: number;
+  givenMinor: number;
+  returnedMinor: number;
+  transactionCount: number;
+  lastAt: string | null;
+}
+
+export interface ContactList {
+  owedToYouMinor: number;
+  youOweMinor: number;
+  contacts: Contact[];
+}
+
+export interface ContactDetail extends Contact {
+  /** Newest first. amountMinor is signed: positive added to what they owe. */
+  history: { transaction: Transaction; amountMinor: number }[];
 }
 
 /** The running balance with everyone the user splits bills with. */

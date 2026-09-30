@@ -11,6 +11,7 @@ process.env.JWT_SECRET ??= "salary-test-secret";
 let mongod: MongoMemoryServer;
 let models: typeof import("../../models");
 let budgetPace: typeof import("./budget.pace").budgetPace;
+let changeCommitmentAmount: typeof import("./budget.pace").changeCommitmentAmount;
 
 before(async () => {
   mongod = await MongoMemoryServer.create();
@@ -19,6 +20,7 @@ before(async () => {
   const [loaded, pace] = await Promise.all([import("../../models"), import("./budget.pace")]);
   models = loaded;
   budgetPace = pace.budgetPace;
+  changeCommitmentAmount = pace.changeCommitmentAmount;
 });
 
 after(async () => {
@@ -237,6 +239,76 @@ describe("a fixed cost settled by a payment rather than a tick", () => {
     const pace = await budgetPace(userId, istDayStart("2026-09-16"));
     if (!pace.configured) return assert.fail("should be configured");
     assert.equal(pace.commitments[0].isPaid, true);
+  });
+
+  describe("changing the amount", () => {
+    it("starts a raise with the next payment when this one already went out", async () => {
+      // SIP of 2,000 paid on the 18th, raised to 3,000 on the 20th. This
+      // month is done; the 3,000 is next month's figure, not 1,000 owed.
+      const userId = await paidOnThe15th();
+      const sip = await commitment(userId, "SIP", 200000);
+      await payTowards(userId, sip._id, "2026-09-18", 200000);
+
+      await changeCommitmentAmount(sip, 300000, istDayStart("2026-09-20"));
+      await sip.save();
+
+      const pace = await budgetPace(userId, istDayStart("2026-09-21"));
+      if (!pace.configured) return assert.fail("should be configured");
+      assert.equal(pace.commitments[0].isPaid, true);
+      assert.equal(pace.commitmentsRemainingMinor, 0, "nothing still to go out");
+      assert.equal(pace.commitments[0].thisPeriodAmountMinor, 200000);
+      assert.equal(pace.commitments[0].amountMinor, 300000);
+
+      // And next period, the new figure is what it costs.
+      const next = await budgetPace(userId, istDayStart("2026-10-16"));
+      if (!next.configured) return assert.fail("should be configured");
+      assert.equal(next.commitments[0].thisPeriodAmountMinor, 300000);
+      assert.equal(next.commitmentsRemainingMinor, 300000);
+    });
+
+    it("applies at once when this period has not been paid yet", async () => {
+      const userId = await paidOnThe15th();
+      const sip = await commitment(userId, "SIP", 200000);
+
+      await changeCommitmentAmount(sip, 300000, istDayStart("2026-09-20"));
+      await sip.save();
+
+      const pace = await budgetPace(userId, istDayStart("2026-09-21"));
+      if (!pace.configured) return assert.fail("should be configured");
+      assert.equal(pace.commitments[0].thisPeriodAmountMinor, 300000);
+      assert.equal(pace.commitmentsRemainingMinor, 300000);
+    });
+
+    it("treats a hand-ticked period as met", async () => {
+      const userId = await paidOnThe15th();
+      const sip = await commitment(userId, "SIP", 200000);
+      sip.paidForPeriod = "2026-09-15";
+      await sip.save();
+
+      await changeCommitmentAmount(sip, 300000, istDayStart("2026-09-20"));
+      await sip.save();
+
+      const pace = await budgetPace(userId, istDayStart("2026-09-21"));
+      if (!pace.configured) return assert.fail("should be configured");
+      assert.equal(pace.commitments[0].thisPeriodAmountMinor, 200000);
+      assert.equal(pace.commitments[0].isPaid, true);
+    });
+
+    it("keeps the paid-at figure through a second change in the same period", async () => {
+      const userId = await paidOnThe15th();
+      const sip = await commitment(userId, "SIP", 200000);
+      await payTowards(userId, sip._id, "2026-09-18", 200000);
+
+      await changeCommitmentAmount(sip, 300000, istDayStart("2026-09-20"));
+      await sip.save();
+      await changeCommitmentAmount(sip, 350000, istDayStart("2026-09-22"));
+      await sip.save();
+
+      const pace = await budgetPace(userId, istDayStart("2026-09-23"));
+      if (!pace.configured) return assert.fail("should be configured");
+      assert.equal(pace.commitments[0].thisPeriodAmountMinor, 200000);
+      assert.equal(pace.commitments[0].amountMinor, 350000);
+    });
   });
 
   it("holds back only what is still to go out", async () => {

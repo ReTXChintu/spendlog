@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AccountOverview } from "../types";
 import { api, ApiError } from "../lib/api";
 import { formatMoney } from "../lib/format";
+import { BalancePanel } from "./BalancePanel";
 import { CardVaultPanel } from "./CardVaultPanel";
 import { Icon } from "./Icon";
 
@@ -245,11 +246,14 @@ export function AccountPanel({
         )}
       </div>
 
-      {(isCard || isDebit) && (
+      {account.tracksBalance && <BalancePanel account={account} onChanged={onChanged} />}
+
+      {(isCard || isDebit || account.accountType === "BANK") && (
         <CardVaultPanel
           accountId={account.id}
           last4={account.last4}
           hasDetails={account.hasCardDetails}
+          isBank={account.accountType === "BANK"}
           onChanged={onChanged}
         />
       )}

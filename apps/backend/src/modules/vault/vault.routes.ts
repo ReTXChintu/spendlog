@@ -25,11 +25,18 @@ const pinBody = z.object({ pin: z.string() });
 
 const detailsBody = z.object({
   pin: z.string(),
-  number: z.string().min(12).max(24),
+  number: z.string().min(6).max(30),
   expiry: z.string().max(7).nullish(),
   nameOnCard: z.string().max(60).nullish(),
+  ifsc: z.string().max(15).nullish(),
   note: z.string().max(400).nullish(),
 });
+
+/** Which accounts hold details here, and what shape of number they take. */
+const VAULT_TYPES = ["CARD", "DEBIT", "BANK"];
+
+/** An IFSC: four letters for the bank, a zero, six for the branch. */
+const IFSC = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 
 /** The digits, with whatever spacing or dashes were typed around them. */
 function digitsOf(raw: string): string {
@@ -173,10 +180,23 @@ vaultRouter.put("/cards/:id", validObjectIdParam("id"), async (req, res) => {
   const accountId = new Types.ObjectId(req.params.id);
   const account = await Account.findOne({ _id: accountId, userId });
   if (!account) return res.status(404).json({ error: "Not found" });
+  if (!VAULT_TYPES.includes(account.accountType)) {
+    return res.status(400).json({ error: "Only cards and bank accounts have details to store." });
+  }
 
+  const isBank = account.accountType === "BANK";
   const digits = digitsOf(parsed.data.number);
-  if (digits.length < 12 || digits.length > 19) {
-    return res.status(400).json({ error: "That does not look like a card number." });
+  // A card number is 12 to 19 digits; an Indian bank account number runs
+  // from 9 to 18, and a few older ones fewer.
+  if (isBank ? digits.length < 6 || digits.length > 20 : digits.length < 12 || digits.length > 19) {
+    return res.status(400).json({
+      error: isBank ? "That does not look like an account number." : "That does not look like a card number.",
+    });
+  }
+
+  const ifsc = parsed.data.ifsc?.trim().toUpperCase() || null;
+  if (ifsc && (!isBank || !IFSC.test(ifsc))) {
+    return res.status(400).json({ error: "That does not look like an IFSC - it's 11 characters, like HDFC0001234." });
   }
 
   const vault = await CardVault.findOneAndUpdate(
@@ -184,8 +204,9 @@ vaultRouter.put("/cards/:id", validObjectIdParam("id"), async (req, res) => {
     {
       $set: {
         number: encryptPassword(digits),
-        expiry: parsed.data.expiry ? encryptPassword(parsed.data.expiry) : null,
+        expiry: !isBank && parsed.data.expiry ? encryptPassword(parsed.data.expiry) : null,
         nameOnCard: parsed.data.nameOnCard ? encryptPassword(parsed.data.nameOnCard) : null,
+        ifsc: ifsc ? encryptPassword(ifsc) : null,
         note: parsed.data.note ? encryptPassword(parsed.data.note) : null,
         last4: digits.slice(-4),
       },
@@ -233,14 +254,55 @@ vaultRouter.post("/cards/:id/reveal", validObjectIdParam("id"), async (req, res)
   if (!vault) return res.status(404).json({ error: "No details are stored for this card." });
 
   res.setHeader("Cache-Control", "no-store, private");
-  res.json({
+  res.json(opened(vault));
+});
+
+function opened(vault: InstanceType<typeof CardVault>) {
+  return {
+    accountId: vault.accountId.toString(),
     number: decryptPassword(vault.number),
     expiry: decryptPassword(vault.expiry),
     nameOnCard: decryptPassword(vault.nameOnCard),
+    ifsc: decryptPassword(vault.ifsc),
     note: decryptPassword(vault.note),
     last4: vault.last4,
     updatedAt: vault.updatedAt,
-  });
+  };
+}
+
+/**
+ * POST /vault/reveal — every stored detail, cards and bank accounts, for
+ * one PIN.
+ *
+ * One PIN already guarded every card; this is one PIN *entry* for all of
+ * them, so opening the accounts screen to read three numbers is not three
+ * prompts. The rule above still holds - nothing comes back without the PIN
+ * on this same request - and what the client does with the answer is to
+ * hold it in memory for a few minutes and then drop it.
+ */
+vaultRouter.post("/reveal", async (req, res) => {
+  const parsed = pinBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "A PIN is required" });
+
+  const userId = currentUserId(req);
+  const user = await User.findById(userId);
+  if (!user?.vaultPin) return res.status(400).json({ error: "No PIN is set." });
+
+  try {
+    if (!(await checkPin(user, parsed.data.pin))) {
+      const { attemptsLeft } = pinStatus(user);
+      return res.status(403).json({
+        error: attemptsLeft > 0 ? `Wrong PIN. ${attemptsLeft} attempts left.` : "Wrong PIN.",
+      });
+    }
+  } catch (error) {
+    if (error instanceof VaultLockedError) return res.status(429).json({ error: error.message });
+    throw error;
+  }
+
+  const vaults = await CardVault.find({ userId });
+  res.setHeader("Cache-Control", "no-store, private");
+  res.json(vaults.map(opened));
 });
 
 // DELETE /vault/cards/:id — forget one card's details. Behind the PIN like

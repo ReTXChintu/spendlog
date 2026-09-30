@@ -2,11 +2,10 @@ import { Router } from "express";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
-import { Account, FixedCommitment, Transaction, User } from "../../models";
+import { Account, FixedCommitment, Transaction, User, commitmentAmountFor } from "../../models";
 import { COMMITMENT_KINDS } from "../../types";
-import { budgetPace } from "./budget.pace";
+import { budgetPace, changeCommitmentAmount, commitmentPeriod } from "./budget.pace";
 import { dailyBudget } from "./budget.daily";
-import { budgetPeriodFor } from "./budget.period";
 
 export const budgetRouter = Router();
 budgetRouter.use(requireAuth);
@@ -70,10 +69,19 @@ const commitmentSchema = z.object({
 });
 
 budgetRouter.get("/commitments", async (req, res) => {
-  const commitments = await FixedCommitment.find({ userId: currentUserId(req) })
-    .sort({ isActive: -1, dayOfMonth: 1 })
-    .populate("categoryId");
-  res.json(commitments);
+  const userId = currentUserId(req);
+  const [commitments, period] = await Promise.all([
+    FixedCommitment.find({ userId }).sort({ isActive: -1, dayOfMonth: 1 }).populate("categoryId"),
+    commitmentPeriod(userId),
+  ]);
+  // amountMinor is what it costs from now on; this is what this period
+  // costs, which is the old figure when a change came after it was paid.
+  res.json(
+    commitments.map((commitment) => ({
+      ...commitment.toJSON(),
+      thisPeriodAmountMinor: commitmentAmountFor(commitment, period.key),
+    }))
+  );
 });
 
 budgetRouter.post("/commitments", async (req, res) => {
@@ -84,18 +92,27 @@ budgetRouter.post("/commitments", async (req, res) => {
   res.status(201).json(created);
 });
 
+// PATCH /budget/commitments/:id
+//
+// A new amount takes effect from the next payment when this period's has
+// already gone out at the old one: raising a SIP from 2,000 to 3,000 the
+// week after 2,000 was paid does not leave 1,000 "still to go out". When
+// this period is not yet paid, the new amount is simply what it costs now.
 budgetRouter.patch("/commitments/:id", validObjectIdParam("id"), async (req, res) => {
   const parsed = commitmentSchema.partial().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const updated = await FixedCommitment.findOneAndUpdate(
-    { _id: req.params.id, userId: currentUserId(req) },
-    { $set: parsed.data },
-    { new: true }
-  );
-  if (!updated) return res.status(404).json({ error: "Not found" });
+  const userId = currentUserId(req);
+  const commitment = await FixedCommitment.findOne({ _id: req.params.id, userId });
+  if (!commitment) return res.status(404).json({ error: "Not found" });
 
-  res.json(updated);
+  if (parsed.data.amountMinor !== undefined) {
+    await changeCommitmentAmount(commitment, parsed.data.amountMinor);
+  }
+
+  commitment.set(parsed.data);
+  await commitment.save();
+  res.json(commitment);
 });
 
 budgetRouter.delete("/commitments/:id", validObjectIdParam("id"), async (req, res) => {
@@ -119,8 +136,9 @@ budgetRouter.post("/commitments/:id/paid", validObjectIdParam("id"), async (req,
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
   const userId = currentUserId(req);
-  const user = await User.findById(userId).select("salaryDay").orFail();
-  const period = budgetPeriodFor(user.salaryDay ?? 1, new Date());
+  // The pace's own period, so a tick made after pay landed early is still
+  // a tick for the period the pace is showing.
+  const period = await commitmentPeriod(userId);
 
   const updated = await FixedCommitment.findOneAndUpdate(
     { _id: req.params.id, userId },
