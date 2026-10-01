@@ -22,12 +22,14 @@ Future<Contact?> createContact(
   BuildContext context, {
   required String name,
   String? phoneNumber,
+  int openingBalanceMinor = 0,
 }) async {
   final messenger = ScaffoldMessenger.maybeOf(context);
   try {
     final json = await ApiClient.instance.post('/contacts', {
       'name': name,
       if (phoneNumber != null && phoneNumber.trim().isNotEmpty) 'phone': phoneNumber.trim(),
+      if (openingBalanceMinor != 0) 'openingBalanceMinor': openingBalanceMinor,
     }) as Map<String, dynamic>;
     final contact = Contact.fromJson(json);
     if (json['existing'] == true) {
@@ -90,12 +92,73 @@ Future<Contact?> addContactFromPhone(BuildContext context) async {
 
 /// Adds someone by typing their name, and a number if it is to hand.
 Future<Contact?> addContactByName(BuildContext context, {String initialName = ''}) async {
-  final entered = await showDialog<({String name, String phone})>(
+  final entered = await showDialog<ContactEntry>(
     context: context,
-    builder: (_) => ContactDialog(title: 'Add a person', initialName: initialName),
+    builder: (_) => ContactDialog(title: 'Add a person', initialName: initialName, askOpening: true),
   );
   if (entered == null || !context.mounted) return null;
-  return createContact(context, name: entered.name, phoneNumber: entered.phone);
+  return createContact(
+    context,
+    name: entered.name,
+    phoneNumber: entered.phone,
+    openingBalanceMinor: entered.openingBalanceMinor,
+  );
+}
+
+/// What [ContactDialog] gives back. The starting balance is 0 unless the
+/// dialog was asked to offer one and something was typed.
+typedef ContactEntry = ({String name, String phone, int openingBalanceMinor});
+
+/// Rupees typed in plus which way they run, as signed paise: positive
+/// when they owe you, negative when you owe them. 0 for nothing usable.
+int signedPaise(String rupees, {required bool theyOwe}) {
+  final value = double.tryParse(rupees.trim().replaceAll(',', ''));
+  if (value == null || value <= 0) return 0;
+  final paise = (value * 100).round();
+  return theyOwe ? paise : -paise;
+}
+
+/// An amount and which way it runs - "They owe me" or "I owe them" - for
+/// money that stood between you before SpendLog.
+class OwedField extends StatelessWidget {
+  const OwedField({
+    super.key,
+    required this.amount,
+    required this.theyOwe,
+    required this.onDirection,
+    this.label = 'Amount (₹)',
+    this.autofocus = false,
+  });
+
+  final TextEditingController amount;
+  final bool theyOwe;
+  final ValueChanged<bool> onDirection;
+  final String label;
+  final bool autofocus;
+
+  @override
+  Widget build(BuildContext context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SegmentedButton<bool>(
+            segments: const [
+              ButtonSegment(value: true, label: Text('They owe me')),
+              ButtonSegment(value: false, label: Text('I owe them')),
+            ],
+            selected: {theyOwe},
+            showSelectedIcon: false,
+            onSelectionChanged: (selection) => onDirection(selection.first),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: amount,
+            autofocus: autofocus,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(labelText: label, hintText: '10000'),
+          ),
+        ],
+      );
 }
 
 /// Why the picker is about to ask for contacts, before Android asks.
@@ -127,12 +190,17 @@ class ContactDialog extends StatefulWidget {
     this.initialName = '',
     this.initialPhone = '',
     this.action = 'Add',
+    this.askOpening = false,
   });
 
   final String title;
   final String initialName;
   final String initialPhone;
   final String action;
+
+  /// Offer an "Already owed" amount, for someone new. Tucked behind a link
+  /// so adding a name stays a one-field job for most people.
+  final bool askOpening;
 
   @override
   State<ContactDialog> createState() => _ContactDialogState();
@@ -141,40 +209,77 @@ class ContactDialog extends StatefulWidget {
 class _ContactDialogState extends State<ContactDialog> {
   late final _name = TextEditingController(text: widget.initialName);
   late final _phone = TextEditingController(text: widget.initialPhone);
+  final _owed = TextEditingController();
+  bool _showOwed = false;
+  bool _theyOwe = true;
 
   @override
   void dispose() {
     _name.dispose();
     _phone.dispose();
+    _owed.dispose();
     super.dispose();
   }
 
   void _done() {
     if (_name.text.trim().isEmpty) return;
-    Navigator.of(context).pop((name: _name.text.trim(), phone: _phone.text.trim()));
+    final ContactEntry entry = (
+      name: _name.text.trim(),
+      phone: _phone.text.trim(),
+      openingBalanceMinor: _showOwed ? signedPaise(_owed.text, theyOwe: _theyOwe) : 0,
+    );
+    Navigator.of(context).pop(entry);
   }
 
   @override
   Widget build(BuildContext context) => AlertDialog(
         title: Text(widget.title),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _name,
-              autofocus: true,
-              textCapitalization: TextCapitalization.words,
-              onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(labelText: 'Name'),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _phone,
-              keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(labelText: 'Phone (optional)'),
-              onSubmitted: (_) => _done(),
-            ),
-          ],
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: _name,
+                autofocus: true,
+                textCapitalization: TextCapitalization.words,
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(labelText: 'Name'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _phone,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: 'Phone (optional)'),
+                onSubmitted: (_) => _done(),
+              ),
+              if (widget.askOpening && !_showOwed)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed: () => setState(() => _showOwed = true),
+                    child: const Text('Already owed? Add it'),
+                  ),
+                ),
+              if (widget.askOpening && _showOwed) ...[
+                const SizedBox(height: 14),
+                OwedField(
+                  amount: _owed,
+                  theyOwe: _theyOwe,
+                  onDirection: (value) => setState(() => _theyOwe = value),
+                  label: 'Already owed (₹)',
+                  autofocus: true,
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 5),
+                  child: Text(
+                    'Money between you from before SpendLog. It starts their balance.',
+                    style: TextStyle(fontSize: 11, height: 1.4, color: context.c.mutedLight),
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),

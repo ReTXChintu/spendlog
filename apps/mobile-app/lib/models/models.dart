@@ -1605,8 +1605,13 @@ class Contact {
   final String name;
   final String? phone;
 
-  /// Positive: they owe you. Negative: you owe them.
+  /// Positive: they owe you. Negative: you owe them. Includes the
+  /// starting balance below, so it is the whole answer.
   final int balanceMinor;
+
+  /// What stood between you before SpendLog - money lent last year, say -
+  /// so a balance doesn't have to begin at zero. Same signs as above.
+  final int openingBalanceMinor;
 
   /// Lent to them or paid for them, all told.
   final int givenMinor;
@@ -1621,6 +1626,7 @@ class Contact {
     required this.name,
     this.phone,
     this.balanceMinor = 0,
+    this.openingBalanceMinor = 0,
     this.givenMinor = 0,
     this.returnedMinor = 0,
     this.transactionCount = 0,
@@ -1635,6 +1641,7 @@ class Contact {
         name: json['name'] as String? ?? 'Someone',
         phone: json['phone'] as String?,
         balanceMinor: json['balanceMinor'] as int? ?? 0,
+        openingBalanceMinor: json['openingBalanceMinor'] as int? ?? 0,
         givenMinor: json['givenMinor'] as int? ?? 0,
         returnedMinor: json['returnedMinor'] as int? ?? 0,
         transactionCount: json['transactionCount'] as int? ?? 0,

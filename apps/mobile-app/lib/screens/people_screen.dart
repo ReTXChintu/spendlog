@@ -11,7 +11,9 @@ import '../widgets/state_block.dart';
 ///
 /// Built from the transactions that name people - a split bill, money
 /// lent, a friend paying back - so a balance here is always the sum of
-/// rows you can open and check, never a figure typed in on its own.
+/// rows you can open and check. The one figure typed in on its own is a
+/// starting balance, for money between you from before SpendLog, and it
+/// shows as the oldest row of their history.
 class PeopleScreen extends StatefulWidget {
   const PeopleScreen({super.key});
 
@@ -248,7 +250,7 @@ class _PersonScreenState extends State<PersonScreen> {
   }
 
   Future<void> _edit() async {
-    final entered = await showDialog<({String name, String phone})>(
+    final entered = await showDialog<ContactEntry>(
       context: context,
       builder: (_) => ContactDialog(
         title: 'Edit ${_contact.name}',
@@ -266,6 +268,29 @@ class _PersonScreenState extends State<PersonScreen> {
         'phone': entered.phone.isEmpty ? null : entered.phone,
       }) as Map<String, dynamic>;
       if (mounted) setState(() => _contact = Contact.fromJson(json));
+    } catch (error) {
+      messenger.showSnackBar(SnackBar(
+        content: Text(error is ApiException ? error.message : "Couldn't save that."),
+      ));
+    }
+  }
+
+  /// Money that stood between you before SpendLog. Saved on its own so the
+  /// balance and the history both pick it up from the server.
+  Future<void> _setOpening() async {
+    final value = await showDialog<int>(
+      context: context,
+      builder: (_) => _OpeningDialog(name: _contact.name, initialMinor: _contact.openingBalanceMinor),
+    );
+    if (value == null || value == _contact.openingBalanceMinor || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final json = await ApiClient.instance.patch('/contacts/${_contact.id}', {
+        'openingBalanceMinor': value,
+      }) as Map<String, dynamic>;
+      if (mounted) setState(() => _contact = Contact.fromJson(json));
+      await _load();
     } catch (error) {
       messenger.showSnackBar(SnackBar(
         content: Text(error is ApiException ? error.message : "Couldn't save that."),
@@ -306,6 +331,7 @@ class _PersonScreenState extends State<PersonScreen> {
   Widget build(BuildContext context) {
     final c = context.c;
     final contact = _contact;
+    final opening = contact.openingBalanceMinor;
 
     return Scaffold(
       backgroundColor: c.paper,
@@ -351,6 +377,27 @@ class _PersonScreenState extends State<PersonScreen> {
                           ].join(' · '),
                           style: TextStyle(fontSize: 12, color: c.muted),
                         ),
+                        if (opening != 0) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            opening > 0
+                                ? 'Owed you ${formatMoney(opening)} before SpendLog'
+                                : 'You owed them ${formatMoney(-opening)} before SpendLog',
+                            style: TextStyle(fontSize: 12, color: c.muted),
+                          ),
+                        ],
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: _setOpening,
+                            style: TextButton.styleFrom(
+                              padding: EdgeInsets.zero,
+                              minimumSize: const Size(0, 32),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            child: Text(opening == 0 ? 'Set starting balance' : 'Change starting balance'),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -371,7 +418,7 @@ class _PersonScreenState extends State<PersonScreen> {
                 padding: EdgeInsets.symmetric(vertical: 24),
                 child: Center(child: CircularProgressIndicator()),
               )
-            else if (_history!.isEmpty)
+            else if (_history!.isEmpty && opening == 0)
               Text(
                 'Nothing yet. On a transaction, tick Split or Settling up and add '
                 '${contact.name} under who it was with.',
@@ -390,12 +437,134 @@ class _PersonScreenState extends State<PersonScreen> {
                       if (i > 0) Divider(height: 1, color: c.line),
                       _HistoryRow(entry: entry),
                     ],
+                    // Newest first, so what came before SpendLog goes last.
+                    if (opening != 0) ...[
+                      if (_history!.isNotEmpty) Divider(height: 1, color: c.line),
+                      _StartingRow(amountMinor: opening),
+                    ],
                   ],
                 ),
               ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// The starting balance, drawn as the oldest line of the history so the
+/// rows still add up to the balance at the top.
+class _StartingRow extends StatelessWidget {
+  const _StartingRow({required this.amountMinor});
+
+  final int amountMinor;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final theyOwed = amountMinor > 0;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Starting balance',
+                  style: TextStyle(fontSize: 13.4, fontWeight: FontWeight.w700, color: c.ink),
+                ),
+                const SizedBox(height: 2),
+                Text('Before SpendLog', style: TextStyle(fontSize: 11.5, color: c.muted)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '${theyOwed ? '+' : '−'}${formatMoney(amountMinor.abs())}',
+                style: kNum.copyWith(fontSize: 13.4, fontWeight: FontWeight.w700, color: c.ink),
+              ),
+              Text(theyOwed ? 'they owed' : 'you owed', style: TextStyle(fontSize: 11, color: c.muted)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Sets what stood between you before SpendLog. Pops the new signed
+/// amount in paise - 0 when cleared - or nothing when cancelled.
+class _OpeningDialog extends StatefulWidget {
+  const _OpeningDialog({required this.name, required this.initialMinor});
+
+  final String name;
+  final int initialMinor;
+
+  @override
+  State<_OpeningDialog> createState() => _OpeningDialogState();
+}
+
+class _OpeningDialogState extends State<_OpeningDialog> {
+  late final _amount = TextEditingController(
+    text: widget.initialMinor == 0 ? '' : _rupees(widget.initialMinor.abs()),
+  );
+  late bool _theyOwe = widget.initialMinor >= 0;
+
+  /// Whole rupees without the ".00", so editing ₹10,000 shows "10000".
+  static String _rupees(int paise) =>
+      paise % 100 == 0 ? '${paise ~/ 100}' : (paise / 100).toStringAsFixed(2);
+
+  @override
+  void dispose() {
+    _amount.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Starting balance'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Money between you and ${widget.name} from before SpendLog - lent last year, say. '
+              'Their balance starts from here.',
+              style: TextStyle(fontSize: 13, height: 1.45, color: context.c.ink70),
+            ),
+            const SizedBox(height: 14),
+            OwedField(
+              amount: _amount,
+              theyOwe: _theyOwe,
+              onDirection: (owe) => setState(() => _theyOwe = owe),
+              autofocus: true,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        if (widget.initialMinor != 0)
+          TextButton(onPressed: () => Navigator.of(context).pop(0), child: const Text('Clear')),
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+        ListenableBuilder(
+          listenable: _amount,
+          builder: (context, _) {
+            final typed = signedPaise(_amount.text, theyOwe: _theyOwe);
+            return FilledButton(
+              onPressed: typed == 0 ? null : () => Navigator.of(context).pop(typed),
+              child: const Text('Save'),
+            );
+          },
+        ),
+      ],
     );
   }
 }
