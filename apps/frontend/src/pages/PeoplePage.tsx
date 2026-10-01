@@ -138,6 +138,52 @@ export function PeoplePage() {
   );
 }
 
+/**
+ * A starting balance as a person thinks of it: an amount and which way it
+ * runs, rather than a signed number.
+ */
+function OwedInput({
+  rupees,
+  theyOwe,
+  onRupees,
+  onTheyOwe,
+}: {
+  rupees: string;
+  theyOwe: boolean;
+  onRupees: (value: string) => void;
+  onTheyOwe: (value: boolean) => void;
+}) {
+  return (
+    <span className="owed-input">
+      <span className="amount-input">
+        <span className="prefix">₹</span>
+        <input
+          className="filter-input"
+          inputMode="decimal"
+          placeholder="0"
+          value={rupees}
+          onChange={(e) => onRupees(e.target.value)}
+          aria-label="Amount already owed"
+        />
+      </span>
+      <span className="seg">
+        <button type="button" className={theyOwe ? "on" : ""} onClick={() => onTheyOwe(true)}>
+          They owe me
+        </button>
+        <button type="button" className={theyOwe ? "" : "on"} onClick={() => onTheyOwe(false)}>
+          I owe them
+        </button>
+      </span>
+    </span>
+  );
+}
+
+/** The signed figure the server keeps, from the two halves above. */
+function signedMinor(rupees: string, theyOwe: boolean): number {
+  const minor = Math.round((Number.parseFloat(rupees.replace(/[₹,\s]/g, "")) || 0) * 100);
+  return theyOwe ? Math.abs(minor) : -Math.abs(minor);
+}
+
 function BalanceTag({ balanceMinor }: { balanceMinor: number }) {
   if (balanceMinor === 0) return <span className="people-tag">Settled up</span>;
   return (
@@ -151,6 +197,8 @@ function BalanceTag({ balanceMinor }: { balanceMinor: number }) {
 function AddPerson({ onDone }: { onDone: (created: Contact | null) => void }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [owed, setOwed] = useState("");
+  const [theyOwe, setTheyOwe] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -158,7 +206,11 @@ function AddPerson({ onDone }: { onDone: (created: Contact | null) => void }) {
     setBusy(true);
     setError(null);
     try {
-      const created = await api.post<Contact>("/contacts", { name: name.trim(), phone: phone.trim() || null });
+      const created = await api.post<Contact>("/contacts", {
+        name: name.trim(),
+        phone: phone.trim() || null,
+        openingBalanceMinor: signedMinor(owed, theyOwe),
+      });
       onDone(created);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't add them.");
@@ -188,6 +240,10 @@ function AddPerson({ onDone }: { onDone: (created: Contact | null) => void }) {
           placeholder="98765 43210"
         />
       </label>
+      <label className="field">
+        <span>Already owed, before SpendLog (optional)</span>
+        <OwedInput rupees={owed} theyOwe={theyOwe} onRupees={setOwed} onTheyOwe={setTheyOwe} />
+      </label>
       <div className="set-card-actions">
         <button className="btn btn-sm btn-primary" type="submit" disabled={busy || !name.trim()}>
           {busy ? "Adding…" : "Add"}
@@ -215,6 +271,9 @@ function PersonDetail({
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(contact.name);
   const [phone, setPhone] = useState(contact.phone ?? "");
+  const opening = contact.openingBalanceMinor ?? 0;
+  const [owed, setOwed] = useState(opening ? (Math.abs(opening) / 100).toFixed(2) : "");
+  const [theyOwe, setTheyOwe] = useState(opening >= 0);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -228,7 +287,11 @@ function PersonDetail({
   async function save() {
     setError(null);
     try {
-      await api.patch(`/contacts/${contact.id}`, { name: name.trim(), phone: phone.trim() || null });
+      await api.patch(`/contacts/${contact.id}`, {
+        name: name.trim(),
+        phone: phone.trim() || null,
+        openingBalanceMinor: signedMinor(owed, theyOwe),
+      });
       setEditing(false);
       onChanged();
     } catch (err) {
@@ -251,6 +314,8 @@ function PersonDetail({
         <div>
           <h3>{contact.name}</h3>
           <p className="section-sub">
+            {opening !== 0 &&
+              `${opening > 0 ? "Owed you" : "You owed them"} ${formatMoney(Math.abs(opening))} before SpendLog · `}
             Lent or paid for {formatMoney(contact.givenMinor)} · paid back {formatMoney(contact.returnedMinor)}
           </p>
         </div>
@@ -267,6 +332,10 @@ function PersonDetail({
             placeholder="Phone"
             aria-label="Phone"
           />
+          <label className="field people-edit-owed">
+            <span>Already owed, before SpendLog</span>
+            <OwedInput rupees={owed} theyOwe={theyOwe} onRupees={setOwed} onTheyOwe={setTheyOwe} />
+          </label>
           <button className="btn btn-sm btn-primary" onClick={save} disabled={!name.trim()}>
             Save
           </button>
@@ -292,8 +361,11 @@ function PersonDetail({
 
       {detail === null ? (
         <p className="field-hint">Loading…</p>
-      ) : detail.history.length === 0 ? (
-        <p className="field-hint">Nothing with {contact.name} yet.</p>
+      ) : detail.history.length === 0 && opening === 0 ? (
+        <p className="field-hint">
+          Nothing with {contact.name} yet. If money changed hands before SpendLog, add it under Edit as what's
+          already owed.
+        </p>
       ) : (
         <div className="people-history">
           {detail.history.map(({ transaction, amountMinor }) => (
@@ -313,6 +385,19 @@ function PersonDetail({
               </span>
             </div>
           ))}
+          {/* Oldest, so last: where the running figure started. */}
+          {opening !== 0 && (
+            <div className="people-history-row">
+              <span className="people-history-main">
+                <span className="people-history-name">Starting balance</span>
+                <span className="people-history-sub">Before SpendLog</span>
+              </span>
+              <span className={`num ${opening > 0 ? "debit" : "credit"}`}>
+                {opening > 0 ? "+" : "−"}
+                {formatMoney(Math.abs(opening))}
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>

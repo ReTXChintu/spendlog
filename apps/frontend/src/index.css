@@ -1259,7 +1259,10 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
 .people-detail{padding:16px;display:flex;flex-direction:column;gap:12px}
 .people-detail-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
 .people-detail-head h3{margin:0 0 3px 0}
-.people-edit{display:flex;gap:8px;flex-wrap:wrap}
+.people-edit{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
+.people-edit-owed{flex-basis:100%}
+.owed-input{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.owed-input .amount-input{width:160px}
 .people-history{display:flex;flex-direction:column}
 .people-history-row{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line)}
 .people-history-row:last-child{border-bottom:none}

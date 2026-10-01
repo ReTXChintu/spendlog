@@ -4,7 +4,7 @@ import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
 import { Contact, Transaction } from "../../models";
-import { NO_BALANCE, balances, normalisePhone } from "./contacts.people";
+import { Balance, NO_BALANCE, balances, normalisePhone } from "./contacts.people";
 
 export const contactsRouter = Router();
 contactsRouter.use(requireAuth);
@@ -14,16 +14,28 @@ contactsRouter.use(requireAuth);
  * what back, and so who still owes how much.
  */
 
+/**
+ * A person with where they stand: whatever was owed before SpendLog was
+ * keeping track, plus everything their transactions have added since.
+ */
+function withBalance(contact: InstanceType<typeof Contact>, owed: Balance | undefined) {
+  const fromTransactions = owed ?? NO_BALANCE;
+  const opening = contact.openingBalanceMinor ?? 0;
+  return {
+    ...contact.toJSON(),
+    ...fromTransactions,
+    openingBalanceMinor: opening,
+    balanceMinor: opening + fromTransactions.balanceMinor,
+  };
+}
+
 // GET /contacts — everyone, with where they stand. Whoever owes most
 // first, then whoever is owed, then everyone square, by name.
 contactsRouter.get("/", async (req, res) => {
   const userId = currentUserId(req);
   const [contacts, owed] = await Promise.all([Contact.find({ userId }).sort({ name: 1 }), balances(userId)]);
 
-  const rows = contacts.map((contact) => ({
-    ...contact.toJSON(),
-    ...(owed.get(contact._id.toString()) ?? NO_BALANCE),
-  }));
+  const rows = contacts.map((contact) => withBalance(contact, owed.get(contact._id.toString())));
   rows.sort((a, b) => Math.abs(b.balanceMinor) - Math.abs(a.balanceMinor) || a.name.localeCompare(b.name));
 
   const owedToYou = rows.filter((row) => row.balanceMinor > 0).reduce((sum, row) => sum + row.balanceMinor, 0);
@@ -35,6 +47,9 @@ contactsRouter.get("/", async (req, res) => {
 const contactSchema = z.object({
   name: z.string().trim().min(1).max(80),
   phone: z.string().max(30).nullable().optional(),
+  /// Owed before any transaction here: positive they owe you, negative you
+  /// owe them.
+  openingBalanceMinor: z.number().int().min(-1_000_000_000_00).max(1_000_000_000_00).optional(),
 });
 
 // POST /contacts — add someone, typed in or picked off the phone. Picking
@@ -49,11 +64,19 @@ contactsRouter.post("/", async (req, res) => {
 
   if (phone) {
     const existing = await Contact.findOne({ userId, phone });
-    if (existing) return res.status(200).json({ ...existing.toJSON(), ...NO_BALANCE, existing: true });
+    if (existing) {
+      const owed = await balances(userId, [existing._id]);
+      return res.status(200).json({ ...withBalance(existing, owed.get(existing._id.toString())), existing: true });
+    }
   }
 
-  const created = await Contact.create({ userId, name: parsed.data.name, phone });
-  res.status(201).json({ ...created.toJSON(), ...NO_BALANCE });
+  const created = await Contact.create({
+    userId,
+    name: parsed.data.name,
+    phone,
+    openingBalanceMinor: parsed.data.openingBalanceMinor ?? 0,
+  });
+  res.status(201).json(withBalance(created, undefined));
 });
 
 // GET /contacts/:id — one person, their balance, and every transaction
@@ -73,8 +96,7 @@ contactsRouter.get("/:id", validObjectIdParam("id"), async (req, res) => {
   ]);
 
   res.json({
-    ...contact.toJSON(),
-    ...(owed.get(contact._id.toString()) ?? NO_BALANCE),
+    ...withBalance(contact, owed.get(contact._id.toString())),
     history: transactions.map((transaction) => ({
       transaction,
       // Their part: positive when it added to what they owe, negative when
@@ -96,6 +118,7 @@ contactsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   if (!contact) return res.status(404).json({ error: "Not found" });
 
   if (parsed.data.name !== undefined) contact.name = parsed.data.name;
+  if (parsed.data.openingBalanceMinor !== undefined) contact.openingBalanceMinor = parsed.data.openingBalanceMinor;
   if (parsed.data.phone !== undefined) {
     const phone = normalisePhone(parsed.data.phone);
     if (phone && (await Contact.exists({ userId, phone, _id: { $ne: contact._id } }))) {
@@ -106,7 +129,7 @@ contactsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   await contact.save();
 
   const owed = await balances(userId, [contact._id]);
-  res.json({ ...contact.toJSON(), ...(owed.get(contact._id.toString()) ?? NO_BALANCE) });
+  res.json(withBalance(contact, owed.get(contact._id.toString())));
 });
 
 // DELETE /contacts/:id — takes them off every transaction they were on.

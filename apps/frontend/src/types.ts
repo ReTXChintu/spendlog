@@ -497,8 +497,12 @@ export interface Contact {
   id: string;
   name: string;
   phone: string | null;
-  /** Positive: they owe you. Negative: you owe them. */
+  /** Positive: they owe you. Negative: you owe them. Includes the
+      starting balance below. */
   balanceMinor: number;
+  /** What stood between you before any transaction here: money handed
+      over before SpendLog. Same sign as balanceMinor. */
+  openingBalanceMinor?: number;
   givenMinor: number;
   returnedMinor: number;
   transactionCount: number;

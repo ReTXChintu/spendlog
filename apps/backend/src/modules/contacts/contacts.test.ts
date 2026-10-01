@@ -128,6 +128,28 @@ describe("people and what they owe", () => {
     );
   });
 
+  it("starts from what was owed before, and adds transactions on top", async () => {
+    // 10,000 lent long before SpendLog; then 2,000 more; then 5,000 back.
+    const created = await json<{ id: string; balanceMinor: number }>(
+      await call("/contacts", { method: "POST", body: JSON.stringify({ name: "Ravi", openingBalanceMinor: 10_000_00 }) })
+    );
+    assert.equal(created.balanceMinor, 10_000_00);
+
+    const lent = await transaction("DEBIT", 2_000_00);
+    await patch(lent, { split: { myShareMinor: 0 }, people: [{ contactId: created.id, amountMinor: 2_000_00 }] });
+    const back = await transaction("CREDIT", 5_000_00);
+    await patch(back, { isSettlement: true, people: [{ contactId: created.id, amountMinor: 5_000_00 }] });
+
+    let listed = await json<Listed>(await call("/contacts"));
+    assert.equal(listed.contacts[0].balanceMinor, 7_000_00);
+    assert.equal(listed.owedToYouMinor, 7_000_00);
+
+    // Corrected later: it was 12,000 to begin with.
+    await call(`/contacts/${created.id}`, { method: "PATCH", body: JSON.stringify({ openingBalanceMinor: 12_000_00 }) });
+    listed = await json<Listed>(await call("/contacts"));
+    assert.equal(listed.contacts[0].balanceMinor, 9_000_00);
+  });
+
   it("splits one bill between several people", async () => {
     const a = await person("Asha");
     const b = await person("Bala");

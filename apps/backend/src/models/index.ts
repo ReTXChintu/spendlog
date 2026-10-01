@@ -1459,6 +1459,11 @@ export interface ContactDoc {
   /// Digits only, the last ten for an Indian number, so the same person
   /// picked twice - once as +91 98xxx, once as 098xxx - is found again.
   phone?: string | null;
+  /// What stood between the user and this person before any transaction
+  /// here said so - money handed over long before SpendLog. Positive: they
+  /// owe the user. Negative: the user owes them. Everything since is added
+  /// on top of it.
+  openingBalanceMinor: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -1468,6 +1473,7 @@ const contactSchema = new Schema<ContactDoc>(
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     name: { type: String, required: true, trim: true, maxlength: 80 },
     phone: { type: String, default: null },
+    openingBalanceMinor: { type: Number, default: 0 },
   },
   { timestamps: true, ...serialization }
 );
