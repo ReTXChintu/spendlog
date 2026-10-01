@@ -383,7 +383,15 @@ class CategorySpend {
 }
 
 class AnalyticsSummary {
+  /// The user's month key, YYYY-MM: the month of the pay day that opens it.
   final String month;
+
+  /// Readable span of that month - "15 Sep – 14 Oct 2026", or plain
+  /// "September 2026" when no salary day is set. Empty from an older server.
+  final String label;
+
+  /// First day of the month, YYYY-MM-DD. Empty from an older server.
+  final String from;
   final int totalSpendMinor;
   final int totalIncomeMinor;
   final List<CategorySpend> byCategory;
@@ -391,6 +399,8 @@ class AnalyticsSummary {
 
   AnalyticsSummary({
     required this.month,
+    this.label = '',
+    this.from = '',
     required this.totalSpendMinor,
     required this.totalIncomeMinor,
     required this.byCategory,
@@ -398,12 +408,55 @@ class AnalyticsSummary {
   });
 
   factory AnalyticsSummary.fromJson(Map<String, dynamic> json) => AnalyticsSummary(
-        month: json['month'] as String,
-        totalSpendMinor: json['totalSpendMinor'] as int,
-        totalIncomeMinor: json['totalIncomeMinor'] as int,
-        byCategory:
-            (json['byCategory'] as List<dynamic>).map((c) => CategorySpend.fromJson(c as Map<String, dynamic>)).toList(),
-        transactionCount: json['transactionCount'] as int,
+        month: json['month'] as String? ?? '',
+        label: json['label'] as String? ?? '',
+        from: json['from'] as String? ?? '',
+        totalSpendMinor: json['totalSpendMinor'] as int? ?? 0,
+        totalIncomeMinor: json['totalIncomeMinor'] as int? ?? 0,
+        byCategory: (json['byCategory'] as List<dynamic>? ?? [])
+            .map((c) => CategorySpend.fromJson(c as Map<String, dynamic>))
+            .toList(),
+        transactionCount: json['transactionCount'] as int? ?? 0,
+      );
+}
+
+/// One of the user's months, as `/analytics/months` lists them.
+///
+/// Someone paid on the 15th lives from the 15th to the 14th, so "this
+/// month" runs pay day to pay day; the key is the month of the pay day that
+/// opens it, which is why 2 Oct can still be in "2026-09".
+class UserMonth {
+  final String month;
+  final String from;
+  final String to;
+  final String label;
+
+  UserMonth({required this.month, required this.from, required this.to, required this.label});
+
+  factory UserMonth.fromJson(Map<String, dynamic> json) => UserMonth(
+        month: json['month'] as String? ?? '',
+        from: json['from'] as String? ?? '',
+        to: json['to'] as String? ?? '',
+        label: json['label'] as String? ?? '',
+      );
+}
+
+/// The list of months to step through, newest first, and which is now.
+class UserMonths {
+  final bool bySalary;
+  final int? salaryDay;
+  final String current;
+  final List<UserMonth> months;
+
+  UserMonths({required this.bySalary, this.salaryDay, required this.current, required this.months});
+
+  factory UserMonths.fromJson(Map<String, dynamic> json) => UserMonths(
+        bySalary: json['bySalary'] as bool? ?? false,
+        salaryDay: json['salaryDay'] as int?,
+        current: json['current'] as String? ?? '',
+        months: (json['months'] as List<dynamic>? ?? [])
+            .map((m) => UserMonth.fromJson(m as Map<String, dynamic>))
+            .toList(),
       );
 }
 
@@ -1271,6 +1324,11 @@ class CategoryChange {
 }
 
 class MonthComparison {
+  final String label;
+  final String previousMonth;
+
+  /// Readable already ("15 Aug – 14 Sep 2026"); older servers sent a bare
+  /// YYYY-MM key here, which the screen still copes with.
   final String previousMonthLabel;
   final int totalSpendMinor;
   final int previousSpendMinor;
@@ -1278,6 +1336,8 @@ class MonthComparison {
   final List<CategoryChange> categories;
 
   MonthComparison({
+    this.label = '',
+    this.previousMonth = '',
     required this.previousMonthLabel,
     required this.totalSpendMinor,
     required this.previousSpendMinor,
@@ -1286,6 +1346,8 @@ class MonthComparison {
   });
 
   factory MonthComparison.fromJson(Map<String, dynamic> json) => MonthComparison(
+        label: json['label'] as String? ?? '',
+        previousMonth: json['previousMonth'] as String? ?? '',
         previousMonthLabel: json['previousMonthLabel'] as String? ?? '',
         totalSpendMinor: json['totalSpendMinor'] as int? ?? 0,
         previousSpendMinor: json['previousSpendMinor'] as int? ?? 0,
@@ -1300,13 +1362,20 @@ class MonthComparison {
 ///
 /// Day-for-day rather than month-for-month: on the 8th, a whole previous
 /// month is not a comparison, it is a number three times larger.
+///
+/// "Month" is the user's own - pay day to pay day when a salary day is
+/// set - so [dayOfMonth] counts from that pay day, not from the 1st.
 class MonthSoFar {
+  final String month;
+  final String label;
   final int dayOfMonth;
   final int spentMinor;
   final int previousMinor;
   final int changeMinor;
 
   MonthSoFar({
+    this.month = '',
+    this.label = '',
     required this.dayOfMonth,
     required this.spentMinor,
     required this.previousMinor,
@@ -1314,6 +1383,8 @@ class MonthSoFar {
   });
 
   factory MonthSoFar.fromJson(Map<String, dynamic> json) => MonthSoFar(
+        month: json['month'] as String? ?? '',
+        label: json['label'] as String? ?? '',
         dayOfMonth: json['dayOfMonth'] as int? ?? 1,
         spentMinor: json['spentMinor'] as int? ?? 0,
         previousMinor: json['previousMinor'] as int? ?? 0,

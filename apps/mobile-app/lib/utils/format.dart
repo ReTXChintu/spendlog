@@ -88,16 +88,23 @@ String formatMonthLabel(String month) {
   return DateFormat('MMMM yyyy').format(DateTime(parts[0], parts[1]));
 }
 
-String shiftMonth(String month, int delta) {
-  final parts = month.split('-').map(int.parse).toList();
-  final shifted = DateTime(parts[0], parts[1] + delta);
-  return '${shifted.year.toString().padLeft(4, '0')}-${shifted.month.toString().padLeft(2, '0')}';
+/// "15 Sep" from a plain YYYY-MM-DD, for naming a pay-day month by the day
+/// it starts. Parsed as a plain date, so no offset can shift the day.
+String formatIsoShortDate(String isoDate) {
+  final parsed = DateTime.tryParse(isoDate);
+  return parsed == null ? '' : DateFormat('d MMM').format(parsed);
 }
 
-String currentMonth() {
-  // The IST month: at 1am on the 1st, UTC still says last month.
-  return istToday().substring(0, 7);
+/// A month's readable name. The server sends one ("15 Sep – 14 Oct 2026");
+/// an older server sent only the YYYY-MM key, which gets the calendar name.
+String readableMonth(String labelOrKey) {
+  if (RegExp(r'^\d{4}-\d{2}$').hasMatch(labelOrKey)) return formatMonthLabel(labelOrKey);
+  return labelOrKey;
 }
+
+// No calendar currentMonth()/shiftMonth() here on purpose: which month
+// "now" is, and the one before it, depend on the user's salary day, so
+// both come from the server (/analytics/months).
 
 /// "1st", "17th", "21st", "23rd" — a day of the month, said aloud.
 ///

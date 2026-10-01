@@ -87,7 +87,7 @@ class TransactionsScreenState extends State<TransactionsScreen> {
       final results = await Future.wait([
         ApiClient.instance.get('/categories'),
         ApiClient.instance.get('/accounts'),
-        ApiClient.instance.get('/analytics/summary?month=${currentMonth()}'),
+        ApiClient.instance.get('/analytics/summary'),
         ApiClient.instance.get('/ingestion/email/status'),
       ]);
       if (!mounted) return;
@@ -528,8 +528,18 @@ class _MonthRollup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // "Spent (Sep)" — the rollup names the month it covers.
-    final month = formatMonthLabel(summary.month).split(' ').first.substring(0, 3);
+    // The rollup names the month it covers: "Spent (Sep)" for a calendar
+    // month, "Spent since 15 Sep" for one that runs pay day to pay day -
+    // calling that one "Oct" on the 2nd would be wrong.
+    final from = summary.from;
+    final String spentLabel;
+    if (from.isEmpty) {
+      spentLabel = 'Spent this month';
+    } else if (from.endsWith('-01')) {
+      spentLabel = 'Spent (${formatMonthLabel(from.substring(0, 7)).substring(0, 3)})';
+    } else {
+      spentLabel = 'Spent since ${formatIsoShortDate(from)}';
+    }
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 14),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -542,7 +552,7 @@ class _MonthRollup extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           _RollupItem(
-            label: 'Spent ($month)',
+            label: spentLabel,
             value: formatMoneyShort(summary.totalSpendMinor),
             color: context.c.debit,
           ),

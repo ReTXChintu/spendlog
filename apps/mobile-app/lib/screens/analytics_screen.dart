@@ -15,7 +15,14 @@ class AnalyticsScreen extends StatefulWidget {
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
   static const _trendHeight = 110.0;
 
-  late String _month;
+  /// The month being looked at, as a user-month key. Null until the server
+  /// has said which month "now" is - with a salary day set, 2 Oct can still
+  /// belong to the month that began on 15 Sep, so the phone's calendar
+  /// cannot answer that.
+  String? _month;
+
+  /// Every month there is to step through, newest first.
+  List<UserMonth> _months = [];
   AnalyticsSummary? _summary;
   List<Map<String, dynamic>> _trend = [];
   List<Category> _categories = [];
@@ -28,22 +35,41 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   @override
   void initState() {
     super.initState();
-    _month = currentMonth();
-    _loadSummary();
+    _loadMonths();
     _loadRest();
+  }
+
+  Future<void> _loadMonths() async {
+    try {
+      final months = UserMonths.fromJson(
+        await ApiClient.instance.get('/analytics/months') as Map<String, dynamic>,
+      );
+      if (!mounted) return;
+      setState(() {
+        _months = months.months;
+        if (months.current.isNotEmpty) _month = months.current;
+      });
+    } catch (_) {
+      // No list to step through; the summary below still opens on the
+      // current month, because the server picks it when none is named.
+    }
+    _loadSummary();
   }
 
   /// The three things a month can be asked about, fetched together so
   /// switching between them is instant rather than a spinner each time.
   Future<void> _loadSummary() async {
+    final query = _month == null ? '' : '?month=$_month';
     final results = await Future.wait([
-      ApiClient.instance.get('/analytics/summary?month=$_month'),
-      ApiClient.instance.get('/analytics/merchants?month=$_month'),
-      ApiClient.instance.get('/analytics/compare?month=$_month'),
+      ApiClient.instance.get('/analytics/summary$query'),
+      ApiClient.instance.get('/analytics/merchants$query'),
+      ApiClient.instance.get('/analytics/compare$query'),
     ]);
     if (!mounted) return;
     setState(() {
-      _summary = AnalyticsSummary.fromJson(results[0] as Map<String, dynamic>);
+      final summary = AnalyticsSummary.fromJson(results[0] as Map<String, dynamic>);
+      _summary = summary;
+      if (_month == null && summary.month.isNotEmpty) _month = summary.month;
       _merchants = (results[1] as List<dynamic>)
           .map((m) => MerchantSpend.fromJson(m as Map<String, dynamic>))
           .toList();
@@ -70,23 +96,41 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     return match.isEmpty ? context.c.muted : parseHexColor(match.first.color);
   }
 
+  /// Where the month being looked at sits in [_months]; -1 when unknown.
+  int get _monthIndex => _months.indexWhere((m) => m.month == _month);
+
+  /// Steps through the server's own list rather than doing calendar
+  /// arithmetic: a pay-day month's key and span are the server's to say.
+  /// Newest first, so going back in time is a higher index.
+  void _step(int delta) {
+    final index = _monthIndex;
+    if (index < 0) return;
+    final target = index - delta;
+    if (target < 0 || target >= _months.length) return;
+    setState(() {
+      _month = _months[target].month;
+      _summary = null;
+    });
+    _loadSummary();
+  }
+
   @override
   Widget build(BuildContext context) {
     final summary = _summary;
+    final index = _monthIndex;
+    final title = index >= 0
+        ? _months[index].label
+        : (summary?.label.isNotEmpty ?? false)
+            ? summary!.label
+            : 'This month';
 
     return Column(
       children: [
         _MonthPicker(
-          month: _month,
-          onChange: (delta) {
-            final next = shiftMonth(_month, delta);
-            if (delta > 0 && next.compareTo(currentMonth()) > 0) return;
-            setState(() {
-              _month = next;
-              _summary = null;
-            });
-            _loadSummary();
-          },
+          title: title,
+          canGoBack: index >= 0 && index < _months.length - 1,
+          canGoForward: index > 0,
+          onChange: _step,
         ),
         Expanded(
           child: summary == null
@@ -182,10 +226,17 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 }
 
 class _MonthPicker extends StatelessWidget {
-  final String month;
+  final String title;
+  final bool canGoBack;
+  final bool canGoForward;
   final ValueChanged<int> onChange;
 
-  const _MonthPicker({required this.month, required this.onChange});
+  const _MonthPicker({
+    required this.title,
+    required this.canGoBack,
+    required this.canGoForward,
+    required this.onChange,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -204,18 +255,22 @@ class _MonthPicker extends StatelessWidget {
             IconButton(
               iconSize: 18,
               visualDensity: VisualDensity.compact,
-              icon: Icon(Icons.chevron_left, color: context.c.muted),
-              onPressed: () => onChange(-1),
+              icon: Icon(Icons.chevron_left, color: canGoBack ? context.c.muted : context.c.lineStrong),
+              onPressed: canGoBack ? () => onChange(-1) : null,
             ),
-            Text(
-              formatMonthLabel(month),
-              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: context.c.ink),
+            Flexible(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: context.c.ink),
+              ),
             ),
             IconButton(
               iconSize: 18,
               visualDensity: VisualDensity.compact,
-              icon: Icon(Icons.chevron_right, color: context.c.muted),
-              onPressed: () => onChange(1),
+              icon: Icon(Icons.chevron_right, color: canGoForward ? context.c.muted : context.c.lineStrong),
+              onPressed: canGoForward ? () => onChange(1) : null,
             ),
           ],
         ),
@@ -368,7 +423,13 @@ class _Trend extends StatelessWidget {
               final spend = point['spendMinor'] as int;
               final income = point['incomeMinor'] as int;
               final empty = spend == 0 && income == 0;
-              final label = formatMonthLabel('${point['month']}').split(' ').first.substring(0, 3);
+              // Named by the day each month starts ("15 Sep"): with a salary
+              // day set, a bar is not a calendar month and "Sep" would lie.
+              // An older server sends no start date, only the key.
+              final from = point['from'] as String? ?? '';
+              final label = from.isNotEmpty
+                  ? formatIsoShortDate(from)
+                  : formatMonthLabel('${point['month']}').split(' ').first.substring(0, 3);
 
               return Expanded(
                 child: Column(
@@ -482,7 +543,7 @@ class _Comparison extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _SectionTitle(
-          title: 'Against ${formatMonthLabel(comparison.previousMonthLabel)}',
+          title: 'Against ${readableMonth(comparison.previousMonthLabel)}',
           sub: 'Per category as well as in total.',
         ),
         const SizedBox(height: 14),

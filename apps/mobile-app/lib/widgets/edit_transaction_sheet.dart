@@ -236,7 +236,34 @@ class _EditSheetState extends State<_EditSheet> {
       _people.add(_Person(contactId: picked.id, name: picked.name));
       _autoSplit = true;
       _resplit();
+      _fillFromPerson();
     });
+  }
+
+  /// Money lent: a payment split where none of it was the user's.
+  bool get _isLend => _type == 'DEBIT' && _isSplit && parseRupees(_myShare.text) == 0;
+
+  /// Naming who it was for says what the payment was. Money lent or paid
+  /// back went *to that person* - the bank's "UPI/9876@ybl" says nothing
+  /// the name does not say better - so those always take the first
+  /// person's name, and the category for money between people. An
+  /// ordinary split (a dinner) was paid to the restaurant, so the name only
+  /// fills an empty merchant there. Called inside setState.
+  void _fillFromPerson() {
+    if (_people.isEmpty) return;
+    final name = _people.first.name;
+    // Still "Someone" while an existing transaction's names load.
+    if (name.trim().isEmpty || name == 'Someone') return;
+
+    if (_isLend || _isSettlement) {
+      _merchant.text = name;
+      final lent = categoriesFor(widget.categories, _type)
+          .where((category) => category.name == 'Lent & borrowed')
+          .firstOrNull;
+      if (lent != null) _categoryId = lent.id;
+    } else if (_merchant.text.trim().isEmpty) {
+      _merchant.text = name;
+    }
   }
 
   void _removePerson(_Person person) {
@@ -1067,6 +1094,8 @@ class _EditSheetState extends State<_EditSheet> {
                     onPressed: () {
                       _myShare.text = '0.00';
                       _figuresChanged();
+                      // Now a lend: whoever is already named is who it went to.
+                      setState(_fillFromPerson);
                     },
                     icon: const Icon(Icons.handshake_outlined, size: 16),
                     label: const Text('Lent — none of it was mine'),

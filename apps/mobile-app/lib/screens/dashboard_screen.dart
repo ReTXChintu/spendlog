@@ -167,8 +167,14 @@ class DashboardScreenState extends State<DashboardScreen> {
 
           _Heading(
             title: 'So far',
-            sub: 'Day ${data.monthSoFar.dayOfMonth}, against the same point last month — not the whole '
-                'of it, which would look like overspending every time.',
+            // "Your month", not the calendar's: with a salary day set it runs
+            // pay day to pay day, and day 1 is the pay day.
+            sub: data.monthSoFar.label.isEmpty
+                ? 'Day ${data.monthSoFar.dayOfMonth} of your month, against the same point in the last one '
+                    '— not the whole of it, which would look like overspending every time.'
+                : 'Day ${data.monthSoFar.dayOfMonth} of your month (${data.monthSoFar.label}), against the '
+                    'same point in the last one — not the whole of it, which would look like overspending '
+                    'every time.',
           ),
           const SizedBox(height: 10),
           _MonthSoFarBlock(month: data.monthSoFar),
@@ -442,8 +448,9 @@ class _MonthSoFarBlock extends StatelessWidget {
             Flexible(
               child: Text(
                 change == 0
-                    ? 'Level with last month'
-                    : '${formatMoneyShort(change.abs())} ${change > 0 ? 'more' : 'less'} than last month',
+                    ? 'Level with this point last month'
+                    : '${formatMoneyShort(change.abs())} ${change > 0 ? 'more' : 'less'} than at this point '
+                        'last month',
                 style: TextStyle(fontSize: 12.8, fontWeight: FontWeight.w600, color: colour),
               ),
             ),

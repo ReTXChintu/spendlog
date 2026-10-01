@@ -221,7 +221,9 @@ class _RefundSheetState extends State<_RefundSheet> {
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 child: Text(
-                  'No payment in the month before this credit to match it against.',
+                  // Either side, because money can arrive first and be
+                  // spent afterwards - a deposit back before the new booking.
+                  'No payment in the 30 days either side of this credit to match it against.',
                   style: TextStyle(fontSize: 12.5, height: 1.45, color: c.muted),
                 ),
               )

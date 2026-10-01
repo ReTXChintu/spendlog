@@ -180,6 +180,8 @@ IconData categoryIcon(String? id) {
       return Icons.trending_up;
     case 'ic-wallet':
       return Icons.account_balance_wallet_outlined;
+    case 'ic-people':
+      return Icons.people_outline;
     case 'ic-dots':
       return Icons.more_horiz;
     default:
