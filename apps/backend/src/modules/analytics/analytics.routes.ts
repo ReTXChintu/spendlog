@@ -3,23 +3,37 @@ import { Types } from "mongoose";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { Transaction } from "../../models";
-import { IST_OFFSET, istDayKey, istMonthEnd, istMonthKey, istMonthStart } from "../../time";
+import { UserMonth, monthLabel, monthSoFar, userMonth, userMonths } from "../budget/budget.months";
 
 export const analyticsRouter = Router();
 analyticsRouter.use(requireAuth);
 
-// A month runs from midnight IST on the 1st to midnight IST on the 1st of
-// the next — so a payment at 00:30 on 1 September belongs to September,
-// which by the UTC calendar it would not.
-function monthRange(month: string): { start: Date; end: Date } {
-  return { start: istMonthStart(month), end: istMonthEnd(month) };
-}
-
+// Every figure here is for one of the user's own months: salary day to
+// salary day where there is a pay day, the calendar month where there is
+// not. See budget.months.ts. `month` names one by its key; left out, it
+// is the month today is in.
 const summarySchema = z.object({
   month: z
     .string()
     .regex(/^\d{4}-\d{2}$/)
-    .default(() => new Date().toISOString().slice(0, 7)),
+    .optional(),
+});
+
+/** What a response says about the month it covers, so a screen can label it. */
+function describe(month: UserMonth, bySalary: boolean) {
+  return { month: month.key, from: month.from, to: month.to, label: monthLabel(month, bySalary) };
+}
+
+// GET /analytics/months — the user's months, newest first, for a screen
+// to step through. The current one is first.
+analyticsRouter.get("/months", async (req, res) => {
+  const months = await userMonths(currentUserId(req), new Date(), 24);
+  res.json({
+    bySalary: months.bySalary,
+    salaryDay: months.salaryDay,
+    current: months.recent[0].key,
+    months: months.recent.map((month) => describe(month, months.bySalary)),
+  });
 });
 
 interface CategoryTotal {
@@ -34,11 +48,16 @@ analyticsRouter.get("/summary", async (req, res) => {
   const parsed = summarySchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const { start, end } = monthRange(parsed.data.month);
+  const userId = currentUserId(req);
+  const [period, { bySalary }] = await Promise.all([
+    userMonth(userId, parsed.data.month),
+    userMonths(userId, new Date(), 1),
+  ]);
+  const { start, end } = period;
   // No isTransfer filter: transfers already count as zero, along with
   // settlements, EMI parents and the unclaimed share of a split.
   const match = {
-    userId: currentUserId(req),
+    userId,
     occurredAt: { $gte: start, $lt: end },
   };
 
@@ -63,7 +82,7 @@ analyticsRouter.get("/summary", async (req, res) => {
   const credit = totals.find((t) => t._id === "CREDIT");
 
   res.json({
-    month: parsed.data.month,
+    ...describe(period, bySalary),
     totalSpendMinor: debit?.amountMinor ?? 0,
     totalIncomeMinor: credit?.amountMinor ?? 0,
     byCategory: byCategory.map((c) => ({
@@ -84,28 +103,33 @@ analyticsRouter.get("/trend", async (req, res) => {
   const parsed = trendSchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const now = new Date();
-  const months: string[] = [];
-  for (let i = parsed.data.months - 1; i >= 0; i--) {
-    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
-    months.push(d.toISOString().slice(0, 7));
-  }
+  const userId = currentUserId(req);
+  const { recent, bySalary } = await userMonths(userId, new Date(), parsed.data.months);
+  // Oldest first, the way a chart reads.
+  const months = [...recent].reverse();
 
-  const start = monthRange(months[0]).start;
-  const end = monthRange(months[months.length - 1]).end;
-
-  // One grouped query for the whole window, rather than one query per month.
+  // One grouped query for the whole window, each transaction put in the
+  // user's month it falls in - which a calendar group-by cannot do once
+  // months run from the 15th.
   const rows = await Transaction.aggregate<{ _id: { month: string; type: string }; amountMinor: number }>([
     {
       $match: {
-        userId: currentUserId(req),
-        occurredAt: { $gte: start, $lt: end },
+        userId,
+        occurredAt: { $gte: months[0].start, $lt: months[months.length - 1].end },
       },
     },
     {
       $group: {
         _id: {
-          month: { $dateToString: { format: "%Y-%m", date: "$occurredAt", timezone: IST_OFFSET } },
+          month: {
+            $switch: {
+              branches: months.map((month) => ({
+                case: { $and: [{ $gte: ["$occurredAt", month.start] }, { $lt: ["$occurredAt", month.end] }] },
+                then: month.key,
+              })),
+              default: "other",
+            },
+          },
           type: "$type",
         },
         amountMinor: { $sum: "$countedAmountMinor" },
@@ -113,7 +137,9 @@ analyticsRouter.get("/trend", async (req, res) => {
     },
   ]);
 
-  const byMonth = new Map(months.map((month) => [month, { month, spendMinor: 0, incomeMinor: 0 }]));
+  const byMonth = new Map(
+    months.map((month) => [month.key, { ...describe(month, bySalary), spendMinor: 0, incomeMinor: 0 }])
+  );
   for (const row of rows) {
     const entry = byMonth.get(row._id.month);
     if (!entry) continue;
@@ -121,7 +147,7 @@ analyticsRouter.get("/trend", async (req, res) => {
     else entry.incomeMinor = row.amountMinor;
   }
 
-  res.json(months.map((month) => byMonth.get(month)!));
+  res.json(months.map((month) => byMonth.get(month.key)!));
 });
 
 // GET /analytics/owed — the running balance with everyone the user splits
@@ -180,7 +206,7 @@ const merchantsSchema = z.object({
   month: z
     .string()
     .regex(/^\d{4}-\d{2}$/)
-    .default(() => new Date().toISOString().slice(0, 7)),
+    .optional(),
   limit: z.coerce.number().int().min(1).max(50).default(15),
 });
 
@@ -198,7 +224,8 @@ analyticsRouter.get("/merchants", async (req, res) => {
   const parsed = merchantsSchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const { start, end } = monthRange(parsed.data.month);
+  const userId = currentUserId(req);
+  const { start, end } = await userMonth(userId, parsed.data.month);
 
   const rows = await Transaction.aggregate<{
     _id: string;
@@ -208,7 +235,7 @@ analyticsRouter.get("/merchants", async (req, res) => {
   }>([
     {
       $match: {
-        userId: currentUserId(req),
+        userId,
         occurredAt: { $gte: start, $lt: end },
         type: "DEBIT",
         countedAmountMinor: { $gt: 0 },
@@ -238,26 +265,20 @@ analyticsRouter.get("/merchants", async (req, res) => {
   );
 });
 
-/** The month before a `YYYY-MM`. */
-function previousMonth(month: string): string {
-  const [year, mon] = month.split("-").map(Number);
-  const previousYear = mon === 1 ? year - 1 : year;
-  const previous = mon === 1 ? 12 : mon - 1;
-  return `${previousYear}-${String(previous).padStart(2, "0")}`;
-}
-
 interface MonthTotals {
-  month: string;
   totalSpendMinor: number;
   byCategory: Map<string, { name: string; amountMinor: number }>;
 }
 
-async function totalsFor(userId: Types.ObjectId, month: string): Promise<MonthTotals> {
-  const { start, end } = monthRange(month);
-
+async function totalsFor(userId: Types.ObjectId, month: UserMonth): Promise<MonthTotals> {
   const rows = await Transaction.aggregate<CategoryTotal>([
     {
-      $match: { userId, occurredAt: { $gte: start, $lt: end }, type: "DEBIT", countedAmountMinor: { $gt: 0 } },
+      $match: {
+        userId,
+        occurredAt: { $gte: month.start, $lt: month.end },
+        type: "DEBIT",
+        countedAmountMinor: { $gt: 0 },
+      },
     },
     { $group: { _id: "$categoryId", amountMinor: { $sum: "$countedAmountMinor" } } },
     { $lookup: { from: "categories", localField: "_id", foreignField: "_id", as: "category" } },
@@ -275,7 +296,18 @@ async function totalsFor(userId: Types.ObjectId, month: string): Promise<MonthTo
     totalSpendMinor += row.amountMinor;
   }
 
-  return { month, totalSpendMinor, byCategory };
+  return { totalSpendMinor, byCategory };
+}
+
+/** The user's month before `month`. */
+async function monthBefore(userId: Types.ObjectId, month: UserMonth): Promise<UserMonth> {
+  const { recent } = await userMonths(userId);
+  const index = recent.findIndex((candidate) => candidate.key === month.key);
+  if (index >= 0 && recent[index + 1]) return recent[index + 1];
+
+  const [year, mon] = month.key.split("-").map(Number);
+  const key = `${mon === 1 ? year - 1 : year}-${String(mon === 1 ? 12 : mon - 1).padStart(2, "0")}`;
+  return userMonth(userId, key);
 }
 
 /**
@@ -295,8 +327,11 @@ analyticsRouter.get("/compare", async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
   const userId = currentUserId(req);
-  const month = parsed.data.month;
-  const earlier = previousMonth(month);
+  const [month, { bySalary }] = await Promise.all([
+    userMonth(userId, parsed.data.month),
+    userMonths(userId, new Date(), 1),
+  ]);
+  const earlier = await monthBefore(userId, month);
 
   const [current, previous] = await Promise.all([totalsFor(userId, month), totalsFor(userId, earlier)]);
 
@@ -321,8 +356,9 @@ analyticsRouter.get("/compare", async (req, res) => {
   categories.sort((a, b) => Math.abs(b.changeMinor) - Math.abs(a.changeMinor));
 
   res.json({
-    month,
-    previousMonthLabel: earlier,
+    ...describe(month, bySalary),
+    previousMonth: earlier.key,
+    previousMonthLabel: monthLabel(earlier, bySalary),
     totalSpendMinor: current.totalSpendMinor,
     previousSpendMinor: previous.totalSpendMinor,
     changeMinor: current.totalSpendMinor - previous.totalSpendMinor,
@@ -330,48 +366,8 @@ analyticsRouter.get("/compare", async (req, res) => {
   });
 });
 
-/**
- * GET /analytics/month-so-far — this month against the same point in the
- * last, for the one line the dashboard carries.
- *
- * Compared day-for-day rather than month-for-month. On the 8th, a whole
- * previous month is not a comparison — it is a number three times larger,
- * and reading it as overspending would be wrong every time.
- */
+// GET /analytics/month-so-far — this month against the same point in the
+// last, for the one line the dashboard carries. See monthSoFar.
 analyticsRouter.get("/month-so-far", async (req, res) => {
-  const userId = currentUserId(req);
-  const now = new Date();
-
-  const month = istMonthKey(now);
-  const dayOfMonth = Number(istDayKey(now).slice(8));
-  const earlier = previousMonth(month);
-
-  const spendUpTo = async (targetMonth: string, days: number): Promise<number> => {
-    const start = istMonthStart(targetMonth);
-    // The same number of days in, clamped so the end of a short February
-    // cannot run past its own month.
-    const monthEnd = istMonthEnd(targetMonth);
-    const end = new Date(Math.min(start.getTime() + days * 24 * 60 * 60 * 1000, monthEnd.getTime()));
-
-    const rows = await Transaction.aggregate<{ total: number }>([
-      {
-        $match: { userId, occurredAt: { $gte: start, $lt: end }, type: "DEBIT", countedAmountMinor: { $gt: 0 } },
-      },
-      { $group: { _id: null, total: { $sum: "$countedAmountMinor" } } },
-    ]);
-    return rows[0]?.total ?? 0;
-  };
-
-  const [spentMinor, previousMinor] = await Promise.all([
-    spendUpTo(month, dayOfMonth),
-    spendUpTo(earlier, dayOfMonth),
-  ]);
-
-  res.json({
-    month,
-    dayOfMonth,
-    spentMinor,
-    previousMinor,
-    changeMinor: spentMinor - previousMinor,
-  });
+  res.json(await monthSoFar(currentUserId(req)));
 });

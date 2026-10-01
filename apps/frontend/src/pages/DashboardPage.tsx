@@ -116,8 +116,9 @@ export function DashboardPage() {
           <div className="section-block">
             <h3>So far</h3>
             <p className="section-sub">
-              Day {monthSoFar.dayOfMonth}, against the same point last month — not the whole of it, which
-              would look like overspending every time.
+              Day {monthSoFar.dayOfMonth}
+              {monthSoFar.label ? ` of ${monthSoFar.label}` : ""}, against the same point last month — not
+              the whole of it, which would look like overspending every time.
             </p>
             <div className="month-headline">
               <div className="month-figure num">{formatMoney(monthSoFar.spentMinor)}</div>

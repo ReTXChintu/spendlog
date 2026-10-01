@@ -546,10 +546,14 @@ transactionsRouter.post("/:id/refund-of", validObjectIdParam("id"), async (req, 
 });
 
 // GET /transactions/:id/refund-candidates — payments this credit could be
-// giving money back from: every payment in the 30 days before it, and
-// further back (up to six months) only the likely ones - the same amount,
-// or the same merchant - so an old order's refund can still be found
-// without the list turning into half a year of payments.
+// giving money back from: every payment in the 30 days either side of it,
+// and further back (up to six months) only the likely ones - the same
+// amount, or the same merchant - so an old order's refund can still be
+// found without the list turning into half a year of payments.
+//
+// Either side, because money does not always come back after it went
+// out: someone sends their share first and the thing is bought with it
+// afterwards, and that credit still only offsets the purchase.
 transactionsRouter.get("/:id/refund-candidates", validObjectIdParam("id"), async (req, res) => {
   const userId = currentUserId(req);
   const refund = await Transaction.findOne({ _id: req.params.id, userId });
@@ -557,6 +561,7 @@ transactionsRouter.get("/:id/refund-candidates", validObjectIdParam("id"), async
 
   const day = 24 * 60 * 60 * 1000;
   const monthBefore = new Date(refund.occurredAt.getTime() - 30 * day);
+  const monthAfter = new Date(refund.occurredAt.getTime() + 30 * day);
   const sixMonthsBefore = new Date(refund.occurredAt.getTime() - 183 * day);
 
   const likely: Record<string, unknown>[] = [{ amountMinor: refund.amountMinor }];
@@ -567,9 +572,9 @@ transactionsRouter.get("/:id/refund-candidates", validObjectIdParam("id"), async
     type: "DEBIT",
     // Deliberately no lower bound on the amount: one credit settling three
     // cancelled orders is larger than any of them, which is the whole
-    // point. A refund still cannot predate the purchase it came from.
+    // point.
     $or: [
-      { occurredAt: { $lte: refund.occurredAt, $gte: monthBefore } },
+      { occurredAt: { $lte: monthAfter, $gte: monthBefore } },
       { occurredAt: { $lt: monthBefore, $gte: sixMonthsBefore }, $or: likely },
     ],
   })

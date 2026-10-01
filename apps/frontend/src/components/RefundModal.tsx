@@ -131,7 +131,7 @@ export function RefundModal({
         {candidates === null ? (
           <p className="field-hint">Looking for payments it could have come from…</p>
         ) : candidates.length === 0 ? (
-          <p className="field-hint">No payment in the month before this credit to match it against.</p>
+          <p className="field-hint">No payment in the 30 days either side of this credit to match it against.</p>
         ) : (
           <>
           <input
@@ -143,7 +143,7 @@ export function RefundModal({
             aria-label="Search payments"
           />
           <p className="field-hint">
-            Every payment from the 30 days before it, plus older ones for the same amount or merchant.
+            Every payment from the 30 days either side of it — money can come in before the thing it paid for — plus older ones for the same amount or merchant.
           </p>
           <div className="refund-list">
             {shown.length === 0 && <p className="field-hint">Nothing matches “{query.trim()}”.</p>}

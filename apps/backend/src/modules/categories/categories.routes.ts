@@ -2,13 +2,33 @@ import { Router } from "express";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { Category, CategoryRule } from "../../models";
+import { PEOPLE_CATEGORY } from "../../parsing/default-categories";
 import { RULE_MATCH_TYPES } from "../../types";
 
 export const categoriesRouter = Router();
 categoriesRouter.use(requireAuth);
 
+/**
+ * The people category, made sure of once per process. Seeding is a step
+ * someone runs by hand on a deploy, and a category the apps pick by name
+ * cannot depend on that having happened.
+ */
+let peopleCategoryReady: Promise<unknown> | null = null;
+function ensurePeopleCategory() {
+  peopleCategoryReady ??= Category.updateOne(
+    { name: PEOPLE_CATEGORY.name, userId: null, isSystem: true },
+    { $setOnInsert: { icon: PEOPLE_CATEGORY.icon, color: PEOPLE_CATEGORY.color, direction: PEOPLE_CATEGORY.direction } },
+    { upsert: true }
+  ).catch((error) => {
+    peopleCategoryReady = null;
+    throw error;
+  });
+  return peopleCategoryReady;
+}
+
 // GET /categories — system defaults + this user's custom categories.
 categoriesRouter.get("/", async (req, res) => {
+  await ensurePeopleCategory();
   const categories = await Category.find({
     $or: [{ userId: null }, { userId: currentUserId(req) }],
   }).sort({ isSystem: -1, name: 1 });

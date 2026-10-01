@@ -12,7 +12,7 @@ import { IST_OFFSET, istDayEnd, istDayKey, istDayStart } from "../../time";
 import { budgetPace } from "../budget/budget.pace";
 import { dailyBudget } from "../budget/budget.daily";
 import { loanProgress } from "../loans/loans.routes";
-import { Periods, periodsFor } from "./ai.periods";
+import { UserMonths as Periods, userMonths as periodsFor } from "../budget/budget.months";
 
 /**
  * What the assistant is allowed to look at, as functions it can call.

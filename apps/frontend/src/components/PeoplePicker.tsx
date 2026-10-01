@@ -27,12 +27,15 @@ export function PeoplePicker({
   roomMinor,
   value,
   onChange,
+  onPersonAdded,
 }: {
   title: string;
   /** How much can be put down to other people at all. */
   roomMinor: number;
   value: PersonShare[];
   onChange: (next: PersonShare[]) => void;
+  /** Told who was just added, so the form can name the transaction after them. */
+  onPersonAdded?: (contact: Contact) => void;
 }) {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [query, setQuery] = useState("");
@@ -65,6 +68,7 @@ export function PeoplePicker({
 
   function add(contact: Contact) {
     onChange(withEvenShares([...value.map((person) => person.contactId), contact.id]));
+    onPersonAdded?.(contact);
     setQuery("");
     setOpen(false);
   }

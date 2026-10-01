@@ -12,6 +12,20 @@ export interface DefaultCategorySeed {
   keywords: string[];
 }
 
+/**
+ * Money that moved between the user and someone they know: lent, borrowed,
+ * paid back. Picked automatically when a person is put on a loan or a
+ * settling-up, so it never sits among the spending categories looking
+ * like a purchase. The clients find it by this name.
+ */
+export const PEOPLE_CATEGORY: DefaultCategorySeed = {
+  name: "Lent & borrowed",
+  icon: "ic-people",
+  color: "#14B8A6",
+  direction: "BOTH",
+  keywords: [],
+};
+
 // Seeded once into the Category table as system defaults (userId = null),
 // each with a matching CategoryRule so new transactions auto-categorize
 // out of the box. Users can add their own rules/categories on top of these.
@@ -100,4 +114,5 @@ export const DEFAULT_CATEGORIES: DefaultCategorySeed[] = [
     direction: "BOTH",
     keywords: [],
   },
+  PEOPLE_CATEGORY,
 ];

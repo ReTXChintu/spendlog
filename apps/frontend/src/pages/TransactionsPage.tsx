@@ -9,7 +9,7 @@ import { LedgerSkeleton, StateBlock } from "../components/States";
 import { RawMessageModal } from "../components/RawMessageModal";
 import { TransactionRow } from "../components/TransactionRow";
 import { api } from "../lib/api";
-import { currentMonth, formatDayLabel, formatMoney } from "../lib/format";
+import { formatDayLabel, formatMoney } from "../lib/format";
 import {
   Account,
   AnalyticsSummary,
@@ -128,7 +128,7 @@ export function TransactionsPage() {
       const [cats, accs, monthSummary, emails] = await Promise.all([
         api.get<Category[]>("/categories"),
         api.get<Account[]>("/accounts"),
-        api.get<AnalyticsSummary>(`/analytics/summary?month=${currentMonth()}`),
+        api.get<AnalyticsSummary>("/analytics/summary"),
         api.get<EmailConnectionStatus[]>("/ingestion/email/status"),
       ]);
       setCategories(cats);
@@ -513,7 +513,7 @@ export function TransactionsPage() {
 
         <div className="rail">
           <div className="card">
-            <div className="rail-title">This month</div>
+            <div className="rail-title" title={summary?.label}>This month{summary?.label ? ` · ${summary.label}` : ""}</div>
             <div className="stat-line">
               <span className="label">Spent</span>
               <span className="value num" style={{ color: "var(--debit)" }}>

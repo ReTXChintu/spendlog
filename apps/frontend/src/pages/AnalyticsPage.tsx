@@ -3,8 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { Icon } from "../components/Icon";
 import { StateBlock } from "../components/States";
 import { api } from "../lib/api";
-import { currentMonth, formatMoney, formatMoneyShort, formatMonthLabel, shiftMonth } from "../lib/format";
+import { formatMoney, formatMoneyShort } from "../lib/format";
 import {
+  AnalyticsMonths,
   AnalyticsSummary,
   Category,
   MerchantSpend,
@@ -26,7 +27,11 @@ type View = "categories" | "merchants" | "compare";
  */
 export function AnalyticsPage() {
   const navigate = useNavigate();
-  const [month, setMonth] = useState(currentMonth());
+  // The user's own months - salary day to salary day - newest first, and
+  // which of them is showing. A calendar month is only what they get with
+  // no pay day set.
+  const [months, setMonths] = useState<AnalyticsMonths | null>(null);
+  const [index, setIndex] = useState(0);
   const [view, setView] = useState<View>("categories");
 
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
@@ -35,7 +40,10 @@ export function AnalyticsPage() {
   const [trend, setTrend] = useState<TrendPoint[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
 
+  const month = months?.months[index]?.month ?? null;
+
   useEffect(() => {
+    if (!month) return;
     api.get<AnalyticsSummary>(`/analytics/summary?month=${month}`).then(setSummary);
     api.get<MerchantSpend[]>(`/analytics/merchants?month=${month}`).then(setMerchants).catch(() => setMerchants([]));
     api
@@ -45,9 +53,13 @@ export function AnalyticsPage() {
   }, [month]);
 
   useEffect(() => {
+    api.get<AnalyticsMonths>("/analytics/months").then(setMonths);
     api.get<TrendPoint[]>("/analytics/trend?months=6").then(setTrend);
     api.get<Category[]>("/categories").then(setCategories);
   }, []);
+
+  const bySalary = months?.bySalary ?? false;
+  const monthWord = bySalary ? "pay month" : "month";
 
   const colorFor = (categoryId: string | null) =>
     categoryId ? (categories.find((c) => c.id === categoryId)?.color ?? "var(--muted)") : "var(--muted-light)";
@@ -62,14 +74,18 @@ export function AnalyticsPage() {
       <div className="screen-header">
         <h1 className="screen-title">Analytics</h1>
         <div className="month-picker">
-          <button onClick={() => setMonth(shiftMonth(month, -1))} aria-label="Previous month">
+          <button
+            onClick={() => setIndex((current) => current + 1)}
+            disabled={!months || index >= months.months.length - 1}
+            aria-label={`Previous ${monthWord}`}
+          >
             <Icon name="ic-chevron-left" />
           </button>
-          <span>{formatMonthLabel(month)}</span>
+          <span>{months?.months[index]?.label ?? "…"}</span>
           <button
-            onClick={() => setMonth(shiftMonth(month, 1))}
-            disabled={month >= currentMonth()}
-            aria-label="Next month"
+            onClick={() => setIndex((current) => current - 1)}
+            disabled={index === 0}
+            aria-label={`Next ${monthWord}`}
           >
             <Icon name="ic-chevron-right" />
           </button>
@@ -184,7 +200,7 @@ export function AnalyticsPage() {
 
             {view === "compare" && comparison && (
               <div className="section-block">
-                <h3>Against {formatMonthLabel(comparison.previousMonthLabel)}</h3>
+                <h3>Against {comparison.previousMonthLabel}</h3>
                 <p className="section-sub">
                   Per category as well as in total — a month that came out level overall can still have
                   doubled on one thing and halved on another.
@@ -252,17 +268,25 @@ export function AnalyticsPage() {
               <p className="section-sub">
                 {monthsWithData <= 1
                   ? "You've been using SpendLog for less than a month — the earlier bars are still empty, and that's expected."
-                  : "Spending and income side by side, month by month."}
+                  : bySalary ? "Spending and income side by side, salary day to salary day." : "Spending and income side by side, month by month."}
               </p>
               <div className="trend-wrap">
                 {trend.map((point) => {
                   const empty = point.spendMinor === 0 && point.incomeMinor === 0;
-                  const label = new Date(`${point.month}-01T00:00:00Z`).toLocaleDateString("en-IN", {
-                    month: "short",
-                    timeZone: "UTC",
-                  });
+                  // A pay month is named by the day it starts, "15 Sep"; a
+                  // calendar month by its name alone.
+                  const label = bySalary && point.from
+                    ? new Date(`${point.from}T12:00:00+05:30`).toLocaleDateString("en-IN", {
+                        day: "numeric",
+                        month: "short",
+                        timeZone: "Asia/Kolkata",
+                      })
+                    : new Date(`${point.month}-01T00:00:00Z`).toLocaleDateString("en-IN", {
+                        month: "short",
+                        timeZone: "UTC",
+                      });
                   return (
-                    <div className="trend-col" key={point.month}>
+                    <div className="trend-col" key={point.month} title={point.label}>
                       <div className="trend-bars">
                         {empty ? (
                           <div className="trend-bar placeholder" />

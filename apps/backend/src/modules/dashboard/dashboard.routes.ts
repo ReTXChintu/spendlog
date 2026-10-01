@@ -2,7 +2,8 @@ import { Router } from "express";
 import { Types } from "mongoose";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { CardStatement, EmiInstalment, EmiPlan, Loan, LoanInstalment, Perk, Transaction } from "../../models";
-import { istDayEnd, istDayKey, istDayStart, istMonthKey, istMonthStart } from "../../time";
+import { istDayEnd, istDayKey, istDayStart } from "../../time";
+import { monthSoFar as monthAgainstLast, userMonth } from "../budget/budget.months";
 import { cardStatuses, pickCards } from "../cards/cards.status";
 import { budgetPace } from "../budget/budget.pace";
 import { dailyBudget } from "../budget/budget.daily";
@@ -35,19 +36,21 @@ dashboardRouter.get("/", async (req, res) => {
 
   const today = istDayKey(now);
   const yesterday = istDayKey(new Date(now.getTime() - 24 * 60 * 60 * 1000));
-  const month = istMonthKey(now);
+  // The user's own month - salary day to salary day - like every other
+  // monthly figure in the app.
+  const month = await userMonth(userId, undefined, now);
 
   const [cards, pace, needsCategory, emis, loans, owed, perks, statements, monthSoFar, bills, daily] =
     await Promise.all([
     cardStatuses(userId, now),
     budgetPace(userId, now),
-    countNeedingACategory(userId, yesterday, month),
+    countNeedingACategory(userId, yesterday, month.start),
     activeEmis(userId),
     activeLoans(userId),
     owedBalance(userId),
     Perk.find({ userId, isActive: true, usedAt: null }).populate("accountId"),
     statementsNeedingAttention(userId),
-    monthAgainstLast(userId, now, today),
+    monthAgainstLast(userId, now),
     upcomingBills(userId, now),
     dailyBudget(userId, now),
   ]);
@@ -89,7 +92,7 @@ dashboardRouter.get("/", async (req, res) => {
  * shows the same figure — two screens disagreeing about how much is left
  * to do would make both of them untrustworthy.
  */
-async function countNeedingACategory(userId: Types.ObjectId, yesterday: string, month: string) {
+async function countNeedingACategory(userId: Types.ObjectId, yesterday: string, monthStart: Date) {
   const unfiled = {
     categoryId: null,
     isTransfer: false,
@@ -102,7 +105,7 @@ async function countNeedingACategory(userId: Types.ObjectId, yesterday: string, 
       ...unfiled,
       occurredAt: { $gte: istDayStart(yesterday), $lte: istDayEnd(yesterday) },
     }),
-    Transaction.countDocuments({ userId, ...unfiled, occurredAt: { $gte: istMonthStart(month) } }),
+    Transaction.countDocuments({ userId, ...unfiled, occurredAt: { $gte: monthStart } }),
   ]);
 
   return { yesterday: yesterdayCount, month: monthCount };
@@ -225,39 +228,4 @@ async function statementsNeedingAttention(userId: Types.ObjectId) {
       statementDate: statement.statementDate,
     })),
   };
-}
-
-/**
- * This month so far against the same point in the last one.
- *
- * Day-for-day, not month-for-month. On the 8th, a whole previous month is
- * not a comparison — it is a number three times larger, and reading that as
- * overspending would be wrong every time.
- */
-async function monthAgainstLast(userId: Types.ObjectId, now: Date, today: string) {
-  const month = istMonthKey(now);
-  const dayOfMonth = Number(today.slice(8));
-
-  const [year, mon] = month.split("-").map(Number);
-  const earlier = `${mon === 1 ? year - 1 : year}-${String(mon === 1 ? 12 : mon - 1).padStart(2, "0")}`;
-
-  const spendUpTo = async (target: string): Promise<number> => {
-    const start = istMonthStart(target);
-    const rows = await Transaction.aggregate<{ total: number }>([
-      {
-        $match: {
-          userId,
-          occurredAt: { $gte: start, $lt: new Date(start.getTime() + dayOfMonth * 24 * 60 * 60 * 1000) },
-          type: "DEBIT",
-          countedAmountMinor: { $gt: 0 },
-        },
-      },
-      { $group: { _id: null, total: { $sum: "$countedAmountMinor" } } },
-    ]);
-    return rows[0]?.total ?? 0;
-  };
-
-  const [spentMinor, previousMinor] = await Promise.all([spendUpTo(month), spendUpTo(earlier)]);
-
-  return { month, dayOfMonth, spentMinor, previousMinor, changeMinor: spentMinor - previousMinor };
 }

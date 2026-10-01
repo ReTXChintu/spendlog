@@ -5,7 +5,7 @@ import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
 import { Account, CardVault, Transaction } from "../../models";
 import { cardStatuses } from "../cards/cards.status";
-import { istMonthKey, istMonthStart } from "../../time";
+import { userMonth } from "../budget/budget.months";
 import { upcomingBills } from "../statements/statements.bills";
 import { expectedBalances, tracksBalance } from "./accounts.balance";
 import { ACCOUNT_TYPES } from "../../types";
@@ -82,7 +82,7 @@ accountsRouter.get("/overview", async (req, res) => {
               state: status.state,
             }
           : null,
-        /// What this account has spent since the first of the month, and
+        /// What this account has spent this month (salary day to salary day), and
         /// what you allowed yourself. Every account has this, because a
         /// limit you set on a bank account is worth just as much as one on
         /// a card - it was only ever a card field because cards were the
@@ -127,7 +127,8 @@ accountsRouter.get("/overview", async (req, res) => {
 });
 
 /**
- * What each account has spent since the first of the month.
+ * What each account has spent this month - the user's month, salary day
+ * to salary day where there is one.
  *
  * One aggregation rather than one per account: this runs on every load of
  * the accounts screen, and a query per account is a query per account.
@@ -141,7 +142,7 @@ async function spentThisMonth(userId: Types.ObjectId, now: Date): Promise<Map<st
       $match: {
         userId,
         type: "DEBIT",
-        occurredAt: { $gte: istMonthStart(istMonthKey(now)), $lte: now },
+        occurredAt: { $gte: (await userMonth(userId, undefined, now)).start, $lte: now },
       },
     },
     { $group: { _id: "$accountId", total: { $sum: "$countedAmountMinor" } } },

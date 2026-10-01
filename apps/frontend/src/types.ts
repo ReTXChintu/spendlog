@@ -534,15 +534,38 @@ export interface DayGroup {
 }
 
 export interface AnalyticsSummary {
+  /** The user's month: salary day to salary day, or the calendar month
+      without a pay day. Keyed YYYY-MM by the pay day that opens it. */
   month: string;
+  from?: string;
+  to?: string;
+  /** "15 Sep – 14 Oct 2026", or "September 2026". */
+  label?: string;
   totalSpendMinor: number;
   totalIncomeMinor: number;
   byCategory: { categoryId: string | null; name: string; amountMinor: number }[];
   transactionCount: number;
 }
 
+/** The user's months, newest first, for stepping through. */
+export interface AnalyticsMonths {
+  bySalary: boolean;
+  salaryDay: number | null;
+  current: string;
+  months: { month: string; from: string; to: string; label: string }[];
+}
+
+/** The system category money with people is filed under. */
+export const PEOPLE_CATEGORY_NAME = "Lent & borrowed";
+
 export interface TrendPoint {
+  /** The user's month: salary day to salary day, or the calendar month
+      without a pay day. Keyed YYYY-MM by the pay day that opens it. */
   month: string;
+  from?: string;
+  to?: string;
+  /** "15 Sep – 14 Oct 2026", or "September 2026". */
+  label?: string;
   spendMinor: number;
   incomeMinor: number;
 }
@@ -625,7 +648,14 @@ export interface MerchantSpend {
 }
 
 export interface MonthComparison {
+  /** The user's month: salary day to salary day, or the calendar month
+      without a pay day. Keyed YYYY-MM by the pay day that opens it. */
   month: string;
+  from?: string;
+  to?: string;
+  /** "15 Sep – 14 Oct 2026", or "September 2026". */
+  label?: string;
+  previousMonth?: string;
   previousMonthLabel: string;
   totalSpendMinor: number;
   previousSpendMinor: number;
@@ -640,7 +670,14 @@ export interface MonthComparison {
 }
 
 export interface MonthSoFar {
+  /** The user's month: salary day to salary day, or the calendar month
+      without a pay day. Keyed YYYY-MM by the pay day that opens it. */
   month: string;
+  from?: string;
+  to?: string;
+  /** "15 Sep – 14 Oct 2026", or "September 2026". */
+  label?: string;
+  /** Day N of the user's month, the salary day being day 1. */
   dayOfMonth: number;
   spentMinor: number;
   previousMinor: number;

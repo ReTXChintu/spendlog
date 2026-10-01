@@ -14,7 +14,7 @@ let baseUrl: string;
 let signToken: (user: { id: string; email: string }) => string;
 let models: typeof import("../../models");
 let tools: typeof import("./ai.tools");
-let periods: typeof import("./ai.periods");
+let periods: typeof import("../budget/budget.months");
 let gemini: typeof import("./ai.gemini");
 
 const realFetch = globalThis.fetch;
@@ -32,7 +32,7 @@ before(async () => {
     import("../../middleware/auth"),
     import("../../models"),
     import("./ai.tools"),
-    import("./ai.periods"),
+    import("../budget/budget.months"),
     import("./ai.gemini"),
   ]);
   signToken = auth.signSessionToken;
@@ -188,7 +188,7 @@ describe("the assistant's months", () => {
     const user = await makeUser();
     await models.User.updateOne({ _id: user.id }, { salaryDay: 15 });
 
-    const { bySalary, recent } = await periods.periodsFor(user.id, now);
+    const { bySalary, recent } = await periods.userMonths(user.id, now);
     assert.equal(bySalary, true);
     assert.deepEqual([recent[0].from, recent[0].to], ["2026-09-15", "2026-10-14"]);
     assert.deepEqual([recent[1].from, recent[1].to], ["2026-08-15", "2026-09-14"]);
@@ -208,14 +208,14 @@ describe("the assistant's months", () => {
       occurredAt: new Date("2026-09-13T10:00:00+05:30"),
     });
 
-    const { recent } = await periods.periodsFor(user.id, now);
+    const { recent } = await periods.userMonths(user.id, now);
     assert.equal(recent[0].from, "2026-09-13");
     assert.deepEqual([recent[1].from, recent[1].to], ["2026-08-15", "2026-09-12"], "no gap, no overlap");
   });
 
   it("falls back to calendar months with no pay day", async () => {
     const user = await makeUser();
-    const { bySalary, recent } = await periods.periodsFor(user.id, now);
+    const { bySalary, recent } = await periods.userMonths(user.id, now);
     assert.equal(bySalary, false);
     assert.deepEqual([recent[0].from, recent[0].to], ["2026-09-01", "2026-09-30"]);
     assert.deepEqual([recent[1].from, recent[1].to], ["2026-08-01", "2026-08-31"]);
@@ -232,7 +232,7 @@ describe("the assistant's months", () => {
       user.id,
       "spending_summary",
       { from: "2026-08-15", to: "2026-09-19", groupBy: "period" },
-      await periods.periodsFor(user.id, now)
+      await periods.userMonths(user.id, now)
     );
     assert.deepEqual(result.groups, [
       { name: "2026-08-15 to 2026-09-14", totalRupees: 300, count: 2 },
@@ -243,7 +243,7 @@ describe("the assistant's months", () => {
   it("tells the model the dates of this month and last", async () => {
     const user = await makeUser();
     await models.User.updateOne({ _id: user.id }, { salaryDay: 15 });
-    const text = gemini.monthsInstruction(await periods.periodsFor(user.id, now)).join("\n");
+    const text = gemini.monthsInstruction(await periods.userMonths(user.id, now)).join("\n");
     assert.match(text, /This month: 2026-09-15 to 2026-10-14/);
     assert.match(text, /Last month: 2026-08-15 to 2026-09-14/);
   });

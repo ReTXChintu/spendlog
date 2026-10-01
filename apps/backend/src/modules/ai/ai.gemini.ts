@@ -1,6 +1,6 @@
 import { Types } from "mongoose";
 import { istDayKey } from "../../time";
-import { Periods, periodsFor } from "./ai.periods";
+import { UserMonths as Periods, userMonths as periodsFor } from "../budget/budget.months";
 import { runTool, toolDeclarations } from "./ai.tools";
 
 /**

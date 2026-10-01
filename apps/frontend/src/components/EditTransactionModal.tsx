@@ -5,9 +5,11 @@ import {
   Account,
   CardStatus,
   Category,
+  Contact,
   FixedCommitment,
   Loan,
   MerchantPreset,
+  PEOPLE_CATEGORY_NAME,
   PersonShare,
   Transaction,
   TransactionType,
@@ -95,6 +97,9 @@ export function EditTransactionModal({
   const [groupLabel, setGroupLabel] = useState(transaction?.split?.groupLabel ?? "");
   const [isSettlement, setIsSettlement] = useState(transaction?.isSettlement ?? false);
   const [people, setPeople] = useState<PersonShare[]>(transaction?.people ?? []);
+  // Who was picked first in this edit, so "Lent" can name the payment
+  // after them even when it is pressed after they were chosen.
+  const [firstPersonName, setFirstPersonName] = useState<string | null>(null);
   // On a trip, an expense is everyone's unless it says otherwise. The only
   // narrowing worth a control is "this one was just mine".
   const [tripJustMine, setTripJustMine] = useState((transaction?.tripShareWith?.length ?? 0) > 0);
@@ -249,6 +254,36 @@ export function EditTransactionModal({
 
     const category = typeof picked.categoryId === "object" ? picked.categoryId?.id : picked.categoryId;
     if (!categoryId && category) setCategoryId(category);
+  }
+
+  /**
+   * Money lent to someone, or paid back by them, is about that person: the
+   * merchant a bank message gives it is a UPI handle at best, and none of
+   * the spending categories fit. So it takes their name and the people
+   * category. An ordinary split - a dinner with Rahul - keeps its merchant
+   * and category, and only borrows the name when it has none.
+   */
+  const peopleCategoryId = categories.find((category) => category.name === PEOPLE_CATEGORY_NAME)?.id ?? null;
+
+  function nameAfterPerson(name: string, isLend: boolean) {
+    if (isLend || isSettlement) {
+      setMerchant(name);
+      if (peopleCategoryId) setCategoryId(peopleCategoryId);
+    } else if (!merchant.trim()) {
+      setMerchant(name);
+    }
+  }
+
+  function personAdded(contact: Contact) {
+    if (people.length > 0) return; // The first person names it.
+    setFirstPersonName(contact.name);
+    nameAfterPerson(contact.name, type === "DEBIT" && isSplit && shareMinor === 0);
+  }
+
+  function markLent() {
+    setMyShare("0");
+    if (firstPersonName) nameAfterPerson(firstPersonName, true);
+    else if (peopleCategoryId) setCategoryId(peopleCategoryId);
   }
 
   async function save() {
@@ -667,7 +702,7 @@ export function EditTransactionModal({
                 <p className="field-hint">
                   {owedHint}{" "}
                   {type === "DEBIT" && shareMinor !== 0 && (
-                    <button type="button" className="link-button" onClick={() => setMyShare("0")}>
+                    <button type="button" className="link-button" onClick={markLent}>
                       Lent — none of it was mine
                     </button>
                   )}
@@ -681,6 +716,7 @@ export function EditTransactionModal({
                     roomMinor={notMineMinor}
                     value={people}
                     onChange={setPeople}
+                    onPersonAdded={personAdded}
                   />
                 </div>
               )}
@@ -729,6 +765,7 @@ export function EditTransactionModal({
                 roomMinor={totalMinor}
                 value={people}
                 onChange={setPeople}
+                onPersonAdded={personAdded}
               />
             </div>
           )}
