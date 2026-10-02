@@ -1,4 +1,7 @@
 import '../utils/format.dart';
+import 'home_models.dart';
+
+export 'home_models.dart';
 
 class Category {
   final String id;
@@ -80,6 +83,9 @@ class Account {
   /// leaves the server, so this is all a client can know about it.
   final bool hasStatementPassword;
 
+  /// The one emergency account, kept out of money on hand.
+  final bool isSavings;
+
   Account({
     required this.id,
     required this.bankName,
@@ -97,6 +103,7 @@ class Account {
     this.dueDay,
     this.isActive = true,
     this.hasStatementPassword = false,
+    this.isSavings = false,
   });
 
   /// What to call it on screen: the name given to it, else the bank's own.
@@ -124,6 +131,7 @@ class Account {
         dueDay: json['dueDay'] as int?,
         isActive: json['isActive'] as bool? ?? true,
         hasStatementPassword: json['hasStatementPassword'] as bool? ?? false,
+        isSavings: json['isSavings'] as bool? ?? false,
       );
 }
 
@@ -224,8 +232,20 @@ class Transaction {
   final String? emiRole;
   final bool isTransfer;
 
+  /// On a transfer between own accounts: the other account. A DEBIT moved
+  /// money from [account] to this one; a CREDIT brought it from this one.
+  final String? transferAccountId;
+
+  /// Read-only: set when both legs of a transfer arrived as separate rows.
+  final String? transferPairId;
+
+  /// CREDIT only: money received for a purchase still to come. Not income
+  /// until it is no longer waiting.
+  final bool isEarmarked;
+
   /// A one-off the daily budget should not score a day against. Still
-  /// counted everywhere else, because the money still left.
+  /// counted everywhere else, because the money still left. On a CREDIT:
+  /// keep this money out of the savings bucket.
   final bool isSpecial;
 
   /// Marked by hand: the credit that opens a spending period.
@@ -274,6 +294,9 @@ class Transaction {
     this.emiPlanId,
     this.emiRole,
     required this.isTransfer,
+    this.transferAccountId,
+    this.transferPairId,
+    this.isEarmarked = false,
     this.isSpecial = false,
     this.isSalary = false,
     this.cardPaymentFor,
@@ -327,6 +350,9 @@ class Transaction {
         emiPlanId: json['emiPlanId'] as String?,
         emiRole: json['emiRole'] as String?,
         isTransfer: json['isTransfer'] as bool? ?? false,
+        transferAccountId: json['transferAccountId'] is String ? json['transferAccountId'] as String : null,
+        transferPairId: json['transferPairId'] is String ? json['transferPairId'] as String : null,
+        isEarmarked: json['isEarmarked'] == true,
         isSpecial: json['isSpecial'] as bool? ?? false,
         isSalary: json['isSalary'] as bool? ?? false,
         cardPaymentFor: json['cardPaymentFor'] as String?,
@@ -731,6 +757,9 @@ class DailyBudget {
   final int keptOutCount;
   final List<DailyBudgetDay> days;
 
+  /// Money in on top of salary this period, already added to bucketMinor.
+  final int extraIncomeMinor;
+
   DailyBudget({
     required this.configured,
     this.dailyBudgetMinor = 0,
@@ -746,6 +775,7 @@ class DailyBudget {
     this.keptOutMinor = 0,
     this.keptOutCount = 0,
     this.days = const [],
+    this.extraIncomeMinor = 0,
   });
 
   factory DailyBudget.fromJson(Map<String, dynamic> json) => DailyBudget(
@@ -765,6 +795,7 @@ class DailyBudget {
         days: (json['days'] as List<dynamic>? ?? [])
             .map((row) => DailyBudgetDay.fromJson(row as Map<String, dynamic>))
             .toList(),
+        extraIncomeMinor: json['extraIncomeMinor'] as int? ?? 0,
       );
 }
 
@@ -1152,6 +1183,16 @@ class Perk {
   final bool isLive;
   final int? daysLeft;
 
+  /// The app or bank it came from ("Google Pay", "CRED", "HDFC Bank").
+  final String? source;
+
+  /// The terms and conditions, as written.
+  final String? terms;
+
+  /// Everything read off the screenshot it came from, kept so the small
+  /// print the form has no field for is still there to check.
+  final String? extractedText;
+
   Perk({
     required this.id,
     required this.kind,
@@ -1171,6 +1212,9 @@ class Perk {
     this.notes,
     this.isLive = true,
     this.daysLeft,
+    this.source,
+    this.terms,
+    this.extractedText,
   });
 
   bool get isCoupon => kind == 'COUPON';
@@ -1209,6 +1253,9 @@ class Perk {
       notes: json['notes'] as String?,
       isLive: json['isLive'] as bool? ?? true,
       daysLeft: json['daysLeft'] as int?,
+      source: json['source'] as String?,
+      terms: json['terms'] as String?,
+      extractedText: json['extractedText'] as String?,
     );
   }
 }
@@ -1468,6 +1515,15 @@ class DashboardData {
   final List<UpcomingBill> bills;
   final MonthSoFar monthSoFar;
 
+  /// Bank and cash, the savings account kept out of the total.
+  final MoneyOnHand money;
+
+  /// Money received for purchases still to come.
+  final Earmarks earmarks;
+
+  /// Savings-plan rules being broken this month.
+  final List<PlanRule> planWarnings;
+
   DashboardData({
     required this.pace,
     required this.daily,
@@ -1487,7 +1543,11 @@ class DashboardData {
     required this.stuckStatements,
     required this.bills,
     required this.monthSoFar,
-  });
+    MoneyOnHand? money,
+    Earmarks? earmarks,
+    this.planWarnings = const [],
+  })  : money = money ?? MoneyOnHand(),
+        earmarks = earmarks ?? Earmarks();
 
   factory DashboardData.fromJson(Map<String, dynamic> json) {
     final needs = json['needsCategory'] as Map<String, dynamic>? ?? {};
@@ -1524,6 +1584,11 @@ class DashboardData {
           .map((bill) => UpcomingBill.fromJson(bill as Map<String, dynamic>))
           .toList(),
       monthSoFar: MonthSoFar.fromJson(json['monthSoFar'] as Map<String, dynamic>? ?? {}),
+      money: MoneyOnHand.fromJson(json['money'] as Map<String, dynamic>? ?? {}),
+      earmarks: Earmarks.fromJson(json['earmarks'] as Map<String, dynamic>? ?? {}),
+      planWarnings: (json['planWarnings'] as List<dynamic>? ?? [])
+          .map((w) => PlanRule.fromJson(w as Map<String, dynamic>))
+          .toList(),
     );
   }
 }

@@ -9,6 +9,8 @@ import 'package:timezone/data/latest_10y.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:workmanager/workmanager.dart';
 import '../config.dart';
+import 'perk_reader.dart';
+import 'plan_warning_rule.dart';
 
 const String _dailyEnabledKey = 'spendlog_reminder_daily';
 const String _nagEnabledKey = 'spendlog_reminder_nag';
@@ -20,10 +22,27 @@ const String _billsSeenKey = 'spendlog_reminder_bills_seen';
 
 const String _nagTask = 'spendlog-review-nag';
 
+/// Warn when the savings plan is being broken. On unless switched off.
+const String _planEnabledKey = 'spendlog_reminder_plan';
+const String _planLastShownKey = 'spendlog_plan_warn_last';
+const String _planSignatureKey = 'spendlog_plan_warn_signature';
+const String _planDayKey = 'spendlog_plan_warn_day';
+const String _planCountKey = 'spendlog_plan_warn_count';
+
+/// The screenshot import being waited on. Whoever sees it finish first -
+/// the app or the background task - removes this and says so, which is
+/// what keeps it to one notification.
+const String perkImportWatchKey = 'spendlog_perk_import_watch';
+
+/// What a coupons notification opens when tapped.
+const String perksPayload = 'perks';
+
 /// Notification ids. Fixed so that re-scheduling replaces rather than piles up.
 const int _dailyNotificationId = 1;
 const int _nagNotificationId = 2;
 const int _billNotificationId = 3;
+const int _couponNotificationId = 4;
+const int _planNotificationId = 5;
 
 /// The hours the nagging runs between.
 const int _nagFromHour = 6;
@@ -76,10 +95,81 @@ class ReminderService {
       settings: const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
       ),
+      onDidReceiveNotificationResponse: (response) => _opened(response.payload),
     );
 
     await Workmanager().initialize(reminderTaskDispatcher);
     _ready = true;
+
+    // A tap that launched the app from cold arrives here rather than
+    // through the callback above.
+    final launch = await _plugin.getNotificationAppLaunchDetails();
+    if (launch?.didNotificationLaunchApp ?? false) {
+      _opened(launch!.notificationResponse?.payload);
+    }
+
+    // Registered on every launch: the savings-plan warning is on by
+    // default, so nobody ever flips a switch that would register it.
+    await _rescheduleBackgroundTask(keep: true);
+  }
+
+  /// Set by whoever can navigate; a tap that comes before that is held.
+  void Function(String payload)? _onOpen;
+  String? _pendingOpen;
+
+  set onNotificationOpened(void Function(String payload)? handler) {
+    _onOpen = handler;
+    final pending = _pendingOpen;
+    if (handler != null && pending != null) {
+      _pendingOpen = null;
+      handler(pending);
+    }
+  }
+
+  void _opened(String? payload) {
+    if (payload == null) return;
+    final handler = _onOpen;
+    if (handler == null) {
+      _pendingOpen = payload;
+    } else {
+      handler(payload);
+    }
+  }
+
+  /// "3 coupons ready to review", from the app while it is running.
+  Future<void> showImportFinished(PerkImportJob job) async {
+    await init();
+    await _showImportFinished(_plugin, job);
+  }
+
+  Future<bool> planWarningsEnabled() async =>
+      (await SharedPreferences.getInstance()).getBool(_planEnabledKey) ?? true;
+
+  Future<bool> setPlanWarningsEnabled(bool enabled) async {
+    await init();
+    final prefs = await SharedPreferences.getInstance();
+
+    if (!enabled) {
+      await prefs.setBool(_planEnabledKey, false);
+      await _plugin.cancel(id: _planNotificationId);
+      await _rescheduleBackgroundTask();
+      return false;
+    }
+
+    if (!await requestPermission()) {
+      await prefs.setBool(_planEnabledKey, false);
+      return false;
+    }
+    await prefs.setBool(_planEnabledKey, true);
+    await _rescheduleBackgroundTask();
+    return true;
+  }
+
+  /// Make sure the background task is there while an import is being
+  /// waited on, so it can still say "done" after the app is closed.
+  Future<void> ensureBackgroundTask() async {
+    await init();
+    await _rescheduleBackgroundTask(keep: true);
   }
 
   /// Below Android 13 this reports whether notifications are switched on
@@ -259,18 +349,27 @@ class ReminderService {
   /// The one periodic task both background reminders run off. Registered
   /// while either wants it and cancelled once neither does, so nothing
   /// wakes up to ask questions nobody is listening for.
-  Future<void> _rescheduleBackgroundTask() async {
+  ///
+  /// [keep] leaves an already-registered task alone, so calling this on
+  /// every launch does not keep pushing its next run further away.
+  Future<void> _rescheduleBackgroundTask({bool keep = false}) async {
     final prefs = await SharedPreferences.getInstance();
-    final wanted = (prefs.getBool(_nagEnabledKey) ?? false) || (prefs.getBool(_billsEnabledKey) ?? false);
+    final wanted = (prefs.getBool(_nagEnabledKey) ?? false) ||
+        (prefs.getBool(_billsEnabledKey) ?? false) ||
+        (prefs.getBool(_planEnabledKey) ?? true) ||
+        prefs.getString(perkImportWatchKey) != null;
 
-    await Workmanager().cancelByUniqueName(_nagTask);
-    if (!wanted) return;
+    if (!wanted) {
+      await Workmanager().cancelByUniqueName(_nagTask);
+      return;
+    }
+    if (!keep) await Workmanager().cancelByUniqueName(_nagTask);
 
     await Workmanager().registerPeriodicTask(
       _nagTask,
       _nagTask,
       frequency: const Duration(minutes: 30),
-      existingWorkPolicy: ExistingPeriodicWorkPolicy.replace,
+      existingWorkPolicy: keep ? ExistingPeriodicWorkPolicy.keep : ExistingPeriodicWorkPolicy.replace,
       constraints: Constraints(networkType: NetworkType.connected),
     );
   }
@@ -312,6 +411,8 @@ void reminderTaskDispatcher() {
     // scheduling.
     final unfiled = await _remindIfAnythingIsUnfiled();
     final bills = await _tellAboutNewBills();
+    await _tellAboutFinishedImport();
+    await _warnAboutSavingsPlan();
     return unfiled && bills;
   });
 }
@@ -456,4 +557,147 @@ Future<bool> _tellAboutNewBills() async {
   }
 
   return true;
+}
+
+Future<FlutterLocalNotificationsPlugin> _backgroundPlugin() async {
+  final plugin = FlutterLocalNotificationsPlugin();
+  await plugin.initialize(
+    settings: const InitializationSettings(
+      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+    ),
+  );
+  return plugin;
+}
+
+Future<void> _showImportFinished(FlutterLocalNotificationsPlugin plugin, PerkImportJob job) async {
+  final String title;
+  if (job.status == 'FAILED' || (job.added == 0 && job.failed > 0 && job.duplicates == 0)) {
+    title = 'Your screenshots could not be read';
+  } else if (job.added == 0) {
+    title = 'No new coupons in those screenshots';
+  } else {
+    title = '${job.added} ${job.added == 1 ? 'coupon' : 'coupons'} ready to review';
+  }
+
+  final extra = <String>[
+    if (job.duplicates > 0) '${job.duplicates} you already had',
+    if (job.failed > 0) '${job.failed} could not be read',
+  ];
+
+  await plugin.show(
+    id: _couponNotificationId,
+    title: title,
+    body: extra.isEmpty ? 'Tap to check them over in Perks.' : '${extra.join(', ')}. Tap to open Perks.',
+    notificationDetails: const NotificationDetails(
+      android: AndroidNotificationDetails(
+        'spendlog-coupons',
+        'Coupons',
+        channelDescription: 'Said when screenshots you sent have been read into coupons.',
+        importance: Importance.defaultImportance,
+      ),
+    ),
+    payload: perksPayload,
+  );
+}
+
+/// The import the app was waiting on, if it finished while the app was
+/// closed. Once only: the watch key comes off before anything is shown.
+Future<void> _tellAboutFinishedImport() async {
+  final prefs = await SharedPreferences.getInstance();
+  final jobId = prefs.getString(perkImportWatchKey);
+  if (jobId == null) return;
+
+  final token = prefs.getString(tokenStorageKey);
+  if (token == null) return;
+
+  try {
+    final response = await http.get(
+      Uri.parse('$apiBaseUrl/perks/import/$jobId'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(const Duration(seconds: 10));
+
+    // Gone from the server: nothing left to wait for.
+    if (response.statusCode == 404) {
+      await prefs.remove(perkImportWatchKey);
+      return;
+    }
+    if (response.statusCode != 200) return;
+
+    final job = PerkImportJob.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    if (job.isRunning) return;
+
+    // The app may have seen it finish since this isolate read the prefs.
+    await prefs.reload();
+    if (prefs.getString(perkImportWatchKey) != jobId) return;
+    await prefs.remove(perkImportWatchKey);
+
+    await _showImportFinished(await _backgroundPlugin(), job);
+  } catch (_) {
+    // Offline; the next run asks again.
+  }
+}
+
+/// Say it again while the savings plan is being broken, within the limits
+/// in plan_warning_rule.dart.
+Future<void> _warnAboutSavingsPlan() async {
+  final prefs = await SharedPreferences.getInstance();
+  if (!(prefs.getBool(_planEnabledKey) ?? true)) return;
+
+  final token = prefs.getString(tokenStorageKey);
+  if (token == null) return;
+
+  final nowIst = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
+  // Checked before asking the server, so the quiet hours cost nothing.
+  if (nowIst.hour < planWarnFromHour || nowIst.hour >= planWarnUntilHour) return;
+
+  final history = PlanWarnHistory(
+    lastShownAt: DateTime.tryParse(prefs.getString(_planLastShownKey) ?? ''),
+    lastSignature: prefs.getString(_planSignatureKey),
+    day: prefs.getString(_planDayKey),
+    shownThatDay: prefs.getInt(_planCountKey) ?? 0,
+  );
+
+  try {
+    final response = await http.get(
+      Uri.parse('$apiBaseUrl/ai/plan/warnings'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(const Duration(seconds: 15));
+    // 409 means no Gemini key; anything but 200 is nothing to say.
+    if (response.statusCode != 200) return;
+
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    final warnings = ((body['warnings'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    if (warnings.isEmpty) {
+      // Back on track: take an old warning off the shade.
+      await (await _backgroundPlugin()).cancel(id: _planNotificationId);
+      return;
+    }
+
+    final signature = planWarningSignature(warnings);
+    if (!shouldWarnAboutPlan(nowIst: nowIst, signature: signature, history: history)) return;
+
+    final message = planWarningMessage(warnings);
+    await (await _backgroundPlugin()).show(
+      id: _planNotificationId,
+      title: message.title,
+      body: message.body,
+      notificationDetails: NotificationDetails(
+        android: AndroidNotificationDetails(
+          'spendlog-plan',
+          'Savings plan',
+          channelDescription: 'A few times a day at most, while your savings plan is being broken.',
+          importance: Importance.defaultImportance,
+          styleInformation: BigTextStyleInformation(message.body),
+        ),
+      ),
+    );
+
+    final next = recordPlanWarning(history, nowIst, signature);
+    await prefs.setString(_planLastShownKey, next.lastShownAt!.toIso8601String());
+    await prefs.setString(_planSignatureKey, signature);
+    await prefs.setString(_planDayKey, next.day!);
+    await prefs.setInt(_planCountKey, next.shownThatDay);
+  } catch (_) {
+    // Offline, no plan, no key: nothing worth waking anyone for.
+  }
 }

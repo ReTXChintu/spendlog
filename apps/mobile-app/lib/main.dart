@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
 import 'services/api_client.dart';
+import 'services/perk_import_watcher.dart';
 import 'services/reminder_service.dart';
 import 'services/theme_service.dart';
 import 'services/update_service.dart';
@@ -24,6 +25,9 @@ void main() {
   // background task that checks yesterday needs a registered callback to
   // call back into, and it can fire long before anyone opens Settings.
   ReminderService.instance.init().catchError((_) {});
+  // Routes the "coupons ready" tap, and keeps watching a screenshot import
+  // that was still being read when the app was last closed.
+  PerkImportWatcher.instance.resume().catchError((_) {});
   runApp(const SpendLogApp());
 }
 
@@ -36,6 +40,7 @@ class SpendLogApp extends StatelessWidget {
       animation: ThemeService.instance,
       builder: (context, _) => MaterialApp(
         title: 'SpendLog',
+        navigatorKey: appNavigatorKey,
         // Tokens from the approved design; see lib/theme.dart.
         theme: buildTheme(Brightness.light),
         darkTheme: buildTheme(Brightness.dark),

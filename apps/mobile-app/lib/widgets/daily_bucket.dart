@@ -16,9 +16,12 @@ import '../utils/format.dart';
 /// in savings. A chart of the days behind it is a second card someone can
 /// ask for - this one answers "where do I stand" at a glance.
 class DailyBucket extends StatelessWidget {
-  const DailyBucket({super.key, required this.daily});
+  const DailyBucket({super.key, required this.daily, this.framed = true});
 
   final DailyBudget daily;
+
+  /// False when it sits inside a Home tile that already draws the box.
+  final bool framed;
 
   @override
   Widget build(BuildContext context) {
@@ -31,18 +34,24 @@ class DailyBucket extends StatelessWidget {
       children: [
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: c.surface,
-            border: Border.all(color: c.line),
-            borderRadius: BorderRadius.circular(T.rMd),
-          ),
+          padding: framed ? const EdgeInsets.all(16) : EdgeInsets.zero,
+          decoration: framed
+              ? BoxDecoration(
+                  color: c.surface,
+                  border: Border.all(color: c.line),
+                  borderRadius: BorderRadius.circular(T.rMd),
+                )
+              : null,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                formatMoney(daily.bucketMinor.abs()),
-                style: kNum.copyWith(fontSize: 26, fontWeight: FontWeight.w800, color: tint),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  formatMoney(daily.bucketMinor.abs()),
+                  style: kNum.copyWith(fontSize: framed ? 26 : 22, fontWeight: FontWeight.w800, color: tint),
+                ),
               ),
               Text(
                 saved ? 'in savings' : 'from savings',
@@ -53,6 +62,14 @@ class DailyBucket extends StatelessWidget {
                 '${formatMoney(daily.spentMinor)} spent of ${formatMoney(daily.allowedMinor)} budget',
                 style: TextStyle(fontSize: 12.5, color: c.ink70),
               ),
+              // Said so a bucket bigger than the days explain is not a puzzle.
+              if (daily.extraIncomeMinor > 0) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'Includes ${formatMoney(daily.extraIncomeMinor)} received on top of salary.',
+                  style: TextStyle(fontSize: 11.5, color: c.credit),
+                ),
+              ],
             ],
           ),
         ),

@@ -202,13 +202,14 @@ class _RefundSheetState extends State<_RefundSheet> {
             ),
             const SizedBox(height: 14),
             Text(
-              'What is this a refund of?',
+              widget.refund.isEarmarked ? 'What did this money pay for?' : 'What is this a refund of?',
               style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: c.ink),
             ),
             const SizedBox(height: 4),
             Text(
               '${widget.refund.merchant ?? 'This credit'} · '
-              '${formatMoney(widget.refund.amountMinor)} back · pick as many as it covers',
+              '${formatMoney(widget.refund.amountMinor)} '
+              '${widget.refund.isEarmarked ? 'set aside' : 'back'} · pick as many as it covers',
               style: TextStyle(fontSize: 12.5, color: c.muted),
             ),
             const SizedBox(height: 14),
@@ -223,7 +224,9 @@ class _RefundSheetState extends State<_RefundSheet> {
                 child: Text(
                   // Either side, because money can arrive first and be
                   // spent afterwards - a deposit back before the new booking.
-                  'No payment in the 30 days either side of this credit to match it against.',
+                  widget.refund.isEarmarked
+                      ? 'No payment since this money came in to match it against yet.'
+                      : 'No payment in the 30 days either side of this credit to match it against.',
                   style: TextStyle(fontSize: 12.5, height: 1.45, color: c.muted),
                 ),
               )
@@ -328,9 +331,14 @@ class _RefundSheetState extends State<_RefundSheet> {
                       label: _picked.length == 1 ? 'Covering 1' : 'Covering ${_picked.length}',
                       value: formatMoneyShort(_allocated),
                     ),
-                    _Stat(label: 'Never came back', value: formatMoneyShort(_lost)),
                     _Stat(
-                      label: _unallocated < 0 ? 'Over' : 'Left as income',
+                      label: widget.refund.isEarmarked ? 'Paid by you' : 'Never came back',
+                      value: formatMoneyShort(_lost),
+                    ),
+                    _Stat(
+                      label: _unallocated < 0
+                          ? 'Over'
+                          : (widget.refund.isEarmarked ? 'Still set aside' : 'Left as income'),
                       value: formatMoneyShort(_unallocated.abs()),
                     ),
                   ],
@@ -339,8 +347,11 @@ class _RefundSheetState extends State<_RefundSheet> {
             ],
             const SizedBox(height: 12),
             Text(
-              'Whatever is allocated stops counting as income, and each purchase costs whatever did '
-              'not come back.',
+              widget.refund.isEarmarked
+                  ? 'Each purchase picked is paid for by this money, so it stops counting as your own '
+                      'spending.'
+                  : 'Whatever is allocated stops counting as income, and each purchase costs whatever '
+                      'did not come back.',
               style: TextStyle(fontSize: 11.8, height: 1.45, color: c.mutedLight),
             ),
             if (_error != null) ...[
@@ -353,7 +364,7 @@ class _RefundSheetState extends State<_RefundSheet> {
                 if (widget.refund.refundOf.isNotEmpty)
                   TextButton(
                     onPressed: _saving ? null : () => _save([]),
-                    child: const Text('Not a refund'),
+                    child: Text(widget.refund.isEarmarked ? 'Unlink all' : 'Not a refund'),
                   ),
                 const Spacer(),
                 TextButton(
@@ -368,7 +379,7 @@ class _RefundSheetState extends State<_RefundSheet> {
                             for (final entry in _picked.entries)
                               {'transactionId': entry.key, 'amountMinor': entry.value},
                           ]),
-                  child: Text(_saving ? 'Saving…' : 'Link refund'),
+                  child: Text(_saving ? 'Saving…' : (widget.refund.isEarmarked ? 'Link' : 'Link refund')),
                 ),
               ],
             ),

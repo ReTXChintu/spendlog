@@ -2,9 +2,9 @@ import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import '../services/sms_service.dart';
 import '../theme.dart';
-import 'analytics_screen.dart';
 import 'ask_screen.dart';
 import 'dashboard_screen.dart';
+import 'home_screen.dart';
 import 'settings_screen.dart';
 import 'transactions_screen.dart';
 import 'trips_screen.dart';
@@ -19,7 +19,9 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
-  static const _titles = ['Dashboard', 'Transactions', 'Trips', 'Analytics', 'Settings'];
+  // Analytics is a tab inside Home now, beside the Dashboard.
+  static const _titles = ['Home', 'Transactions', 'Trips', 'Settings'];
+  static const _settingsIndex = 3;
 
   // The dashboard reloads when you come back to it, since half of what
   // it shows is a count of jobs the other tabs are where you do.
@@ -51,26 +53,29 @@ class _HomeShellState extends State<HomeShell> {
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => AskScreen(
-          onOpenSettings: () {
-            setState(() => _index = 4);
-            _settings.currentState?.showAssistant();
-          },
+          onOpenSettings: _openAssistantSettings,
         ),
       ),
     );
   }
 
+  /// Settings, at the assistant's card: where a Gemini key is added.
+  void _openAssistantSettings() {
+    setState(() => _index = _settingsIndex);
+    _settings.currentState?.showAssistant();
+  }
+
   @override
   Widget build(BuildContext context) {
     final screens = [
-      DashboardScreen(
-        key: _dashboard,
+      HomeScreen(
+        dashboardKey: _dashboard,
         onOpenTransactions: () => setState(() => _index = 1),
-        onOpenSettings: () => setState(() => _index = 4),
+        onOpenSettings: () => setState(() => _index = _settingsIndex),
+        onOpenAiSettings: _openAssistantSettings,
       ),
-      TransactionsScreen(onOpenSettings: () => setState(() => _index = 4)),
+      TransactionsScreen(onOpenSettings: () => setState(() => _index = _settingsIndex)),
       const TripsScreen(),
-      const AnalyticsScreen(),
       SettingsScreen(key: _settings),
     ];
 
@@ -114,8 +119,8 @@ class _HomeShellState extends State<HomeShell> {
         },
         destinations: const [
           NavigationDestination(
-            icon: Icon(Icons.dashboard_outlined),
-            selectedIcon: Icon(Icons.dashboard),
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home),
             label: 'Home',
           ),
           NavigationDestination(
@@ -127,11 +132,6 @@ class _HomeShellState extends State<HomeShell> {
             icon: Icon(Icons.luggage_outlined),
             selectedIcon: Icon(Icons.luggage),
             label: 'Trips',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.trending_up_outlined),
-            selectedIcon: Icon(Icons.trending_up),
-            label: 'Analytics',
           ),
           NavigationDestination(
             icon: Icon(Icons.settings_outlined),

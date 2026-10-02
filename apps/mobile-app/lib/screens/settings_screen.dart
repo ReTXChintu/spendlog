@@ -49,6 +49,7 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
   DateTime? _nagLastRun;
   bool _nagReminder = false;
   bool _billReminder = false;
+  bool _planWarnings = true;
 
   List<MerchantPreset> _presets = [];
   List<Category> _categories = [];
@@ -430,11 +431,13 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
     final nag = await ReminderService.instance.nagEnabled();
     final bills = await ReminderService.instance.billsEnabled();
     final lastRun = await ReminderService.instance.followUpsLastRan();
+    final plan = await ReminderService.instance.planWarningsEnabled();
     if (!mounted) return;
     setState(() {
       _dailyReminder = daily;
       _nagReminder = nag;
       _billReminder = bills;
+      _planWarnings = plan;
       _nagLastRun = lastRun;
     });
   }
@@ -447,6 +450,8 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
         _dailyReminder = enabled;
       } else if (which == 'nag') {
         _nagReminder = enabled;
+      } else if (which == 'plan') {
+        _planWarnings = enabled;
       } else {
         _billReminder = enabled;
       }
@@ -456,6 +461,7 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
     final armed = switch (which) {
       'daily' => await ReminderService.instance.setDailyEnabled(enabled),
       'nag' => await ReminderService.instance.setNagEnabled(enabled),
+      'plan' => await ReminderService.instance.setPlanWarningsEnabled(enabled),
       _ => await ReminderService.instance.setBillsEnabled(enabled),
     };
 
@@ -465,6 +471,8 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
         _dailyReminder = false;
       } else if (which == 'nag') {
         _nagReminder = false;
+      } else if (which == 'plan') {
+        _planWarnings = false;
       } else {
         _billReminder = false;
       }
@@ -789,6 +797,13 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
                       'dashboard carries it after that until it is paid.',
                   value: _billReminder,
                   onChanged: (on) => _setReminder('bills', on),
+                ),
+                _ToggleRow(
+                  title: 'Warn me when I break my savings plan',
+                  subtitle: 'Up to 3 times a day, 8am to 10pm, while a rule in your AI savings '
+                      'plan is being broken. Needs a Gemini key and a plan.',
+                  value: _planWarnings,
+                  onChanged: (on) => _setReminder('plan', on),
                 ),
                 _ToggleRow(
                   title: 'Keep reminding',

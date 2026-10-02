@@ -42,6 +42,20 @@ const _missingLabel = {
   'code': 'the code',
 };
 
+/// The usual places a coupon or offer comes from in India. Suggestions
+/// only - anything can be typed.
+const _sourceSuggestions = [
+  'Google Pay',
+  'PhonePe',
+  'Paytm',
+  'CRED',
+  'Amazon Pay',
+  'HDFC Bank',
+  'ICICI Bank',
+  'SBI Card',
+  'Axis Bank',
+];
+
 /// Minor units as whole rupees, for a field somebody types into.
 String _rupees(int? minor) => minor == null ? '' : (minor ~/ 100).toString();
 
@@ -53,6 +67,8 @@ class _PerkSheetState extends State<PerkSheet> {
   late final TextEditingController _maxDiscount;
   late final TextEditingController _minSpend;
   late final TextEditingController _code;
+  late final TextEditingController _source;
+  late final TextEditingController _terms;
 
   late String _kind;
   late bool _asPercent;
@@ -89,6 +105,8 @@ class _PerkSheetState extends State<PerkSheet> {
       text: _rupees(perk?.minSpendMinor ?? draft?.minSpendMinor),
     );
     _code = TextEditingController(text: perk?.code ?? draft?.code ?? '');
+    _source = TextEditingController(text: perk?.source ?? draft?.source ?? '');
+    _terms = TextEditingController(text: perk?.terms ?? draft?.terms ?? '');
   }
 
   @override
@@ -100,6 +118,8 @@ class _PerkSheetState extends State<PerkSheet> {
     _maxDiscount.dispose();
     _minSpend.dispose();
     _code.dispose();
+    _source.dispose();
+    _terms.dispose();
     super.dispose();
   }
 
@@ -128,6 +148,8 @@ class _PerkSheetState extends State<PerkSheet> {
       'minSpendMinor': _minorOrNull(_minSpend),
       'expiresOn': _expiresOn?.toIso8601String(),
       'code': _code.text.trim().isEmpty ? null : _code.text.trim(),
+      'source': _source.text.trim().isEmpty ? null : _source.text.trim(),
+      'terms': _terms.text.trim().isEmpty ? null : _terms.text.trim(),
     };
 
     try {
@@ -327,6 +349,70 @@ class _PerkSheetState extends State<PerkSheet> {
                           ? 'No expiry'
                           : '${_expiresOn!.day}/${_expiresOn!.month}/${_expiresOn!.year}',
                       style: TextStyle(color: _expiresOn == null ? c.mutedLight : c.ink),
+                    ),
+                  ),
+                ),
+              ],
+
+              const SizedBox(height: 16),
+              _field(c, 'From (app or bank)', _source, hint: 'Google Pay, CRED, HDFC Bank…'),
+              const SizedBox(height: 8),
+              // Tap to fill rather than a dropdown: the list is a shortcut,
+              // and a bank not on it still has to be typeable.
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final suggestion in _sourceSuggestions)
+                    if (suggestion.toLowerCase() != _source.text.trim().toLowerCase())
+                      ActionChip(
+                        label: Text(suggestion, style: const TextStyle(fontSize: 12)),
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => setState(() => _source.text = suggestion),
+                      ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _terms,
+                minLines: 2,
+                maxLines: 6,
+                style: TextStyle(color: c.ink),
+                decoration: const InputDecoration(
+                  labelText: 'Terms & conditions',
+                  hintText: 'Valid once per user. Not on sale items.',
+                  alignLabelWithHint: true,
+                  isDense: true,
+                ),
+              ),
+
+              // What was read off the screenshot, for checking the fields
+              // above against. Not editable: it is a record of the picture.
+              if ((widget.perk?.extractedText?.trim() ?? '').isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Text(
+                  'TEXT READ FROM THE SCREENSHOT',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.5,
+                    color: c.muted,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Container(
+                  width: double.infinity,
+                  constraints: const BoxConstraints(maxHeight: 220),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: c.paper,
+                    border: Border.all(color: c.line),
+                    borderRadius: BorderRadius.circular(T.rSm),
+                  ),
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                      widget.perk!.extractedText!.trim(),
+                      style: TextStyle(fontSize: 12, height: 1.5, color: c.ink70),
                     ),
                   ),
                 ),

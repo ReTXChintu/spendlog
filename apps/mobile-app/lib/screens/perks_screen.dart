@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/format.dart';
-import 'dart:async';
 
+import '../services/perk_import_watcher.dart';
 import '../services/perk_reader.dart';
+import '../services/reminder_service.dart';
 import '../widgets/perk_sheet.dart';
 import '../widgets/state_block.dart';
 
@@ -33,42 +35,72 @@ class _PerksScreenState extends State<PerksScreen> {
   List<Account> _accounts = [];
   List<Category> _categories = [];
 
-  /// Whether this server has a model to read a picture with, and whether
-  /// one is being read right now.
+  /// Whether this server has a model to read a picture with.
   bool _canRead = false;
-  bool _reading = false;
 
-  /// A batch being read on the server, and the timer watching it.
-  PerkImportJob? _job;
-  Timer? _poll;
+  /// Only while the screenshots are being uploaded - a second or two. The
+  /// reading itself happens in the background (see PerkImportWatcher).
   bool _sending = false;
+
+  /// Show only perks from this app or bank; null shows all.
+  String? _sourceFilter;
+
+  /// Whether the watched batch was still going last time we looked, so its
+  /// finishing can reload the list.
+  bool _jobWasRunning = false;
+
+  final _watcher = PerkImportWatcher.instance;
 
   /// How many perks a model wrote that nobody has confirmed.
   int get _unreviewed => _perks.where((perk) => perk.needsReview).length;
 
+  /// Every app or bank named on a perk, for the filter chips.
+  List<String> get _sources {
+    final seen = <String>{};
+    for (final perk in _perks) {
+      final source = perk.source?.trim();
+      if (source != null && source.isNotEmpty) seen.add(source);
+    }
+    return seen.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  }
+
+  List<Perk> get _shown => _sourceFilter == null
+      ? _perks
+      : _perks.where((perk) => perk.source?.trim() == _sourceFilter).toList();
+
   @override
   void initState() {
     super.initState();
+    _jobWasRunning = _watcher.job?.isRunning ?? false;
+    _watcher.addListener(_onJobChanged);
     _load();
     PerkReader.instance.available().then((can) {
       if (!mounted) return;
       setState(() => _canRead = can);
 
-      // Pick up a batch that was already going. The job lives on the
+      // Pick up a batch that was already going - from another phone, or
+      // from before the watcher knew about it. The job lives on the
       // server, so closing the app does not lose it.
       if (can) {
         PerkReader.instance.newestImport().then((job) {
-          if (!mounted || job == null) return;
-          setState(() => _job = job);
-          if (job.isRunning) _watchJob();
+          if (job != null) _watcher.adoptIfRunning(job);
         }).catchError((_) => null);
       }
     });
   }
 
+  void _onJobChanged() {
+    if (!mounted) return;
+    final running = _watcher.job?.isRunning ?? false;
+    // The perks it wrote are new rows; the list has to go and get them.
+    if (_jobWasRunning && !running) _load();
+    _jobWasRunning = running;
+    setState(() {});
+  }
+
   @override
   void dispose() {
-    _poll?.cancel();
+    _watcher.removeListener(_onJobChanged);
     _query.dispose();
     _amount.dispose();
     super.dispose();
@@ -84,6 +116,8 @@ class _PerksScreenState extends State<PerksScreen> {
       if (!mounted) return;
       setState(() {
         _perks = (results[0] as List<dynamic>).map((p) => Perk.fromJson(p as Map<String, dynamic>)).toList();
+        // A filter on a source nothing has any more would show an empty list.
+        if (!_sources.contains(_sourceFilter)) _sourceFilter = null;
         _accounts =
             (results[1] as List<dynamic>).map((a) => Account.fromJson(a as Map<String, dynamic>)).toList();
         _categories =
@@ -154,37 +188,10 @@ class _PerksScreenState extends State<PerksScreen> {
     if (saved == true) await _load();
   }
 
-  /// Take or choose a picture of a coupon, and let the model fill the form.
-  ///
-  /// The model is on the server and runs on its processor, so this is tens
-  /// of seconds rather than a moment. Said out loud while it waits, because
-  /// a button that looks stuck is a button people press again.
-  Future<void> _readPicture({required bool fromCamera}) async {
-    final picture = await PerkReader.instance.pick(fromCamera: fromCamera);
-    if (picture == null) return;
-
-    setState(() => _reading = true);
-    try {
-      final draft = await PerkReader.instance.read(picture);
-      if (!mounted) return;
-      await _edit(null, draft: draft);
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(error is ApiException ? error.message : 'That picture could not be read.'),
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _reading = false);
-    }
-  }
-
-  /// Camera or gallery. Asked rather than assumed: a coupon is as often a
-  /// screenshot already on the phone as a thing in front of you.
+  /// Screenshots from the gallery (one or many) or a photo. Asked rather
+  /// than assumed: a coupon is as often a screenshot already on the phone
+  /// as a thing in front of you.
   Future<void> _offerToRead() async {
-    var chose = false;
     final fromCamera = await showModalBottomSheet<bool>(
       context: context,
       builder: (_) => SafeArea(
@@ -193,12 +200,13 @@ class _PerksScreenState extends State<PerksScreen> {
           children: [
             const Padding(
               padding: EdgeInsets.all(16),
-              child: Text('Read a coupon from a picture',
+              child: Text('Read coupons from pictures',
                   style: TextStyle(fontWeight: FontWeight.w700)),
             ),
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Choose a screenshot'),
+              title: const Text('Choose screenshots'),
+              subtitle: const Text('One or several'),
               onTap: () => Navigator.of(context).pop(false),
             ),
             ListTile(
@@ -206,70 +214,56 @@ class _PerksScreenState extends State<PerksScreen> {
               title: const Text('Take a photo'),
               onTap: () => Navigator.of(context).pop(true),
             ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.burst_mode_outlined),
-              title: const Text('Choose several at once'),
-              subtitle: const Text('Read in the background and added for you'),
-              onTap: () {
-                chose = true;
-                Navigator.of(context).pop(null);
-              },
-            ),
           ],
         ),
       ),
     );
+    if (fromCamera == null || !mounted) return;
 
-    if (!mounted) return;
-    if (fromCamera != null) {
-      await _readPicture(fromCamera: fromCamera);
-    } else if (chose) {
-      await _startBatch();
+    final List<XFile> pictures;
+    if (fromCamera) {
+      final photo = await PerkReader.instance.pick(fromCamera: true);
+      pictures = photo == null ? const [] : [photo];
+    } else {
+      pictures = await PerkReader.instance.pickMany();
     }
+    if (pictures.isEmpty || !mounted) return;
+    await _import(pictures);
   }
 
-  /// A pile of screenshots, read on the server while you get on with
-  /// something else.
-  Future<void> _startBatch() async {
-    final pictures = await PerkReader.instance.pickMany();
-    if (pictures.isEmpty || !mounted) return;
-
+  /// Hand the pictures to the server and give the screen straight back.
+  ///
+  /// Reading is ~30 s a picture, so even a single one goes through the
+  /// background import: waiting on a spinner for that long is the
+  /// complaint this replaces. PerkImportWatcher says when it is done.
+  Future<void> _import(List<XFile> pictures) async {
+    final messenger = ScaffoldMessenger.of(context);
     setState(() => _sending = true);
     try {
       final job = await PerkReader.instance.startImport(pictures);
-      if (!mounted) return;
-      setState(() => _job = job);
-      _watchJob();
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(error is ApiException ? error.message : 'Those could not be sent.'),
+      await _watcher.watch(job);
+      final n = pictures.length;
+      messenger.showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 6),
+          content: Text(
+            'Reading ${n == 1 ? 'your screenshot' : '$n screenshots'} in the background — about '
+            '30 s each. ${n == 1 ? 'It will appear' : 'They will appear'} here for review and '
+            'you will get a notification when it is done.',
           ),
-        );
-      }
+        ),
+      );
+      // The first notification on Android 13+ needs the permission.
+      ReminderService.instance.requestPermission().catchError((_) => false);
+    } catch (error) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(error is ApiException ? error.message : 'Those could not be sent.'),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _sending = false);
     }
-  }
-
-  /// Ask every few seconds until it finishes. Polled rather than pushed: a
-  /// socket to maintain for something that happens occasionally is more
-  /// machinery than the problem has.
-  void _watchJob() {
-    _poll?.cancel();
-    _poll = Timer.periodic(const Duration(seconds: 3), (timer) async {
-      final job = await PerkReader.instance.newestImport().catchError((_) => null);
-      if (!mounted) return timer.cancel();
-
-      setState(() => _job = job);
-      if (job == null || !job.isRunning) {
-        timer.cancel();
-        // The perks it wrote are new rows; the list has to go and get them.
-        await _load();
-      }
-    });
   }
 
   /// How a batch is getting on, or what it did.
@@ -302,7 +296,7 @@ class _PerksScreenState extends State<PerksScreen> {
               if (!running)
                 IconButton(
                   icon: const Icon(Icons.close, size: 17),
-                  onPressed: () => setState(() => _job = null),
+                  onPressed: _watcher.dismiss,
                 ),
             ],
           ),
@@ -321,8 +315,8 @@ class _PerksScreenState extends State<PerksScreen> {
           if (running) ...[
             const SizedBox(height: 8),
             Text(
-              'Roughly half a minute a picture, on your own server. You can close the app — it '
-              'carries on without you.',
+              'About 30 s a picture. Carry on with anything else, or close the app — you will '
+              'get a notification when they are ready to review.',
               style: TextStyle(fontSize: 11.5, height: 1.45, color: c.muted),
             ),
           ],
@@ -360,9 +354,9 @@ class _PerksScreenState extends State<PerksScreen> {
           // is an extra way to add a coupon and never the only one.
           if (_canRead)
             IconButton(
-              tooltip: 'Read a coupon from a picture',
-              onPressed: _reading || _sending ? null : _offerToRead,
-              icon: _reading || _sending
+              tooltip: 'Read coupons from screenshots',
+              onPressed: _sending ? null : _offerToRead,
+              icon: _sending
                   ? const SizedBox(
                       width: 18,
                       height: 18,
@@ -380,8 +374,8 @@ class _PerksScreenState extends State<PerksScreen> {
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 90),
         children: [
           // A batch being read on the server, or one that just finished.
-          if (_job != null) ...[
-            _importCard(_job!),
+          if (_watcher.job != null) ...[
+            _importCard(_watcher.job!),
             const SizedBox(height: 14),
           ],
 
@@ -414,22 +408,6 @@ class _PerksScreenState extends State<PerksScreen> {
             const SizedBox(height: 14),
           ],
 
-          if (_reading) ...[
-            Container(
-              padding: const EdgeInsets.all(13),
-              decoration: BoxDecoration(
-                color: c.brand50,
-                borderRadius: BorderRadius.circular(T.rMd),
-              ),
-              child: Text(
-                'Reading the picture. The model is on your own server and runs on its processor, '
-                'so this takes a little while — usually under a minute, longer the first time '
-                'after a restart.',
-                style: TextStyle(fontSize: 12, height: 1.45, color: c.ink70),
-              ),
-            ),
-            const SizedBox(height: 14),
-          ],
           TextField(
             controller: _query,
             autofocus: true,
@@ -507,6 +485,29 @@ class _PerksScreenState extends State<PerksScreen> {
           ),
           const SizedBox(height: 10),
 
+          // Which app or bank they came from, built from what is saved, so
+          // "what do I have on CRED?" is one tap.
+          if (_sources.isNotEmpty) ...[
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final source in [null, ..._sources])
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: ChoiceChip(
+                        label: Text(source ?? 'All'),
+                        selected: _sourceFilter == source,
+                        onSelected: (_) => setState(() => _sourceFilter = source),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+
           if (_perks.isEmpty)
             StateBlock(
               icon: Icons.local_offer_outlined,
@@ -517,7 +518,7 @@ class _PerksScreenState extends State<PerksScreen> {
               onAction: () => _edit(null),
             )
           else
-            for (final perk in _perks)
+            for (final perk in _shown)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: _PerkRow(
@@ -693,7 +694,7 @@ class _MatchRow extends StatelessWidget {
   }
 }
 
-class _PerkRow extends StatelessWidget {
+class _PerkRow extends StatefulWidget {
   final Perk perk;
   final VoidCallback onEdit;
   final VoidCallback onUsed;
@@ -707,8 +708,89 @@ class _PerkRow extends StatelessWidget {
   });
 
   @override
+  State<_PerkRow> createState() => _PerkRowState();
+}
+
+/// Which of the two folds under a perk is open, if any.
+enum _Fold { terms, text }
+
+class _PerkRowState extends State<_PerkRow> {
+  _Fold? _open;
+
+  void _toggle(_Fold fold) => setState(() => _open = _open == fold ? null : fold);
+
+  /// "from Google Pay", then the T&C and the screenshot text, each closed
+  /// until asked for - they are long and only sometimes wanted.
+  Widget _extras(SpendColors c) {
+    final perk = widget.perk;
+    final source = perk.source?.trim() ?? '';
+    final terms = perk.terms?.trim() ?? '';
+    final text = perk.extractedText?.trim() ?? '';
+    if (source.isEmpty && terms.isEmpty && text.isEmpty) return const SizedBox.shrink();
+
+    Widget toggle(_Fold fold, String label) => InkWell(
+          onTap: () => _toggle(fold),
+          borderRadius: BorderRadius.circular(100),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(label, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: c.brand)),
+                Icon(_open == fold ? Icons.expand_less : Icons.expand_more, size: 15, color: c.brand),
+              ],
+            ),
+          ),
+        );
+
+    final body = switch (_open) {
+      _Fold.terms => terms,
+      _Fold.text => text,
+      null => '',
+    };
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 4,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              if (source.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(color: c.track, borderRadius: BorderRadius.circular(100)),
+                  child: Text('from $source', style: TextStyle(fontSize: 11, color: c.ink70)),
+                ),
+              if (terms.isNotEmpty) toggle(_Fold.terms, 'T&C'),
+              if (text.isNotEmpty) toggle(_Fold.text, 'Text read from the screenshot'),
+            ],
+          ),
+          if (body.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: c.paper, borderRadius: BorderRadius.circular(T.rSm)),
+              // Selectable so a code or a line of small print can be copied.
+              child: SelectableText(body, style: TextStyle(fontSize: 12, height: 1.5, color: c.ink70)),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final perk = widget.perk;
+    final onEdit = widget.onEdit;
+    final onUsed = widget.onUsed;
+    final onRemove = widget.onRemove;
 
     final sub = <String>[
       perk.merchants.isNotEmpty ? perk.merchants.join(', ') : 'anywhere',
@@ -804,6 +886,7 @@ class _PerkRow extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(fontSize: 11.8, color: c.muted),
                       ),
+                      _extras(c),
                     ],
                   ),
                 ),

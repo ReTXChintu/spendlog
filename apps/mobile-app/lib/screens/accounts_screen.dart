@@ -224,6 +224,21 @@ class _AccountsScreenState extends State<AccountsScreen> {
     }
   }
 
+  /// Marking one account as savings unmarks any other on the server, so the
+  /// whole list is reloaded rather than this one row patched.
+  Future<void> _setSavings(Account account, bool isSavings) async {
+    try {
+      await ApiClient.instance.patch('/accounts/${account.id}', {'isSavings': isSavings});
+      await _load();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(error is ApiException ? error.message : "That didn't save just now."),
+        ));
+      }
+    }
+  }
+
   Future<void> _open({Account? account}) async {
     final changed = await showEditAccountSheet(
       context,
@@ -519,6 +534,23 @@ class _AccountsScreenState extends State<AccountsScreen> {
               balance: row.balance,
               isCash: account.accountType == 'CASH',
               onChanged: _load,
+            ),
+
+          // The emergency pot: still tracked here, but left out of the
+          // money-on-hand total on Home so it never looks spendable.
+          if (isBank)
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: account.isSavings,
+              onChanged: (value) => _setSavings(account, value),
+              title: Text(
+                'This is my savings account',
+                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: c.ink),
+              ),
+              subtitle: Text(
+                'Kept out of money on hand. Only one account can be the savings account.',
+                style: TextStyle(fontSize: 11.5, color: c.muted),
+              ),
             ),
 
           if (isCard && row.cycle != null)

@@ -1,14 +1,13 @@
 import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
-import '../config.dart';
 import 'api_client.dart';
 
 /// Reading a coupon off a picture.
 ///
 /// The model runs on your own server, on its processor, so this takes
-/// tens of seconds rather than the moment an API would. What comes back
-/// fills the form in; nothing is saved until you save it.
+/// tens of seconds rather than the moment an API would. Every picture goes
+/// through the background import, and the perks it writes arrive marked
+/// for review.
 ///
 /// The picture is shrunk before it leaves the phone. A vision model turns
 /// an image into tiles and the count grows with the area, so a full phone
@@ -32,6 +31,8 @@ class PerkDraft {
   final String? code;
   final String? notes;
   final String? accountId;
+  final String? source;
+  final String? terms;
 
   /// What it said the card was, kept even when nothing matched, so the
   /// sheet can say "it says HDFC Regalia, which you have not added".
@@ -52,6 +53,8 @@ class PerkDraft {
     this.code,
     this.notes,
     this.accountId,
+    this.source,
+    this.terms,
     this.cardNamed,
     this.missing = const [],
   });
@@ -70,6 +73,8 @@ class PerkDraft {
         code: json['code'] as String?,
         notes: json['notes'] as String?,
         accountId: json['accountId'] as String?,
+        source: json['source'] as String?,
+        terms: json['terms'] as String?,
         cardNamed: json['cardNamed'] as String?,
         missing: ((json['missing'] as List?) ?? const [])
             .map((one) => one.toString())
@@ -163,36 +168,11 @@ class PerkReader {
         imageQuality: 90,
       );
 
-  /// Send it, and wait. Uses its own request rather than ApiClient's,
-  /// because this posts bytes rather than JSON and waits far longer than
-  /// anything else in the app.
-  Future<PerkDraft> read(XFile picture) async {
-    final token = await ApiClient.getToken();
-    final bytes = await picture.readAsBytes();
+  // There used to be a synchronous read() on POST /perks/read here. It held
+  // the screen for 30 s a picture, so even one screenshot now goes through
+  // the background import below.
 
-    final response = await http
-        .post(
-          Uri.parse('$apiBaseUrl/perks/read'),
-          headers: {
-            'Content-Type': _mimeOf(picture.path),
-            if (token != null) 'Authorization': 'Bearer $token',
-          },
-          body: bytes,
-        )
-        .timeout(const Duration(minutes: 3));
-
-    if (response.statusCode >= 400) {
-      String message = 'That picture could not be read.';
-      try {
-        message = (jsonDecode(response.body) as Map)['error']?.toString() ?? message;
-      } catch (_) {}
-      throw ApiException(response.statusCode, message);
-    }
-
-    return PerkDraft.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
-  }
-
-  /// Several at once, already shrunk.
+  /// One or several, already shrunk.
   Future<List<XFile>> pickMany() => _picker.pickMultiImage(
         maxWidth: _maxEdge,
         maxHeight: _maxEdge,
@@ -223,12 +203,10 @@ class PerkReader {
     return json == null ? null : PerkImportJob.fromJson(json as Map<String, dynamic>);
   }
 
-  /// The server only accepts the three it can decode, and image_picker
-  /// hands back whatever the camera produced.
-  String _mimeOf(String path) {
-    final lower = path.toLowerCase();
-    if (lower.endsWith('.png')) return 'image/png';
-    if (lower.endsWith('.webp')) return 'image/webp';
-    return 'image/jpeg';
+  /// One particular batch - the one being waited on, even if a newer one
+  /// was started from another device.
+  Future<PerkImportJob> importById(String id) async {
+    final json = await ApiClient.instance.get('/perks/import/$id');
+    return PerkImportJob.fromJson(json as Map<String, dynamic>);
   }
 }
