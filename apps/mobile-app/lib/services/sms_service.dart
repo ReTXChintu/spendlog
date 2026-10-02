@@ -23,11 +23,17 @@ class SmsSyncResult {
   final int duplicates;
   final int ignored;
 
+  /// Why the mailbox could not be read, when it could not - usually that
+  /// Google stopped letting SpendLog in and Gmail needs connecting again.
+  /// Null when it was read, or when no mailbox is connected at all.
+  final String? mailProblem;
+
   const SmsSyncResult({
     required this.scanned,
     required this.created,
     required this.duplicates,
     required this.ignored,
+    this.mailProblem,
   });
 
   /// Messages that were already known — the normal case when the automatic
@@ -151,6 +157,7 @@ class SmsService {
   Future<SmsSyncResult> syncEverything() async {
     var mailCreated = 0;
     var mailScanned = 0;
+    String? mailProblem;
 
     // Email first, and allowed to fail on its own: a mailbox that is not
     // connected must not stop the inbox being read.
@@ -161,8 +168,14 @@ class SmsService {
         mailCreated += counts['created'] as int? ?? 0;
         mailScanned += counts['scanned'] as int? ?? 0;
       }
+      final unlinked = ((response)['needsReconnect'] as List<dynamic>? ?? []).map((e) => e.toString()).toList();
+      if (unlinked.isNotEmpty) mailProblem = '${unlinked.join(', ')} needs connecting again in Settings.';
+    } on ApiException catch (error) {
+      // No mailbox connected at all is not a problem worth saying; anything
+      // else - above all, Google refusing the saved sign-in - is.
+      if (error.statusCode != 404) mailProblem = error.message;
     } catch (_) {
-      // Not connected, or the token has lapsed. Settings says which.
+      mailProblem = "Couldn't reach Gmail just now.";
     }
 
     // Reading the inbox without the permission throws, and that would
@@ -176,6 +189,7 @@ class SmsService {
       created: sms.created + mailCreated,
       duplicates: sms.duplicates,
       ignored: sms.ignored,
+      mailProblem: mailProblem,
     );
   }
 

@@ -38,6 +38,27 @@ async function connection() {
   });
 }
 
+describe("telling a refused sign-in from a bad moment", () => {
+  const withStatus = (status: number, data: unknown = {}, message = "Request failed") =>
+    Object.assign(new Error(message), { response: { status, data } });
+
+  it("unlinks on a dead token, a 401, or a 403 that isn't a rate limit", () => {
+    assert.equal(gmail.isRevokedGrant(revoked()), true);
+    assert.equal(gmail.isRevokedGrant(withStatus(400, { error: "unauthorized_client" })), true);
+    assert.equal(gmail.isRevokedGrant(withStatus(401)), true);
+    assert.equal(gmail.isRevokedGrant(withStatus(403, { error: { message: "Gmail API has not been used" } })), true);
+  });
+
+  it("leaves it linked for a rate limit, a server error, or no network", () => {
+    assert.equal(
+      gmail.isRevokedGrant(withStatus(403, { error: { errors: [{ reason: "userRateLimitExceeded" }] } })),
+      false
+    );
+    assert.equal(gmail.isRevokedGrant(withStatus(500)), false);
+    assert.equal(gmail.isRevokedGrant(new Error("getaddrinfo ENOTFOUND oauth2.googleapis.com")), false);
+  });
+});
+
 describe("a Gmail sign-in Google no longer accepts", () => {
   it("is flagged on the connection and reported as needing a reconnect", async () => {
     const saved = await connection();

@@ -1335,3 +1335,9 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
   background:var(--paper);border-top:1px solid var(--line)}
 .ask-composer textarea{flex:1;min-height:42px;max-height:160px;resize:vertical;font:inherit;font-size:14px;padding:10px 12px}
 @media (max-width:640px){.ask-msg{max-width:92%}}
+
+/* A sync that could not read the mailbox, said where the button was pressed. */
+.sync-problem{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:-6px 0 16px 0;padding:10px 13px;
+  border-radius:var(--radius-md);background:var(--warn-bg);color:var(--warn);font-size:13px;line-height:1.45}
+.sync-problem svg{width:15px;height:15px;flex-shrink:0}
+.sync-problem a{margin-left:auto;font-weight:700;color:var(--warn)}

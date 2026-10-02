@@ -121,7 +121,9 @@ function ConnectionsTab() {
 
   const reload = useCallback(() => {
     api
-      .get<EmailConnectionStatus[]>("/ingestion/email/status")
+      // Checked with Google, so this never says "Connected" about a mailbox
+      // that can no longer be read.
+      .get<EmailConnectionStatus[]>("/ingestion/email/status?check=1")
       .then(setConnections)
       .catch(() => setConnections([]));
   }, []);
@@ -180,25 +182,15 @@ function ConnectionsTab() {
         {connection?.needsReconnect ? (
           <>
             <p className="desc">
-              <span className="status-pill status-off">Needs reconnecting</span>
+              <span className="status-pill status-off">Not connected</span>
               &nbsp;{connection.email}
               <br />
-              Google stopped accepting SpendLog's sign-in to this mailbox — it happens when access is removed,
-              the password changes, or the sign-in simply expires. Nothing already imported is lost; reconnect to
-              carry on reading new emails and statements.
+              Google stopped letting SpendLog read this mailbox, so it has been unlinked. Nothing already
+              imported is lost — connect it again to carry on reading new emails and statements.
             </p>
             <div className="set-card-actions">
               <button className="btn btn-sm btn-primary" onClick={connect}>
-                Reconnect Gmail
-              </button>
-              <button
-                className="btn btn-sm btn-ghost btn-danger-text"
-                onClick={async () => {
-                  await api.delete(`/ingestion/email/${connection.id}`);
-                  reload();
-                }}
-              >
-                Disconnect
+                Connect Gmail
               </button>
             </div>
           </>

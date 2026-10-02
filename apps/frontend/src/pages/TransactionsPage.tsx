@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { EditTransactionModal } from "../components/EditTransactionModal";
 import { CardStrip } from "../components/CardStrip";
 import { EmiModal } from "../components/EmiModal";
@@ -54,6 +54,9 @@ export function TransactionsPage() {
   const [hasGmail, setHasGmail] = useState(false);
   const [error, setError] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  // Said, not swallowed: a mailbox Google stopped letting us read has to be
+  // reconnected, and a sync that quietly did nothing looks like "no news".
+  const [syncProblem, setSyncProblem] = useState<string | null>(null);
 
   const [rawFor, setRawFor] = useState<Transaction | null>(null);
   const [emiFor, setEmiFor] = useState<Transaction | null>(null);
@@ -134,7 +137,7 @@ export function TransactionsPage() {
       setCategories(cats);
       setAccounts(accs);
       setSummary(monthSummary);
-      setHasGmail(emails.length > 0);
+      setHasGmail(emails.some((email) => !email.needsReconnect));
     } catch {
       // The ledger still works without the rail populated.
     }
@@ -191,11 +194,16 @@ export function TransactionsPage() {
 
   async function syncNow() {
     setSyncing(true);
+    setSyncProblem(null);
     try {
-      await api.post("/ingestion/email/sync");
+      const result = await api.post<{ needsReconnect?: string[] }>("/ingestion/email/sync");
+      if (result.needsReconnect?.length) {
+        setSyncProblem(`${result.needsReconnect.join(", ")} needs connecting again.`);
+      }
       await Promise.all([load({ keepVisible: true }), loadContext()]);
-    } catch {
-      // Nothing to do — the ledger on screen is still valid.
+    } catch (err) {
+      setSyncProblem(err instanceof Error ? err.message : "Couldn't sync just now.");
+      loadContext();
     } finally {
       setSyncing(false);
     }
@@ -305,6 +313,13 @@ export function TransactionsPage() {
           )}
         </div>
       </div>
+      {syncProblem && (
+        <div className="sync-problem" role="alert">
+          <Icon name="ic-alert" />
+          <span>{syncProblem}</span>
+          <Link to="/settings">Connect Gmail</Link>
+        </div>
+      )}
 
       <CardStrip cards={cards} pace={pace} />
 

@@ -78,9 +78,65 @@ export class GmailNeedsReconnectError extends Error {
   }
 }
 
+/** The OAuth errors that mean the saved sign-in is unusable, not just slow. */
+const DEAD_SIGN_IN = ["invalid_grant", "unauthorized_client", "invalid_client", "invalid_token"];
+
+/** A 403 that is Gmail saying "slow down" rather than "no". */
+const RATE_LIMITED = /rate ?limit|quota/i;
+
+/**
+ * Google refused to let this sign-in read the mailbox.
+ *
+ * Any answer of that kind unlinks the mailbox: a dead refresh token
+ * (invalid_grant and its relatives), a 401, or a 403 that is not just a
+ * rate limit - Gmail access removed from the Google account, or the scope
+ * withdrawn. A timeout or a network failure is not one of these: nothing
+ * about the sign-in is wrong, and it is retried on the next sync.
+ */
 export function isRevokedGrant(error: unknown): boolean {
-  const data = (error as { response?: { data?: { error?: unknown } } })?.response?.data;
-  return data?.error === "invalid_grant" || /invalid_grant/.test(String((error as Error)?.message ?? ""));
+  const response = (error as { response?: { status?: number; data?: unknown } })?.response;
+  const data = response?.data as { error?: unknown; error_description?: unknown } | undefined;
+  const code = typeof data?.error === "string" ? data.error : null;
+  const message = String((error as Error)?.message ?? "");
+
+  if (code && DEAD_SIGN_IN.includes(code)) return true;
+  if (DEAD_SIGN_IN.some((name) => message.includes(name))) return true;
+  if (response?.status === 401) return true;
+  if (response?.status === 403) return !RATE_LIMITED.test(`${message} ${JSON.stringify(data ?? "")}`);
+  return false;
+}
+
+/**
+ * Asks Google for a fresh access token with the saved refresh token alone,
+ * which is the cheapest way to learn whether the sign-in still works. A
+ * dead one is flagged on the connection (see withGmail); a working one
+ * leaves the connection with a current access token.
+ */
+export async function checkConnection(connection: InstanceType<typeof EmailConnection>): Promise<void> {
+  const client = createOAuthClient();
+  client.setCredentials({ refresh_token: connection.refreshToken });
+  try {
+    await withGmail(connection, async () => {
+      const { token } = await client.getAccessToken();
+      if (token) {
+        await EmailConnection.updateOne(
+          { _id: connection._id },
+          {
+            $set: {
+              accessToken: token,
+              expiryDate: client.credentials.expiry_date ? new Date(client.credentials.expiry_date) : null,
+            },
+          }
+        );
+      }
+    });
+  } catch (error) {
+    // Flagged already when the sign-in is dead. Anything else - Google
+    // unreachable for a moment - says nothing about the connection.
+    if (!(error instanceof GmailNeedsReconnectError)) {
+      console.warn(`Couldn't check Gmail connection ${connection._id.toString()}:`, (error as Error).message);
+    }
+  }
 }
 
 /**

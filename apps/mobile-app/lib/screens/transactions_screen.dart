@@ -96,7 +96,7 @@ class TransactionsScreenState extends State<TransactionsScreen> {
             (results[0] as List<dynamic>).map((c) => Category.fromJson(c as Map<String, dynamic>)).toList();
         _accounts = (results[1] as List<dynamic>).map((a) => Account.fromJson(a as Map<String, dynamic>)).toList();
         _summary = AnalyticsSummary.fromJson(results[2] as Map<String, dynamic>);
-        _hasGmail = (results[3] as List<dynamic>).isNotEmpty;
+        _hasGmail = (results[3] as List<dynamic>).any((c) => (c as Map<String, dynamic>)['needsReconnect'] != true);
       });
     } catch (_) {
       // The ledger still works without the rollup and the chips.
@@ -178,14 +178,21 @@ class TransactionsScreenState extends State<TransactionsScreen> {
     try {
       final result = await SmsService.instance.syncEverything();
       await _refreshAll(keepVisible: true);
+      final imported = result.foundNothingNew
+          ? 'Checked messages — nothing new.'
+          : 'Imported ${result.created} ${result.created == 1 ? 'transaction' : 'transactions'}.';
+      final problem = result.mailProblem;
       messenger.showSnackBar(
         SnackBar(
-          content: Text(
-            result.foundNothingNew
-                ? 'Checked messages and email — nothing new.'
-                : 'Imported ${result.created} '
-                    '${result.created == 1 ? 'transaction' : 'transactions'}.',
-          ),
+          // A mailbox that could not be read is said, not swallowed: "nothing
+          // new" from a sync that never reached Gmail would be a lie.
+          content: Text(problem == null
+              ? (result.foundNothingNew ? 'Checked messages and email — nothing new.' : imported)
+              : '$imported Email: $problem'),
+          duration: Duration(seconds: problem == null ? 4 : 8),
+          action: problem != null && widget.onOpenSettings != null
+              ? SnackBarAction(label: 'Settings', onPressed: widget.onOpenSettings!)
+              : null,
         ),
       );
     } catch (e) {

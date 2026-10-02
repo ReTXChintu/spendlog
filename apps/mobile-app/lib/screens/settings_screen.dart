@@ -550,7 +550,9 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
 
   Future<void> _loadConnections() async {
     try {
-      final result = await ApiClient.instance.get('/ingestion/email/status') as List<dynamic>;
+      // Checked with Google, so this never says "Connected" about a mailbox
+      // that can no longer be read.
+      final result = await ApiClient.instance.get('/ingestion/email/status?check=1') as List<dynamic>;
       if (!mounted) return;
       setState(() => _connections =
           result.map((c) => EmailConnectionStatus.fromJson(c as Map<String, dynamic>)).toList());
@@ -702,12 +704,12 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
               // only reading new mail waits on reconnecting.
               : connection.needsReconnect
               ? _CardBody(
-                  pill: const _StatusPill(label: 'Needs reconnecting', on: false),
-                  text: '${connection.email}\nGoogle stopped accepting SpendLog\'s sign-in to this mailbox - '
-                      'it happens when access is removed, the password changes, or the sign-in expires. '
-                      'Reconnect to carry on reading new emails and statements.',
+                  pill: const _StatusPill(label: 'Not connected', on: false),
+                  text: '${connection.email}\nGoogle stopped letting SpendLog read this mailbox, so it has been '
+                      'unlinked. Nothing already imported is lost - connect it again to carry on reading new '
+                      'emails and statements.',
                   actions: [
-                    FilledButton(onPressed: _connectGmail, child: const Text('Reconnect Gmail')),
+                    FilledButton(onPressed: _connectGmail, child: const Text('Connect Gmail')),
                   ],
                 )
               : _CardBody(
