@@ -566,10 +566,15 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
 
   Future<void> _syncNow() async {
     setState(() => _syncing = true);
+    final messenger = ScaffoldMessenger.of(context);
     try {
       await ApiClient.instance.post('/ingestion/email/sync');
-      await _loadConnections();
+    } catch (error) {
+      messenger.showSnackBar(SnackBar(
+        content: Text(error is ApiException ? error.message : "Couldn't sync just now."),
+      ));
     } finally {
+      await _loadConnections();
       if (mounted) setState(() => _syncing = false);
     }
   }
@@ -691,6 +696,18 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
                   text: 'Email access was declined when you signed in. You can grant it here instead.',
                   actions: [
                     FilledButton(onPressed: _connectGmail, child: const Text('Connect Gmail')),
+                  ],
+                )
+              // Google dropped the saved sign-in. Nothing imported is lost;
+              // only reading new mail waits on reconnecting.
+              : connection.needsReconnect
+              ? _CardBody(
+                  pill: const _StatusPill(label: 'Needs reconnecting', on: false),
+                  text: '${connection.email}\nGoogle stopped accepting SpendLog\'s sign-in to this mailbox - '
+                      'it happens when access is removed, the password changes, or the sign-in expires. '
+                      'Reconnect to carry on reading new emails and statements.',
+                  actions: [
+                    FilledButton(onPressed: _connectGmail, child: const Text('Reconnect Gmail')),
                   ],
                 )
               : _CardBody(

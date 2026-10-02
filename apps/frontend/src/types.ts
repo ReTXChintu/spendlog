@@ -579,6 +579,8 @@ export interface EmailConnectionStatus {
   email: string;
   lastSyncedAt: string | null;
   createdAt: string;
+  /** Google stopped accepting the saved sign-in; reading mail needs a reconnect. */
+  needsReconnect?: boolean;
 }
 
 export interface User {

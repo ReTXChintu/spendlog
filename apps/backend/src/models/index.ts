@@ -649,6 +649,10 @@ export interface EmailConnectionDoc {
   expiryDate?: Date | null;
   historyId?: string | null;
   lastSyncedAt?: Date | null;
+  /// Set when Google refused the saved sign-in - revoked, password changed,
+  /// or expired - so the app can say "reconnect Gmail" rather than fail.
+  /// Cleared by reconnecting, which saves fresh tokens.
+  needsReconnect: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -662,6 +666,7 @@ const emailConnectionSchema = new Schema<EmailConnectionDoc>(
     expiryDate: { type: Date, default: null },
     historyId: { type: String, default: null },
     lastSyncedAt: { type: Date, default: null },
+    needsReconnect: { type: Boolean, default: false },
   },
   { timestamps: true, ...serialization }
 );

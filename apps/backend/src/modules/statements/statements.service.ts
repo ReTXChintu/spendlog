@@ -3,7 +3,7 @@ import { gmail_v1, google } from "googleapis";
 import { HydratedDocument, Types } from "mongoose";
 import { Account, CardStatement, CardStatementDoc, EmailConnection } from "../../models";
 import { learnCycleFromStatement } from "../cards/cards.learn";
-import { createOAuthClient } from "../ingestion/gmail.service";
+import { GmailNeedsReconnectError, createOAuthClient, withGmail } from "../ingestion/gmail.service";
 import { decryptPassword, encryptionAvailable } from "./statements.crypto";
 import { readStatementFile, saveStatementFile } from "./statements.files";
 import { horizonFor } from "../ledger/ledger.horizon";
@@ -42,6 +42,8 @@ export interface StatementSyncResult {
   locked: number;
   unidentified: number;
   added: number;
+  /** Mailboxes skipped because Google dropped their sign-in. */
+  needsReconnect?: string[];
 }
 
 /**
@@ -88,44 +90,59 @@ export async function syncStatements(userId: Types.ObjectId, options?: { days?: 
     });
     const gmail = google.gmail({ version: "v1", auth: client });
 
-    let pageToken: string | undefined;
-    do {
-      const list = await gmail.users.messages.list({
-        userId: "me",
-        q: `${STATEMENT_QUERY} after:${after}`,
-        pageToken,
-        maxResults: 25,
-      });
-
-      for (const ref of list.data.messages ?? []) {
-        if (!ref.id) continue;
-
-        const message = await gmail.users.messages.get({ userId: "me", id: ref.id, format: "full" });
-        for (const attachment of pdfAttachments(message.data.payload)) {
-          result.scanned += 1;
-
-          const outcome = await readOneStatement({
-            gmail,
-            userId,
-            messageId: ref.id,
-            subject: headerValue(message.data.payload, "Subject"),
-            receivedAt: mailDate(message.data.internalDate),
-            attachment,
-            passwords,
-            cards,
+    try {
+      await withGmail(connection, async () => {
+        let pageToken: string | undefined;
+        do {
+          const list = await gmail.users.messages.list({
+            userId: "me",
+            q: `${STATEMENT_QUERY} after:${after}`,
+            pageToken,
+            maxResults: 25,
           });
 
-          if (outcome === "locked") result.locked += 1;
-          else if (outcome === "unidentified") result.unidentified += 1;
-          else if (typeof outcome === "number") {
-            result.read += 1;
-            result.added += outcome;
-          }
-        }
-      }
+          for (const ref of list.data.messages ?? []) {
+            if (!ref.id) continue;
 
-      pageToken = list.data.nextPageToken ?? undefined;
-    } while (pageToken);
+            const message = await gmail.users.messages.get({ userId: "me", id: ref.id, format: "full" });
+            for (const attachment of pdfAttachments(message.data.payload)) {
+              result.scanned += 1;
+
+              const outcome = await readOneStatement({
+                gmail,
+                userId,
+                messageId: ref.id,
+                subject: headerValue(message.data.payload, "Subject"),
+                receivedAt: mailDate(message.data.internalDate),
+                attachment,
+                passwords,
+                cards,
+              });
+
+              if (outcome === "locked") result.locked += 1;
+              else if (outcome === "unidentified") result.unidentified += 1;
+              else if (typeof outcome === "number") {
+                result.read += 1;
+                result.added += outcome;
+              }
+            }
+          }
+
+          pageToken = list.data.nextPageToken ?? undefined;
+        } while (pageToken);
+      });
+    } catch (error) {
+      // One mailbox whose sign-in Google has dropped should not stop the
+      // others being read. It is reported, and flagged on the connection.
+      if (!(error instanceof GmailNeedsReconnectError)) throw error;
+      result.needsReconnect = [...(result.needsReconnect ?? []), connection.email];
+    }
+  }
+
+  // Nothing could be read at all: say why, rather than an empty result
+  // that looks like there were simply no statements.
+  if (result.needsReconnect?.length === connections.length) {
+    throw new GmailNeedsReconnectError(result.needsReconnect.join(", "));
   }
 
   return result;

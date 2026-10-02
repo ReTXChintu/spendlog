@@ -114,6 +114,7 @@ function ConnectionsTab() {
   const [connections, setConnections] = useState<EmailConnectionStatus[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [apkAvailable, setApkAvailable] = useState<boolean | null>(null);
   const [searchParams] = useSearchParams();
   const gmailStatus = searchParams.get("gmail");
@@ -143,11 +144,14 @@ function ConnectionsTab() {
 
   async function syncNow() {
     setSyncing(true);
+    setSyncError(null);
     try {
       await api.post("/ingestion/email/sync");
-      reload();
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : "Couldn't sync just now.");
     } finally {
       setSyncing(false);
+      reload();
     }
   }
 
@@ -173,7 +177,32 @@ function ConnectionsTab() {
           <p className="desc">Gmail access wasn't granted. Email import stays off until you allow it.</p>
         )}
 
-        {connection ? (
+        {connection?.needsReconnect ? (
+          <>
+            <p className="desc">
+              <span className="status-pill status-off">Needs reconnecting</span>
+              &nbsp;{connection.email}
+              <br />
+              Google stopped accepting SpendLog's sign-in to this mailbox — it happens when access is removed,
+              the password changes, or the sign-in simply expires. Nothing already imported is lost; reconnect to
+              carry on reading new emails and statements.
+            </p>
+            <div className="set-card-actions">
+              <button className="btn btn-sm btn-primary" onClick={connect}>
+                Reconnect Gmail
+              </button>
+              <button
+                className="btn btn-sm btn-ghost btn-danger-text"
+                onClick={async () => {
+                  await api.delete(`/ingestion/email/${connection.id}`);
+                  reload();
+                }}
+              >
+                Disconnect
+              </button>
+            </div>
+          </>
+        ) : connection ? (
           <>
             <p className="desc">
               <span className="status-pill status-on">
@@ -201,6 +230,7 @@ function ConnectionsTab() {
                 Disconnect
               </button>
             </div>
+            {syncError && <p className="form-error">{syncError}</p>}
           </>
         ) : (
           <>
@@ -325,14 +355,18 @@ function AccountsTab() {
         locked: number;
         unidentified: number;
         added: number;
+        needsReconnect?: string[];
       }>("/statements/sync");
 
+      const skipped = result.needsReconnect?.length
+        ? ` ${result.needsReconnect.join(", ")} needs reconnecting under Connections.`
+        : "";
       setScanResult(
-        result.scanned === 0
+        (result.scanned === 0
           ? "No statements found in the mailbox."
           : `Read ${result.read} of ${result.scanned}. ${result.added} transactions added` +
-              `${result.locked > 0 ? `, ${result.locked} still locked` : ""}` +
-              `${result.unidentified > 0 ? `, ${result.unidentified} on an unknown card` : ""}.`
+            `${result.locked > 0 ? `, ${result.locked} still locked` : ""}` +
+            `${result.unidentified > 0 ? `, ${result.unidentified} on an unknown card` : ""}.`) + skipped
       );
       reload();
     } catch (error) {

@@ -1077,12 +1077,16 @@ class EmailConnectionStatus {
   final String email;
   final DateTime? lastSyncedAt;
 
-  EmailConnectionStatus({required this.id, required this.email, this.lastSyncedAt});
+  /// Google stopped accepting the saved sign-in; reading mail needs a reconnect.
+  final bool needsReconnect;
+
+  EmailConnectionStatus({required this.id, required this.email, this.lastSyncedAt, this.needsReconnect = false});
 
   factory EmailConnectionStatus.fromJson(Map<String, dynamic> json) => EmailConnectionStatus(
         id: json['id'] as String,
         email: json['email'] as String,
         lastSyncedAt: json['lastSyncedAt'] != null ? DateTime.parse(json['lastSyncedAt'] as String) : null,
+        needsReconnect: json['needsReconnect'] as bool? ?? false,
       );
 }
 

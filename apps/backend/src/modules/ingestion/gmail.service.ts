@@ -57,10 +57,49 @@ export async function saveConnection(params: {
         accessToken: params.accessToken,
         refreshToken: params.refreshToken,
         expiryDate: params.expiryDate ? new Date(params.expiryDate) : null,
+        needsReconnect: false,
       },
     },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
+}
+
+/**
+ * Google no longer accepts the saved sign-in.
+ *
+ * "invalid_grant" from the token endpoint means the refresh token is dead:
+ * access was revoked, the password changed, or - while the Google Cloud
+ * app is in Testing mode - seven days simply passed. No retry fixes it;
+ * only signing in to Gmail again does.
+ */
+export class GmailNeedsReconnectError extends Error {
+  constructor(readonly email: string) {
+    super(`Gmail (${email}) needs reconnecting: Google no longer accepts the saved sign-in. Reconnect it in Settings.`);
+  }
+}
+
+export function isRevokedGrant(error: unknown): boolean {
+  const data = (error as { response?: { data?: { error?: unknown } } })?.response?.data;
+  return data?.error === "invalid_grant" || /invalid_grant/.test(String((error as Error)?.message ?? ""));
+}
+
+/**
+ * Runs Gmail work for one connection, turning a dead sign-in into a flag on
+ * the connection and an error that says what to do about it.
+ */
+export async function withGmail<T>(
+  connection: { _id: unknown; email: string },
+  work: () => Promise<T>
+): Promise<T> {
+  try {
+    const result = await work();
+    await EmailConnection.updateOne({ _id: connection._id, needsReconnect: true }, { $set: { needsReconnect: false } });
+    return result;
+  } catch (error) {
+    if (!isRevokedGrant(error)) throw error;
+    await EmailConnection.updateOne({ _id: connection._id }, { $set: { needsReconnect: true } });
+    throw new GmailNeedsReconnectError(connection.email);
+  }
 }
 
 /** True when Google actually granted Gmail read access. */
@@ -98,7 +137,12 @@ const TRANSACTION_QUERY =
  */
 export async function syncEmailConnection(connectionId: string): Promise<{ created: number; scanned: number }> {
   const connection = await EmailConnection.findById(connectionId).orFail();
+  return withGmail(connection, () => syncConnection(connection));
+}
 
+async function syncConnection(
+  connection: InstanceType<typeof EmailConnection>
+): Promise<{ created: number; scanned: number }> {
   const client = createOAuthClient();
   client.setCredentials({
     access_token: connection.accessToken,
@@ -169,6 +213,9 @@ export async function syncAllConnectedEmails(): Promise<void> {
     try {
       await syncEmailConnection(connection._id.toString());
     } catch (err) {
+      // A dead sign-in is flagged on the connection and waits for the user;
+      // logging its stack every few minutes says nothing new.
+      if (err instanceof GmailNeedsReconnectError) continue;
       console.error(`Gmail sync failed for connection ${connection._id.toString()}:`, err);
     }
   }

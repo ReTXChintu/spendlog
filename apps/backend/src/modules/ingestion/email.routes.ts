@@ -24,7 +24,7 @@ emailRouter.get("/connect", requireAuth, (req, res) => {
 // GET /ingestion/email/status — which Gmail accounts are connected.
 emailRouter.get("/status", requireAuth, async (req, res) => {
   const connections = await EmailConnection.find({ userId: currentUserId(req) }).select(
-    "email lastSyncedAt createdAt"
+    "email lastSyncedAt createdAt needsReconnect"
   );
   res.json(connections);
 });

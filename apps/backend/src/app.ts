@@ -19,6 +19,7 @@ import { emiRouter } from "./modules/emi/emi.routes";
 import { loansRouter } from "./modules/loans/loans.routes";
 import { presetsRouter } from "./modules/presets/presets.routes";
 import { emailRouter } from "./modules/ingestion/email.routes";
+import { GmailNeedsReconnectError } from "./modules/ingestion/gmail.service";
 import { smsRouter } from "./modules/ingestion/sms.routes";
 import { statementsRouter } from "./modules/statements/statements.routes";
 import { ledgerRouter } from "./modules/ledger/ledger.routes";
@@ -69,6 +70,12 @@ app.use((_req, res) => res.status(404).json({ error: "Not found" }));
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  // Google dropped the saved Gmail sign-in. Not the server's fault and not
+  // fixable by retrying - the user has to reconnect, so say exactly that.
+  if (err instanceof GmailNeedsReconnectError) {
+    return res.status(409).json({ error: err.message, needsReconnect: true });
+  }
+
   console.error("Unhandled error:", err);
 
   // Mongoose validation failures are the caller's fault, not the server's.
