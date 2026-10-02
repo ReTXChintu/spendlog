@@ -1,72 +1,47 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "../lib/api";
+import { useRef, useState, useSyncExternalStore } from "react";
 import { ImportJob, importPerkImages } from "../lib/perkImage";
+import {
+  askToNotify,
+  finishedDetail,
+  finishedHeadline,
+  getImportState,
+  setLastFinished,
+  subscribeImports,
+  trackImport,
+} from "../lib/perkImports";
 import { Icon } from "./Icon";
+import "../styles/perks.css";
 
 /**
- * A pile of screenshots, being read.
+ * The one way in for coupon screenshots, one or forty.
  *
- * The reading happens on the server and takes tens of seconds a picture,
- * so this is a progress line rather than a wait. It picks up a job that
- * was already running when the page loaded, which is the point of the job
- * being a document: close the tab, come back, and it is still going.
- *
- * Polled rather than pushed. One request every few seconds for a few
- * minutes is nothing next to a socket to maintain for a thing that
- * happens occasionally.
+ * Reading is ~30 s a picture on the server, so nothing here waits for it:
+ * the pictures are shrunk and sent (a few seconds), the server says it has
+ * them, and the page is yours again. PerkImportWatcher, mounted in the
+ * layout, does the waiting and tells you when they are done.
  */
-
-/** Often enough to feel live, rarely enough to be free. */
-const POLL_MS = 3000;
-
-export function PerkImportBar({ onFinished }: { onFinished: () => void }) {
-  const [job, setJob] = useState<ImportJob | null>(null);
-  const [preparing, setPreparing] = useState<{ done: number; total: number } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+export function PerkImportBar({
+  onStarted,
+  onError,
+}: {
+  onStarted: (job: ImportJob) => void;
+  onError: (message: string) => void;
+}) {
+  const [sending, setSending] = useState<{ done: number; total: number } | null>(null);
   const picker = useRef<HTMLInputElement>(null);
 
-  // Held so the "all done" callback fires once, on the edge, rather than
-  // on every poll after it.
-  const wasRunning = useRef(false);
-
-  const check = useCallback(() => {
-    api
-      .get<ImportJob | null>("/perks/import")
-      .then(setJob)
-      .catch(() => undefined);
-  }, []);
-
-  useEffect(check, [check]);
-
-  useEffect(() => {
-    if (!job || job.status === "DONE" || job.status === "FAILED") {
-      if (wasRunning.current) {
-        wasRunning.current = false;
-        onFinished();
-      }
-      return;
-    }
-
-    wasRunning.current = true;
-    const timer = setTimeout(check, POLL_MS);
-    return () => clearTimeout(timer);
-  }, [job, check, onFinished]);
-
   async function send(files: File[]) {
-    setError(null);
-    setPreparing({ done: 0, total: files.length });
+    setSending({ done: 0, total: files.length });
     try {
-      const started = await importPerkImages(files, (done, total) => setPreparing({ done, total }));
-      setJob(started);
+      const job = await importPerkImages(files, (done, total) => setSending({ done, total }));
+      trackImport(job);
+      onStarted(job);
     } catch (problem) {
-      setError(problem instanceof Error ? problem.message : "Those pictures could not be sent.");
+      onError(problem instanceof Error ? problem.message : "Those screenshots could not be sent.");
     } finally {
-      setPreparing(null);
+      setSending(null);
     }
   }
-
-  const running = job !== null && job.status !== "DONE" && job.status !== "FAILED";
-  const read = job ? job.counts.done + job.counts.failed : 0;
 
   return (
     <>
@@ -78,86 +53,86 @@ export function PerkImportBar({ onFinished }: { onFinished: () => void }) {
         hidden
         onChange={(event) => {
           const files = [...(event.target.files ?? [])];
-          // Cleared so the same folder can be picked twice, which is what
-          // you do after a batch half worked.
+          // Cleared so the same pictures can be picked again after a bad read.
           event.target.value = "";
+          if (files.length > 40) {
+            onError("That's more than 40 screenshots. Send them in a few smaller batches.");
+            return;
+          }
           if (files.length > 0) send(files);
         }}
       />
 
       <button
         className="btn btn-sm"
-        disabled={running || preparing !== null}
-        onClick={() => picker.current?.click()}
+        disabled={sending !== null}
+        onClick={() => {
+          // Asked here, when "tell me when it's done" is the obvious next
+          // thought, and inside the click so browsers allow the prompt.
+          askToNotify();
+          picker.current?.click();
+        }}
       >
         <Icon name="ic-search" />
-        {preparing
-          ? `Preparing ${preparing.done} of ${preparing.total}…`
-          : running
-            ? "Reading…"
-            : "Read screenshots"}
+        {sending ? `Sending ${sending.done} of ${sending.total}…` : "Read screenshots"}
       </button>
-
-      {error && <p className="desc set-warn">{error}</p>}
-
-      {job && (
-        <div className={`import-bar${running ? " is-running" : ""}`}>
-          <div className="import-head">
-            <span>
-              {running ? (
-                <>
-                  Reading your screenshots — <b>{read}</b> of <b>{job.total}</b> done.
-                </>
-              ) : job.status === "FAILED" ? (
-                <>{job.problem ?? "That batch did not finish."}</>
-              ) : (
-                <>{summary(job)}</>
-              )}
-            </span>
-            {!running && (
-              <button className="btn btn-sm btn-ghost" onClick={() => setJob(null)}>
-                <Icon name="ic-x" />
-              </button>
-            )}
-          </div>
-
-          {job.total > 0 && (
-            <div className="import-meter">
-              <div
-                className="import-fill"
-                style={{ width: `${Math.round((read / job.total) * 100)}%` }}
-              />
-            </div>
-          )}
-
-          {running && (
-            <p className="field-hint">
-              The model is on your own server and runs on its processor, so this is roughly half a
-              minute a picture. You can leave this page — it carries on without you.
-            </p>
-          )}
-
-          {job.failures.length > 0 && (
-            <ul className="import-failures">
-              {job.failures.map((failure) => (
-                <li key={failure.fileName}>
-                  <b>{failure.fileName}</b> — {failure.problem ?? "could not be read"}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
     </>
   );
 }
 
-/** What happened, in the order somebody would want to hear it. */
-function summary(job: ImportJob): string {
-  const parts = [`${job.added} added`];
+/**
+ * The quiet line on the perks page while a batch is being read, and the
+ * summary of the last one once it is done (with what could not be read).
+ */
+export function PerkImportStatus() {
+  const { running, lastFinished } = useSyncExternalStore(subscribeImports, getImportState);
 
-  if (job.duplicates > 0) parts.push(`${job.duplicates} you already had`);
-  if (job.counts.failed > 0) parts.push(`${job.counts.failed} could not be read`);
+  if (running.length > 0) {
+    const total = running.reduce((sum, job) => sum + job.total, 0);
+    const read = running.reduce((sum, job) => sum + job.counts.done + job.counts.failed, 0);
+    // The one in hand, counted from one: "Reading 1 of 5" as soon as it starts.
+    const current = Math.min(read + 1, total);
 
-  return `${parts.join(", ")}. Check them over below.`;
+    return (
+      <div className="perk-reading" role="status" aria-live="polite">
+        <span className="perk-reading-dot" aria-hidden="true" />
+        <span>
+          Reading {current} of {total}…
+        </span>
+        <span className="perk-reading-meter" aria-hidden="true">
+          <span style={{ width: `${total ? Math.round((read / total) * 100) : 0}%` }} />
+        </span>
+      </div>
+    );
+  }
+
+  if (!lastFinished) return null;
+
+  const detail = finishedDetail(lastFinished);
+  return (
+    <div className="import-bar">
+      <div className="import-head">
+        <span>
+          <b>{finishedHeadline(lastFinished)}.</b>
+          {detail && ` ${detail}.`}
+        </span>
+        <button
+          className="btn btn-sm btn-ghost"
+          onClick={() => setLastFinished(null)}
+          aria-label="Dismiss"
+        >
+          <Icon name="ic-x" />
+        </button>
+      </div>
+      {lastFinished.failures.length > 0 && (
+        <ul className="import-failures">
+          {lastFinished.failures.map((failure, index) => (
+            <li key={`${failure.fileName}-${index}`}>
+              <b>{failure.fileName}</b> — {failure.problem ?? "could not be read"}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }

@@ -31,6 +31,10 @@ export function RefundModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  // Money set aside for a purchase is linked with the same tool, but the
+  // question is the other way round: not "what came back" but "what did
+  // this pay for", among purchases made after it arrived.
+  const earmarked = refund.isEarmarked === true;
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -119,19 +123,23 @@ export function RefundModal({
         <button className="modal-close" onClick={onClose} aria-label="Close">
           <Icon name="ic-x" />
         </button>
-        <h3>What is this a refund of?</h3>
+        <h3>{earmarked ? "What did this pay for?" : "What is this a refund of?"}</h3>
         <div className="modal-sub">
           <Icon name="ic-updown" />
           <span>
-            {refund.merchant ?? "This credit"} · {formatMoney(refund.amountMinor)} back · pick as many
-            purchases as it covers
+            {refund.merchant ?? "This credit"} · {formatMoney(refund.amountMinor)}{" "}
+            {earmarked ? "set aside · pick the purchases it paid for" : "back · pick as many purchases as it covers"}
           </span>
         </div>
 
         {candidates === null ? (
           <p className="field-hint">Looking for payments it could have come from…</p>
         ) : candidates.length === 0 ? (
-          <p className="field-hint">No payment in the 30 days either side of this credit to match it against.</p>
+          <p className="field-hint">
+            {earmarked
+              ? "No payment yet in the 120 days after this money came in to link it to."
+              : "No payment in the 30 days either side of this credit to match it against."}
+          </p>
         ) : (
           <>
           <input
@@ -143,7 +151,9 @@ export function RefundModal({
             aria-label="Search payments"
           />
           <p className="field-hint">
-            Every payment from the 30 days either side of it — money can come in before the thing it paid for — plus older ones for the same amount or merchant.
+            {earmarked
+              ? "Every payment from around when it came in and up to 120 days after."
+              : "Every payment from the 30 days either side of it — money can come in before the thing it paid for — plus older ones for the same amount or merchant."}
           </p>
           <div className="refund-list">
             {shown.length === 0 && <p className="field-hint">Nothing matches “{query.trim()}”.</p>}
@@ -194,12 +204,16 @@ export function RefundModal({
               <span className="emi-preview-value num">{formatMoney(allocatedMinor)}</span>
             </div>
             <div>
-              <span className="emi-preview-label">Never came back</span>
+              <span className="emi-preview-label">{earmarked ? "Paid from your own money" : "Never came back"}</span>
               <span className="emi-preview-value num">{formatMoney(lostMinor)}</span>
             </div>
             <div>
               <span className="emi-preview-label">
-                {unallocatedMinor < 0 ? "More than the credit" : "Left counting as income"}
+                {unallocatedMinor < 0
+                  ? "More than the credit"
+                  : earmarked
+                    ? "Still waiting to be spent"
+                    : "Left counting as income"}
               </span>
               <span className="emi-preview-value num">{formatMoney(Math.abs(unallocatedMinor))}</span>
             </div>
@@ -208,8 +222,9 @@ export function RefundModal({
 
         <div className="modal-footnote">
           <Icon name="ic-info" />
-          Whatever is allocated stops counting as income, and each purchase costs whatever did not come
-          back.
+          {earmarked
+            ? "Each purchase only costs you what this money didn't cover. Whatever is left keeps waiting."
+            : "Whatever is allocated stops counting as income, and each purchase costs whatever did not come back."}
         </div>
 
         {error && <p className="form-error">{error}</p>}
@@ -217,7 +232,7 @@ export function RefundModal({
         <div className="modal-actions">
           {refund.refundOf.length > 0 && (
             <button className="btn btn-sm btn-ghost" onClick={() => save([])} disabled={saving}>
-              Not a refund
+              {earmarked ? "Unlink all" : "Not a refund"}
             </button>
           )}
           <span className="modal-actions-spacer" />
@@ -229,7 +244,7 @@ export function RefundModal({
             onClick={() => save(chosenIds.map((id) => ({ transactionId: id, amountMinor: picked[id] })))}
             disabled={saving || chosenIds.length === 0 || unallocatedMinor < 0}
           >
-            {saving ? "Saving…" : "Link refund"}
+            {saving ? "Saving…" : earmarked ? "Link purchases" : "Link refund"}
           </button>
         </div>
       </div>

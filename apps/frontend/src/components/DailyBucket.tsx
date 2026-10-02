@@ -30,6 +30,13 @@ export function DailyBucket({ daily }: { daily: DailyBudget }) {
         <div className="bucket-simple-sub">
           {formatMoney(daily.spentMinor)} spent of {formatMoney(daily.allowedMinor)} budget
         </div>
+        {/* Money in beyond salary goes into the pot too; said so the
+            figure doesn't look too good to be true. */}
+        {(daily.extraIncomeMinor ?? 0) > 0 && (
+          <div className="bucket-simple-sub">
+            includes {formatMoney(daily.extraIncomeMinor!)} extra money in
+          </div>
+        )}
       </div>
 
       {/* Said out loud, so the bucket never looks as though it simply

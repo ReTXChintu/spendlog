@@ -161,6 +161,25 @@ describe("money on hand", () => {
   });
 });
 
+describe("adding a transaction by hand", () => {
+  it("keeps the one-off, salary and fixed-cost markings rather than dropping them", async () => {
+    const rent = await models.FixedCommitment.create({ userId, name: "Rent", amountMinor: 500_00, dayOfMonth: 5 });
+    const post = (body: Record<string, unknown>) =>
+      call("/transactions", {
+        method: "POST",
+        body: JSON.stringify({ occurredAt: new Date().toISOString(), ...body }),
+      }).then((response) => json<{ id: string }>(response));
+
+    const laptop = await post({ type: "DEBIT", amountMinor: 50_000_00, isSpecial: true, commitmentId: rent.id });
+    const pay = await post({ type: "CREDIT", amountMinor: 80_000_00, isSalary: true });
+
+    const storedLaptop = await models.Transaction.findById(laptop.id).orFail();
+    assert.equal(storedLaptop.isSpecial, true);
+    assert.equal(String(storedLaptop.commitmentId), rent.id);
+    assert.equal((await models.Transaction.findById(pay.id).orFail()).isSalary, true);
+  });
+});
+
 describe("money set aside for a purchase still to come", () => {
   it("is not income, and shows on the dashboard until it is spent", async () => {
     const credit = await tx({ type: "CREDIT", amountMinor: 8_000_00, merchant: "Father", isEarmarked: true });

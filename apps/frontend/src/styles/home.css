@@ -1,0 +1,324 @@
+/* Home: the Dashboard and Analytics tabs, and the charts they draw.
+ *
+ * Kept out of index.css so it can change without touching the shared
+ * sheet. Only tokens from index.css are used for UI colour; the chart
+ * series take their own validated steps below, one set per theme.
+ */
+
+/* ---------------------------------------------------------- chart tokens */
+/* Series hues from the data-viz palette, stepped separately for each theme
+   (validated against both surfaces). Spending is slot 1, money in slot 3. */
+:root {
+  --viz-1: #2a78d6;
+  --viz-2: #eb6834;
+  --viz-3: #1baf7a;
+  --viz-4: #eda100;
+  --viz-5: #e87ba4;
+  --viz-6: #008300;
+  --viz-7: #4a3aa7;
+  --viz-8: #e34948;
+  --viz-spend: var(--viz-1);
+  --viz-income: var(--viz-3);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --viz-1: #3987e5;
+    --viz-2: #d95926;
+    --viz-3: #199e70;
+    --viz-4: #c98500;
+    --viz-5: #d55181;
+    --viz-6: #008300;
+    --viz-7: #9085e9;
+    --viz-8: #e66767;
+  }
+}
+:root[data-theme="dark"] {
+  --viz-1: #3987e5;
+  --viz-2: #d95926;
+  --viz-3: #199e70;
+  --viz-4: #c98500;
+  --viz-5: #d55181;
+  --viz-6: #008300;
+  --viz-7: #9085e9;
+  --viz-8: #e66767;
+}
+
+/* ------------------------------------------------------------------ grid */
+/* Two cards to a row wherever there is room for two, one on a phone. The
+   container query catches a narrow content area beside the sidebar too. */
+.home-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
+  margin-bottom: 24px;
+  container-type: inline-size;
+}
+@container (max-width: 620px) {
+  .home-grid > .home-card { grid-column: 1 / -1; }
+}
+@media (max-width: 700px) {
+  .home-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.home-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  min-height: 240px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.home-card.is-wide { grid-column: 1 / -1; min-height: 0; }
+.home-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 3px; flex-wrap: wrap; }
+.home-card-title { display: flex; align-items: center; gap: 7px; font-size: 14.5px; font-weight: 800; margin: 0 0 3px; }
+.home-card-title svg { width: 15px; height: 15px; color: var(--brand); }
+.home-card-head .home-card-title { margin: 0; }
+.home-card-link {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 14px;
+  font-size: 13px; font-weight: 600; color: var(--brand); text-decoration: none;
+}
+.home-card-link svg { width: 13px; height: 13px; }
+.home-card-link:hover { text-decoration: underline; }
+
+/* Existing pieces dropped into a card keep their insides but lose the
+   spacing they had as page sections. */
+.home-card > .section-block { margin: 0; }
+.home-card .bucket-simple { border: none; padding: 0; background: none; margin-top: 8px; }
+.home-card .bucket-simple-figure { font-size: 32px; }
+.home-card .loan-list { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.home-card .budget-headline { gap: 18px; }
+.home-card .month-delta { margin-top: 4px; }
+
+.home-figure { font-size: 32px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; margin-top: 6px; }
+.home-figure-sub { font-size: 12px; color: var(--muted); font-weight: 600; margin-top: 2px; }
+
+.home-stat { display: flex; flex-direction: column; gap: 2px; padding: 12px 0; border-top: 1px solid var(--line); }
+.home-stat:first-of-type { border-top: none; padding-top: 8px; }
+.home-stat-label { font-size: 12px; color: var(--muted); font-weight: 600; }
+.home-stat-figure { font-size: 22px; font-weight: 800; }
+.home-stat-figure.credit { color: var(--credit); }
+.home-stat-figure.debit { color: var(--debit); }
+.home-stat-sub { font-size: 12px; color: var(--muted); line-height: 1.45; }
+
+.home-section {
+  font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--muted); margin: 8px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line);
+  scroll-margin-top: 20px;
+}
+
+.home-loading { min-height: 320px; border-radius: var(--radius-lg); background: var(--track); opacity: .5; }
+
+/* ------------------------------------------------------- money carousel */
+.money { margin-bottom: 20px; }
+.money-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.money-label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; margin: 0; }
+/* The one hero figure on the page. Proportional digits: it stands alone. */
+.money-figure { font-size: clamp(34px, 4.6vw, 48px); font-weight: 800; letter-spacing: -0.025em; line-height: 1.1; margin-top: 4px; }
+.money-sub { font-size: 12.5px; color: var(--muted); margin: 4px 0 12px; }
+
+.money-row {
+  display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 10px;
+  scroll-snap-type: x mandatory; scroll-padding-left: 2px;
+  overscroll-behavior-x: contain;
+}
+.money-row:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.money-card {
+  flex: 0 0 214px; scroll-snap-align: start; min-width: 0;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 14px 15px; border: 1px solid var(--line); border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.money-card-top { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 12.5px; font-weight: 700; color: var(--ink-70); }
+.money-card-top svg { width: 15px; height: 15px; color: var(--muted); flex-shrink: 0; }
+.money-card-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.money-card-last4 { font-family: var(--font-mono); font-size: 11px; color: var(--muted); font-weight: 500; flex-shrink: 0; }
+.money-card-figure { font-size: 20px; font-weight: 800; margin-top: 6px; }
+.money-card-figure.is-negative { color: var(--debit); }
+.money-card-sub { font-size: 11.5px; color: var(--muted); }
+.money-card-sub a { color: var(--brand); }
+.money-card-set {
+  display: inline-flex; align-items: center; gap: 5px; margin-top: 8px; font-size: 13px; font-weight: 700;
+  color: var(--brand); text-decoration: none;
+}
+.money-card-set svg { width: 13px; height: 13px; }
+.money-card-set:hover { text-decoration: underline; }
+.money-meter { height: 5px; background: var(--track); border-radius: 100px; overflow: hidden; margin-top: 6px; }
+.money-meter-fill { height: 100%; background: var(--brand); border-radius: 100px; transition: width .3s ease; }
+.money-card.is-close .money-meter-fill { background: var(--warn); }
+.money-card.is-over .money-meter-fill { background: var(--debit); }
+
+/* Savings: present, but quiet, and not counted. */
+.money-card.is-savings { background: var(--paper); border-style: dashed; border-color: var(--line-strong); }
+.money-card.is-savings .money-card-top { color: var(--muted); }
+.money-reveal {
+  align-self: flex-start; margin-top: 6px; padding: 3px 9px; border-radius: 100px;
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-70);
+  font-size: 13px; font-weight: 700; font-family: var(--font-mono);
+}
+.money-reveal[aria-pressed="false"] { font-family: var(--font-sans); color: var(--muted); }
+.money-reveal:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.money-card.is-empty { flex-basis: 280px; justify-content: center; }
+
+/* ---------------------------------------------------------- plan warnings */
+.plan-warn {
+  border: 1px solid var(--line); border-left: 4px solid var(--warn); background: var(--warn-bg);
+  border-radius: var(--radius-md); padding: 14px 16px; margin-bottom: 20px;
+}
+.plan-warn.is-over { border-left-color: var(--debit); }
+.plan-warn-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.plan-warn-head > svg { width: 17px; height: 17px; color: var(--warn); }
+.plan-warn.is-over .plan-warn-head > svg { color: var(--debit); }
+.plan-warn-head h2 { font-size: 14.5px; font-weight: 800; margin: 0; flex: 1; min-width: 180px; }
+.plan-warn-link { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 700; color: var(--brand); text-decoration: none; }
+.plan-warn-link svg { width: 13px; height: 13px; }
+.plan-warn-link:hover { text-decoration: underline; }
+.plan-warn-list {
+  list-style: none; margin: 12px 0 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px;
+}
+.plan-warn-list .rule { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; }
+
+/* One savings rule: words, pill, and spent against cap. */
+.rule-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.rule-text { font-size: 13px; font-weight: 600; color: var(--ink); line-height: 1.4; }
+.rule-pill {
+  display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; white-space: nowrap;
+  font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 100px;
+}
+.rule-pill svg { width: 12px; height: 12px; }
+.rule-pill.is-ok { background: var(--credit-50); color: var(--credit); }
+.rule-pill.is-watch { background: var(--warn-bg); color: var(--warn); }
+.rule-pill.is-over { background: var(--debit-50); color: var(--debit); }
+.rule-bar { position: relative; height: 6px; border-radius: 100px; background: var(--track); margin-top: 8px; }
+.rule-bar-fill { height: 100%; border-radius: 100px; background: var(--brand); transition: width .3s ease; }
+.rule.is-watch .rule-bar-fill { background: var(--warn); }
+.rule.is-over .rule-bar-fill { background: var(--debit); }
+/* Where spending would be by today at an even pace. */
+.rule-bar-pace { position: absolute; top: -3px; width: 2px; height: 12px; margin-left: -1px; background: var(--ink-70); border-radius: 1px; }
+.rule-sub { font-size: 11.5px; color: var(--muted); margin-top: 5px; }
+
+.plan-summary { font-size: 13.5px; line-height: 1.55; color: var(--ink-70); margin: 6px 0 10px; }
+.plan-target { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--brand-50); margin-bottom: 12px; }
+.plan-target-figure { font-size: 20px; font-weight: 800; color: var(--brand-dark); }
+.plan-rules { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.plan-rules > li { padding: 10px 0; border-top: 1px solid var(--line); }
+.plan-rules > li:first-child { border-top: none; padding-top: 2px; }
+
+/* -------------------------------------------------------------- earmarks */
+.earmark-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; }
+.earmark-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 9px 4px; border-top: 1px solid var(--line); text-decoration: none; color: inherit; border-radius: 4px;
+}
+.earmark-list li:first-child .earmark-row { border-top: none; }
+.earmark-row:hover { background: var(--row-hover); }
+.earmark-row:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.earmark-main { display: flex; flex-direction: column; min-width: 0; }
+.earmark-who { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.earmark-when { font-size: 11.5px; color: var(--muted); }
+.earmark-left { font-size: 13px; font-weight: 700; white-space: nowrap; }
+
+/* -------------------------------------------------------------------- AI */
+.ai-card { min-height: 260px; }
+.ai-text { font-size: 13.5px; line-height: 1.55; margin-top: 8px; color: var(--ink-70); }
+.ai-text strong { color: var(--ink); }
+.ai-meta { font-size: 11.5px; color: var(--muted); margin: auto 0 0; padding-top: 14px; }
+.ai-wait { display: flex; align-items: flex-start; gap: 12px; margin-top: 12px; padding: 14px; border-radius: var(--radius-md); background: var(--paper); }
+.ai-wait p { margin: 0; font-size: 13px; color: var(--ink-70); line-height: 1.5; }
+.ai-wait .ask-dots { margin-top: 6px; flex-shrink: 0; }
+.ai-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 6px; }
+
+/* ---------------------------------------------------------- filters, KPIs */
+.viz-filters { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+.viz-filter { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; font-weight: 600; color: var(--muted); }
+.viz-filter .filter-select { min-width: 170px; }
+
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.kpi { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 14px 16px; min-width: 0; }
+.kpi-label { font-size: 12px; color: var(--muted); font-weight: 600; }
+.kpi-value { font-size: 22px; font-weight: 800; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi-value.credit { color: var(--credit); }
+.kpi-value.debit { color: var(--debit); }
+.kpi-note { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+
+/* ----------------------------------------------------------------- charts */
+.viz { position: relative; width: 100%; min-width: 0; margin-top: 4px; }
+.viz-svg { display: block; overflow: visible; }
+.viz-svg:focus { outline: none; }
+.viz-svg:focus-visible { outline: 2px solid var(--brand); outline-offset: 4px; border-radius: 4px; }
+.viz-grid { stroke: var(--line); stroke-width: 1; shape-rendering: crispEdges; }
+.viz-base { stroke: var(--line-strong); stroke-width: 1; shape-rendering: crispEdges; }
+.viz-axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; font-family: var(--font-sans); }
+.viz-axis-title { font-weight: 700; }
+.viz-value { fill: var(--ink-70); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; font-family: var(--font-sans); }
+.viz-line { fill: none; stroke: var(--viz-spend); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.viz-area { fill: var(--viz-spend); opacity: .1; }
+.viz-income { fill: var(--viz-income); }
+.viz-cross { stroke: var(--muted-light); stroke-width: 1; }
+.viz-dot { fill: var(--viz-spend); stroke: var(--surface); stroke-width: 2; }
+.viz-col.is-spend { fill: var(--viz-spend); }
+.viz-col.is-income { fill: var(--viz-income); }
+.viz-group .viz-col { transition: opacity .15s; }
+.viz-svg:hover .viz-group:not(.is-active) .viz-col,
+.viz-svg:focus-visible .viz-group:not(.is-active) .viz-col { opacity: .55; }
+.viz-empty { fill: var(--track-strong); }
+.viz-hit { fill: transparent; }
+.viz-fill { background: var(--viz-spend); }
+
+.viz-tip {
+  position: absolute; top: 0; z-index: 2; pointer-events: none;
+  min-width: 130px; padding: 8px 10px; border-radius: var(--radius-sm);
+  background: var(--surface); border: 1px solid var(--line-strong);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, .12); font-size: 12px; color: var(--ink-70);
+}
+.viz-tip-title { font-weight: 700; color: var(--ink); margin-bottom: 3px; }
+.viz-tip-row { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.viz-tip-row b { margin-left: auto; padding-left: 10px; color: var(--ink); }
+
+.viz-legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; font-size: 12px; color: var(--muted); }
+.viz-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.viz-key { display: inline-block; width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+.viz-key.is-spend { background: var(--viz-spend); }
+.viz-key.is-income { background: var(--viz-income); }
+
+/* Donut and its list. */
+.donut { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; margin-top: 4px; }
+.donut-svg { flex-shrink: 0; overflow: visible; }
+.donut-track { fill: none; stroke: var(--track); }
+.donut-arc { transition: opacity .15s; }
+.donut-arc.is-dim { opacity: .35; }
+.donut-centre-label { fill: var(--muted); font-size: 11.5px; font-weight: 600; font-family: var(--font-sans); }
+.donut-centre-value { fill: var(--ink); font-size: 17px; font-weight: 800; font-family: var(--font-sans); }
+.donut-legend { list-style: none; margin: 0; padding: 0; flex: 1; min-width: 190px; display: flex; flex-direction: column; gap: 2px; }
+.donut-legend li {
+  display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 38px; align-items: center; gap: 8px;
+  padding: 5px 6px; border-radius: 6px; font-size: 12.8px; cursor: default;
+}
+.donut-legend li.is-active { background: var(--row-hover); }
+.donut-legend li:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.donut-swatch { width: 10px; height: 10px; border-radius: 3px; }
+.donut-swatch.is-muted { background: transparent; border: 1.5px dashed var(--muted-light); }
+.donut-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.donut-val { font-weight: 700; font-size: 12.5px; }
+.donut-pct { color: var(--muted); font-size: 11.5px; text-align: right; }
+
+/* Account panel: the savings toggle sits between the figures and the balance. */
+.savings-toggle { margin: 14px 0 4px; }
+
+/* hbar label column is too wide for half a row; narrower inside a card. */
+.home-card .hbar-row { grid-template-columns: minmax(80px, 34%) 1fr 88px; }
+.home-card .compare-row { grid-template-columns: minmax(80px, 34%) 1fr 92px; }
+
+@media (max-width: 700px) {
+  .home-card { min-height: 0; padding: 16px; }
+  .money-card { flex-basis: 78%; }
+  .viz-filter, .viz-filter .filter-select { flex: 1; min-width: 0; width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .money-meter-fill, .rule-bar-fill, .viz-group .viz-col, .donut-arc { transition: none; }
+  .money-row { scroll-behavior: auto; }
+}

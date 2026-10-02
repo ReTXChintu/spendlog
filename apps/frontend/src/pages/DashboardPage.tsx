@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { CardLimits } from "../components/CardLimits";
 import { DailyBucket } from "../components/DailyBucket";
 import { CardPicker } from "../components/CardPicker";
+import { EarmarksCard } from "../components/home/EarmarksCard";
+import { MoneyCarousel } from "../components/home/MoneyCarousel";
+import { PlanWarnings } from "../components/home/PlanWarnings";
 import { Icon } from "../components/Icon";
 import { LoanModal } from "../components/LoanModal";
 import { StateBlock } from "../components/States";
@@ -11,17 +14,20 @@ import { formatMoney, formatMoneyShort, formatShortDate } from "../lib/format";
 import { DashboardData, FixedCommitment, Loan, UpcomingBill, commitmentAmountLabel } from "../types";
 
 /**
- * The landing screen: what you need to know now.
+ * The Dashboard tab of Home: what you need to know now.
  *
  * Everything here passes one test — could you act on it before closing the
  * app? A card near its limit changes which card comes out of the wallet; a
- * chart of last March changes nothing, and lives on the analytics page.
+ * chart of last March changes nothing, and lives on the Analytics tab.
+ *
+ * Laid out as a grid of compact cards, two to a row, so a wide screen is
+ * used side to side instead of as one long column. A card takes the whole
+ * row only when what it holds is genuinely wide (a list of loans).
  *
  * One request draws the whole thing. Seven round trips to paint the screen
  * you land on is the slowest possible place to spend them.
  */
-export function DashboardPage() {
-  const navigate = useNavigate();
+export function DashboardTab() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [failed, setFailed] = useState(false);
   const [editingLoan, setEditingLoan] = useState<Loan | null>(null);
@@ -45,39 +51,33 @@ export function DashboardPage() {
 
   if (failed) {
     return (
-      <section className="screen">
-        <StateBlock
-          icon="ic-wifioff"
-          title="Couldn't reach the server"
-          body="Nothing is lost — this screen is built from what the server already knows. Try again in a moment."
-          actions={
-            <button className="btn btn-primary" onClick={load}>
-              Try again
-            </button>
-          }
-        />
-      </section>
+      <StateBlock
+        icon="ic-wifioff"
+        title="Couldn't reach the server"
+        body="Nothing is lost — this screen is built from what the server already knows. Try again in a moment."
+        actions={
+          <button className="btn btn-primary" onClick={load}>
+            Try again
+          </button>
+        }
+      />
     );
   }
 
-  if (!data) return <section className="screen" />;
+  if (!data) return <div className="home-loading" aria-busy="true" />;
 
   const { pace, daily, monthSoFar, needsCategory, emis, loans, owed, expiringPerks, statements, bills } = data;
   const change = monthSoFar.changeMinor;
+  const earmarks = data.earmarks;
 
   return (
-    <section className="screen">
-      <div className="screen-header">
-        <h1 className="screen-title">Dashboard</h1>
-        <div className="screen-actions">
-          <button className="btn btn-sm" onClick={() => navigate("/ask")}>
-            <Icon name="ic-question" /> Ask about my money
-          </button>
-          <button className="btn btn-sm" onClick={() => navigate("/perks")}>
-            <Icon name="ic-percent" /> What do I have here?
-          </button>
-        </div>
-      </div>
+    <>
+      {/* What there is to spend comes first: every other figure on the
+          page is a question about it. */}
+      <MoneyCarousel money={data.money} cards={data.cards} />
+
+      {/* The plan's broken rules, while there is still month left to fix them. */}
+      <PlanWarnings warnings={data.planWarnings ?? []} />
 
       {/* Jobs before figures: the things that want doing are the reason to
           have opened the app at all. */}
@@ -88,217 +88,204 @@ export function DashboardPage() {
         bills={bills}
       />
 
-      <div className="layout-2">
-        <div>
-          {/* Three groups, in the order the questions come. Today: what can I
-              spend and which card. Cards: where each one stands. This month:
-              how the month is going. It was one long run of sections and
-              the figures for different timescales sat next to each other as
-              though they were comparable. */}
-          <h2 className="dash-group">Today</h2>
-
-          {daily && <DailyBucket daily={daily} />}
-
-          <div className="section-block">
-            <h3>Which card today</h3>
-            <p className="section-sub">
-              The card that gives you longest before the money actually has to leave, on each network.
-            </p>
-            <CardPicker picks={data.picks} />
+      <div className="home-grid">
+        {daily?.configured && (
+          <div className="home-card">
+            <DailyBucket daily={daily} />
           </div>
+        )}
 
-          <h2 className="dash-group">Cards</h2>
+        <div className="home-card">
+          <h3 className="home-card-title">Which card today</h3>
+          <p className="section-sub">
+            The card that gives you longest before the money actually has to leave, on each network.
+          </p>
+          <CardPicker picks={data.picks} />
+        </div>
 
-          <CardLimits cards={data.cards} />
+        <div className="home-card">
+          <h3 className="home-card-title">This month so far</h3>
+          <p className="section-sub">
+            Day {monthSoFar.dayOfMonth}
+            {monthSoFar.label ? ` of ${monthSoFar.label}` : ""}, against the same point last month — not the
+            whole of it, which would look like overspending every time.
+          </p>
+          <div className="home-figure">{formatMoney(monthSoFar.spentMinor)}</div>
+          <div className={`month-delta${change > 0 ? " is-up" : change < 0 ? " is-down" : ""}`}>
+            <Icon name="ic-updown" />
+            {change === 0
+              ? "Level with last month"
+              : `${formatMoneyShort(Math.abs(change))} ${change > 0 ? "more" : "less"} than last month`}
+          </div>
+          <Link className="home-card-link" to="/?tab=analytics">
+            See where it went <Icon name="ic-arrow-right" />
+          </Link>
+        </div>
 
-          <h2 className="dash-group">This month</h2>
+        {earmarks && earmarks.count > 0 && <EarmarksCard earmarks={earmarks} />}
 
-          <div className="section-block">
-            <h3>So far</h3>
+        {pace.configured ? (
+          <div className="home-card">
+            <h3 className="home-card-title">Spending pace</h3>
             <p className="section-sub">
-              Day {monthSoFar.dayOfMonth}
-              {monthSoFar.label ? ` of ${monthSoFar.label}` : ""}, against the same point last month — not
-              the whole of it, which would look like overspending every time.
+              {pace.daysLeft} {pace.daysLeft === 1 ? "day" : "days"} until the next salary.
             </p>
-            <div className="month-headline">
-              <div className="month-figure num">{formatMoney(monthSoFar.spentMinor)}</div>
-              <div className={`month-delta${change > 0 ? " is-up" : change < 0 ? " is-down" : ""}`}>
-                <Icon name="ic-updown" />
-                {change === 0
-                  ? "Level with last month"
-                  : `${formatMoneyShort(Math.abs(change))} ${change > 0 ? "more" : "less"} than last month`}
+
+            <div className={`budget-headline home-pace is-${pace.state}`}>
+              <div>
+                <span className="emi-preview-label">Left to spend</span>
+                <span className="budget-figure num">{formatMoney(pace.remainingMinor)}</span>
               </div>
-              <Link className="month-link" to="/analytics">
-                See where it went
-              </Link>
+              <div>
+                <span className="emi-preview-label">A day from here</span>
+                <span className="budget-figure num">{formatMoney(pace.perDayMinor)}</span>
+              </div>
+              <div>
+                <span className="emi-preview-label">Lately</span>
+                <span className="budget-figure num">{formatMoney(pace.recentPerDayMinor)} a day</span>
+              </div>
             </div>
-          </div>
 
-          {pace.configured ? (
-            <div className="section-block">
-              <h3>Spending pace</h3>
-              <p className="section-sub">
-                {pace.daysLeft} {pace.daysLeft === 1 ? "day" : "days"} until the next salary.
+            <div className={`pace-source${pace.salaryIsActual ? "" : " is-guess"}`}>
+              <Icon name={pace.salaryIsActual ? "ic-check" : "ic-info"} />
+              {pace.salaryIsActual
+                ? `Built on the ${formatMoney(pace.salaryMinor)} that actually landed.`
+                : "Built on the salary in Settings. Tick the credit on your ledger as salary and this uses what really arrived."}
+            </div>
+
+            {pace.state !== "ok" && (
+              <p className="budget-verdict">
+                <Icon name="ic-alert" />
+                {pace.state === "over"
+                  ? "Past the salary for this period. Anything more comes out of something else."
+                  : "Carrying on at the last week's pace would run this period dry before payday."}
               </p>
+            )}
 
-              <div className={`budget-headline is-${pace.state}`}>
-                <div>
-                  <span className="emi-preview-label">Left to spend</span>
-                  <span className="budget-figure num">{formatMoney(pace.remainingMinor)}</span>
+            {/* Sending less than usual is worth a sentence rather than a
+                silently unticked box. */}
+            {pace.shortfallNote && (
+              <p className="budget-verdict">
+                <Icon name="ic-info" />
+                {pace.shortfallNote}
+              </p>
+            )}
+
+            {pace.commitments.length > 0 && (
+              <div className="budget-commitments">
+                <div className="trip-settle-title">
+                  Fixed each month
+                  {pace.commitmentsRemainingMinor > 0 &&
+                    ` · ${formatMoneyShort(pace.commitmentsRemainingMinor)} still to go out`}
                 </div>
-                <div>
-                  <span className="emi-preview-label">A day from here</span>
-                  <span className="budget-figure num">{formatMoney(pace.perDayMinor)}</span>
-                </div>
-                <div>
-                  <span className="emi-preview-label">Lately</span>
-                  <span className="budget-figure num">{formatMoney(pace.recentPerDayMinor)} a day</span>
-                </div>
+                {pace.commitments.map((commitment) => (
+                  <label className="budget-commitment" key={commitment.id}>
+                    <input
+                      type="checkbox"
+                      checked={commitment.isPaid ?? false}
+                      onChange={(e) => togglePaid(commitment, e.target.checked)}
+                    />
+                    <span className={commitment.isPaid ? "is-paid" : ""}>
+                      {commitment.name} · {commitment.dayOfMonth}
+                      {ordinal(commitment.dayOfMonth)}
+                      {commitment.isPartial && (
+                        <em className="commitment-short">
+                          {formatMoneyShort(commitment.shortfallMinor ?? 0)} short
+                        </em>
+                      )}
+                    </span>
+                    <span className="num">
+                      {commitment.isPartial
+                        ? `${formatMoney(commitment.paidMinor ?? 0)} of ${formatMoney(
+                            commitment.thisPeriodAmountMinor ?? commitment.amountMinor
+                          )}`
+                        : commitmentAmountLabel(commitment, formatMoney)}
+                    </span>
+                  </label>
+                ))}
               </div>
+            )}
+          </div>
+        ) : (
+          <div className="home-card">
+            <h3 className="home-card-title">Spending pace</h3>
+            <p className="section-sub">
+              Tell SpendLog what lands each month and when, and it can say how much a day is left before the
+              next one. <Link to="/settings?tab=budget">Set your salary</Link>.
+            </p>
+          </div>
+        )}
 
-              <div className={`pace-source${pace.salaryIsActual ? "" : " is-guess"}`}>
-                <Icon name={pace.salaryIsActual ? "ic-check" : "ic-info"} />
-                {pace.salaryIsActual
-                  ? `Built on the ${formatMoney(pace.salaryMinor)} that actually landed.`
-                  : "Built on the salary in Settings. Tick the credit on your ledger as salary and this uses what really arrived."}
+        {data.cards.length > 0 && (
+          <div className="home-card">
+            <CardLimits cards={data.cards} />
+          </div>
+        )}
+
+        {(emis.count > 0 || owed.balanceMinor !== 0) && (
+          <div className="home-card">
+            <h3 className="home-card-title">Owed and owing</h3>
+            {emis.count > 0 && (
+              <div className="home-stat">
+                <span className="home-stat-label">EMIs running</span>
+                <span className="home-stat-figure num">{formatMoney(emis.monthlyMinor)}</span>
+                <span className="home-stat-sub">
+                  a month across {emis.count === 1 ? "one plan" : `${emis.count} plans`} ·{" "}
+                  {formatMoneyShort(emis.remainingMinor)} still to pay
+                </span>
               </div>
+            )}
+            {owed.balanceMinor !== 0 && (
+              <div className="home-stat">
+                <span className="home-stat-label">Split bills</span>
+                <span className={`home-stat-figure num ${owed.balanceMinor > 0 ? "credit" : "debit"}`}>
+                  {formatMoney(Math.abs(owed.balanceMinor))}
+                </span>
+                <span className="home-stat-sub">
+                  {owed.balanceMinor > 0 ? "owed to you" : "you owe"} · <Link to="/people">see who</Link>
+                </span>
+              </div>
+            )}
+          </div>
+        )}
 
-              {pace.state !== "ok" && (
-                <p className="budget-verdict">
-                  <Icon name="ic-alert" />
-                  {pace.state === "over"
-                    ? "Past the salary for this period. Anything more comes out of something else."
-                    : "Carrying on at the last week's pace would run this period dry before payday."}
-                </p>
-              )}
-
-              {/* Sending less than usual is worth a sentence rather than a
-                  silently unticked box. */}
-              {pace.shortfallNote && (
-                <p className="budget-verdict">
-                  <Icon name="ic-info" />
-                  {pace.shortfallNote}
-                </p>
-              )}
-
-              {pace.commitments.length > 0 && (
-                <div className="budget-commitments">
-                  <div className="trip-settle-title">
-                    Fixed each month
-                    {pace.commitmentsRemainingMinor > 0 &&
-                      ` · ${formatMoneyShort(pace.commitmentsRemainingMinor)} still to go out`}
+        {loans.count > 0 && (
+          <div className={`home-card${loans.count > 1 ? " is-wide" : ""}`}>
+            <h3 className="home-card-title">Loans · {formatMoney(loans.monthlyMinor)} a month</h3>
+            <p className="section-sub">
+              Across {loans.count === 1 ? "one loan" : `${loans.count} loans`} ·{" "}
+              {formatMoney(loans.remainingMinor)} still to repay. Soonest due first.
+            </p>
+            <div className="loan-list">
+              {loans.loans.map((loan) => (
+                <button className="loan-row" key={loan.id} onClick={() => setEditingLoan(loan)}>
+                  <div className="loan-row-top">
+                    <span className="loan-row-name">{loan.label}</span>
+                    <span className="loan-row-left num">{formatMoney(loan.remainingMinor)} left</span>
                   </div>
-                  {pace.commitments.map((commitment) => (
-                    <label className="budget-commitment" key={commitment.id}>
-                      <input
-                        type="checkbox"
-                        checked={commitment.isPaid ?? false}
-                        onChange={(e) => togglePaid(commitment, e.target.checked)}
-                      />
-                      <span className={commitment.isPaid ? "is-paid" : ""}>
-                        {commitment.name} · {commitment.dayOfMonth}
-                        {ordinal(commitment.dayOfMonth)}
-                        {commitment.isPartial && (
-                          <em className="commitment-short">
-                            {formatMoneyShort(commitment.shortfallMinor ?? 0)} short
-                          </em>
-                        )}
+                  <div className="emi-progress">
+                    <div
+                      className="emi-progress-fill"
+                      style={{ width: `${Math.round((loan.paidCount / Math.max(1, loan.months)) * 100)}%` }}
+                    />
+                  </div>
+                  <div className="loan-row-sub">
+                    <span>
+                      {loan.paidCount} of {loan.months} paid · {formatMoney(loan.monthlyAmountMinor)} a month
+                    </span>
+                    {loan.nextDue && (
+                      <span>
+                        Next {formatShortDate(loan.nextDue.dueDate)}
+                        {loan.nextDue.amountMinor !== loan.monthlyAmountMinor &&
+                          ` · ${formatMoney(loan.nextDue.amountMinor)}`}
                       </span>
-                      <span className="num">
-                        {commitment.isPartial
-                          ? `${formatMoney(commitment.paidMinor ?? 0)} of ${formatMoney(
-                              commitment.thisPeriodAmountMinor ?? commitment.amountMinor
-                            )}`
-                          : commitmentAmountLabel(commitment, formatMoney)}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="section-block">
-              <h3>Spending pace</h3>
-              <p className="section-sub">
-                Tell SpendLog what lands each month and when, and it can say how much a day is left before
-                the next one. <Link to="/settings?tab=budget">Set your salary</Link>.
-              </p>
-            </div>
-          )}
-
-          {loans.count > 0 && (
-            <>
-              <h2 className="dash-group">Loans</h2>
-              <div className="section-block">
-                <h3>{formatMoney(loans.monthlyMinor)} a month</h3>
-                <p className="section-sub">
-                  Across {loans.count === 1 ? "one loan" : `${loans.count} loans`} ·{" "}
-                  {formatMoney(loans.remainingMinor)} still to repay. Soonest due first.
-                </p>
-                <div className="loan-list">
-                  {loans.loans.map((loan) => (
-                    <button className="loan-row" key={loan.id} onClick={() => setEditingLoan(loan)}>
-                      <div className="loan-row-top">
-                        <span className="loan-row-name">{loan.label}</span>
-                        <span className="loan-row-left num">{formatMoney(loan.remainingMinor)} left</span>
-                      </div>
-                      <div className="emi-progress">
-                        <div
-                          className="emi-progress-fill"
-                          style={{ width: `${Math.round((loan.paidCount / Math.max(1, loan.months)) * 100)}%` }}
-                        />
-                      </div>
-                      <div className="loan-row-sub">
-                        <span>
-                          {loan.paidCount} of {loan.months} paid · {formatMoney(loan.monthlyAmountMinor)} a month
-                        </span>
-                        {loan.nextDue && (
-                          <span>
-                            Next {formatShortDate(loan.nextDue.dueDate)}
-                            {loan.nextDue.amountMinor !== loan.monthlyAmountMinor &&
-                              ` · ${formatMoney(loan.nextDue.amountMinor)}`}
-                          </span>
-                        )}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="rail">
-          {emis.count > 0 && (
-            <div className="card rail-card">
-              <div className="rail-title">EMIs running</div>
-              <div className="rail-figure num">{formatMoney(emis.monthlyMinor)}</div>
-              <div className="rail-sub">
-                a month across {emis.count === 1 ? "one plan" : `${emis.count} plans`} ·{" "}
-                {formatMoneyShort(emis.remainingMinor)} still to pay
-              </div>
-            </div>
-          )}
-
-          {owed.balanceMinor !== 0 && (
-            <div className="card rail-card">
-              <div className="rail-title">Split bills</div>
-              <div className={`rail-figure num ${owed.balanceMinor > 0 ? "credit" : "debit"}`}>
-                {formatMoney(Math.abs(owed.balanceMinor))}
-              </div>
-              <div className="rail-sub">
-                {owed.balanceMinor > 0 ? "owed to you" : "you owe"} · <Link to="/people">see who</Link>
-              </div>
-            </div>
-          )}
-
-          <div className="stat-tiles">
-            <div className="stat-tile">
-              <div className="label">Cards</div>
-              <div className="value num">{data.cards.length}</div>
+                    )}
+                  </div>
+                </button>
+              ))}
             </div>
           </div>
-        </div>
+        )}
       </div>
 
       {editingLoan && (
@@ -311,7 +298,7 @@ export function DashboardPage() {
           onClose={() => setEditingLoan(null)}
         />
       )}
-    </section>
+    </>
   );
 }
 

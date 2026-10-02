@@ -59,6 +59,23 @@ export function AccountPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [savingBusy, setSavingBusy] = useState(false);
+  const [savingsError, setSavingsError] = useState<string | null>(null);
+
+  // Marking one account as savings unmarks any other, on the server.
+  async function toggleSavings(isSavings: boolean) {
+    setSavingBusy(true);
+    setSavingsError(null);
+    try {
+      await api.patch(`/accounts/${account.id}`, { isSavings });
+      onChanged();
+    } catch (err) {
+      setSavingsError(err instanceof Error ? err.message : "That didn't save.");
+    } finally {
+      setSavingBusy(false);
+    }
+  }
+
   async function remove(unassign: boolean) {
     setBusy(true);
     setError(null);
@@ -245,6 +262,23 @@ export function AccountPanel({
         </div>
         )}
       </div>
+
+      {/* The emergency account: its money stays out of "money on hand" on
+          Home, so an ordinary month never looks richer than it is. */}
+      {account.accountType === "BANK" && (
+        <label className="checkbox-row savings-toggle">
+          <input
+            type="checkbox"
+            checked={account.isSavings ?? false}
+            disabled={savingBusy}
+            onChange={(e) => toggleSavings(e.target.checked)}
+          />
+          <span>
+            This is my savings account (kept out of money on hand)
+            {savingsError && <span className="set-warn"> {savingsError}</span>}
+          </span>
+        </label>
+      )}
 
       {account.tracksBalance && <BalancePanel account={account} onChanged={onChanged} />}
 

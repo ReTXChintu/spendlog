@@ -1,10 +1,9 @@
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { RequireAuth } from "./components/RequireAuth";
-import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { AskPage } from "./pages/AskPage";
 import { AuthCallbackPage } from "./pages/AuthCallbackPage";
-import { DashboardPage } from "./pages/DashboardPage";
+import { HomePage } from "./pages/HomePage";
 import { PeoplePage } from "./pages/PeoplePage";
 import { PerksPage } from "./pages/PerksPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -24,13 +23,15 @@ export default function App() {
           </RequireAuth>
         }
       >
-        {/* The dashboard is what you land on: what needs knowing now. The
-            ledger keeps its own path rather than sharing the root. */}
-        <Route path="/" element={<DashboardPage />} />
+        {/* Home is what you land on: the dashboard, with analytics as its
+            second tab. The ledger keeps its own path rather than sharing
+            the root. */}
+        <Route path="/" element={<HomePage />} />
         <Route path="/transactions" element={<TransactionsPage />} />
         <Route path="/perks" element={<PerksPage />} />
         <Route path="/trips" element={<TripsPage />} />
-        <Route path="/analytics" element={<AnalyticsPage />} />
+        {/* Old links and bookmarks still land on the analytics. */}
+        <Route path="/analytics" element={<Navigate to="/?tab=analytics" replace />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/ask" element={<AskPage />} />
         <Route path="/people" element={<PeoplePage />} />

@@ -233,6 +233,12 @@ const createTransactionSchema = z.object({
   transferAccountId: z.string().regex(OBJECT_ID).nullable().optional(),
   // Money in that is set aside for a purchase still to come.
   isEarmarked: z.boolean().optional(),
+  // The same markings the edit form offers, so adding a transaction keeps
+  // them rather than quietly dropping everything but the basics.
+  isSalary: z.boolean().optional(),
+  cardPaymentFor: z.string().regex(OBJECT_ID).nullable().optional(),
+  commitmentId: z.string().regex(OBJECT_ID).nullable().optional(),
+  loanId: z.string().regex(OBJECT_ID).nullable().optional(),
 });
 
 // POST /transactions — manual entry (cash spends, or anything the auto
@@ -284,8 +290,22 @@ transactionsRouter.post("/", async (req, res) => {
     people,
     transferAccountId: parsed.data.isTransfer ? (parsed.data.transferAccountId ?? null) : null,
     isEarmarked: parsed.data.type === "CREDIT" ? (parsed.data.isEarmarked ?? false) : false,
+    isSpecial: parsed.data.isSpecial ?? false,
+    isSalary: parsed.data.type === "CREDIT" ? (parsed.data.isSalary ?? false) : false,
+    cardPaymentFor: parsed.data.type === "DEBIT" ? (parsed.data.cardPaymentFor ?? null) : null,
+    commitmentId: parsed.data.type === "DEBIT" ? (parsed.data.commitmentId ?? null) : null,
     source: "MANUAL",
   });
+
+  // A loan claims an instalment as it is linked, so it goes through the
+  // same step an edit uses rather than being written as a plain field.
+  if (parsed.data.type === "DEBIT" && parsed.data.loanId) {
+    const error = await applyLoanLink(created._id, currentUserId(req), parsed.data.loanId);
+    if (error) {
+      await created.deleteOne();
+      return res.status(400).json({ error });
+    }
+  }
 
   const tx = await Transaction.findById(created._id).populate("category").populate("account").populate("trip");
   res.status(201).json(tx);

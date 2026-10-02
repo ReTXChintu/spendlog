@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { Account, Category, Perk, PerkKind, accountLabel } from "../types";
-import { PerkDraft } from "../lib/perkImage";
 import { Icon } from "./Icon";
+import "../styles/perks.css";
 
 /**
  * Add or edit one perk.
@@ -11,9 +11,22 @@ import { Icon } from "./Icon";
  * card offer is attached to a card and stands until the bank changes it; a
  * coupon has a code, an expiry, and is gone once used.
  */
+/** Where coupons usually come from. Banks are added from your own accounts. */
+const SOURCE_SUGGESTIONS = [
+  "Google Pay",
+  "PhonePe",
+  "Paytm",
+  "CRED",
+  "Amazon Pay",
+  "Swiggy",
+  "Zomato",
+  "Flipkart",
+  "BHIM",
+  "MobiKwik",
+];
+
 export function PerkModal({
   perk,
-  draft,
   accounts,
   categories,
   onSaved,
@@ -21,13 +34,6 @@ export function PerkModal({
 }: {
   /** null means "add a new one". */
   perk: Perk | null;
-  /**
-   * What a model made of a picture, to start from. Every field is still
-   * editable and nothing is saved until the form is — the model proposes
-   * and you decide, because one that reads "20% up to ₹150" as "₹150 off"
-   * is wrong in a way you would only notice at a till.
-   */
-  draft?: PerkDraft | null;
   accounts: Account[];
   categories: Category[];
   onSaved: () => void;
@@ -35,19 +41,21 @@ export function PerkModal({
 }) {
   const isNew = perk === null;
 
-  const [kind, setKind] = useState<PerkKind>(perk?.kind ?? draft?.kind ?? "COUPON");
-  const [title, setTitle] = useState(perk?.title ?? draft?.title ?? "");
-  const [merchants, setMerchants] = useState(perk?.merchants.join(", ") ?? draft?.merchants.join(", ") ?? "");
-  const [accountId, setAccountId] = useState(idOf(perk?.accountId) || (draft?.accountId ?? ""));
+  const [kind, setKind] = useState<PerkKind>(perk?.kind ?? "COUPON");
+  const [title, setTitle] = useState(perk?.title ?? "");
+  const [merchants, setMerchants] = useState(perk?.merchants.join(", ") ?? "");
+  const [accountId, setAccountId] = useState(idOf(perk?.accountId));
   const [categoryId, setCategoryId] = useState(idOf(perk?.categoryId));
-  const [worthKind, setWorthKind] = useState<"percent" | "flat">((perk ?? draft)?.flatMinor ? "flat" : "percent");
-  const [percent, setPercent] = useState((perk ?? draft)?.percent?.toString() ?? "");
-  const [flat, setFlat] = useState(rupees((perk ?? draft)?.flatMinor));
-  const [maxDiscount, setMaxDiscount] = useState(rupees((perk ?? draft)?.maxDiscountMinor));
-  const [minSpend, setMinSpend] = useState(rupees((perk ?? draft)?.minSpendMinor));
-  const [expiresOn, setExpiresOn] = useState((perk?.expiresOn ?? draft?.expiresOn)?.slice(0, 10) ?? "");
-  const [code, setCode] = useState(perk?.code ?? draft?.code ?? "");
-  const [notes, setNotes] = useState(perk?.notes ?? draft?.notes ?? "");
+  const [worthKind, setWorthKind] = useState<"percent" | "flat">(perk?.flatMinor ? "flat" : "percent");
+  const [percent, setPercent] = useState(perk?.percent?.toString() ?? "");
+  const [flat, setFlat] = useState(rupees(perk?.flatMinor));
+  const [maxDiscount, setMaxDiscount] = useState(rupees(perk?.maxDiscountMinor));
+  const [minSpend, setMinSpend] = useState(rupees(perk?.minSpendMinor));
+  const [expiresOn, setExpiresOn] = useState(perk?.expiresOn?.slice(0, 10) ?? "");
+  const [code, setCode] = useState(perk?.code ?? "");
+  const [notes, setNotes] = useState(perk?.notes ?? "");
+  const [source, setSource] = useState(perk?.source ?? "");
+  const [terms, setTerms] = useState(perk?.terms ?? "");
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,8 +72,13 @@ export function PerkModal({
     (account) => account.accountType === "CARD" || account.accountType === "DEBIT"
   );
 
-  /** What the model could not find, named so the form can point at it. */
-  const missing = new Set<string>(draft?.missing ?? []);
+  // Your own banks sit alongside the apps: a card offer usually comes from one.
+  const sourceOptions = [
+    ...new Set([
+      ...SOURCE_SUGGESTIONS,
+      ...accounts.map((account) => account.bankName?.trim()).filter(Boolean),
+    ]),
+  ];
 
   async function save() {
     setSaving(true);
@@ -87,6 +100,8 @@ export function PerkModal({
       expiresOn: expiresOn || null,
       code: code.trim() || null,
       notes: notes.trim() || null,
+      source: source.trim() || null,
+      terms: terms.trim() || null,
     };
 
     try {
@@ -116,26 +131,12 @@ export function PerkModal({
           Anything that makes a purchase cheaper, so this page can answer before you pay.
         </div>
 
-        {/* Read, not saved. The model fills the form and a person decides,
-            because one that reads "20% up to ₹150" as "₹150 off" is wrong
-            in a way nobody notices until they are at a till. */}
-        {draft && (
+        {perk?.needsReview && (
           <div className="read-banner">
             <Icon name="ic-info" />
             <div>
-              <b>Read from your picture.</b>{" "}
-              {missing.size > 0
-                ? `Check it over — it could not find ${[...missing]
-                    .map((field) => MISSING_LABEL[field] ?? field)
-                    .join(", ")}.`
-                : "Check it over before saving."}
-              {draft.cardNamed && !draft.accountId && (
-                <>
-                  {" "}
-                  It says this is for <b>{draft.cardNamed}</b>, which is not one of your cards —
-                  pick the right one below, or leave it blank.
-                </>
-              )}
+              <b>Read from a screenshot.</b> Check the figures against the text below before
+              relying on it — "20% up to ₹150" and "₹150 off" are easy to mix up.
             </div>
           </div>
         )}
@@ -256,6 +257,33 @@ export function PerkModal({
             </>
           )}
 
+          <label className="field">
+            <span>From (app or bank)</span>
+            <input
+              list="perk-source-options"
+              value={source}
+              onChange={(e) => setSource(e.target.value)}
+              placeholder="Google Pay, CRED, HDFC Bank…"
+            />
+            <datalist id="perk-source-options">
+              {sourceOptions.map((option) => (
+                <option key={option} value={option} />
+              ))}
+            </datalist>
+            <span className="field-hint">Where you got it, so you know which app to open.</span>
+          </label>
+
+          <label className="field field-wide">
+            <span>Terms &amp; conditions</span>
+            <textarea
+              className="perk-textarea"
+              rows={4}
+              value={terms}
+              onChange={(e) => setTerms(e.target.value)}
+              placeholder="Valid once per user. Not valid on gift cards…"
+            />
+          </label>
+
           <label className="field field-wide">
             <span>Notes</span>
             <input
@@ -265,6 +293,15 @@ export function PerkModal({
             />
           </label>
         </div>
+
+        {/* Read-only: it is what the model saw, kept so a misread figure
+            can be checked against the original wording. */}
+        {perk?.extractedText && (
+          <details className="perk-details perk-details-modal">
+            <summary>Text read from the screenshot</summary>
+            <pre className="perk-extracted">{perk.extractedText}</pre>
+          </details>
+        )}
 
         {error && <p className="modal-error">{error}</p>}
 
@@ -280,14 +317,6 @@ export function PerkModal({
     </div>
   );
 }
-
-/** What a missing field is called in the sentence that names it. */
-const MISSING_LABEL: Record<string, string> = {
-  title: "a name",
-  discount: "what it takes off",
-  expiresOn: "when it runs out",
-  code: "the code",
-};
 
 /** Minor units as whole rupees, for a field somebody types into. */
 function rupees(minor: number | null | undefined): string {

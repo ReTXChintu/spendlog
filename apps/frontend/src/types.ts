@@ -65,6 +65,9 @@ export interface Account {
   /// Whether a statement password is stored. The value itself never leaves
   /// the server, so this is all a client can know about it.
   hasStatementPassword?: boolean;
+  /// THE savings (emergency) account: kept out of money on hand. At most
+  /// one per user; marking one unmarks the others.
+  isSavings?: boolean;
 }
 
 /**
@@ -375,6 +378,8 @@ export interface DailyBudgetDay {
   spentMinor: number;
   /** Budget less spending: positive put by, negative taken back. */
   deltaMinor: number;
+  /** Money in that day on top of salary. */
+  incomeMinor?: number;
 }
 
 /**
@@ -405,6 +410,8 @@ export type DailyBudget =
       /** One-offs and trips, kept out of the score and reported here. */
       keptOutMinor?: number;
       keptOutCount?: number;
+      /** Money in on top of salary this period, already in bucketMinor. */
+      extraIncomeMinor?: number;
       days: DailyBudgetDay[];
     };
 
@@ -461,6 +468,13 @@ export interface Transaction {
   emiPlanId: string | null;
   emiRole: EmiRole | null;
   isTransfer: boolean;
+  /** On a transfer between own accounts, the other account. On a debit
+      the money went from `account` to this; on a credit it came from this. */
+  transferAccountId?: string | null;
+  /** Read-only: set when both legs of a transfer were found as separate rows. */
+  transferPairId?: string | null;
+  /** Credit only: money received for a purchase still to come. Not income. */
+  isEarmarked?: boolean;
   /// A one-off the daily budget should not score a day against. Still
   /// counted everywhere else, because the money still left.
   isSpecial?: boolean;
@@ -624,6 +638,12 @@ export interface Perk {
   needsReview?: boolean;
   isActive: boolean;
   notes: string | null;
+  /** The app or bank it came from: "Google Pay", "CRED", "HDFC Bank"… */
+  source?: string | null;
+  /** Terms & conditions, as written on the offer. */
+  terms?: string | null;
+  /** Everything read off the screenshot, kept so a misread can be checked. */
+  extractedText?: string | null;
   /** Added by the list and the dashboard, not stored. */
   isLive?: boolean;
   daysLeft?: number | null;
@@ -724,4 +744,89 @@ export interface DashboardData {
   };
   monthSoFar: MonthSoFar;
   bills: UpcomingBill[];
+  /// Optional, like daily: a cached page can outlive the server build.
+  money?: MoneyOnHand;
+  earmarks?: EarmarkSummary;
+  planWarnings?: PlanRule[];
+}
+
+/** Bank and cash balances. onHandMinor leaves the savings account out. */
+export interface MoneyOnHand {
+  accounts: {
+    id: string;
+    name: string;
+    last4: string | null;
+    accountType: "BANK" | "CASH";
+    isSavings: boolean;
+    /** Null until a starting balance is set. */
+    balanceMinor: number | null;
+  }[];
+  onHandMinor: number;
+  inBankMinor: number;
+  cashMinor: number | null;
+  savingsMinor: number | null;
+  untracked: number;
+}
+
+/** Money received for a purchase still to come, not yet spent. */
+export interface EarmarkSummary {
+  count: number;
+  totalMinor: number;
+  items: {
+    id: string;
+    merchant: string | null;
+    note: string | null;
+    occurredAt: string;
+    amountMinor: number;
+    spentMinor: number;
+    leftMinor: number;
+  }[];
+}
+
+/** One rule of the AI savings plan, with how this month is going on it. */
+export interface PlanRule {
+  text: string;
+  category: string | null;
+  monthlyCapMinor: number | null;
+  spentMinor?: number;
+  expectedSoFarMinor?: number;
+  state: "ok" | "watch" | "over";
+}
+
+export interface SavingsPlan {
+  summary: string;
+  monthlyTargetMinor: number | null;
+  model: string;
+  updatedAt: string;
+  month: { from: string; to: string };
+  rules: PlanRule[];
+  warnings: PlanRule[];
+}
+
+export interface AiInsight {
+  day: string;
+  text: string;
+  model: string;
+  updatedAt: string;
+}
+
+export interface DailySpend {
+  day: string;
+  spendMinor: number;
+  incomeMinor: number;
+}
+
+export interface WeekdaySpend {
+  day: string;
+  amountMinor: number;
+  count: number;
+  averageMinor: number;
+}
+
+export interface AccountSpend {
+  accountId: string;
+  name: string;
+  accountType: string;
+  amountMinor: number;
+  count: number;
 }

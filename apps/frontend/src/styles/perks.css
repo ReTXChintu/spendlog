@@ -1,0 +1,82 @@
+/* Perks: screenshot import, source filter, T&C and the text read off a
+   picture. Tokens only, so both themes come for free. */
+
+/* ------------------------------------------ "we've got them, carry on" */
+.perk-notice{display:flex;align-items:flex-start;gap:10px;margin:14px 0 0;padding:11px 13px;
+  background:var(--credit-50);border:1px solid var(--credit);border-radius:var(--radius-md);
+  font-size:12.8px;line-height:1.5;color:var(--ink-70)}
+.perk-notice p{margin:0;flex:1;min-width:0}
+.perk-notice>svg{width:15px;height:15px;flex-shrink:0;margin-top:2px;color:var(--credit)}
+.perk-notice .btn{flex-shrink:0;padding:2px 6px}
+.perk-notice.is-warn{background:var(--warn-bg);border-color:var(--warn)}
+.perk-notice.is-warn>svg{color:var(--warn)}
+
+/* The small "Reading 2 of 5…" line: present, never in the way. */
+.perk-reading{display:inline-flex;align-items:center;gap:9px;margin:12px 0 0;padding:6px 12px;
+  border:1px solid var(--line);border-radius:100px;background:var(--surface);
+  font-size:12.3px;font-weight:600;color:var(--ink-70)}
+.perk-reading-dot{width:8px;height:8px;border-radius:50%;background:var(--brand);
+  animation:perk-pulse 1.4s ease-in-out infinite}
+.perk-reading-meter{width:70px;height:4px;border-radius:100px;background:var(--track);overflow:hidden}
+.perk-reading-meter>span{display:block;height:100%;background:var(--brand);transition:width .4s ease}
+@keyframes perk-pulse{0%,100%{opacity:1}50%{opacity:.3}}
+@media (prefers-reduced-motion: reduce){.perk-reading-dot{animation:none}}
+
+/* ----------------------------------------------------- filter by source */
+.perk-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
+.perk-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;font:inherit;
+  font-size:12.3px;font-weight:600;color:var(--ink-70);background:var(--surface);
+  border:1px solid var(--line);border-radius:100px;cursor:pointer}
+.perk-chip:hover{border-color:var(--brand)}
+.perk-chip:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.perk-chip.is-on{background:var(--brand-50);border-color:var(--brand);color:var(--brand-dark)}
+.perk-chip-count{font-size:11px;color:var(--muted);font-weight:700}
+.perk-chip.is-on .perk-chip-count{color:var(--brand-dark)}
+
+/* ------------------------------------------------------------- the row */
+/* The row grows a second line for the expandable sections, so the old
+   single flex line becomes the top of a column. */
+.perk-row.perk-row-full{flex-direction:column;align-items:stretch;gap:0}
+.perk-row-top{display:flex;align-items:center;gap:12px;min-width:0}
+.perk-title{flex-wrap:wrap}
+.perk-source{font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:100px;
+  background:var(--chip-neutral);color:var(--ink-70);white-space:nowrap}
+
+.perk-more{display:flex;flex-direction:column;gap:6px;margin:10px 0 0;padding:8px 0 0;
+  border-top:1px dashed var(--line)}
+.perk-details>summary{cursor:pointer;font-size:12px;font-weight:700;color:var(--muted);
+  padding:2px 0;width:fit-content;border-radius:4px}
+.perk-details>summary:hover{color:var(--ink)}
+.perk-details>summary:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.perk-details[open]>summary{color:var(--ink)}
+.perk-terms{margin:6px 0 4px;font-size:12.5px;line-height:1.55;color:var(--ink-70);
+  white-space:pre-wrap;overflow-wrap:anywhere}
+.perk-extracted{margin:6px 0 4px;padding:10px 12px;max-height:260px;overflow:auto;
+  font-family:var(--font-mono);font-size:11.8px;line-height:1.55;white-space:pre-wrap;
+  overflow-wrap:anywhere;color:var(--ink-70);background:var(--paper);
+  border:1px solid var(--line);border-radius:var(--radius-sm);user-select:text}
+.perk-copy{padding:3px 8px}
+
+.perk-details-modal{margin:16px 0 0}
+.perk-textarea{font:inherit;font-size:13.5px;line-height:1.5;padding:9px 11px;resize:vertical;
+  min-height:84px;color:var(--ink);background:var(--surface);border:1px solid var(--line-strong);
+  border-radius:var(--radius-sm)}
+.perk-textarea:focus{outline:none;border-color:var(--brand)}
+
+/* ---------------------------------------- "done", wherever you are now */
+.perk-toast-wrap{position:fixed;right:16px;bottom:16px;left:16px;z-index:200;
+  display:flex;justify-content:flex-end;pointer-events:none}
+.perk-toast{pointer-events:auto;display:flex;align-items:center;gap:10px;max-width:440px;
+  padding:12px 12px 12px 14px;background:var(--surface);color:var(--ink);
+  border:1px solid var(--line-strong);border-left:4px solid var(--credit);
+  border-radius:var(--radius-md);box-shadow:0 10px 30px rgba(0,0,0,.18);
+  animation:perk-toast-in .2s ease-out}
+.perk-toast.is-quiet{border-left-color:var(--muted)}
+.perk-toast>svg{width:17px;height:17px;flex-shrink:0;color:var(--credit)}
+.perk-toast.is-quiet>svg{color:var(--muted)}
+.perk-toast-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;font-size:13px;line-height:1.4}
+.perk-toast-body span{font-size:12px;color:var(--muted)}
+.perk-toast .btn{flex-shrink:0;text-decoration:none}
+.perk-toast-close{padding:2px 6px}
+@keyframes perk-toast-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion: reduce){.perk-toast{animation:none}}

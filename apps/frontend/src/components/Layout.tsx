@@ -2,15 +2,16 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { useAuth } from "../lib/auth";
 import { Icon, IconSprite } from "./Icon";
+import { PerkImportWatcher } from "./PerkImportWatcher";
 import { ThemeToggle } from "./ThemeToggle";
 
 const NAV = [
-  { to: "/", label: "Dashboard", icon: "ic-home", end: true },
+  // Home holds the Dashboard and Analytics as tabs, so neither has an entry of its own.
+  { to: "/", label: "Home", icon: "ic-home", end: true },
   { to: "/transactions", label: "Transactions", icon: "ic-receipt" },
   { to: "/perks", label: "Perks", icon: "ic-percent" },
   { to: "/trips", label: "Trips", icon: "ic-calendar" },
   { to: "/people", label: "People", icon: "ic-people" },
-  { to: "/analytics", label: "Analytics", icon: "ic-trend" },
   { to: "/ask", label: "Ask", icon: "ic-spark" },
   { to: "/settings", label: "Settings", icon: "ic-filter" },
 ];
@@ -31,6 +32,8 @@ export function Layout() {
   return (
     <>
       <IconSprite />
+      {/* Here, not on the perks page, so "done reading" reaches you anywhere. */}
+      <PerkImportWatcher />
       <div id="app-shell">
         <aside className="sidebar">
           <div className="brand-mark">

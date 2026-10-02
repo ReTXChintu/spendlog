@@ -1,8 +1,9 @@
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../components/Icon";
 import { PerkModal } from "../components/PerkModal";
-import { PerkImportBar } from "../components/PerkImportBar";
-import { PerkDraft, readPerkFromImage } from "../lib/perkImage";
+import { PerkImportBar, PerkImportStatus } from "../components/PerkImportBar";
+import { onImportFinished, subscribeImports, getImportState } from "../lib/perkImports";
+import "../styles/perks.css";
 import { StateBlock } from "../components/States";
 import { api } from "../lib/api";
 import { formatMoney, formatMoneyShort } from "../lib/format";
@@ -23,17 +24,16 @@ export function PerksPage() {
   const [perks, setPerks] = useState<Perk[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [editing, setEditing] = useState<{ perk: Perk | null; draft?: PerkDraft | null } | null>(
-    null
-  );
+  const [editing, setEditing] = useState<{ perk: Perk | null } | null>(null);
+  /// "All", a source name, or NO_SOURCE.
+  const [sourceFilter, setSourceFilter] = useState<string>(ALL);
 
   /// Whether this server has a model to read a picture with. Asked before
   /// the button is drawn: a deployment without one hides it rather than
   /// offering something that fails.
   const [reader, setReader] = useState<{ available: boolean } | null>(null);
-  const [reading, setReading] = useState(false);
-  const [readError, setReadError] = useState<string | null>(null);
-  const picker = useRef<HTMLInputElement>(null);
+  /// What the upload just said: accepted (and what happens next), or why not.
+  const [notice, setNotice] = useState<{ tone: "ok" | "warn"; text: string } | null>(null);
 
   useEffect(() => {
     api
@@ -51,24 +51,58 @@ export function PerksPage() {
     load();
   }
 
-  async function readPicture(file: File) {
-    setReading(true);
-    setReadError(null);
-    try {
-      const draft = await readPerkFromImage(file);
-      setEditing({ perk: null, draft });
-    } catch (error) {
-      setReadError(error instanceof Error ? error.message : "That picture could not be read.");
-    } finally {
-      setReading(false);
-    }
-  }
-
   const load = useCallback(() => {
     api.get<Perk[]>("/perks").then(setPerks).catch(() => setPerks([]));
   }, []);
 
   useEffect(load, [load]);
+
+  // New perks land one screenshot at a time, so refresh the list as the
+  // count of read pictures moves, and once more when a batch finishes.
+  const readSoFar = useRef(-1);
+  useEffect(() => {
+    const stopFinished = onImportFinished(() => load());
+    const stopProgress = subscribeImports(() => {
+      const read = getImportState().running.reduce((sum, job) => sum + job.counts.done, 0);
+      if (read !== readSoFar.current) {
+        if (readSoFar.current >= 0 && read > readSoFar.current) load();
+        readSoFar.current = read;
+      }
+    });
+    return () => {
+      stopFinished();
+      stopProgress();
+    };
+  }, [load]);
+
+  /// The apps and banks these came from, most-used first, for the chips.
+  const sources = useMemo(() => {
+    const counts = new Map<string, { label: string; count: number }>();
+    for (const perk of perks) {
+      const label = perk.source?.trim();
+      if (!label) continue;
+      const key = label.toLowerCase();
+      const entry = counts.get(key);
+      if (entry) entry.count += 1;
+      else counts.set(key, { label, count: 1 });
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1].count - a[1].count || a[1].label.localeCompare(b[1].label))
+      .map(([key, { label, count }]) => ({ key, label, count }));
+  }, [perks]);
+  const unsourced = perks.filter((perk) => !perk.source?.trim()).length;
+
+  // A filter whose source no longer exists (last one deleted) falls back to all.
+  const activeFilter =
+    sourceFilter === ALL ||
+    (sourceFilter === NO_SOURCE ? unsourced > 0 : sources.some((s) => s.key === sourceFilter))
+      ? sourceFilter
+      : ALL;
+  const shown = perks.filter((perk) => {
+    if (activeFilter === ALL) return true;
+    const key = perk.source?.trim().toLowerCase() ?? "";
+    return activeFilter === NO_SOURCE ? key === "" : key === activeFilter;
+  });
   useEffect(() => {
     api.get<Account[]>("/accounts").then(setAccounts).catch(() => setAccounts([]));
     api.get<Category[]>("/categories").then(setCategories).catch(() => setCategories([]));
@@ -112,30 +146,21 @@ export function PerksPage() {
               fails - reading a picture is an extra way to add a coupon
               and never the only one. */}
           {reader?.available && (
-            <>
-              <input
-                ref={picker}
-                type="file"
-                accept="image/*"
-                hidden
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  // Cleared so the same picture can be picked twice, which
-                  // is exactly what you do after a bad read.
-                  event.target.value = "";
-                  if (file) readPicture(file);
-                }}
-              />
-              <button
-                className="btn btn-sm"
-                disabled={reading}
-                onClick={() => picker.current?.click()}
-              >
-                <Icon name="ic-search" />
-                {reading ? "Reading it…" : "Read one"}
-              </button>
-              <PerkImportBar onFinished={load} />
-            </>
+            <PerkImportBar
+              onStarted={(job) =>
+                setNotice({
+                  tone: "ok",
+                  text: `Reading ${job.total} ${
+                    job.total === 1 ? "screenshot" : "screenshots"
+                  } in the background — about 30 seconds each. ${
+                    job.total === 1 ? "It'll" : "They'll"
+                  } appear here for review, and you'll get a notification when ${
+                    job.total === 1 ? "it's" : "they're"
+                  } done. You can leave this page.`,
+                })
+              }
+              onError={(text) => setNotice({ tone: "warn", text })}
+            />
           )}
           <button className="btn btn-sm btn-primary" onClick={() => setEditing({ perk: null })}>
             <Icon name="ic-plus" /> Add one
@@ -143,13 +168,19 @@ export function PerksPage() {
         </div>
       </div>
 
-      {reading && (
-        <p className="desc">
-          The model is on your own server and runs on its processor, so this takes a little while —
-          usually under a minute, longer the first time after a restart.
-        </p>
+      {notice && (
+        <div
+          className={`perk-notice${notice.tone === "warn" ? " is-warn" : ""}`}
+          role={notice.tone === "warn" ? "alert" : "status"}
+        >
+          <Icon name={notice.tone === "warn" ? "ic-alert" : "ic-check"} />
+          <p>{notice.text}</p>
+          <button className="btn btn-sm btn-ghost" onClick={() => setNotice(null)} aria-label="Dismiss">
+            <Icon name="ic-x" />
+          </button>
+        </div>
       )}
-      {readError && <p className="desc set-warn">{readError}</p>}
+      <PerkImportStatus />
 
       <form className="ask-bar" onSubmit={ask}>
         <div className="ask-field">
@@ -210,8 +241,37 @@ export function PerksPage() {
             }
           />
         ) : (
+          <>
+            {/* Only worth showing once there is more than one place to pick. */}
+            {sources.length + (unsourced > 0 ? 1 : 0) > 1 && (
+              <div className="perk-chips" role="group" aria-label="Filter by where you got it">
+                <SourceChip
+                  label="All"
+                  count={perks.length}
+                  on={activeFilter === ALL}
+                  onClick={() => setSourceFilter(ALL)}
+                />
+                {sources.map((source) => (
+                  <SourceChip
+                    key={source.key}
+                    label={source.label}
+                    count={source.count}
+                    on={activeFilter === source.key}
+                    onClick={() => setSourceFilter(source.key)}
+                  />
+                ))}
+                {unsourced > 0 && (
+                  <SourceChip
+                    label="Not set"
+                    count={unsourced}
+                    on={activeFilter === NO_SOURCE}
+                    onClick={() => setSourceFilter(NO_SOURCE)}
+                  />
+                )}
+              </div>
+            )}
           <div className="perk-list">
-            {perks.map((perk) => (
+            {shown.map((perk) => (
               <PerkRow
                 key={perk.id}
                 perk={perk}
@@ -221,12 +281,12 @@ export function PerksPage() {
               />
             ))}
           </div>
+          </>
         )}
       </div>
 
       {editing && (
         <PerkModal
-          draft={editing.draft ?? null}
           perk={editing.perk}
           accounts={accounts}
           categories={categories}
@@ -300,6 +360,27 @@ function Answer({ answer, onUsed }: { answer: PerkLookup; onUsed: (perk: PerkMat
   );
 }
 
+const ALL = "__all";
+const NO_SOURCE = "__none";
+
+function SourceChip({
+  label,
+  count,
+  on,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  on: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button className={`perk-chip${on ? " is-on" : ""}`} aria-pressed={on} onClick={onClick}>
+      {label} <span className="perk-chip-count">{count}</span>
+    </button>
+  );
+}
+
 function PerkRow({
   perk,
   onEdit,
@@ -313,53 +394,102 @@ function PerkRow({
 }) {
   const card = typeof perk.accountId === "object" && perk.accountId ? perk.accountId : null;
   const worth = perk.percent ? `${perk.percent}%` : perk.flatMinor ? formatMoney(perk.flatMinor) : "";
+  const terms = perk.terms?.trim();
+  const extracted = perk.extractedText?.trim();
 
   return (
     <div
-      className={`perk-row${perk.isLive === false ? " is-dead" : ""}${
+      className={`perk-row perk-row-full${perk.isLive === false ? " is-dead" : ""}${
         perk.needsReview ? " needs-review" : ""
       }`}
     >
-      <span className={`perk-kind is-${perk.kind === "COUPON" ? "coupon" : "offer"}`}>
-        {perk.kind === "COUPON" ? "Coupon" : "Card offer"}
-      </span>
+      <div className="perk-row-top">
+        <span className={`perk-kind is-${perk.kind === "COUPON" ? "coupon" : "offer"}`}>
+          {perk.kind === "COUPON" ? "Coupon" : "Card offer"}
+        </span>
 
-      <div className="perk-main">
-        <div className="perk-title">
-          {perk.title} {worth && <span className="perk-worth">{worth}</span>}
-          {/* Which of them a machine wrote, so the count in the banner
-              above is findable rather than just a number. */}
-          {perk.needsReview && <span className="perk-unread">read from a picture</span>}
+        <div className="perk-main">
+          <div className="perk-title">
+            {perk.title} {worth && <span className="perk-worth">{worth}</span>}
+            {perk.source?.trim() && <span className="perk-source">from {perk.source.trim()}</span>}
+            {/* Which of them a machine wrote, so the count in the banner
+                above is findable rather than just a number. */}
+            {perk.needsReview && <span className="perk-unread">read from a picture</span>}
+          </div>
+          <div className="perk-sub">
+            {perk.merchants.length > 0 ? perk.merchants.join(", ") : "anywhere"}
+            {card ? ` · ${card.nickname?.trim() || card.bankName}` : ""}
+            {perk.code ? ` · ${perk.code}` : ""}
+            {perk.usedAt
+              ? " · used"
+              : perk.expiresOn
+                ? ` · ${
+                    (perk.daysLeft ?? 0) < 0
+                      ? "expired"
+                      : `${perk.daysLeft} ${perk.daysLeft === 1 ? "day" : "days"} left`
+                  }`
+                : ""}
+          </div>
         </div>
-        <div className="perk-sub">
-          {perk.merchants.length > 0 ? perk.merchants.join(", ") : "anywhere"}
-          {card ? ` · ${card.nickname?.trim() || card.bankName}` : ""}
-          {perk.code ? ` · ${perk.code}` : ""}
-          {perk.usedAt
-            ? " · used"
-            : perk.expiresOn
-              ? ` · ${
-                  (perk.daysLeft ?? 0) < 0
-                    ? "expired"
-                    : `${perk.daysLeft} ${perk.daysLeft === 1 ? "day" : "days"} left`
-                }`
-              : ""}
-        </div>
-      </div>
 
-      <div className="perk-actions">
-        {perk.kind === "COUPON" && (
-          <button className="btn btn-sm btn-ghost" onClick={() => onUsed(!perk.usedAt)}>
-            {perk.usedAt ? "Unuse" : "Used it"}
+        <div className="perk-actions">
+          {perk.kind === "COUPON" && (
+            <button className="btn btn-sm btn-ghost" onClick={() => onUsed(!perk.usedAt)}>
+              {perk.usedAt ? "Unuse" : "Used it"}
+            </button>
+          )}
+          <button className="btn btn-sm btn-ghost" onClick={onEdit} aria-label={`Edit ${perk.title}`}>
+            <Icon name="ic-pencil" />
           </button>
-        )}
-        <button className="btn btn-sm btn-ghost" onClick={onEdit}>
-          <Icon name="ic-pencil" />
-        </button>
-        <button className="btn btn-sm btn-ghost btn-danger-text" onClick={onRemove}>
-          <Icon name="ic-x" />
-        </button>
+          <button
+            className="btn btn-sm btn-ghost btn-danger-text"
+            onClick={onRemove}
+            aria-label={`Delete ${perk.title}`}
+          >
+            <Icon name="ic-x" />
+          </button>
+        </div>
       </div>
+
+      {/* Native <details>: keyboard and screen-reader friendly for free,
+          and closed by default so the list stays scannable. */}
+      {(terms || extracted) && (
+        <div className="perk-more">
+          {terms && (
+            <details className="perk-details">
+              <summary>T&amp;C</summary>
+              <p className="perk-terms">{terms}</p>
+            </details>
+          )}
+          {extracted && (
+            <details className="perk-details">
+              <summary>Text read from the screenshot</summary>
+              <pre className="perk-extracted">{extracted}</pre>
+              <CopyButton text={extracted} />
+            </details>
+          )}
+        </div>
+      )}
     </div>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // Clipboard blocked (http, old browser): the text is selectable anyway.
+    }
+  }
+
+  return (
+    <button className="btn btn-sm btn-ghost perk-copy" onClick={copy}>
+      {copied ? "Copied" : "Copy text"}
+    </button>
   );
 }

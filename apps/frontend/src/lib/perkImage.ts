@@ -19,23 +19,6 @@ const MAX_EDGE = 1024;
 /** What the model is told it is looking at. */
 const TYPE = "image/jpeg";
 
-export interface PerkDraft {
-  kind: "COUPON" | "CARD_OFFER";
-  title: string;
-  merchants: string[];
-  percent: number | null;
-  flatMinor: number | null;
-  maxDiscountMinor: number | null;
-  minSpendMinor: number | null;
-  startsOn: string | null;
-  expiresOn: string | null;
-  code: string | null;
-  notes: string | null;
-  accountId: string | null;
-  cardNamed: string | null;
-  missing: string[];
-}
-
 async function shrink(file: File): Promise<Blob> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height));
@@ -122,25 +105,4 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   }
 
   return (await response.json()) as T;
-}
-
-export async function readPerkFromImage(file: File): Promise<PerkDraft> {
-  const token = getToken();
-  const body = await shrink(file);
-
-  const response = await fetch(`${API_URL}/perks/read`, {
-    method: "POST",
-    headers: {
-      "Content-Type": TYPE,
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body,
-  });
-
-  if (!response.ok) {
-    const problem = await response.json().catch(() => ({ error: response.statusText }));
-    throw new ApiError(response.status, problem.error ?? response.statusText);
-  }
-
-  return (await response.json()) as PerkDraft;
 }
