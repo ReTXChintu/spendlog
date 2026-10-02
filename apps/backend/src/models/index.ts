@@ -225,6 +225,9 @@ export interface AccountDoc {
   /// saw. Signed, so an overdrawn account can be said as it is.
   openingBalanceMinor?: number | null;
   openingBalanceAt?: Date | null;
+  /// The emergency fund. Its balance is kept, but left out of the money
+  /// on hand the dashboard adds up - it is not for spending.
+  isSavings?: boolean;
   isActive: boolean;
   color?: string | null;
   createdAt: Date;
@@ -261,6 +264,7 @@ const accountSchema = new Schema<AccountDoc>(
     statementPassword: { type: String, default: null },
     openingBalanceMinor: { type: Number, default: null },
     openingBalanceAt: { type: Date, default: null },
+    isSavings: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
     color: { type: String, default: null },
   },
@@ -414,6 +418,21 @@ export interface TransactionDoc {
   /// Who else this was for or from, and how much. See PersonShare.
   people: PersonShare[];
   isTransfer: boolean;
+  /// On a transfer between the user's own accounts: the other account.
+  /// accountId is the one this row moved money on - money out of it on a
+  /// debit, into it on a credit - and this is where it went or came from.
+  /// Cash is an account like any other, so a withdrawal is bank -> cash.
+  transferAccountId?: Types.ObjectId | null;
+  /// The other leg, when both sides of a transfer arrived as their own
+  /// messages. Set, the other account's balance already has its own row;
+  /// unset, this one row moves both balances.
+  transferPairId?: Types.ObjectId | null;
+  /// Money in that is already spoken for: sent for something that will be
+  /// bought later (a father's 8,000 for next week's purchase). Not income,
+  /// and not in the savings bucket; the purchase, once linked to it like a
+  /// refund, costs nothing of the user's own. Cleared once it is no longer
+  /// waiting, at which point whatever is left counts as income.
+  isEarmarked?: boolean;
   /// A one-off that should not be scored against a day. A laptop, a
   /// flight, a wedding gift: real spending, counted everywhere else, but
   /// a day is not a bad day for having had it. Kept out of the daily
@@ -542,6 +561,9 @@ const transactionSchema = new Schema<TransactionDoc>(
     emiRole: { type: String, enum: EMI_ROLES, default: null },
     loanId: { type: Schema.Types.ObjectId, ref: "Loan", default: null },
     isTransfer: { type: Boolean, default: false },
+    transferAccountId: { type: Schema.Types.ObjectId, ref: "Account", default: null },
+    transferPairId: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
+    isEarmarked: { type: Boolean, default: false },
     isSpecial: { type: Boolean, default: false },
     isSalary: { type: Boolean, default: false },
     cardPaymentFor: { type: Schema.Types.ObjectId, ref: "Account", default: null },
@@ -1279,6 +1301,14 @@ export interface PerkDoc {
   needsReview?: boolean;
   isActive: boolean;
   notes?: string | null;
+  /// Where it came from: the app that gave it - Google Pay, PhonePe,
+  /// Paytm, CRED - or the bank, when it says.
+  source?: string | null;
+  /// The terms and conditions, as printed.
+  terms?: string | null;
+  /// Everything that could be read off the screenshot, kept so the coupon
+  /// can be checked against what it actually said.
+  extractedText?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -1302,6 +1332,9 @@ const perkSchema = new Schema<PerkDoc>(
     needsReview: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
     notes: { type: String, default: null, trim: true },
+    source: { type: String, default: null, trim: true },
+    terms: { type: String, default: null },
+    extractedText: { type: String, default: null },
   },
   { timestamps: true, ...serialization }
 );
@@ -1490,3 +1523,81 @@ contactSchema.index(
 
 export const Contact = model<ContactDoc>("Contact", contactSchema);
 
+
+/**
+ * The assistant's read of the user's spending, kept for the day.
+ *
+ * Generated at most once a day unless asked for again: it costs the user's
+ * own Gemini quota, and the figures it reads do not move much in an hour.
+ */
+export interface AiInsightDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  /// The IST day it was made for, YYYY-MM-DD.
+  day: string;
+  text: string;
+  model: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const aiInsightSchema = new Schema<AiInsightDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    day: { type: String, required: true },
+    text: { type: String, required: true },
+    model: { type: String, required: true },
+  },
+  { timestamps: true, ...serialization }
+);
+aiInsightSchema.index({ userId: 1, day: -1 });
+
+export const AiInsight = model<AiInsightDoc>("AiInsight", aiInsightSchema);
+
+/** One rule of a savings plan. A cap makes it something that can be checked. */
+export interface SavingsRule {
+  text: string;
+  /// The category it watches, by name, when it is about one.
+  category?: string | null;
+  /// What the category should stay under in a month, when there is a number.
+  monthlyCapMinor?: number | null;
+}
+
+/**
+ * A savings plan the assistant wrote from the user's own spending: a short
+ * summary and a handful of rules, the ones with a category and a cap
+ * checked against each month as it goes.
+ */
+export interface SavingsPlanDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  summary: string;
+  /// What the plan aims to put aside each month, if it says.
+  monthlyTargetMinor?: number | null;
+  rules: SavingsRule[];
+  model: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const savingsRuleSchema = new Schema<SavingsRule>(
+  {
+    text: { type: String, required: true },
+    category: { type: String, default: null },
+    monthlyCapMinor: { type: Number, default: null, min: 0 },
+  },
+  { _id: false }
+);
+
+const savingsPlanSchema = new Schema<SavingsPlanDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, unique: true },
+    summary: { type: String, required: true },
+    monthlyTargetMinor: { type: Number, default: null },
+    rules: { type: [savingsRuleSchema], default: [] },
+    model: { type: String, required: true },
+  },
+  { timestamps: true, ...serialization }
+);
+
+export const SavingsPlan = model<SavingsPlanDoc>("SavingsPlan", savingsPlanSchema);

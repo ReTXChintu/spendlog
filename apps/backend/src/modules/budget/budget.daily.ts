@@ -1,5 +1,5 @@
 import { Types } from "mongoose";
-import { Transaction, User } from "../../models";
+import { Loan, Transaction, User } from "../../models";
 import { IST_OFFSET, IST_OFFSET_MS, istDayKey, istMonthKey, istMonthStart } from "../../time";
 import { BudgetPeriod } from "./budget.period";
 import { currentBudgetPeriod } from "./budget.pace";
@@ -27,7 +27,10 @@ export interface DailyBudgetDay {
   /** The IST calendar day, as YYYY-MM-DD. */
   day: string;
   spentMinor: number;
-  /** Budget less spending: positive put by, negative taken back. */
+  /** Money in on top of pay that day, which goes straight into the bucket. */
+  incomeMinor: number;
+  /** Budget less spending, plus any extra money in: positive put by,
+      negative taken back. */
   deltaMinor: number;
 }
 
@@ -51,6 +54,9 @@ export type DailyBudget =
       spentMinor: number;
       /// Positive is put by, negative is spent out of what was put by.
       bucketMinor: number;
+      /// Money in on top of pay this period - gifts, interest, cashback -
+      /// already included in the bucket.
+      extraIncomeMinor: number;
       todaySpentMinor: number;
       /// What is left of today's allowance. Negative once today is over it.
       todayLeftMinor: number;
@@ -171,15 +177,47 @@ export async function dailyBudget(userId: Types.ObjectId, now = new Date()): Pro
   );
   const budget = user.dailyBudgetMinor;
 
+  // Money that came in on top of pay goes straight into the bucket: a
+  // friend's gift, interest, cashback, a side job. Not the salary itself -
+  // the daily budget is what the salary is for - and not anything that is
+  // not really income: refunds, settling up, transfers, money set aside for
+  // a purchase and a split's other shares all count as zero already. Nor a
+  // loan landing, which is borrowed, nor a credit marked as kept out.
+  const loanCredits = (await Loan.find({ userId, disbursedTransactionId: { $ne: null } }).select("disbursedTransactionId"))
+    .map((loan) => loan.disbursedTransactionId)
+    .filter((id): id is Types.ObjectId => Boolean(id));
+  const incomeRows = await Transaction.aggregate<{ _id: string; total: number }>([
+    {
+      $match: {
+        userId,
+        type: "CREDIT",
+        occurredAt: { $gte: period.start, $lte: now },
+        countedAmountMinor: { $gt: 0 },
+        isSalary: { $ne: true },
+        isSpecial: { $ne: true },
+        _id: { $nin: loanCredits },
+      },
+    },
+    {
+      $group: {
+        _id: { $dateToString: { date: "$occurredAt", format: "%Y-%m-%d", timezone: IST_OFFSET } },
+        total: { $sum: "$countedAmountMinor" },
+      },
+    },
+  ]);
+  const incomeByDay = new Map(incomeRows.map((row) => [row._id, row.total]));
+
   // Every day from the start, not only the days something was spent on. A
   // day with no spending on it is the best kind of day for a bucket, and
   // leaving it out would silently drop what it put by.
   const days: DailyBudgetDay[] = daysUpToToday(period.start, now).map((day) => {
     const spentMinor = spentByDay.get(day) ?? 0;
-    return { day, spentMinor, deltaMinor: budget - spentMinor };
+    const incomeMinor = incomeByDay.get(day) ?? 0;
+    return { day, spentMinor, incomeMinor, deltaMinor: budget - spentMinor + incomeMinor };
   });
 
   const spentMinor = days.reduce((sum, day) => sum + day.spentMinor, 0);
+  const extraIncomeMinor = days.reduce((sum, day) => sum + day.incomeMinor, 0);
   const allowedMinor = budget * days.length;
   const today = days[days.length - 1];
 
@@ -193,10 +231,11 @@ export async function dailyBudget(userId: Types.ObjectId, now = new Date()): Pro
     daysLeft: period.daysLeft,
     allowedMinor,
     spentMinor,
-    bucketMinor: allowedMinor - spentMinor,
+    bucketMinor: allowedMinor - spentMinor + extraIncomeMinor,
+    extraIncomeMinor,
     todaySpentMinor: today?.spentMinor ?? 0,
     todayLeftMinor: budget - (today?.spentMinor ?? 0),
-    daysOver: days.filter((day) => day.deltaMinor < 0).length,
+    daysOver: days.filter((day) => day.spentMinor > budget).length,
     keptOutMinor: keptOut?.total ?? 0,
     keptOutCount: keptOut?.count ?? 0,
     days,

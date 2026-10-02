@@ -26,6 +26,19 @@ export const PEOPLE_CATEGORY: DefaultCategorySeed = {
   keywords: [],
 };
 
+/**
+ * Money moved between the user's own accounts - savings to current, bank
+ * to cash. Never spending or income; filed here so it does not sit among
+ * the categories that are.
+ */
+export const TRANSFER_CATEGORY: DefaultCategorySeed = {
+  name: "Transfers",
+  icon: "ic-updown",
+  color: "#64748B",
+  direction: "BOTH",
+  keywords: [],
+};
+
 // Seeded once into the Category table as system defaults (userId = null),
 // each with a matching CategoryRule so new transactions auto-categorize
 // out of the box. Users can add their own rules/categories on top of these.
@@ -115,4 +128,5 @@ export const DEFAULT_CATEGORIES: DefaultCategorySeed[] = [
     keywords: [],
   },
   PEOPLE_CATEGORY,
+  TRANSFER_CATEGORY,
 ];

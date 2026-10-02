@@ -3,7 +3,8 @@ import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { User } from "../../models";
 import { decryptPassword, encryptionAvailable, encryptPassword } from "../statements/statements.crypto";
-import { AiError, ask, cleanModelName, DEFAULT_MODELS, listModels } from "./ai.gemini";
+import { AiError, ask, cleanModelName, DEFAULT_MODELS, listModels, withModel } from "./ai.gemini";
+import { dailyInsight, makeSavingsPlan, planStatus } from "./ai.coach";
 
 export const aiRouter = Router();
 aiRouter.use(requireAuth);
@@ -134,5 +135,66 @@ aiRouter.post("/ask", async (req, res) => {
       if (error.modelMissing && index < candidates.length - 1) continue;
       return res.status(error.status).json({ error: error.message });
     }
+  }
+});
+
+/** Turns an AiError into the response it describes; anything else is thrown on. */
+function sendAiError(res: import("express").Response, error: unknown) {
+  if (error instanceof AiError) return res.status(error.status).json({ error: error.message });
+  throw error;
+}
+
+// GET /ai/insights — today's read of the month, made at most once a day.
+// Without a key, whatever was made before (or nothing).
+aiRouter.get("/insights", async (req, res) => {
+  const userId = currentUserId(req);
+  const { key, model } = await savedKey(userId);
+  try {
+    let usedModel: string | null = null;
+    const { result } = await withModel(model, async (candidate) => {
+      usedModel = candidate;
+      return dailyInsight(userId, key ? { key, model: candidate } : null);
+    });
+    res.json({ insight: result, hasKey: Boolean(key), model: usedModel });
+  } catch (error) {
+    sendAiError(res, error);
+  }
+});
+
+// POST /ai/insights/refresh — a new one now, whatever the time of day.
+aiRouter.post("/insights/refresh", async (req, res) => {
+  const userId = currentUserId(req);
+  const { key, model } = await savedKey(userId);
+  if (!key) return res.status(409).json({ error: "Add a Gemini API key in Settings first." });
+  try {
+    const { result } = await withModel(model, (candidate) => dailyInsight(userId, { key, model: candidate }, true));
+    res.json({ insight: result, hasKey: true });
+  } catch (error) {
+    sendAiError(res, error);
+  }
+});
+
+// GET /ai/plan — the savings plan, with each rule checked against this month.
+aiRouter.get("/plan", async (req, res) => {
+  res.json({ plan: await planStatus(currentUserId(req)) });
+});
+
+// GET /ai/plan/warnings — only the rules being broken, for the dashboard and
+// the phone's reminders.
+aiRouter.get("/plan/warnings", async (req, res) => {
+  const status = await planStatus(currentUserId(req));
+  res.json({ warnings: status?.warnings ?? [] });
+});
+
+// POST /ai/plan — write (or rewrite) the savings plan from recent spending.
+aiRouter.post("/plan", async (req, res) => {
+  const userId = currentUserId(req);
+  const { key, model } = await savedKey(userId);
+  if (!key) return res.status(409).json({ error: "Add a Gemini API key in Settings first." });
+  try {
+    await withModel(model, (candidate) => makeSavingsPlan(userId, key, candidate));
+    res.json({ plan: await planStatus(userId) });
+  } catch (error) {
+    sendAiError(res, error);
   }
 });

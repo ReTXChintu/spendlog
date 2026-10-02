@@ -227,3 +227,52 @@ export async function ask(
 
   throw new AiError("That took too many lookups to answer. Try a narrower question.", 422);
 }
+
+/**
+ * One answer in a fixed JSON shape, with no lookups: for when the server
+ * has already gathered the figures and only wants them turned into
+ * something - a savings plan - that it can store and check against later.
+ */
+export async function askForJson<T>(
+  key: string,
+  model: string,
+  instruction: string,
+  prompt: string,
+  schema: Record<string, unknown>
+): Promise<T> {
+  const result = await gemini<{ candidates?: { content?: Content }[] }>(key, `models/${model}:generateContent`, {
+    systemInstruction: { parts: [{ text: instruction }] },
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.3, responseMimeType: "application/json", responseSchema: schema },
+  });
+
+  const text = (result.candidates?.[0]?.content?.parts ?? [])
+    .filter((part) => typeof part.text === "string" && !part.thought)
+    .map((part) => part.text)
+    .join("");
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new AiError("Gemini's answer couldn't be read. Try again.", 502);
+  }
+}
+
+/**
+ * Runs a Gemini call with the user's chosen model, or the defaults in
+ * order when none is chosen - so a key without access to the rolling alias
+ * still works.
+ */
+export async function withModel<T>(chosen: string | null, run: (model: string) => Promise<T>): Promise<{ result: T; model: string }> {
+  const candidates = chosen ? [chosen] : DEFAULT_MODELS;
+  let lastError: unknown = null;
+  for (const [index, candidate] of candidates.entries()) {
+    try {
+      return { result: await run(candidate), model: candidate };
+    } catch (error) {
+      lastError = error;
+      if (error instanceof AiError && error.modelMissing && index < candidates.length - 1) continue;
+      throw error;
+    }
+  }
+  throw lastError;
+}

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { Types } from "mongoose";
 import { currentUserId, requireAuth } from "../../middleware/auth";
-import { CardStatement, EmiInstalment, EmiPlan, Loan, LoanInstalment, Perk, Transaction } from "../../models";
+import { Account, CardStatement, EmiInstalment, EmiPlan, Loan, LoanInstalment, Perk, Transaction } from "../../models";
 import { istDayEnd, istDayKey, istDayStart } from "../../time";
 import { monthSoFar as monthAgainstLast, userMonth } from "../budget/budget.months";
 import { cardStatuses, pickCards } from "../cards/cards.status";
@@ -10,6 +10,8 @@ import { dailyBudget } from "../budget/budget.daily";
 import { perkIsLive } from "../perks/perks.match";
 import { upcomingBills } from "../statements/statements.bills";
 import { loanProgress } from "../loans/loans.routes";
+import { planStatus } from "../ai/ai.coach";
+import { expectedBalances, tracksBalance } from "../accounts/accounts.balance";
 
 export const dashboardRouter = Router();
 dashboardRouter.use(requireAuth);
@@ -40,7 +42,7 @@ dashboardRouter.get("/", async (req, res) => {
   // monthly figure in the app.
   const month = await userMonth(userId, undefined, now);
 
-  const [cards, pace, needsCategory, emis, loans, owed, perks, statements, monthSoFar, bills, daily] =
+  const [cards, pace, needsCategory, emis, loans, owed, perks, statements, monthSoFar, bills, daily, money, earmarks, plan] =
     await Promise.all([
     cardStatuses(userId, now),
     budgetPace(userId, now),
@@ -53,6 +55,9 @@ dashboardRouter.get("/", async (req, res) => {
     monthAgainstLast(userId, now),
     upcomingBills(userId, now),
     dailyBudget(userId, now),
+    moneyOnHand(userId),
+    openEarmarks(userId),
+    planStatus(userId, now),
   ]);
 
   // Only the ones close enough to act on. Settled: shown here, never as a
@@ -82,8 +87,71 @@ dashboardRouter.get("/", async (req, res) => {
     // Only the ones still to pay. A bill already cleared is a fact about
     // last month, not something to do today.
     bills: bills.filter((bill) => !bill.isPaid),
+    money,
+    earmarks,
+    // The savings plan's rules being broken this month, said every time the
+    // dashboard is opened until they are not.
+    planWarnings: plan?.warnings ?? [],
   });
 });
+
+/**
+ * What is in each bank account and in cash, as far as SpendLog can tell:
+ * the starting balance typed in, moved by every transaction since. The
+ * account marked as savings is shown on its own and left out of the total,
+ * because it is the emergency fund and not money to spend.
+ */
+async function moneyOnHand(userId: Types.ObjectId) {
+  const accounts = await Account.find({ userId, isActive: true, accountType: { $in: ["BANK", "CASH", "DEBIT"] } });
+  const balances = await expectedBalances(userId, accounts);
+
+  const rows = accounts
+    .filter((account) => tracksBalance(account))
+    .map((account) => ({
+      id: account._id.toString(),
+      name: account.nickname || account.bankName,
+      last4: account.last4 ?? null,
+      accountType: account.accountType,
+      isSavings: Boolean(account.isSavings),
+      balanceMinor: balances.get(account._id.toString())?.expectedMinor ?? null,
+    }))
+    // Spendable money first, cash after the banks, the savings account last.
+    .sort((a, b) => Number(a.isSavings) - Number(b.isSavings) || (a.accountType === "CASH" ? 1 : 0) - (b.accountType === "CASH" ? 1 : 0));
+
+  const spendable = rows.filter((row) => !row.isSavings && row.balanceMinor !== null);
+  return {
+    accounts: rows,
+    onHandMinor: spendable.reduce((sum, row) => sum + row.balanceMinor!, 0),
+    inBankMinor: spendable.filter((row) => row.accountType !== "CASH").reduce((sum, row) => sum + row.balanceMinor!, 0),
+    cashMinor: rows.find((row) => row.accountType === "CASH")?.balanceMinor ?? null,
+    savingsMinor: rows.find((row) => row.isSavings)?.balanceMinor ?? null,
+    /// Bank or cash accounts with no starting balance yet, so not counted.
+    untracked: rows.filter((row) => row.balanceMinor === null).length,
+  };
+}
+
+/**
+ * Money that came in for something still to be bought, and how much of it
+ * is still waiting to be spent.
+ */
+async function openEarmarks(userId: Types.ObjectId) {
+  const credits = await Transaction.find({ userId, type: "CREDIT", isEarmarked: true }).sort({ occurredAt: -1 });
+  const items = credits
+    .map((credit) => {
+      const spent = credit.refundOf.reduce((sum, allocation) => sum + allocation.amountMinor, 0);
+      return {
+        id: credit._id.toString(),
+        merchant: credit.merchant ?? null,
+        note: credit.note ?? null,
+        occurredAt: credit.occurredAt,
+        amountMinor: credit.amountMinor,
+        spentMinor: spent,
+        leftMinor: Math.max(0, credit.amountMinor - spent),
+      };
+    })
+    .filter((item) => item.leftMinor > 0);
+  return { count: items.length, totalMinor: items.reduce((sum, item) => sum + item.leftMinor, 0), items };
+}
 
 /**
  * How much still needs a person: yesterday, and the month as a whole.

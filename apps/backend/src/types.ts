@@ -36,6 +36,8 @@ export const COUNTED_REASONS = [
   "EMI_PARENT",
   "REFUND",
   "REFUNDED",
+  // Money in, set aside for a purchase still to come.
+  "EARMARKED",
   "EXCLUDED",
 ] as const;
 export type CountedReason = (typeof COUNTED_REASONS)[number];

@@ -93,7 +93,8 @@ class LlamaCppVision implements VisionProvider {
             // Zero, because this is transcription rather than writing. A
             // coupon's expiry is not a thing to be creative about.
             temperature: 0,
-            max_tokens: 700,
+            // Room for the full text and the terms as well as the fields.
+            max_tokens: 1400,
             messages: [
               {
                 role: "user",

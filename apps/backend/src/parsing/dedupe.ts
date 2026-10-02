@@ -1,6 +1,7 @@
 import { HydratedDocument, Types } from "mongoose";
 import { Transaction, TransactionDoc } from "../models";
 import { TransactionType } from "../types";
+import { transferCategoryId } from "../modules/categories/categories.system";
 
 const DEDUPE_WINDOW_MINUTES = 20;
 
@@ -83,5 +84,16 @@ export async function detectSelfTransfer(transaction: HydratedDocument<Transacti
   // put the rule in two places.
   transaction.isTransfer = true;
   match.isTransfer = true;
+  // Each leg knows the other account, and that the other account has a row
+  // of its own - so a balance never moves twice for the one transfer.
+  transaction.transferAccountId = match.accountId;
+  match.transferAccountId = transaction.accountId;
+  transaction.transferPairId = match._id;
+  match.transferPairId = transaction._id;
+  const transfers = await transferCategoryId();
+  if (transfers) {
+    transaction.categoryId ??= transfers;
+    match.categoryId ??= transfers;
+  }
   await Promise.all([transaction.save(), match.save()]);
 }

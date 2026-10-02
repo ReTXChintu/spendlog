@@ -32,6 +32,12 @@ export interface PerkDraft {
   expiresOn: string | null;
   code: string | null;
   notes: string | null;
+  /// The app or bank that gave it, as named on the screenshot.
+  source: string | null;
+  /// The terms and conditions, as printed.
+  terms: string | null;
+  /// Everything legible on the screenshot.
+  extractedText: string | null;
   /// The card it names, matched to one of yours where the name is close
   /// enough. Null when it named none, or named one you do not have.
   accountId: string | null;
@@ -70,7 +76,10 @@ Reply with ONE JSON object and nothing else. No explanation, no markdown fence.
   "expiresInDays": a whole number when it says a period rather than a date, or null,
   "code": the coupon code exactly as printed, or null,
   "card": the credit or debit card it requires, or null,
-  "notes": anything else that limits it, one short sentence, or null
+  "notes": anything else that limits it, one short sentence, or null,
+  "source": the app or bank the offer is from - e.g. "Google Pay", "PhonePe", "Paytm", "CRED", "Amazon Pay", "HDFC Bank" - or null,
+  "terms": the terms and conditions as printed, shortened to the conditions that matter, or null,
+  "text": every piece of text you can read on the picture, in reading order, as plain text
 }
 
 Rules:
@@ -84,7 +93,9 @@ Rules:
 8. A period rather than a date - "expires in 7 days", "valid for 2 weeks",
    "3 days left" - goes in expiresInDays as a number. 2 weeks is 14. Leave
    expiresOn null when you do that; the date is worked out from today.
-9. Use null for anything not printed. Do not guess.`;
+9. Use null for anything not printed. Do not guess.
+10. "source" is the app showing the offer (its name or logo at the top, a "Google Pay"
+    or "PhonePe" header), not the shop the discount is at.`;
 }
 
 /** A rupee figure the model wrote as a number, in paise. */
@@ -266,6 +277,9 @@ export async function extractPerk(params: {
     expiresOn: toIsoDate(raw.expiresOn) ?? dateInDays(raw.expiresInDays, today),
     code: typeof raw.code === "string" && raw.code.trim() ? raw.code.trim().slice(0, 60) : null,
     notes: typeof raw.notes === "string" && raw.notes.trim() ? raw.notes.trim().slice(0, 500) : null,
+    source: typeof raw.source === "string" && raw.source.trim() ? raw.source.trim().slice(0, 60) : null,
+    terms: typeof raw.terms === "string" && raw.terms.trim() ? raw.terms.trim().slice(0, 4000) : null,
+    extractedText: typeof raw.text === "string" && raw.text.trim() ? raw.text.trim().slice(0, 8000) : null,
     accountId: await matchCard(params.userId, cardNamed),
     cardNamed,
     missing: [],

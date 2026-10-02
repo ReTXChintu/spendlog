@@ -157,6 +157,9 @@ async function savePerk(userId: Types.ObjectId, draft: PerkDraft) {
     expiresOn: draft.expiresOn ? new Date(`${draft.expiresOn}T23:59:59.999+05:30`) : null,
     code: draft.code,
     notes: noteFor(draft),
+    source: draft.source,
+    terms: draft.terms,
+    extractedText: draft.extractedText,
     needsReview: true,
   });
 }

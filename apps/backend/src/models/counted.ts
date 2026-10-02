@@ -41,6 +41,8 @@ export interface CountedInput {
   refundOf?: { amountMinor?: number | null }[] | null;
   /** On a purchase: how much of it has since come back as refunds. */
   refundedMinor?: number | null;
+  /** Money in that is set aside for a purchase still to come. */
+  isEarmarked?: boolean | null;
 }
 
 export interface CountedAmount {
@@ -81,6 +83,13 @@ export function resolveCountedAmount(transaction: CountedInput): CountedAmount {
   // when the original split was recorded.
   if (transaction.isSettlement) {
     return { countedAmountMinor: 0, countedReason: "SETTLEMENT" };
+  }
+
+  // Money sent for something still to be bought is not income, however
+  // much of it has been spent so far - the purchases it covers are linked
+  // to it the way a refund is, and cost nothing of the user's own.
+  if (transaction.isEarmarked) {
+    return { countedAmountMinor: 0, countedReason: "EARMARKED" };
   }
 
   // Money given back is not income. It reduces what the purchase cost,

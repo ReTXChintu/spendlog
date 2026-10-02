@@ -229,6 +229,10 @@ const createTransactionSchema = z.object({
     .optional(),
   isSettlement: z.boolean().optional(),
   people: z.array(personShareBody).max(20).optional(),
+  // On a transfer between own accounts, the other one.
+  transferAccountId: z.string().regex(OBJECT_ID).nullable().optional(),
+  // Money in that is set aside for a purchase still to come.
+  isEarmarked: z.boolean().optional(),
 });
 
 // POST /transactions — manual entry (cash spends, or anything the auto
@@ -256,6 +260,13 @@ transactionsRouter.post("/", async (req, res) => {
   );
   if (peopleProblem) return res.status(400).json({ error: peopleProblem });
 
+  const transferProblem = await checkTransferAccount(
+    currentUserId(req),
+    parsed.data.isTransfer ? parsed.data.transferAccountId : null,
+    parsed.data.accountId
+  );
+  if (transferProblem) return res.status(400).json({ error: transferProblem });
+
   const created = await Transaction.create({
     userId: currentUserId(req),
     amountMinor: parsed.data.amountMinor,
@@ -271,6 +282,8 @@ transactionsRouter.post("/", async (req, res) => {
     split: parsed.data.split ?? null,
     isSettlement: parsed.data.isSettlement ?? false,
     people,
+    transferAccountId: parsed.data.isTransfer ? (parsed.data.transferAccountId ?? null) : null,
+    isEarmarked: parsed.data.type === "CREDIT" ? (parsed.data.isEarmarked ?? false) : false,
     source: "MANUAL",
   });
 
@@ -322,7 +335,28 @@ const updateTransactionSchema = z.object({
   pending: z.boolean().optional(),
   // Who it was for or from. An empty list takes everyone off it.
   people: z.array(personShareBody).max(20).optional(),
+  // On a transfer between own accounts, the other one. null clears it.
+  transferAccountId: z.string().regex(OBJECT_ID).nullable().optional(),
+  // Money in that is set aside for a purchase still to come.
+  isEarmarked: z.boolean().optional(),
 });
+
+/**
+ * The other account of a transfer, checked: the user's own, and not the
+ * account the money moved on. Returns an error sentence, or null when fine.
+ */
+async function checkTransferAccount(
+  userId: Types.ObjectId,
+  transferAccountId: string | null | undefined,
+  accountId: string | null | undefined
+): Promise<string | null> {
+  if (!transferAccountId) return null;
+  if (accountId && transferAccountId === String(accountId)) {
+    return "A transfer goes between two different accounts.";
+  }
+  const owned = await Account.exists({ _id: transferAccountId, userId });
+  return owned ? null : "Unknown account";
+}
 
 /**
  * Moves which loan (if any) a payment is claiming, undoing the old claim
@@ -407,6 +441,18 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
     if (problem) return res.status(400).json({ error: problem });
   }
 
+  const willBeTransfer = parsed.data.isTransfer ?? existing.isTransfer;
+  const transferProblem = await checkTransferAccount(
+    userId,
+    willBeTransfer ? parsed.data.transferAccountId : null,
+    parsed.data.accountId !== undefined ? parsed.data.accountId : existing.accountId?.toString()
+  );
+  if (transferProblem) return res.status(400).json({ error: transferProblem });
+  // No longer a transfer: there is no other account to speak of.
+  const transferFields: Record<string, unknown> = willBeTransfer ? {} : { transferAccountId: null };
+  // Only money in can be set aside; on a payment it would zero real spending.
+  if ((parsed.data.type ?? existing.type) === "DEBIT") transferFields.isEarmarked = false;
+
   // Which loan a payment repays is not a plain field the way cardPaymentFor
   // is: picking one claims an instalment on it, and picking a different
   // one - or clearing it - has to give back whichever instalment this
@@ -420,7 +466,14 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
 
   const updated = await Transaction.findOneAndUpdate(
     { _id: req.params.id, userId },
-    { $set: { ...fields, ...(people !== undefined ? { people } : {}), editedAt: new Date() } },
+    {
+      $set: {
+        ...fields,
+        ...transferFields,
+        ...(people !== undefined ? { people } : {}),
+        editedAt: new Date(),
+      },
+    },
     { new: true }
   )
     .populate("category")
@@ -561,7 +614,8 @@ transactionsRouter.get("/:id/refund-candidates", validObjectIdParam("id"), async
 
   const day = 24 * 60 * 60 * 1000;
   const monthBefore = new Date(refund.occurredAt.getTime() - 30 * day);
-  const monthAfter = new Date(refund.occurredAt.getTime() + 30 * day);
+  // Money set aside for something can wait a while before it is spent.
+  const monthAfter = new Date(refund.occurredAt.getTime() + (refund.isEarmarked ? 120 : 30) * day);
   const sixMonthsBefore = new Date(refund.occurredAt.getTime() - 183 * day);
 
   const likely: Record<string, unknown>[] = [{ amountMinor: refund.amountMinor }];

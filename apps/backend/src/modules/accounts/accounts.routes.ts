@@ -177,6 +177,8 @@ const accountFields = {
   /// Null clears it. Without a moment given, the balance is as of now.
   openingBalanceMinor: z.number().int().min(-1_000_000_000_00).max(1_000_000_000_00).nullable().optional(),
   openingBalanceAt: z.coerce.date().nullable().optional(),
+  /// The emergency fund: kept out of the money on hand. One at a time.
+  isSavings: z.boolean().optional(),
 };
 
 const createAccountSchema = z.object(accountFields);
@@ -349,6 +351,11 @@ accountsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
     { new: true, runValidators: true }
   );
   if (!updated) return res.status(404).json({ error: "Not found" });
+
+  // One emergency fund: marking this one unmarks whichever was before.
+  if (parsed.data.isSavings) {
+    await Account.updateMany({ userId, _id: { $ne: updated._id }, isSavings: true }, { $set: { isSavings: false } });
+  }
 
   res.json(updated);
 });

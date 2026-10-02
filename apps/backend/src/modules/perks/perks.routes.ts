@@ -46,6 +46,8 @@ const perkSchema = z.object({
   expiresOn: z.coerce.date().nullable().optional(),
   code: z.string().trim().max(60).nullable().optional(),
   notes: z.string().trim().max(500).nullable().optional(),
+  source: z.string().trim().max(60).nullable().optional(),
+  terms: z.string().trim().max(4000).nullable().optional(),
   isActive: z.boolean().optional(),
 });
 

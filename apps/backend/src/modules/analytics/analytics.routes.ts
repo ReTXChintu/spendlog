@@ -2,7 +2,8 @@ import { Router } from "express";
 import { Types } from "mongoose";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
-import { Transaction } from "../../models";
+import { Account, Transaction } from "../../models";
+import { IST_OFFSET, istDayKey } from "../../time";
 import { UserMonth, monthLabel, monthSoFar, userMonth, userMonths } from "../budget/budget.months";
 
 export const analyticsRouter = Router();
@@ -17,7 +18,31 @@ const summarySchema = z.object({
     .string()
     .regex(/^\d{4}-\d{2}$/)
     .optional(),
+  /// An account id, or "cash" for payments with no account - which is
+  /// what paying in cash has always meant here.
+  account: z.string().regex(/^([0-9a-fA-F]{24}|cash)$/).optional(),
+  category: z.string().regex(/^([0-9a-fA-F]{24}|none)$/).optional(),
 });
+
+/**
+ * The filters a chart can be narrowed by, as a query fragment. Cash covers
+ * both the cash account and payments with no account at all.
+ */
+async function filters(
+  userId: Types.ObjectId,
+  query: { account?: string; category?: string }
+): Promise<Record<string, unknown>> {
+  const match: Record<string, unknown> = {};
+  if (query.account === "cash") {
+    const cash = await Account.findOne({ userId, accountType: "CASH" }).select("_id");
+    match.accountId = { $in: [null, ...(cash ? [cash._id] : [])] };
+  } else if (query.account) {
+    match.accountId = new Types.ObjectId(query.account);
+  }
+  if (query.category === "none") match.categoryId = null;
+  else if (query.category) match.categoryId = new Types.ObjectId(query.category);
+  return match;
+}
 
 /** What a response says about the month it covers, so a screen can label it. */
 function describe(month: UserMonth, bySalary: boolean) {
@@ -59,6 +84,7 @@ analyticsRouter.get("/summary", async (req, res) => {
   const match = {
     userId,
     occurredAt: { $gte: start, $lt: end },
+    ...(await filters(userId, parsed.data)),
   };
 
   // Totals and the category breakdown are computed in the database rather
@@ -208,6 +234,8 @@ const merchantsSchema = z.object({
     .regex(/^\d{4}-\d{2}$/)
     .optional(),
   limit: z.coerce.number().int().min(1).max(50).default(15),
+  account: z.string().regex(/^([0-9a-fA-F]{24}|cash)$/).optional(),
+  category: z.string().regex(/^([0-9a-fA-F]{24}|none)$/).optional(),
 });
 
 /**
@@ -240,6 +268,7 @@ analyticsRouter.get("/merchants", async (req, res) => {
         type: "DEBIT",
         countedAmountMinor: { $gt: 0 },
         merchant: { $nin: [null, ""] },
+        ...(await filters(userId, parsed.data)),
       },
     },
     {
@@ -370,4 +399,153 @@ analyticsRouter.get("/compare", async (req, res) => {
 // last, for the one line the dashboard carries. See monthSoFar.
 analyticsRouter.get("/month-so-far", async (req, res) => {
   res.json(await monthSoFar(currentUserId(req)));
+});
+
+/**
+ * GET /analytics/daily?month=&account=&category= — spending and money in,
+ * day by day across one of the user's months, for the line chart. Every
+ * day is there, including the empty ones a chart needs to be honest.
+ */
+analyticsRouter.get("/daily", async (req, res) => {
+  const parsed = summarySchema.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const userId = currentUserId(req);
+  const month = await userMonth(userId, parsed.data.month);
+  const rows = await Transaction.aggregate<{ _id: { day: string; type: string }; amountMinor: number }>([
+    {
+      $match: {
+        userId,
+        occurredAt: { $gte: month.start, $lt: month.end },
+        countedAmountMinor: { $gt: 0 },
+        ...(await filters(userId, parsed.data)),
+      },
+    },
+    {
+      $group: {
+        _id: {
+          day: { $dateToString: { format: "%Y-%m-%d", date: "$occurredAt", timezone: IST_OFFSET } },
+          type: "$type",
+        },
+        amountMinor: { $sum: "$countedAmountMinor" },
+      },
+    },
+  ]);
+
+  const byDay = new Map<string, { day: string; spendMinor: number; incomeMinor: number }>();
+  for (let at = month.start.getTime(); at < month.end.getTime(); at += 24 * 60 * 60 * 1000) {
+    const day = istDayKey(new Date(at));
+    byDay.set(day, { day, spendMinor: 0, incomeMinor: 0 });
+  }
+  for (const row of rows) {
+    const entry = byDay.get(row._id.day);
+    if (!entry) continue;
+    if (row._id.type === "DEBIT") entry.spendMinor += row.amountMinor;
+    else entry.incomeMinor += row.amountMinor;
+  }
+  res.json([...byDay.values()]);
+});
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/**
+ * GET /analytics/weekday?month=&account=&category= — which days of the
+ * week the money goes on, with how many of each day the month had so far
+ * so an average is a fair one.
+ */
+analyticsRouter.get("/weekday", async (req, res) => {
+  const parsed = summarySchema.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const userId = currentUserId(req);
+  const month = await userMonth(userId, parsed.data.month);
+  const rows = await Transaction.aggregate<{ _id: number; amountMinor: number; count: number }>([
+    {
+      $match: {
+        userId,
+        type: "DEBIT",
+        occurredAt: { $gte: month.start, $lt: month.end },
+        countedAmountMinor: { $gt: 0 },
+        ...(await filters(userId, parsed.data)),
+      },
+    },
+    {
+      $group: {
+        _id: { $dayOfWeek: { date: "$occurredAt", timezone: IST_OFFSET } },
+        amountMinor: { $sum: "$countedAmountMinor" },
+        count: { $sum: 1 },
+      },
+    },
+  ]);
+
+  // How many Mondays (and so on) the month has had, so far.
+  const until = Math.min(month.end.getTime(), Date.now());
+  const days = new Array(7).fill(0);
+  for (let at = month.start.getTime(); at < until; at += 24 * 60 * 60 * 1000) {
+    days[new Date(at + 5.5 * 60 * 60 * 1000).getUTCDay()] += 1;
+  }
+
+  res.json(
+    WEEKDAYS.map((name, index) => {
+      const row = rows.find((candidate) => candidate._id === index + 1);
+      const amountMinor = row?.amountMinor ?? 0;
+      return {
+        day: name,
+        amountMinor,
+        count: row?.count ?? 0,
+        averageMinor: days[index] ? Math.round(amountMinor / days[index]) : 0,
+      };
+    })
+  );
+});
+
+/**
+ * GET /analytics/accounts?month=&category= — where the spending was paid
+ * from: each card and account, and cash (which includes payments with no
+ * account at all).
+ */
+analyticsRouter.get("/accounts", async (req, res) => {
+  const parsed = summarySchema.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const userId = currentUserId(req);
+  const month = await userMonth(userId, parsed.data.month);
+  const [rows, accounts] = await Promise.all([
+    Transaction.aggregate<{ _id: Types.ObjectId | null; amountMinor: number; count: number }>([
+      {
+        $match: {
+          userId,
+          type: "DEBIT",
+          occurredAt: { $gte: month.start, $lt: month.end },
+          countedAmountMinor: { $gt: 0 },
+          ...(await filters(userId, { category: parsed.data.category })),
+        },
+      },
+      { $group: { _id: "$accountId", amountMinor: { $sum: "$countedAmountMinor" }, count: { $sum: 1 } } },
+    ]),
+    Account.find({ userId }),
+  ]);
+
+  const cash = accounts.find((account) => account.accountType === "CASH");
+  const merged = new Map<
+    string,
+    { accountId: string; name: string; accountType: string; amountMinor: number; count: number }
+  >();
+  for (const row of rows) {
+    const account = row._id ? accounts.find((candidate) => candidate._id.equals(row._id!)) : cash;
+    const key = account ? account._id.toString() : "cash";
+    const entry = merged.get(key) ?? {
+      accountId: account && account.accountType !== "CASH" ? key : "cash",
+      name: account
+        ? account.nickname || `${account.bankName}${account.last4 ? ` ••${account.last4}` : ""}`
+        : "Cash",
+      accountType: account?.accountType ?? "CASH",
+      amountMinor: 0,
+      count: 0,
+    };
+    entry.amountMinor += row.amountMinor;
+    entry.count += row.count;
+    merged.set(key, entry);
+  }
+  res.json([...merged.values()].sort((a, b) => b.amountMinor - a.amountMinor));
 });
