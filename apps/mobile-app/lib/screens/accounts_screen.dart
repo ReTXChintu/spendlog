@@ -8,6 +8,7 @@ import '../widgets/card_vault_panel.dart';
 import '../widgets/edit_account_sheet.dart';
 import '../widgets/state_block.dart';
 import 'statements_screen.dart';
+import 'transactions_screen.dart';
 
 /// Every account, one at a time.
 ///
@@ -601,6 +602,26 @@ class _AccountsScreenState extends State<AccountsScreen> {
               isBank: isBank,
               onChanged: _load,
             ),
+
+          // Every account has payments on it, debit cards included, so this
+          // is the one row they all get.
+          const SizedBox(height: 14),
+          _row(
+            Icons.receipt_outlined,
+            'Transactions',
+            account.accountType == 'CARD' && account.statementDay != null ? 'This statement cycle' : 'This month',
+            on: true,
+            action: TextButton(
+              onPressed: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => TransactionsScreen(initialAccountId: account.id)),
+                );
+                // An edit or a new payment there moves this page's figures.
+                await _load();
+              },
+              child: const Text('Open'),
+            ),
+          ),
 
           // A debit card emails no statement, so there is no password for
           // one and nothing filed under it. The account it draws on has

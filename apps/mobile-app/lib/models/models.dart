@@ -1792,6 +1792,49 @@ class ExpectedBalance {
       );
 }
 
+/// One stretch of an account's history: a card's statement cycle, or a
+/// salary-to-salary month for anything without one. Days are IST and
+/// inclusive at both ends.
+class AccountCycle {
+  final String from;
+  final String to;
+  final bool current;
+  final int spentMinor;
+  final int count;
+
+  AccountCycle({
+    required this.from,
+    required this.to,
+    this.current = false,
+    this.spentMinor = 0,
+    this.count = 0,
+  });
+
+  factory AccountCycle.fromJson(Map<String, dynamic> json) => AccountCycle(
+        from: json['from'] as String,
+        to: json['to'] as String,
+        current: json['current'] as bool? ?? false,
+        spentMinor: json['spentMinor'] as int? ?? 0,
+        count: json['count'] as int? ?? 0,
+      );
+}
+
+/// `GET /accounts/:id/cycles` — newest first. [byStatement] is false when
+/// the account has no statement day and the cycles are pay months instead.
+class AccountCycles {
+  final bool byStatement;
+  final List<AccountCycle> cycles;
+
+  AccountCycles({required this.byStatement, required this.cycles});
+
+  factory AccountCycles.fromJson(Map<String, dynamic> json) => AccountCycles(
+        byStatement: json['byStatement'] as bool? ?? false,
+        cycles: (json['cycles'] as List<dynamic>? ?? const [])
+            .map((c) => AccountCycle.fromJson(c as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
 /// What the gap between the bank's figure and the expected one most
 /// likely means, in a sentence.
 String describeBalanceCheck({required int expectedMinor, required int bankMinor}) {

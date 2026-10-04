@@ -21,7 +21,17 @@ class TransactionsScreen extends StatefulWidget {
   final bool startUncategorized;
   final VoidCallback? onOpenSettings;
 
-  const TransactionsScreen({super.key, this.startUncategorized = false, this.onOpenSettings});
+  /// Set when opened from an account's page: the ledger starts narrowed to
+  /// that account's current cycle, and gets an app bar to go back with,
+  /// since it is then a pushed page rather than a tab.
+  final String? initialAccountId;
+
+  const TransactionsScreen({
+    super.key,
+    this.startUncategorized = false,
+    this.onOpenSettings,
+    this.initialAccountId,
+  });
 
   @override
   State<TransactionsScreen> createState() => TransactionsScreenState();
@@ -50,6 +60,13 @@ class TransactionsScreenState extends State<TransactionsScreen> {
   String _direction = '';
   Timer? _debounce;
 
+  /// The account filter, and the cycle within it. A null [_cycle] with an
+  /// account picked means all time on that account.
+  String? _accountId;
+  AccountCycles? _cycles;
+  AccountCycle? _cycle;
+  bool _loadingCycles = false;
+
   /// Rows picked for merging. Entered by long-pressing a row.
   bool _selecting = false;
   final List<String> _selectedIds = [];
@@ -61,7 +78,14 @@ class TransactionsScreenState extends State<TransactionsScreen> {
     super.initState();
     if (widget.startUncategorized) _categoryId = 'none';
     _loadContext();
-    load();
+    final initialAccountId = widget.initialAccountId;
+    if (initialAccountId != null) {
+      // Loads the ledger itself once the cycle is known, so the first rows
+      // shown are already the current cycle's rather than all time's.
+      _pickAccount(initialAccountId);
+    } else {
+      load();
+    }
   }
 
   @override
@@ -76,9 +100,118 @@ class TransactionsScreenState extends State<TransactionsScreen> {
       if (_query.isNotEmpty) 'q': _query,
       if (_categoryId != null) 'categoryId': _categoryId!,
       if (_direction.isNotEmpty) 'type': _direction,
+      if (_accountId != null) 'accountId': _accountId!,
+      if (_accountId != null && _cycle != null) ...{'from': _cycle!.from, 'to': _cycle!.to},
     };
     return Uri(queryParameters: params).query;
   }
+
+  /// Narrows the ledger to one account, starting on its current cycle —
+  /// "what went on this card this statement" is the question being asked
+  /// far more often than "everything it ever did".
+  Future<void> _pickAccount(String? id) async {
+    setState(() {
+      _accountId = id;
+      _cycles = null;
+      _cycle = null;
+      _loadingCycles = id != null;
+      _days = null;
+    });
+    if (id == null) {
+      await load();
+      return;
+    }
+    try {
+      final json = await ApiClient.instance.get('/accounts/$id/cycles?count=12') as Map<String, dynamic>;
+      // A different account may have been picked while this one loaded.
+      if (!mounted || _accountId != id) return;
+      final cycles = AccountCycles.fromJson(json);
+      setState(() {
+        _cycles = cycles;
+        _cycle = cycles.cycles.where((c) => c.current).firstOrNull ?? cycles.cycles.firstOrNull;
+      });
+    } catch (_) {
+      // Without cycles the account filter still works, over all time.
+    } finally {
+      if (mounted && _accountId == id) setState(() => _loadingCycles = false);
+    }
+    if (mounted && _accountId == id) await load();
+  }
+
+  Future<void> _chooseAccount() async {
+    // A closed account stays listed when it is the one already picked, so
+    // arriving from its page does not leave a filter you cannot see.
+    final shown = _accounts.where((a) => a.isActive || a.id == _accountId).toList();
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            _sheetOption(sheetContext, label: 'All accounts', value: '', on: _accountId == null),
+            for (final account in shown)
+              _sheetOption(sheetContext, label: account.label, value: account.id, on: account.id == _accountId),
+          ],
+        ),
+      ),
+    );
+    if (picked == null) return;
+    final id = picked.isEmpty ? null : picked;
+    if (id == _accountId) return;
+    await _pickAccount(id);
+  }
+
+  Future<void> _chooseCycle() async {
+    final cycles = _cycles;
+    if (cycles == null) return;
+    // The sheet hands back an index; -1 is "All time".
+    final picked = await showModalBottomSheet<int>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(sheetContext).size.height * 0.7),
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              for (var i = 0; i < cycles.cycles.length; i++)
+                _sheetOption(
+                  sheetContext,
+                  label: _cycleLabel(cycles.cycles[i]),
+                  value: i,
+                  on: identical(cycles.cycles[i], _cycle),
+                ),
+              _sheetOption(sheetContext, label: 'All time', value: -1, on: _cycle == null),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked == null) return;
+    _setFilter(() => _cycle = picked < 0 ? null : cycles.cycles[picked]);
+  }
+
+  Widget _sheetOption<V>(BuildContext sheetContext, {required String label, required V value, required bool on}) {
+    final c = context.c;
+    return ListTile(
+      title: Text(
+        label,
+        style: TextStyle(fontSize: 14, fontWeight: on ? FontWeight.w700 : FontWeight.w500, color: c.ink),
+      ),
+      trailing: on ? Icon(Icons.check, size: 18, color: c.brand) : null,
+      onTap: () => Navigator.of(sheetContext).pop(value),
+    );
+  }
+
+  String _cycleLabel(AccountCycle cycle) {
+    final range = '${formatIsoShortDate(cycle.from)} – ${formatIsoShortDate(cycle.to)}';
+    return cycle.current ? '$range (current)' : range;
+  }
+
+  String get _accountLabel =>
+      _accounts.where((a) => a.id == _accountId).firstOrNull?.label ?? 'Account';
 
   /// Categories, accounts and the month rollup — everything the ledger shows
   /// around the list itself. A failure here still leaves the list usable.
@@ -308,12 +441,18 @@ class TransactionsScreenState extends State<TransactionsScreen> {
     if (changed == true) await _refreshAll(keepVisible: true);
   }
 
-  bool get _filtersActive => _query.isNotEmpty || _categoryId != null || _direction.isNotEmpty;
+  bool get _filtersActive =>
+      _query.isNotEmpty || _categoryId != null || _direction.isNotEmpty || _accountId != null;
 
   void _clearFilters() => _setFilter(() {
         _query = '';
         _categoryId = null;
         _direction = '';
+        // The dates belong to the account, so they go with it.
+        _accountId = null;
+        _cycles = null;
+        _cycle = null;
+        _loadingCycles = false;
       });
 
   Widget _searchField(SpendColors c) => TextField(
@@ -345,6 +484,13 @@ class TransactionsScreenState extends State<TransactionsScreen> {
 
     return Scaffold(
       backgroundColor: c.paper,
+      // Only as a pushed page; as a tab the shell's own chrome is enough.
+      appBar: widget.initialAccountId != null
+          ? AppBar(
+              title: Text('Transactions', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: c.ink)),
+              shape: Border(bottom: BorderSide(color: c.line)),
+            )
+          : null,
       floatingActionButton: _selecting
           ? null
           : FloatingActionButton(
@@ -403,6 +549,12 @@ class TransactionsScreenState extends State<TransactionsScreen> {
               children: [
                 _FilterChip(label: 'All', on: !_filtersActive, onTap: _clearFilters),
                 _FilterChip(
+                  label: _accountId == null ? 'All accounts' : _accountLabel,
+                  on: _accountId != null,
+                  dropdown: true,
+                  onTap: _chooseAccount,
+                ),
+                _FilterChip(
                   label: 'Needs a category',
                   on: _categoryId == 'none',
                   onTap: () => _setFilter(() => _categoryId = _categoryId == 'none' ? null : 'none'),
@@ -428,8 +580,54 @@ class TransactionsScreenState extends State<TransactionsScreen> {
             ),
           ),
           const SizedBox(height: 6),
+          if (_accountId != null) _cycleBar(c),
           CardStrip(cards: _cards, pace: _pace),
           Expanded(child: _buildBody(uncategorized)),
+        ],
+      ),
+    );
+  }
+
+  /// Which stretch of the picked account is showing, and what it came to.
+  Widget _cycleBar(SpendColors c) {
+    final cycles = _cycles;
+    final cycle = _cycle;
+    final String value;
+    if (_loadingCycles) {
+      value = 'Loading…';
+    } else if (cycle == null) {
+      value = 'All time';
+    } else {
+      value = _cycleLabel(cycle);
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                cycles?.byStatement == false ? 'Month' : 'Statement cycle',
+                style: TextStyle(fontSize: 12, color: c.muted, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(width: 10),
+              // No cycles came back (or none yet): nothing to switch between.
+              if (cycles != null && cycles.cycles.isNotEmpty)
+                _FilterChip(label: value, on: cycle != null, dropdown: true, onTap: _chooseCycle)
+              else
+                Text(value, style: TextStyle(fontSize: 12, color: c.ink70, fontWeight: FontWeight.w600)),
+            ],
+          ),
+          if (cycle != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              '${formatMoney(cycle.spentMinor)} spent across ${cycle.count} '
+              '${cycle.count == 1 ? 'payment' : 'payments'}',
+              style: kNum.copyWith(fontSize: 11.5, color: c.muted),
+            ),
+          ],
         ],
       ),
     );
@@ -718,7 +916,10 @@ class _FilterChip extends StatelessWidget {
   final Color? color;
   final VoidCallback onTap;
 
-  const _FilterChip({required this.label, required this.on, required this.onTap, this.color});
+  /// Opens a list to pick from rather than toggling, so it says so.
+  final bool dropdown;
+
+  const _FilterChip({required this.label, required this.on, required this.onTap, this.color, this.dropdown = false});
 
   @override
   Widget build(BuildContext context) {
@@ -752,6 +953,10 @@ class _FilterChip extends StatelessWidget {
                   color: on ? context.c.brandDark : context.c.ink70,
                 ),
               ),
+              if (dropdown) ...[
+                const SizedBox(width: 2),
+                Icon(Icons.arrow_drop_down, size: 16, color: on ? context.c.brandDark : context.c.muted),
+              ],
             ],
           ),
         ),
