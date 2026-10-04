@@ -1,5 +1,5 @@
 import { Types } from "mongoose";
-import { Loan, Transaction, User } from "../../models";
+import { DailyBudgetChange, Loan, Transaction, User } from "../../models";
 import { IST_OFFSET, IST_OFFSET_MS, istDayKey, istMonthKey, istMonthStart } from "../../time";
 import { BudgetPeriod } from "./budget.period";
 import { currentBudgetPeriod } from "./budget.pace";
@@ -29,6 +29,8 @@ export interface DailyBudgetDay {
   spentMinor: number;
   /** Money in on top of pay that day, which goes straight into the bucket. */
   incomeMinor: number;
+  /** The daily budget in force that day. */
+  allowedMinor: number;
   /** Budget less spending, plus any extra money in: positive put by,
       negative taken back. */
   deltaMinor: number;
@@ -72,6 +74,54 @@ export type DailyBudget =
       days: DailyBudgetDay[];
     };
 
+/** Before any change was recorded, the amount set covers every day. */
+export const SINCE_ALWAYS = "0000-01-01";
+
+/**
+ * What a day was allowed: the budget in force on that IST day. Days before
+ * the first recorded change - and accounts that have never changed it -
+ * take the amount on the user.
+ */
+export function budgetOn(
+  user: { dailyBudgetMinor?: number | null; dailyBudgetHistory?: DailyBudgetChange[] | null },
+  day: string
+): number {
+  let amount = user.dailyBudgetMinor ?? 0;
+  const history = user.dailyBudgetHistory ?? [];
+  if (history.length > 0) {
+    amount = history[0].amountMinor;
+    for (const change of history) {
+      if (change.from <= day) amount = change.amountMinor;
+      else break;
+    }
+  }
+  return amount;
+}
+
+/**
+ * The history after the daily budget is set to `next` today.
+ *
+ * The amount until now is kept for every day before today, so a change
+ * applies from today onwards and the bucket already built stays as it was.
+ * Changing it twice in one day keeps only the last.
+ */
+export function withBudgetChange(
+  user: { dailyBudgetMinor?: number | null; dailyBudgetHistory?: DailyBudgetChange[] | null },
+  next: number,
+  now = new Date()
+): DailyBudgetChange[] {
+  const today = istDayKey(now);
+  const history = [...(user.dailyBudgetHistory ?? [])];
+  if (history.length === 0 && user.dailyBudgetMinor) {
+    history.push({ from: SINCE_ALWAYS, amountMinor: user.dailyBudgetMinor });
+  }
+  const kept = history.filter((change) => change.from < today);
+  // The first budget ever set covers the period it was set in, as it
+  // always has - there was nothing before it to keep.
+  kept.push({ from: kept.length === 0 ? SINCE_ALWAYS : today, amountMinor: next });
+  return kept;
+}
+
 /** The calendar month, shaped like a budget period, for someone with no pay day. */
 function calendarMonth(now: Date): BudgetPeriod {
   const start = istMonthStart(istMonthKey(now));
@@ -113,7 +163,7 @@ function daysUpToToday(start: Date, now: Date): string[] {
 }
 
 export async function dailyBudget(userId: Types.ObjectId, now = new Date()): Promise<DailyBudget> {
-  const user = await User.findById(userId).select("dailyBudgetMinor salaryDay").orFail();
+  const user = await User.findById(userId).select("dailyBudgetMinor dailyBudgetHistory salaryDay").orFail();
   if (!user.dailyBudgetMinor || user.dailyBudgetMinor <= 0) return { configured: false };
 
   // Salary day to salary day where there is one, because that is when the
@@ -175,7 +225,9 @@ export async function dailyBudget(userId: Types.ObjectId, now = new Date()): Pro
   const spentByDay = new Map(
     rows.filter((row) => row._id !== null).map((row) => [row._id as string, row.total])
   );
-  const budget = user.dailyBudgetMinor;
+  // Each day against the budget it had, so a change made today does not
+  // rewrite what the days before it were allowed.
+  const budget = (day: string) => budgetOn(user, day);
 
   // Money that came in on top of pay goes straight into the bucket: a
   // friend's gift, interest, cashback, a side job. Not the salary itself -
@@ -213,17 +265,19 @@ export async function dailyBudget(userId: Types.ObjectId, now = new Date()): Pro
   const days: DailyBudgetDay[] = daysUpToToday(period.start, now).map((day) => {
     const spentMinor = spentByDay.get(day) ?? 0;
     const incomeMinor = incomeByDay.get(day) ?? 0;
-    return { day, spentMinor, incomeMinor, deltaMinor: budget - spentMinor + incomeMinor };
+    const allowedMinor = budget(day);
+    return { day, spentMinor, incomeMinor, allowedMinor, deltaMinor: allowedMinor - spentMinor + incomeMinor };
   });
 
   const spentMinor = days.reduce((sum, day) => sum + day.spentMinor, 0);
   const extraIncomeMinor = days.reduce((sum, day) => sum + day.incomeMinor, 0);
-  const allowedMinor = budget * days.length;
+  const allowedMinor = days.reduce((sum, day) => sum + day.allowedMinor, 0);
   const today = days[days.length - 1];
+  const todayBudget = budget(istDayKey(now));
 
   return {
     configured: true,
-    dailyBudgetMinor: budget,
+    dailyBudgetMinor: todayBudget,
     periodStart: period.start,
     periodEnd: period.end,
     resetsOnSalary: Boolean(user.salaryDay),
@@ -234,8 +288,8 @@ export async function dailyBudget(userId: Types.ObjectId, now = new Date()): Pro
     bucketMinor: allowedMinor - spentMinor + extraIncomeMinor,
     extraIncomeMinor,
     todaySpentMinor: today?.spentMinor ?? 0,
-    todayLeftMinor: budget - (today?.spentMinor ?? 0),
-    daysOver: days.filter((day) => day.spentMinor > budget).length,
+    todayLeftMinor: todayBudget - (today?.spentMinor ?? 0),
+    daysOver: days.filter((day) => day.spentMinor > day.allowedMinor).length,
     keptOutMinor: keptOut?.total ?? 0,
     keptOutCount: keptOut?.count ?? 0,
     days,

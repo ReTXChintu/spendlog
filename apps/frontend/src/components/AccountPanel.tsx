@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { AccountOverview } from "../types";
 import { api, ApiError } from "../lib/api";
 import { formatMoney } from "../lib/format";
@@ -120,6 +121,10 @@ export function AccountPanel({
           </p>
         </div>
         <div className="account-panel-actions">
+          {/* Opens on this account's current statement cycle. */}
+          <Link className="btn btn-sm btn-ghost" to={`/transactions?account=${account.id}`}>
+            <Icon name="ic-receipt" /> Transactions
+          </Link>
           <button className="btn btn-sm btn-ghost" onClick={onEdit}>
             <Icon name="ic-pencil" /> Edit
           </button>

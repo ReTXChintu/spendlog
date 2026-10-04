@@ -830,3 +830,10 @@ export interface AccountSpend {
   amountMinor: number;
   count: number;
 }
+
+/** An account's billing cycles, newest first. */
+export interface AccountCycles {
+  /** True for a card with a statement day; otherwise the user's months. */
+  byStatement: boolean;
+  cycles: { from: string; to: string; current: boolean; spentMinor: number; count: number }[];
+}

@@ -22,6 +22,7 @@ import {
   EmailConnectionStatus,
   Transaction,
   TransactionType,
+  AccountCycles,
   accountLabel,
 } from "../types";
 
@@ -75,7 +76,10 @@ export function TransactionsPage() {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [categoryId, setCategoryId] = useState(searchParams.get("category") ?? "");
-  const [accountId, setAccountId] = useState("");
+  const [accountId, setAccountId] = useState(searchParams.get("account") ?? "");
+  // The chosen account's billing cycles: statement day to the day before
+  // the next for a card, the user's own months for anything else.
+  const [cycles, setCycles] = useState<AccountCycles | null>(null);
   const [direction, setDirection] = useState<TransactionType | "">("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -84,6 +88,45 @@ export function TransactionsPage() {
     const id = window.setTimeout(() => setDebouncedSearch(search), 300);
     return () => window.clearTimeout(id);
   }, [search]);
+
+  // Picking an account opens on its current cycle - "what's on this card's
+  // bill so far" is nearly always the question - and the dates can then be
+  // moved to an earlier cycle, all time, or anything typed.
+  useEffect(() => {
+    if (!accountId) {
+      setCycles(null);
+      return;
+    }
+    let live = true;
+    api
+      .get<AccountCycles>(`/accounts/${accountId}/cycles?count=12`)
+      .then((next) => {
+        if (!live) return;
+        setCycles(next);
+        const current = next.cycles[0];
+        if (current) {
+          setFrom(current.from);
+          setTo(current.to);
+        }
+      })
+      .catch(() => live && setCycles(null));
+    return () => {
+      live = false;
+    };
+  }, [accountId]);
+
+  const selectedCycle = cycles?.cycles.find((cycle) => cycle.from === from && cycle.to === to) ?? null;
+
+  function pickCycle(value: string) {
+    if (value === "all") {
+      setFrom("");
+      setTo("");
+    } else if (value !== "custom") {
+      const [nextFrom, nextTo] = value.split("|");
+      setFrom(nextFrom);
+      setTo(nextTo);
+    }
+  }
 
   const filterQuery = useMemo(() => {
     const params = new URLSearchParams();
@@ -396,6 +439,34 @@ export function TransactionsPage() {
             </select>
           </div>
 
+          {cycles && cycles.cycles.length > 0 && (
+            <div className="filter-group">
+              <label htmlFor="f-cycle">{cycles.byStatement ? "Statement cycle" : "Month"}</label>
+              <select
+                id="f-cycle"
+                className="filter-select"
+                value={selectedCycle ? `${selectedCycle.from}|${selectedCycle.to}` : from || to ? "custom" : "all"}
+                onChange={(e) => pickCycle(e.target.value)}
+              >
+                {cycles.cycles.map((cycle) => (
+                  <option key={cycle.from} value={`${cycle.from}|${cycle.to}`}>
+                    {cycleLabel(cycle.from, cycle.to)}
+                    {cycle.current ? " (current)" : ""}
+                  </option>
+                ))}
+                <option value="all">All time</option>
+                {!selectedCycle && (from || to) && <option value="custom">Dates chosen above</option>}
+              </select>
+              {selectedCycle && (
+                <p className="field-hint">
+                  {formatMoney(selectedCycle.spentMinor)} spent across {selectedCycle.count}{" "}
+                  {selectedCycle.count === 1 ? "payment" : "payments"}
+                  {cycles.byStatement ? " — statement day to the day before the next" : ""}
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="filter-group">
             <label>Direction</label>
             <div className="filter-radio-row">
@@ -616,4 +687,15 @@ export function TransactionsPage() {
       )}
     </section>
   );
+}
+
+/** "17 Sep – 16 Oct" for a billing cycle. */
+function cycleLabel(from: string, to: string): string {
+  const format = (day: string) =>
+    new Date(`${day}T12:00:00+05:30`).toLocaleDateString("en-IN", {
+      day: "numeric",
+      month: "short",
+      timeZone: "Asia/Kolkata",
+    });
+  return `${format(from)} – ${format(to)}`;
 }

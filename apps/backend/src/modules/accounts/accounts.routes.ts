@@ -5,7 +5,9 @@ import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
 import { Account, CardVault, Transaction } from "../../models";
 import { cardStatuses } from "../cards/cards.status";
-import { userMonth } from "../budget/budget.months";
+import { userMonth, userMonths } from "../budget/budget.months";
+import { cycleFor } from "../cards/cards.cycle";
+import { istDayKey } from "../../time";
 import { upcomingBills } from "../statements/statements.bills";
 import { expectedBalances, tracksBalance } from "./accounts.balance";
 import { ACCOUNT_TYPES } from "../../types";
@@ -445,4 +447,81 @@ accountsRouter.post("/:id/merge", validObjectIdParam("id"), async (req, res) => 
   await target.save();
 
   res.json(target);
+});
+
+/**
+ * GET /accounts/:id/cycles — this account's billing cycles, newest first,
+ * for looking at everything spent on it bill by bill.
+ *
+ * A card with a statement day runs statement day to the day before the
+ * next one - the same cycle its bill covers. Anything without one (a bank
+ * account, a debit card, a card whose day isn't known) runs by the user's
+ * own months instead, salary day to salary day.
+ */
+accountsRouter.get("/:id/cycles", validObjectIdParam("id"), async (req, res) => {
+  const userId = currentUserId(req);
+  const account = await Account.findOne({ _id: req.params.id, userId });
+  if (!account) return res.status(404).json({ error: "Not found" });
+
+  const count = Math.min(Math.max(Number.parseInt(String(req.query.count ?? "12"), 10) || 12, 1), 36);
+  const now = new Date();
+  const ranges: { from: string; to: string; start: Date; end: Date }[] = [];
+
+  if (account.statementDay) {
+    let at = now;
+    for (let i = 0; i < count; i += 1) {
+      const cycle = cycleFor(account, at)!;
+      ranges.push({
+        from: istDayKey(cycle.start),
+        to: istDayKey(cycle.endsOn),
+        start: cycle.start,
+        end: cycle.statementOn,
+      });
+      at = new Date(cycle.start.getTime() - 1);
+    }
+  } else {
+    const { recent } = await userMonths(userId, now, count);
+    ranges.push(...recent.map((month) => ({ from: month.from, to: month.to, start: month.start, end: month.end })));
+  }
+
+  // What each cycle came to on this account, in one query.
+  const rows = await Transaction.aggregate<{ _id: number; spentMinor: number; count: number }>([
+    {
+      $match: {
+        userId,
+        accountId: account._id,
+        type: "DEBIT",
+        occurredAt: { $gte: ranges[ranges.length - 1].start, $lt: ranges[0].end },
+      },
+    },
+    {
+      $group: {
+        _id: {
+          $switch: {
+            branches: ranges.map((range, index) => ({
+              case: { $and: [{ $gte: ["$occurredAt", range.start] }, { $lt: ["$occurredAt", range.end] }] },
+              then: index,
+            })),
+            default: -1,
+          },
+        },
+        spentMinor: { $sum: "$countedAmountMinor" },
+        count: { $sum: 1 },
+      },
+    },
+  ]);
+
+  res.json({
+    byStatement: Boolean(account.statementDay),
+    cycles: ranges.map((range, index) => {
+      const row = rows.find((candidate) => candidate._id === index);
+      return {
+        from: range.from,
+        to: range.to,
+        current: index === 0,
+        spentMinor: row?.spentMinor ?? 0,
+        count: row?.count ?? 0,
+      };
+    }),
+  });
 });

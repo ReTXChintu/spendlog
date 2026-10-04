@@ -71,6 +71,11 @@ export interface UserDoc {
   /// every day over it takes the difference back, and the running total is
   /// what there is to move into savings when the next salary lands.
   dailyBudgetMinor?: number | null;
+  /// Every daily budget there has been, and the IST day it took effect.
+  /// A day is scored against the amount in force on it, so raising the
+  /// budget today changes today onwards and leaves the days already
+  /// counted exactly as they were. Oldest first.
+  dailyBudgetHistory?: DailyBudgetChange[];
   /// The first month SpendLog will import anything for, as YYYY-MM.
   ///
   /// Somebody who joins on the 13th of September does not want August's
@@ -104,6 +109,20 @@ export interface UserDoc {
   updatedAt: Date;
 }
 
+export interface DailyBudgetChange {
+  /// YYYY-MM-DD in IST. "0000-01-01" for the amount before any change.
+  from: string;
+  amountMinor: number;
+}
+
+const dailyBudgetChangeSchema = new Schema<DailyBudgetChange>(
+  {
+    from: { type: String, required: true },
+    amountMinor: { type: Number, required: true, min: 0 },
+  },
+  { _id: false }
+);
+
 export interface VaultPin {
   hash: string;
   salt: string;
@@ -131,6 +150,7 @@ const userSchema = new Schema<UserDoc>(
     salaryAmountMinor: { type: Number, default: null, min: 0 },
     salaryDay: { type: Number, default: null, min: 1, max: 31 },
     dailyBudgetMinor: { type: Number, default: null, min: 0 },
+    dailyBudgetHistory: { type: [dailyBudgetChangeSchema], default: [] },
     ledgerFrom: { type: String, default: null },
     vaultPin: { type: vaultPinSchema, default: null },
     geminiApiKeyEnc: { type: String, default: null },

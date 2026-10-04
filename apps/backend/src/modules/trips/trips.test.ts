@@ -46,7 +46,7 @@ async function makeTrip(
     name: "Goa",
     startedAt: overrides.startedAt ?? GOA_START,
     endedAt: overrides.endedAt === undefined ? null : overrides.endedAt,
-    members: [{ userId, joinedAt: new Date() }],
+    members: [{ userId, joinedAt: overrides.startedAt ?? GOA_START }],
     joinCode: generateJoinCode(),
   });
 }
@@ -108,7 +108,7 @@ describe("which trip a payment belongs to", () => {
   it("claims it for a member who did not start the trip", async () => {
     const [owner, friend] = await Promise.all([makeUser(), makeUser()]);
     const trip = await makeTrip(owner);
-    trip.members.push({ userId: friend, joinedAt: new Date() });
+    trip.members.push({ userId: friend, joinedAt: GOA_START });
     await trip.save();
 
     const found = await tripForOccurredAt(friend, new Date("2026-10-03T12:00:00Z"));
@@ -123,7 +123,7 @@ describe("which trip a payment belongs to", () => {
       name: "Side trip",
       startedAt: new Date("2026-10-04T00:00:00Z"),
       endedAt: new Date("2026-10-05T00:00:00Z"),
-      members: [{ userId, joinedAt: new Date() }],
+      members: [{ userId, joinedAt: new Date("2026-10-04T00:00:00Z") }],
       joinCode: generateJoinCode(),
     });
 

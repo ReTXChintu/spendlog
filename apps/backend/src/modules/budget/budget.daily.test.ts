@@ -3,7 +3,7 @@ import { after, before, beforeEach, describe, it } from "node:test";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import mongoose, { Types } from "mongoose";
 import { Transaction, User } from "../../models";
-import { dailyBudget } from "./budget.daily";
+import { dailyBudget, withBudgetChange } from "./budget.daily";
 
 let mongod: MongoMemoryServer;
 
@@ -242,6 +242,46 @@ describe("the daily budget bucket", () => {
         ["2026-09-02", 700_00],
       ]
     );
+  });
+
+  it("applies a changed budget from that day on, leaving earlier days as they were", async () => {
+    // 1,000 a day for the 1st and 2nd; raised to 1,500 on the 3rd.
+    const user = await withUser({ dailyBudgetMinor: 1000_00, salaryDay: 1 });
+    await spend("2026-09-01", 400); // +600
+    await spend("2026-09-02", 1200); // -200
+    const history = withBudgetChange(user, 1500_00, on("2026-09-03"));
+    await User.updateOne({ _id: user._id }, { dailyBudgetMinor: 1500_00, dailyBudgetHistory: history });
+    await spend("2026-09-03", 1000); // +500 against 1,500
+
+    const result = await bucket(on("2026-09-03"));
+    assert.deepEqual(
+      result.days.map((day) => [day.day, day.allowedMinor, day.deltaMinor]),
+      [
+        ["2026-09-01", 1000_00, 600_00],
+        ["2026-09-02", 1000_00, -200_00],
+        ["2026-09-03", 1500_00, 500_00],
+      ]
+    );
+    assert.equal(result.allowedMinor, 3500_00);
+    assert.equal(result.bucketMinor, 900_00);
+    assert.equal(result.dailyBudgetMinor, 1500_00);
+    assert.equal(result.todayLeftMinor, 500_00);
+  });
+
+  it("keeps only the last change made on one day", () => {
+    const user = { dailyBudgetMinor: 1000_00, dailyBudgetHistory: [] };
+    const once = withBudgetChange(user, 1200_00, on("2026-09-05"));
+    const twice = withBudgetChange({ dailyBudgetMinor: 1200_00, dailyBudgetHistory: once }, 900_00, on("2026-09-05"));
+    assert.deepEqual(twice, [
+      { from: "0000-01-01", amountMinor: 1000_00 },
+      { from: "2026-09-05", amountMinor: 900_00 },
+    ]);
+  });
+
+  it("lets a first-ever budget cover the period it was set in", () => {
+    assert.deepEqual(withBudgetChange({ dailyBudgetMinor: null, dailyBudgetHistory: [] }, 800_00, on("2026-09-10")), [
+      { from: "0000-01-01", amountMinor: 800_00 },
+    ]);
   });
 
   it("counts today, so the bucket moves as the day is spent", async () => {

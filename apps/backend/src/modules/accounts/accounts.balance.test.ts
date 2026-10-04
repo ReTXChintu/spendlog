@@ -161,3 +161,29 @@ describe("an account's expected balance", () => {
     assert.equal(rows.find((row) => row.id === card._id.toString())!.tracksBalance, false);
   });
 });
+
+describe("an account's billing cycles", () => {
+  it("runs statement day to the day before the next, with what each came to", async () => {
+    const card = await models.Account.create({ userId, bankName: "Axis", last4: "7777", accountType: "CARD", statementDay: 17 });
+    const now = new Date();
+    await models.Transaction.create({ userId, accountId: card._id, type: "DEBIT", amountMinor: 500_00, source: "MANUAL", occurredAt: now });
+
+    const body = (await (await call(`/accounts/${card.id}/cycles?count=3`)).json()) as {
+      byStatement: boolean;
+      cycles: { from: string; to: string; current: boolean; spentMinor: number }[];
+    };
+    assert.equal(body.byStatement, true);
+    assert.equal(body.cycles.length, 3);
+    assert.ok(body.cycles.every((cycle) => cycle.from.endsWith("-17")));
+    assert.ok(body.cycles.every((cycle) => cycle.to.endsWith("-16")));
+    assert.equal(body.cycles[0].current, true);
+    assert.equal(body.cycles[0].spentMinor, 500_00);
+    assert.equal(body.cycles[1].to < body.cycles[0].from, true, "back to back, newest first");
+  });
+
+  it("falls back to the user's months without a statement day", async () => {
+    const body = (await (await call(`/accounts/${bankId}/cycles?count=2`)).json()) as { byStatement: boolean; cycles: unknown[] };
+    assert.equal(body.byStatement, false);
+    assert.equal(body.cycles.length, 2);
+  });
+});

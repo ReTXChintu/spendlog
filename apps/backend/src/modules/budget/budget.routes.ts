@@ -5,7 +5,7 @@ import { validObjectIdParam } from "../../middleware/validate";
 import { Account, FixedCommitment, Transaction, User, commitmentAmountFor } from "../../models";
 import { COMMITMENT_KINDS } from "../../types";
 import { budgetPace, changeCommitmentAmount, commitmentPeriod } from "./budget.pace";
-import { dailyBudget } from "./budget.daily";
+import { dailyBudget, withBudgetChange } from "./budget.daily";
 
 export const budgetRouter = Router();
 budgetRouter.use(requireAuth);
@@ -30,11 +30,16 @@ budgetRouter.patch("/profile", async (req, res) => {
   const parsed = profileSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const user = await User.findByIdAndUpdate(
-    currentUserId(req),
-    { $set: parsed.data },
-    { new: true }
-  ).orFail();
+  // A new daily budget applies from today: the days already counted keep
+  // the amount they were counted against.
+  const set: Record<string, unknown> = { ...parsed.data };
+  const next = parsed.data.dailyBudgetMinor;
+  if (next !== undefined && next !== null) {
+    const current = await User.findById(currentUserId(req)).select("dailyBudgetMinor dailyBudgetHistory").orFail();
+    if (next !== current.dailyBudgetMinor) set.dailyBudgetHistory = withBudgetChange(current, next);
+  }
+
+  const user = await User.findByIdAndUpdate(currentUserId(req), { $set: set }, { new: true }).orFail();
 
   res.json({
     salaryAmountMinor: user.salaryAmountMinor ?? null,
