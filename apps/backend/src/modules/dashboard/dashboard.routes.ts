@@ -12,6 +12,7 @@ import { upcomingBills } from "../statements/statements.bills";
 import { loanProgress } from "../loans/loans.routes";
 import { planStatus } from "../ai/ai.coach";
 import { expectedBalances, tracksBalance } from "../accounts/accounts.balance";
+import { pocketStatuses } from "../accounts/accounts.pocket";
 
 export const dashboardRouter = Router();
 dashboardRouter.use(requireAuth);
@@ -42,7 +43,7 @@ dashboardRouter.get("/", async (req, res) => {
   // monthly figure in the app.
   const month = await userMonth(userId, undefined, now);
 
-  const [cards, pace, needsCategory, emis, loans, owed, perks, statements, monthSoFar, bills, daily, money, earmarks, plan] =
+  const [cards, pace, needsCategory, emis, loans, owed, perks, statements, monthSoFar, bills, daily, money, earmarks, plan, pocketMoney] =
     await Promise.all([
     cardStatuses(userId, now),
     budgetPace(userId, now),
@@ -58,6 +59,7 @@ dashboardRouter.get("/", async (req, res) => {
     moneyOnHand(userId),
     openEarmarks(userId),
     planStatus(userId, now),
+    pocketMoneyFor(userId, now),
   ]);
 
   // Only the ones close enough to act on. Settled: shown here, never as a
@@ -92,6 +94,7 @@ dashboardRouter.get("/", async (req, res) => {
     // The savings plan's rules being broken this month, said every time the
     // dashboard is opened until they are not.
     planWarnings: plan?.warnings ?? [],
+    pocketMoney,
   });
 });
 
@@ -296,4 +299,18 @@ async function statementsNeedingAttention(userId: Types.ObjectId) {
       statementDate: statement.statementDate,
     })),
   };
+}
+
+/** Every pocket-money account, with this month's spending and when to top up. */
+async function pocketMoneyFor(userId: Types.ObjectId, now: Date) {
+  const accounts = await Account.find({ userId, isActive: true, pocketMoney: { $ne: null } });
+  const statuses = await pocketStatuses(userId, accounts, now);
+  return accounts
+    .map((account) => {
+      const status = statuses.get(account._id.toString());
+      return status
+        ? { accountId: account._id.toString(), name: account.nickname || account.bankName, ...status }
+        : null;
+    })
+    .filter(Boolean);
 }

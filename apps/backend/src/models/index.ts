@@ -123,6 +123,23 @@ const dailyBudgetChangeSchema = new Schema<DailyBudgetChange>(
   { _id: false }
 );
 
+export interface PocketMoney {
+  /// Whose it is, for "Pocket money · Rahul".
+  holder: string;
+  limitMinor: number;
+  /// Day of the month it is topped back up to the limit.
+  renewDay: number;
+}
+
+const pocketMoneySchema = new Schema<PocketMoney>(
+  {
+    holder: { type: String, required: true, trim: true, maxlength: 40 },
+    limitMinor: { type: Number, required: true, min: 0 },
+    renewDay: { type: Number, required: true, min: 1, max: 31 },
+  },
+  { _id: false }
+);
+
 export interface VaultPin {
   hash: string;
   salt: string;
@@ -248,6 +265,12 @@ export interface AccountDoc {
   /// The emergency fund. Its balance is kept, but left out of the money
   /// on hand the dashboard adds up - it is not for spending.
   isSavings?: boolean;
+  /// Pocket money for someone who spends from this account - a child with
+  /// no UPI of their own - topped back up to a monthly limit on a set day.
+  /// Everything on it is theirs to spend: still the user's money, so it
+  /// counts in the month, but a fixed allowance rather than a day's
+  /// spending, so the daily budget leaves it out.
+  pocketMoney?: PocketMoney | null;
   isActive: boolean;
   color?: string | null;
   createdAt: Date;
@@ -285,6 +308,7 @@ const accountSchema = new Schema<AccountDoc>(
     openingBalanceMinor: { type: Number, default: null },
     openingBalanceAt: { type: Date, default: null },
     isSavings: { type: Boolean, default: false },
+    pocketMoney: { type: pocketMoneySchema, default: null },
     isActive: { type: Boolean, default: true },
     color: { type: String, default: null },
   },

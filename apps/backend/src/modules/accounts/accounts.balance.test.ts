@@ -208,3 +208,51 @@ describe("the ledger filtered to one account", () => {
     assert.equal(cardOnly.days.flatMap((day) => day.transactions).length, 1);
   });
 });
+
+describe("a pocket-money account", () => {
+  it("tracks the month from its renewal day, and what to top up", async () => {
+    const pocket = await models.Account.create({ userId, bankName: "Rahul's wallet", accountType: "BANK" });
+    const response = await call(`/accounts/${pocket.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ pocketMoney: { holder: "Rahul", limitMinor: 2000_00, renewDay: 1 } }),
+    });
+    assert.equal(response.status, 200);
+
+    const status = await import("./accounts.pocket").then((m) =>
+      m.pocketStatus(userId, { _id: pocket._id, pocketMoney: { holder: "Rahul", limitMinor: 2000_00, renewDay: 1 } }, new Date("2026-10-10T12:00:00+05:30"))
+    );
+    assert.ok(status);
+    assert.deepEqual([status.from, status.to, status.renewsOn], ["2026-10-01", "2026-10-31", "2026-11-01"]);
+
+    await models.Transaction.create({ userId, accountId: pocket._id, type: "DEBIT", amountMinor: 300_00, source: "MANUAL", occurredAt: new Date("2026-09-20T12:00:00+05:30") });
+    await models.Transaction.create({ userId, accountId: pocket._id, type: "DEBIT", amountMinor: 450_00, source: "MANUAL", occurredAt: new Date("2026-10-05T12:00:00+05:30") });
+
+    const later = await import("./accounts.pocket").then((m) =>
+      m.pocketStatus(userId, { _id: pocket._id, pocketMoney: { holder: "Rahul", limitMinor: 2000_00, renewDay: 1 } }, new Date("2026-10-10T12:00:00+05:30"))
+    );
+    assert.equal(later!.spentMinor, 450_00);
+    assert.equal(later!.leftMinor, 1550_00);
+    assert.equal(later!.lastMonthSpentMinor, 300_00);
+    assert.equal(later!.renewsToday, false);
+
+    const rows = (await (await call("/accounts/overview")).json()) as { id: string; pocket: { holder: string } | null }[];
+    assert.equal(rows.find((row) => row.id === pocket.id)!.pocket?.holder, "Rahul");
+  });
+
+  it("is kept out of the daily budget, though it still counts in the month", async () => {
+    await models.User.updateOne({ _id: userId }, { dailyBudgetMinor: 1000_00, salaryDay: 1 });
+    const pocket = await models.Account.create({
+      userId,
+      bankName: "Rahul's wallet",
+      accountType: "BANK",
+      pocketMoney: { holder: "Rahul", limitMinor: 2000_00, renewDay: 1 },
+    });
+    await models.Transaction.create({ userId, accountId: pocket._id, type: "DEBIT", amountMinor: 500_00, source: "MANUAL", occurredAt: new Date() });
+
+    const { dailyBudget } = await import("../budget/budget.daily");
+    const daily = await dailyBudget(userId);
+    assert.ok(daily.configured);
+    assert.equal(daily.spentMinor, 0);
+    assert.equal(daily.keptOutMinor, 500_00);
+  });
+});

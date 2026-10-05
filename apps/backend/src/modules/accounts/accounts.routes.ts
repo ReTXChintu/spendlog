@@ -10,6 +10,7 @@ import { cycleFor } from "../cards/cards.cycle";
 import { istDayKey } from "../../time";
 import { upcomingBills } from "../statements/statements.bills";
 import { expectedBalances, tracksBalance } from "./accounts.balance";
+import { pocketStatuses } from "./accounts.pocket";
 import { ACCOUNT_TYPES } from "../../types";
 
 export const accountsRouter = Router();
@@ -48,7 +49,10 @@ accountsRouter.get("/overview", async (req, res) => {
     upcomingBills(userId),
     spentThisMonth(userId, now),
   ]);
-  const balances = await expectedBalances(userId, accounts);
+  const [balances, pockets] = await Promise.all([
+    expectedBalances(userId, accounts),
+    pocketStatuses(userId, accounts, now),
+  ]);
 
   const statusFor = new Map(statuses.map((status) => [status.accountId, status]));
   const nameFor = new Map(
@@ -109,6 +113,8 @@ accountsRouter.get("/overview", async (req, res) => {
         /// what it should hold now if it has one.
         tracksBalance: tracksBalance(account),
         balance: balances.get(id) ?? null,
+        /// Spent and left this month, for a pocket-money account.
+        pocket: pockets.get(id) ?? null,
         /// What a debit card draws on, named rather than referenced - the
         /// panel says "draws on HDFC Savings", and an id would mean the
         /// client holding the whole list to turn it into that.
@@ -181,6 +187,15 @@ const accountFields = {
   openingBalanceAt: z.coerce.date().nullable().optional(),
   /// The emergency fund: kept out of the money on hand. One at a time.
   isSavings: z.boolean().optional(),
+  /// Pocket money for someone who spends from this account. null stops it.
+  pocketMoney: z
+    .object({
+      holder: z.string().trim().min(1).max(40),
+      limitMinor: z.number().int().min(0).max(1_000_000_00),
+      renewDay: z.number().int().min(1).max(31),
+    })
+    .nullable()
+    .optional(),
 };
 
 const createAccountSchema = z.object(accountFields);

@@ -1,5 +1,5 @@
 import { Types } from "mongoose";
-import { DailyBudgetChange, Loan, Transaction, User } from "../../models";
+import { Account, DailyBudgetChange, Loan, Transaction, User } from "../../models";
 import { peopleCategoryId } from "../categories/categories.system";
 import { IST_OFFSET, IST_OFFSET_MS, istDayKey, istMonthKey, istMonthStart } from "../../time";
 import { BudgetPeriod } from "./budget.period";
@@ -198,8 +198,16 @@ export async function dailyBudget(userId: Types.ObjectId, now = new Date()): Pro
   // $group. "Has a trip" / "has a commitment" is written as
   // greater-than-null: any set value sorts above null in BSON, and a
   // missing field does not.
+  // Pocket money is a fixed allowance someone else spends, topped up once
+  // a month - not the user's own day of spending - so it is kept out too.
+  const pocketAccounts = (await Account.find({ userId, pocketMoney: { $ne: null } }).select("_id")).map((a) => a._id);
   const special = {
-    $or: [{ $eq: ["$isSpecial", true] }, { $gt: ["$tripId", null] }, { $gt: ["$commitmentId", null] }],
+    $or: [
+      { $eq: ["$isSpecial", true] },
+      { $gt: ["$tripId", null] },
+      { $gt: ["$commitmentId", null] },
+      { $in: ["$accountId", pocketAccounts] },
+    ],
   };
   const rows = await Transaction.aggregate<{ _id: string | null; total: number; count: number }>([
     {
