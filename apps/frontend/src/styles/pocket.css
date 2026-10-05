@@ -1,0 +1,25 @@
+/* ------------------------------------------------------------ pocket money */
+/* Same quiet box as the balance panel above it. Tokens only, so both themes follow. */
+.pocket-panel{margin-top:14px;padding:14px 15px;background:var(--paper);border:1px solid var(--line);
+  border-radius:var(--radius-md);display:flex;flex-direction:column;gap:10px}
+.pocket-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.pocket-actions{display:flex;gap:6px;flex-wrap:wrap}
+.pocket-empty{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.pocket-desc{margin:0;flex:1;min-width:220px}
+
+.pocket-status{display:flex;flex-direction:column;gap:4px}
+.pocket-status .figure-value{font-size:22px}
+.pocket-status.is-close .meter-fill{background:var(--warn)}
+.pocket-status.is-over .meter-fill{background:var(--debit)}
+
+/* Renewal day: the one job this account has, so it stands out. */
+.pocket-topup{display:flex;align-items:center;gap:8px;margin:8px 0 0;padding:9px 11px;font-size:13px;
+  font-weight:600;border-radius:var(--radius-sm);background:var(--warn-bg);color:var(--warn)}
+.pocket-topup.is-done{background:var(--credit-50);color:var(--credit)}
+.pocket-topup svg{width:15px;height:15px;flex-shrink:0}
+
+.pocket-form{display:flex;flex-direction:column;gap:10px}
+.pocket-form-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.pocket-form .filter-input{width:100%}
+
+.badge-pocket{background:var(--warn-bg);color:var(--warn)}

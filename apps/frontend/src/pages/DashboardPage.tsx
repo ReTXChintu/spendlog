@@ -6,12 +6,20 @@ import { CardPicker } from "../components/CardPicker";
 import { EarmarksCard } from "../components/home/EarmarksCard";
 import { MoneyCarousel } from "../components/home/MoneyCarousel";
 import { PlanWarnings } from "../components/home/PlanWarnings";
+import { PocketMoneyCard, possessive } from "../components/PocketMoneyPanel";
 import { Icon } from "../components/Icon";
 import { LoanModal } from "../components/LoanModal";
 import { StateBlock } from "../components/States";
 import { api } from "../lib/api";
 import { formatMoney, formatMoneyShort, formatShortDate } from "../lib/format";
-import { DashboardData, FixedCommitment, Loan, UpcomingBill, commitmentAmountLabel } from "../types";
+import {
+  DashboardData,
+  FixedCommitment,
+  Loan,
+  PocketMoneyStatus,
+  UpcomingBill,
+  commitmentAmountLabel,
+} from "../types";
 
 /**
  * The Dashboard tab of Home: what you need to know now.
@@ -69,6 +77,7 @@ export function DashboardTab() {
   const { pace, daily, monthSoFar, needsCategory, emis, loans, owed, expiringPerks, statements, bills } = data;
   const change = monthSoFar.changeMinor;
   const earmarks = data.earmarks;
+  const pocketMoney = data.pocketMoney ?? [];
 
   return (
     <>
@@ -86,6 +95,7 @@ export function DashboardTab() {
         stuckStatements={statements.stuckCount}
         expiring={expiringPerks.length}
         bills={bills}
+        pocketMoney={pocketMoney}
       />
 
       <div className="home-grid">
@@ -123,6 +133,10 @@ export function DashboardTab() {
         </div>
 
         {earmarks && earmarks.count > 0 && <EarmarksCard earmarks={earmarks} />}
+
+        {pocketMoney.map((pocket) => (
+          <PocketMoneyCard key={pocket.accountId} pocket={pocket} />
+        ))}
 
         {pace.configured ? (
           <div className="home-card">
@@ -313,11 +327,13 @@ function TodoStrip({
   stuckStatements,
   expiring,
   bills,
+  pocketMoney,
 }: {
   needsCategory: { yesterday: number; month: number };
   stuckStatements: number;
   expiring: number;
   bills: UpcomingBill[];
+  pocketMoney: (PocketMoneyStatus & { accountId: string; name: string })[];
 }) {
   const jobs: { to: string; icon: string; text: string; urgent?: boolean }[] = [];
 
@@ -357,6 +373,18 @@ function TodoStrip({
       icon: "ic-wallet",
       text: `${bill.cardName} bill ${formatMoney(bill.totalDueMinor)}${due}`,
       urgent: (bill.daysUntilDue ?? 99) <= 3,
+    });
+  }
+
+  // Renewal day: put back what last month used. Gone once it's been done,
+  // or when last month used nothing.
+  for (const pocket of pocketMoney) {
+    if (!pocket.renewsToday || pocket.toppedUpMinor > 0 || pocket.lastMonthSpentMinor <= 0) continue;
+    jobs.push({
+      to: `/settings?tab=accounts&account=${pocket.accountId}`,
+      icon: "ic-wallet",
+      text: `Top up ${possessive(pocket.holder)} pocket money ${formatMoney(pocket.lastMonthSpentMinor)} today`,
+      urgent: true,
     });
   }
 

@@ -4,6 +4,7 @@ import { Category, Transaction, accountLabel } from "../types";
 import { CategoryPopover } from "./CategoryPopover";
 import { Icon } from "./Icon";
 import { RememberBanner } from "./RememberBanner";
+import "../styles/pocket.css";
 
 /**
  * One transaction. The category is set from the round chip on the left
@@ -119,6 +120,13 @@ export function TransactionRow({
                   <Icon name="ic-arrow-right" />
                   Between your accounts · not counted
                 </span>
+              </div>
+            )}
+            {/* Marked from the account, so every payment from a child's
+                pocket money says whose it was without tagging each one. */}
+            {account?.pocketMoney && (
+              <div className="row-badges">
+                <span className="badge badge-pocket">Pocket money · {account.pocketMoney.holder}</span>
               </div>
             )}
             {transaction.trip && (

@@ -6,6 +6,7 @@ import { formatMoney } from "../lib/format";
 import { BalancePanel } from "./BalancePanel";
 import { CardVaultPanel } from "./CardVaultPanel";
 import { Icon } from "./Icon";
+import { PocketMoneyPanel } from "./PocketMoneyPanel";
 
 /**
  * One account, everything about it.
@@ -287,6 +288,10 @@ export function AccountPanel({
       )}
 
       {account.tracksBalance && <BalancePanel account={account} onChanged={onChanged} />}
+
+      {/* Anything that holds money can be someone's allowance; a credit
+          card is borrowing, not a purse to hand over. */}
+      {!isCard && <PocketMoneyPanel account={account} onChanged={onChanged} />}
 
       {(isCard || isDebit || account.accountType === "BANK") && (
         <CardVaultPanel

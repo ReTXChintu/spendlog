@@ -48,7 +48,7 @@ export function DailyBucket({ daily }: { daily: DailyBudget }) {
           lost a purchase. */}
       {(daily.keptOutMinor ?? 0) > 0 && (
         <p className="field-hint">
-          {formatMoney(daily.keptOutMinor!)} in one-offs, trips and fixed costs kept out of this —
+          {formatMoney(daily.keptOutMinor!)} in one-offs, trips, fixed costs and pocket money kept out of this —
           still counted in the month.
         </p>
       )}

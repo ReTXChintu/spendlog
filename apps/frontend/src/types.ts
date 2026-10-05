@@ -68,6 +68,31 @@ export interface Account {
   /// THE savings (emergency) account: kept out of money on hand. At most
   /// one per user; marking one unmarks the others.
   isSavings?: boolean;
+  /// Pocket money for someone else (a child without UPI): a monthly limit
+  /// topped back up on renewDay. Null or missing when it is an ordinary account.
+  pocketMoney?: PocketMoneySettings | null;
+}
+
+export interface PocketMoneySettings {
+  holder: string;
+  limitMinor: number;
+  /** Day of the month (1-31) the money is topped back up. */
+  renewDay: number;
+}
+
+/** How a pocket-money month is going. The month runs renewal day to the day before the next. */
+export interface PocketMoneyStatus extends PocketMoneySettings {
+  from: string;
+  to: string;
+  /** YYYY-MM-DD */
+  renewsOn: string;
+  spentMinor: number;
+  leftMinor: number;
+  transactionCount: number;
+  /** What the month just ended used: the top-up that brings it back to the limit. */
+  lastMonthSpentMinor: number;
+  toppedUpMinor: number;
+  renewsToday: boolean;
 }
 
 /**
@@ -112,6 +137,9 @@ export interface AccountOverview extends Account {
   debitCards?: { id: string; name: string; last4: string | null; network: string | null }[];
   /// Bank and cash accounts can carry a starting balance.
   tracksBalance?: boolean;
+  /// This month of a pocket-money account. Optional: a cached page can
+  /// outlive the server build that added it.
+  pocket?: PocketMoneyStatus | null;
   /// What it should hold now, from the starting balance and everything
   /// since. Null until a starting balance is given.
   balance?: {
@@ -750,6 +778,7 @@ export interface DashboardData {
   money?: MoneyOnHand;
   earmarks?: EarmarkSummary;
   planWarnings?: PlanRule[];
+  pocketMoney?: (PocketMoneyStatus & { accountId: string; name: string })[];
 }
 
 /** Bank and cash balances. onHandMinor leaves the savings account out. */
