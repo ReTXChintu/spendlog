@@ -38,12 +38,31 @@ class TransactionsScreen extends StatefulWidget {
 }
 
 class TransactionsScreenState extends State<TransactionsScreen> {
-  static const _daysPerPage = 30;
+  /// A week a page: the list loads the latest days of the month first and
+  /// pulls in the week before as you scroll, rather than the whole ledger.
+  static const _daysPerPage = 7;
+
+  /// How close to the end of the list the next week starts loading, so it
+  /// is usually there before you reach it.
+  static const _loadMoreWithin = 600.0;
 
   List<DayGroup>? _days;
   bool _hasMore = false;
   String? _nextBefore;
   bool _loadingMore = false;
+  bool _loadMoreFailed = false;
+  final _scroll = ScrollController();
+
+  /// Bumped by every fresh load, so a reply for a month or filter that has
+  /// since been left is dropped instead of landing on the wrong list.
+  int _generation = 0;
+
+  /// The user's months, newest first, pay day to pay day. The list only
+  /// ever shows one of them (unless an account brings its own range), so
+  /// the ledger never comes down whole.
+  List<UserMonth> _months = [];
+  String _currentMonthKey = '';
+  int _monthIndex = 0;
 
   List<Category> _categories = [];
   List<Account> _accounts = [];
@@ -77,31 +96,102 @@ class TransactionsScreenState extends State<TransactionsScreen> {
   void initState() {
     super.initState();
     if (widget.startUncategorized) _categoryId = 'none';
+    _scroll.addListener(_maybeLoadMore);
     _loadContext();
     final initialAccountId = widget.initialAccountId;
     if (initialAccountId != null) {
       // Loads the ledger itself once the cycle is known, so the first rows
-      // shown are already the current cycle's rather than all time's.
+      // shown are already the current cycle's rather than all time's. The
+      // months still load, for "Back to months".
+      _loadMonths(thenLoadLedger: false);
       _pickAccount(initialAccountId);
     } else {
-      load();
+      // The ledger waits for the months, so the first load is one month
+      // rather than everything.
+      _loadMonths(thenLoadLedger: true);
     }
   }
 
   @override
   void dispose() {
     _debounce?.cancel();
+    _scroll.dispose();
     super.dispose();
   }
 
+  /// The month on show, or null when the months could not be loaded.
+  UserMonth? get _month => _monthIndex < _months.length ? _months[_monthIndex] : null;
+
+  int get _currentMonthIndex {
+    final index = _months.indexWhere((m) => m.month == _currentMonthKey);
+    return index < 0 ? 0 : index;
+  }
+
+  bool get _onCurrentMonth => _monthIndex == _currentMonthIndex;
+
+  /// An account brings its own dates (a statement cycle, or all time),
+  /// which stand in for the month.
+  bool get _ownRange => _accountId != null;
+
+  String _rangeLabel(String from, String to) => '${formatIsoShortDate(from)} – ${formatIsoShortDate(to)}';
+
+  String get _monthLabel {
+    final month = _month;
+    if (month == null) return '';
+    if (month.from.isEmpty || month.to.isEmpty) return readableMonth(month.label.isEmpty ? month.month : month.label);
+    return _rangeLabel(month.from, month.to);
+  }
+
+  Future<void> _loadMonths({required bool thenLoadLedger}) async {
+    try {
+      final months = UserMonths.fromJson(
+        await ApiClient.instance.get('/analytics/months') as Map<String, dynamic>,
+      );
+      if (!mounted) return;
+      setState(() {
+        _months = months.months;
+        _currentMonthKey = months.current;
+        _monthIndex = _currentMonthIndex;
+      });
+    } catch (_) {
+      // Without the months there is no range to send, so the list falls
+      // back to paging the whole ledger — slower, but still usable.
+    }
+    if (!mounted) return;
+    unawaited(_loadSummary());
+    if (thenLoadLedger) await load();
+  }
+
+  void _goToMonth(int index) {
+    if (index < 0 || index >= _months.length || index == _monthIndex) return;
+    setState(() => _monthIndex = index);
+    _loadSummary();
+    load();
+  }
+
+  /// Drops the account (and its dates) and goes back to the month that
+  /// was showing before it.
+  void _backToMonths() => _setFilter(() {
+        _accountId = null;
+        _cycles = null;
+        _cycle = null;
+        _loadingCycles = false;
+      });
+
   String _filterQuery() {
+    final month = _month;
+    final cycle = _cycle;
     final params = <String, String>{
       'days': '$_daysPerPage',
       if (_query.isNotEmpty) 'q': _query,
       if (_categoryId != null) 'categoryId': _categoryId!,
       if (_direction.isNotEmpty) 'type': _direction,
       if (_accountId != null) 'accountId': _accountId!,
-      if (_accountId != null && _cycle != null) ...{'from': _cycle!.from, 'to': _cycle!.to},
+      if (_ownRange && cycle != null) ...{'from': cycle.from, 'to': cycle.to},
+      if (!_ownRange && month != null && month.from.isNotEmpty && month.to.isNotEmpty) ...{
+        'from': month.from,
+        'to': month.to,
+      },
     };
     return Uri(queryParameters: params).query;
   }
@@ -110,6 +200,8 @@ class TransactionsScreenState extends State<TransactionsScreen> {
   /// "what went on this card this statement" is the question being asked
   /// far more often than "everything it ever did".
   Future<void> _pickAccount(String? id) async {
+    // Any load still in flight was for the old range.
+    _generation++;
     setState(() {
       _accountId = id;
       _cycles = null;
@@ -220,7 +312,6 @@ class TransactionsScreenState extends State<TransactionsScreen> {
       final results = await Future.wait([
         ApiClient.instance.get('/categories'),
         ApiClient.instance.get('/accounts'),
-        ApiClient.instance.get('/analytics/summary'),
         ApiClient.instance.get('/ingestion/email/status'),
       ]);
       if (!mounted) return;
@@ -228,8 +319,7 @@ class TransactionsScreenState extends State<TransactionsScreen> {
         _categories =
             (results[0] as List<dynamic>).map((c) => Category.fromJson(c as Map<String, dynamic>)).toList();
         _accounts = (results[1] as List<dynamic>).map((a) => Account.fromJson(a as Map<String, dynamic>)).toList();
-        _summary = AnalyticsSummary.fromJson(results[2] as Map<String, dynamic>);
-        _hasGmail = (results[3] as List<dynamic>).any((c) => (c as Map<String, dynamic>)['needsReconnect'] != true);
+        _hasGmail = (results[2] as List<dynamic>).any((c) => (c as Map<String, dynamic>)['needsReconnect'] != true);
       });
     } catch (_) {
       // The ledger still works without the rollup and the chips.
@@ -264,31 +354,58 @@ class TransactionsScreenState extends State<TransactionsScreen> {
   /// the scroll position goes with it — so editing a payment from the 1st
   /// would land you back at today's rows every time. Changing a filter still
   /// blanks it, because there the view really is starting over.
+  /// The spent/received rollup for the month on show. Asked for by key, so
+  /// stepping back a month moves the totals with the list.
+  Future<void> _loadSummary() async {
+    final key = _month?.month;
+    try {
+      final path = key == null || key.isEmpty
+          ? '/analytics/summary'
+          : '/analytics/summary?${Uri(queryParameters: {'month': key}).query}';
+      final summary = AnalyticsSummary.fromJson(await ApiClient.instance.get(path) as Map<String, dynamic>);
+      // Another month may have been picked while this one loaded.
+      if (!mounted || _month?.month != key) return;
+      setState(() => _summary = summary);
+    } catch (_) {
+      // The ledger still works without the rollup.
+    }
+  }
+
   Future<void> load({bool keepVisible = false}) async {
-    if (!keepVisible) setState(() => _days = null);
+    final generation = ++_generation;
+    setState(() {
+      if (!keepVisible) _days = null;
+      _loadingMore = false;
+      _loadMoreFailed = false;
+    });
     try {
       final result = await ApiClient.instance.get('/transactions/by-day?${_filterQuery()}') as Map<String, dynamic>;
-      if (!mounted) return;
+      if (!mounted || generation != _generation) return;
       setState(() {
         _days = (result['days'] as List<dynamic>).map((d) => DayGroup.fromJson(d as Map<String, dynamic>)).toList();
         _hasMore = result['hasMore'] as bool? ?? false;
         _nextBefore = result['nextBefore'] as String?;
         _error = false;
       });
+      _checkAfterLayout();
     } catch (_) {
-      if (mounted) setState(() => _error = true);
+      if (mounted && generation == _generation) setState(() => _error = true);
     }
   }
 
   Future<void> _loadMore() async {
     final before = _nextBefore;
-    if (before == null) return;
-    setState(() => _loadingMore = true);
+    if (before == null || _loadingMore) return;
+    final generation = _generation;
+    setState(() {
+      _loadingMore = true;
+      _loadMoreFailed = false;
+    });
     try {
       final result = await ApiClient.instance
               .get('/transactions/by-day?${_filterQuery()}&before=${Uri.encodeQueryComponent(before)}')
           as Map<String, dynamic>;
-      if (!mounted) return;
+      if (!mounted || generation != _generation) return;
       setState(() {
         _days = [
           ...?_days,
@@ -296,13 +413,32 @@ class TransactionsScreenState extends State<TransactionsScreen> {
         ];
         _hasMore = result['hasMore'] as bool? ?? false;
         _nextBefore = result['nextBefore'] as String?;
+        _loadingMore = false;
       });
+      _checkAfterLayout();
     } catch (_) {
-      // Keep what's already on screen; the button stays for another try.
-    } finally {
-      if (mounted) setState(() => _loadingMore = false);
+      // Keep what's already on screen. Scrolling stops retrying on its own,
+      // or a bad connection would be hit on every pixel scrolled; the row
+      // at the bottom offers the retry instead.
+      if (mounted && generation == _generation) {
+        setState(() {
+          _loadingMore = false;
+          _loadMoreFailed = true;
+        });
+      }
     }
   }
+
+  /// Infinite scroll: fetch the week before once the end of the list is
+  /// close.
+  void _maybeLoadMore() {
+    if (!mounted || !_hasMore || _loadingMore || _loadMoreFailed || !_scroll.hasClients) return;
+    if (_scroll.position.extentAfter < _loadMoreWithin) _loadMore();
+  }
+
+  /// A week with few rows may not fill the screen, and then there is no
+  /// scrolling to trigger the next one — so check once it has been laid out.
+  void _checkAfterLayout() => WidgetsBinding.instance.addPostFrameCallback((_) => _maybeLoadMore());
 
   /// One button for both: the phone's inbox and the connected mailbox.
   Future<void> _syncEverything() async {
@@ -337,8 +473,9 @@ class TransactionsScreenState extends State<TransactionsScreen> {
     }
   }
 
+  /// Stays on the month (or range) already showing.
   Future<void> _refreshAll({bool keepVisible = false}) =>
-      Future.wait([load(keepVisible: keepVisible), _loadContext()]);
+      Future.wait([load(keepVisible: keepVisible), _loadContext(), _loadSummary()]);
 
   /// Keyed by IST day, so a day header can show what that day did to the
   /// savings bucket alongside spend/income. Only covers the current pay
@@ -531,8 +668,12 @@ class TransactionsScreenState extends State<TransactionsScreen> {
           : null,
       body: Column(
         children: [
+          // On top of everything: which month this is decides what the rest
+          // of the screen is about.
+          const SizedBox(height: 10),
+          _monthBar(c),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+            padding: const EdgeInsets.fromLTRB(16, 2, 16, 10),
             child: Row(
               children: [
                 Expanded(child: _searchField(c)),
@@ -583,6 +724,85 @@ class TransactionsScreenState extends State<TransactionsScreen> {
           if (_accountId != null) _cycleBar(c),
           CardStrip(cards: _cards, pace: _pace),
           Expanded(child: _buildBody(uncategorized)),
+        ],
+      ),
+    );
+  }
+
+  /// Which month the list is showing, stepped one at a time. An account's
+  /// own dates take its place, and then the bar says so and offers the way
+  /// back.
+  Widget _monthBar(SpendColors c) {
+    final String title;
+    final String note;
+    if (_ownRange) {
+      final cycle = _cycle;
+      if (_loadingCycles) {
+        title = 'Loading…';
+      } else if (cycle == null) {
+        title = 'All time';
+      } else {
+        title = _rangeLabel(cycle.from, cycle.to);
+      }
+      note = 'your own range';
+    } else {
+      // The months could not be loaded: nothing to step through.
+      if (_month == null) return const SizedBox.shrink();
+      title = _monthLabel;
+      note = _onCurrentMonth ? 'this month' : '';
+    }
+
+    final canGoBack = !_ownRange && _monthIndex + 1 < _months.length;
+    final canGoForward = !_ownRange && _monthIndex > _currentMonthIndex;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 2, 16, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border.all(color: c.line),
+        borderRadius: BorderRadius.circular(T.rMd),
+      ),
+      child: Row(
+        children: [
+          if (!_ownRange)
+            IconButton(
+              onPressed: canGoBack ? () => _goToMonth(_monthIndex + 1) : null,
+              icon: const Icon(Icons.chevron_left),
+              color: c.ink,
+              disabledColor: c.mutedLight,
+              tooltip: 'The month before',
+              visualDensity: VisualDensity.compact,
+            )
+          else
+            const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: _ownRange ? CrossAxisAlignment.start : CrossAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: c.ink),
+                ),
+                if (note.isNotEmpty)
+                  Text(note, style: TextStyle(fontSize: 11, color: c.muted, fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+          if (!_ownRange)
+            IconButton(
+              onPressed: canGoForward ? () => _goToMonth(_monthIndex - 1) : null,
+              icon: const Icon(Icons.chevron_right),
+              color: c.ink,
+              disabledColor: c.mutedLight,
+              tooltip: 'The month after',
+              visualDensity: VisualDensity.compact,
+            ),
+          if (_ownRange)
+            TextButton(onPressed: _backToMonths, child: const Text('Back to months'))
+          else if (!_onCurrentMonth)
+            TextButton(onPressed: () => _goToMonth(_currentMonthIndex), child: const Text('This month')),
         ],
       ),
     );
@@ -642,11 +862,16 @@ class TransactionsScreenState extends State<TransactionsScreen> {
         body: "The connection to SpendLog's server failed. Your data is safe — this is just a "
             'connection problem. Check your internet and try again.',
         actionLabel: 'Retry',
-        onAction: load,
+        // If the months were what failed, try them again first, so a retry
+        // does not fall back to the whole ledger.
+        onAction: _months.isEmpty && !_ownRange ? () => _loadMonths(thenLoadLedger: true) : load,
       );
     }
 
     if (_days == null) return const Center(child: CircularProgressIndicator());
+
+    final month = _month;
+    final monthBefore = !_ownRange && _monthIndex + 1 < _months.length ? _monthIndex + 1 : null;
 
     if (_days!.isEmpty) {
       return RefreshIndicator(
@@ -659,10 +884,23 @@ class TransactionsScreenState extends State<TransactionsScreen> {
                   ? StateBlock(
                       icon: Icons.search_off,
                       title: 'Nothing matches those filters',
-                      body: 'No transaction fits this combination. Clear a filter to see more.',
+                      body: _ownRange
+                          ? 'No transaction fits this combination. Clear a filter to see more.'
+                          : 'No transaction in $_monthLabel fits this combination. Clear a filter, or try '
+                              'another month.',
                       actionLabel: 'Clear filters',
                       onAction: _clearFilters,
                     )
+                  // An empty past month is just a quiet month, not a sign
+                  // that nothing is connected.
+                  : month != null && !_onCurrentMonth
+                      ? StateBlock(
+                          icon: Icons.event_busy_outlined,
+                          title: 'Nothing in $_monthLabel',
+                          body: 'No transactions were recorded in this month.',
+                          actionLabel: monthBefore == null ? null : 'Go to the month before',
+                          onAction: monthBefore == null ? null : () => _goToMonth(monthBefore),
+                        )
                   : _hasGmail
                       ? StateBlock(
                           icon: Icons.mail_outline,
@@ -690,9 +928,13 @@ class TransactionsScreenState extends State<TransactionsScreen> {
     return RefreshIndicator(
       onRefresh: _refreshAll,
       child: ListView(
+        controller: _scroll,
+        // The pull-to-refresh and the near-the-end check both need it to
+        // scroll even when a short week does not fill the screen.
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.only(top: 10, bottom: 90),
         children: [
-          if (_summary != null && !_filtersActive) _MonthRollup(summary: _summary!),
+          if (_summary != null && !_filtersActive) _MonthRollup(summary: _summary!, current: _onCurrentMonth),
           if (uncategorized.isNotEmpty && _categoryId != 'none')
             _NudgeStrip(
               amountMinor: uncategorized.first.amountMinor,
@@ -713,13 +955,21 @@ class TransactionsScreenState extends State<TransactionsScreen> {
               ),
             const SizedBox(height: 22),
           ],
-          if (_hasMore)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: OutlinedButton(
-                onPressed: _loadingMore ? null : _loadMore,
-                child: Text(_loadingMore ? 'Loading…' : 'Load earlier days'),
-              ),
+          if (_hasMore && _loadMoreFailed)
+            _EndRow(
+              text: "Couldn't load the week before. Tap to try again",
+              icon: Icons.refresh,
+              onTap: _loadMore,
+            )
+          else if (_hasMore)
+            const _LoadingMoreRow()
+          else if (!_ownRange && month != null)
+            _EndRow(
+              text: monthBefore == null
+                  ? "That's all for $_monthLabel."
+                  : "That's all for $_monthLabel. Go to the month before",
+              icon: monthBefore == null ? null : Icons.chevron_left,
+              onTap: monthBefore == null ? null : () => _goToMonth(monthBefore),
             ),
         ],
       ),
@@ -727,9 +977,85 @@ class TransactionsScreenState extends State<TransactionsScreen> {
   }
 }
 
+/// Sits at the end of the list while the week before is on its way.
+class _LoadingMoreRow extends StatelessWidget {
+  const _LoadingMoreRow();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 2, color: context.c.muted),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            'Loading the week before…',
+            style: TextStyle(fontSize: 12, color: context.c.muted, fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The last row of the list: the end of the month, with the way into the
+/// one before, or a retry when the next week failed to load.
+class _EndRow extends StatelessWidget {
+  final String text;
+  final IconData? icon;
+  final VoidCallback? onTap;
+
+  const _EndRow({required this.text, this.icon, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(T.rSm),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 16, color: c.brandDark),
+                const SizedBox(width: 6),
+              ],
+              Flexible(
+                child: Text(
+                  text,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: onTap == null ? c.muted : c.brandDark,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _MonthRollup extends StatelessWidget {
   final AnalyticsSummary summary;
-  const _MonthRollup({required this.summary});
+
+  /// A past month is over, so "since 15 Sep" would misdescribe it; the
+  /// month bar above already names its dates.
+  final bool current;
+  const _MonthRollup({required this.summary, this.current = true});
 
   @override
   Widget build(BuildContext context) {
@@ -738,7 +1064,9 @@ class _MonthRollup extends StatelessWidget {
     // calling that one "Oct" on the 2nd would be wrong.
     final from = summary.from;
     final String spentLabel;
-    if (from.isEmpty) {
+    if (!current) {
+      spentLabel = 'Spent';
+    } else if (from.isEmpty) {
       spentLabel = 'Spent this month';
     } else if (from.endsWith('-01')) {
       spentLabel = 'Spent (${formatMonthLabel(from.substring(0, 7)).substring(0, 3)})';
