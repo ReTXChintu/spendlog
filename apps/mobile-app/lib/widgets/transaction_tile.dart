@@ -46,6 +46,7 @@ class TransactionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDebit = transaction.type == 'DEBIT';
     final isTransfer = transaction.isTransfer;
+    final pocket = transaction.account?.pocketMoney;
 
     final amountColor = isTransfer
         ? context.c.transfer
@@ -143,6 +144,7 @@ class TransactionTile extends StatelessWidget {
                   ],
                 ),
                 if (isTransfer ||
+                    pocket != null ||
                     transaction.tripName != null ||
                     transaction.refundOf.isNotEmpty ||
                     transaction.refundedMinor > 0 ||
@@ -159,6 +161,15 @@ class TransactionTile extends StatelessWidget {
                           label: 'Not counted',
                           background: context.c.chipNeutral,
                           foreground: context.c.transfer,
+                        ),
+                      // Marked from the account rather than stored on the
+                      // row, so every payment from it - old ones included -
+                      // shows whose spending it was.
+                      if (pocket != null)
+                        _Badge(
+                          label: 'Pocket money · ${pocket.holder}',
+                          background: context.c.warnBg,
+                          foreground: context.c.warn,
                         ),
                       if (transaction.tripName != null)
                         _Badge(

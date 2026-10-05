@@ -14,6 +14,7 @@ import '../widgets/home/home_grid.dart';
 import '../widgets/home/money_carousel.dart';
 import '../widgets/home/plan_warnings.dart';
 import '../widgets/loan_dialog.dart';
+import '../widgets/pocket_money.dart';
 import '../widgets/state_block.dart';
 import 'accounts_screen.dart';
 import 'people_screen.dart';
@@ -152,6 +153,7 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
             onOpenTransactions: widget.onOpenTransactions,
             onOpenSettings: widget.onOpenSettings,
             onOpenPerks: _openPerks,
+            onOpenAccounts: _openAccounts,
           ),
 
           // Above the money, because a broken rule is the one thing here
@@ -182,6 +184,8 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
                 ),
               )),
             if (data.earmarks.count > 0) GridItem(EarmarksTile(earmarks: data.earmarks)),
+            for (final pocket in data.pocketMoney)
+              GridItem(_PocketTile(pocket: pocket, onTap: _openAccounts)),
             GridItem(
               HomeTile(
                 label: 'Which card today',
@@ -330,12 +334,14 @@ class _Todos extends StatelessWidget {
   final VoidCallback? onOpenTransactions;
   final VoidCallback? onOpenSettings;
   final VoidCallback onOpenPerks;
+  final VoidCallback onOpenAccounts;
 
   const _Todos({
     required this.data,
     this.onOpenTransactions,
     this.onOpenSettings,
     required this.onOpenPerks,
+    required this.onOpenAccounts,
   });
 
   @override
@@ -366,6 +372,16 @@ class _Todos extends StatelessWidget {
         text: '${bill.cardName} bill ${formatMoney(bill.totalDueMinor)}${bill.whenDue}',
         urgent: (bill.daysUntilDue ?? 99) <= 3,
         onTap: onOpenTransactions,
+      ));
+    }
+
+    // Only until the money goes in: a top-up seen on the account clears it.
+    for (final pocket in data.pocketMoney.where((p) => p.topUpDue)) {
+      jobs.add((
+        icon: Icons.savings_outlined,
+        text: 'Top up ${pocketTitle(pocket.holder)} ${formatMoney(pocket.lastMonthSpentMinor)} today',
+        urgent: true,
+        onTap: onOpenAccounts,
       ));
     }
 
@@ -770,6 +786,46 @@ class _LoanTile extends StatelessWidget {
                 color: overdue ? c.warn : c.ink70,
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One pocket-money account: whose it is, how much of the month's limit is
+/// gone, and when it renews.
+class _PocketTile extends StatelessWidget {
+  final PocketStatus pocket;
+  final VoidCallback onTap;
+
+  const _PocketTile({required this.pocket, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final due = pocket.topUpDue;
+
+    return HomeTile(
+      label: pocketTitle(pocket.holder),
+      icon: Icons.savings_outlined,
+      onTap: onTap,
+      background: due ? c.warnBg : null,
+      accent: due ? c.warn : null,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          PocketMeter(status: pocket, compact: true),
+          const SizedBox(height: 2),
+          Text(
+            due ? 'Top up ${formatMoneyShort(pocket.lastMonthSpentMinor)} today' : pocketRenews(pocket),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: due ? FontWeight.w700 : FontWeight.w600,
+              color: due ? c.warn : c.ink70,
+            ),
+          ),
         ],
       ),
     );

@@ -270,3 +270,91 @@ class AccountSpend {
         count: _int(json['count']),
       );
 }
+
+/// An account someone else spends from - a child without UPI of their own,
+/// say - on a monthly limit that is topped back up on the same day each
+/// month.
+class PocketMoney {
+  final String holder;
+  final int limitMinor;
+
+  /// Day of the month (1-31) the limit renews and the top-up is due.
+  final int renewDay;
+
+  PocketMoney({required this.holder, required this.limitMinor, required this.renewDay});
+
+  static PocketMoney? maybe(Object? json) {
+    if (json is! Map<String, dynamic>) return null;
+    return PocketMoney(
+      holder: json['holder'] as String? ?? 'Pocket money',
+      limitMinor: _int(json['limitMinor']),
+      renewDay: _int(json['renewDay']).clamp(1, 31),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {'holder': holder, 'limitMinor': limitMinor, 'renewDay': renewDay};
+}
+
+/// Where a pocket-money account stands this month, as the accounts page
+/// and Home both show it. accountId and name are only set on Home's copy.
+class PocketStatus {
+  final String accountId;
+  final String name;
+  final String holder;
+  final int limitMinor;
+  final int renewDay;
+  // Plain YYYY-MM-DD days in IST, kept as strings so no time zone can move
+  // the day they name.
+  final String from;
+  final String to;
+  final String renewsOn;
+  final int spentMinor;
+  final int leftMinor;
+  final int transactionCount;
+
+  /// What the month just ended used - what has to go back in on renewal day.
+  final int lastMonthSpentMinor;
+
+  /// Money already put in since this month began.
+  final int toppedUpMinor;
+  final bool renewsToday;
+
+  PocketStatus({
+    this.accountId = '',
+    this.name = '',
+    required this.holder,
+    required this.limitMinor,
+    required this.renewDay,
+    this.from = '',
+    this.to = '',
+    this.renewsOn = '',
+    required this.spentMinor,
+    required this.leftMinor,
+    this.transactionCount = 0,
+    this.lastMonthSpentMinor = 0,
+    this.toppedUpMinor = 0,
+    this.renewsToday = false,
+  });
+
+  /// Renewal day with nothing put in yet, and something to put back.
+  bool get topUpDue => renewsToday && toppedUpMinor <= 0 && lastMonthSpentMinor > 0;
+
+  bool get over => limitMinor > 0 && spentMinor > limitMinor;
+
+  factory PocketStatus.fromJson(Map<String, dynamic> json) => PocketStatus(
+        accountId: json['accountId'] as String? ?? '',
+        name: json['name'] as String? ?? '',
+        holder: json['holder'] as String? ?? 'Pocket money',
+        limitMinor: _int(json['limitMinor']),
+        renewDay: _int(json['renewDay']).clamp(1, 31),
+        from: json['from'] as String? ?? '',
+        to: json['to'] as String? ?? '',
+        renewsOn: json['renewsOn'] as String? ?? '',
+        spentMinor: _int(json['spentMinor']),
+        leftMinor: _int(json['leftMinor']),
+        transactionCount: _int(json['transactionCount']),
+        lastMonthSpentMinor: _int(json['lastMonthSpentMinor']),
+        toppedUpMinor: _int(json['toppedUpMinor']),
+        renewsToday: json['renewsToday'] as bool? ?? false,
+      );
+}

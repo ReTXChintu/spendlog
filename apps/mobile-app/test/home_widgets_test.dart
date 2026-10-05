@@ -58,6 +58,32 @@ void main() {
     expect(data.daily.extraIncomeMinor, 500000);
   });
 
+  test('pocket money reads off an account and the dashboard', () {
+    final account = Account.fromJson({
+      'id': 'p1',
+      'bankName': 'Kotak',
+      'accountType': 'BANK',
+      'pocketMoney': {'holder': 'Rahul', 'limitMinor': 200000, 'renewDay': 1},
+    });
+    expect(account.pocketMoney!.holder, 'Rahul');
+    expect(account.pocketMoney!.toJson(), {'holder': 'Rahul', 'limitMinor': 200000, 'renewDay': 1});
+    expect(Account.fromJson({'id': 'x', 'bankName': 'X', 'accountType': 'BANK'}).pocketMoney, isNull);
+
+    final data = DashboardData.fromJson({
+      'pocketMoney': [
+        {
+          'accountId': 'p1', 'name': 'Kotak', 'holder': 'Rahul', 'limitMinor': 200000, 'renewDay': 1,
+          'from': '2026-10-01', 'to': '2026-10-31', 'renewsOn': '2026-11-01',
+          'spentMinor': 50000, 'leftMinor': 150000, 'transactionCount': 4,
+          'lastMonthSpentMinor': 180000, 'toppedUpMinor': 0, 'renewsToday': true,
+        },
+      ],
+    });
+    final pocket = data.pocketMoney.single;
+    expect(pocket.renewsOn, '2026-11-01');
+    expect(pocket.topUpDue, isTrue);
+  });
+
   test('DashboardData copes with an older server', () {
     final data = DashboardData.fromJson({});
     expect(data.money.accounts, isEmpty);

@@ -6,6 +6,7 @@ import '../utils/format.dart';
 import '../widgets/account_balance_panel.dart';
 import '../widgets/card_vault_panel.dart';
 import '../widgets/edit_account_sheet.dart';
+import '../widgets/pocket_money.dart';
 import '../widgets/state_block.dart';
 import 'statements_screen.dart';
 import 'transactions_screen.dart';
@@ -76,6 +77,9 @@ class _Overview {
   /// includes theirs, which a total does not say.
   final List<({String name, String? last4})> debitCards;
 
+  /// This month's spending against the limit, for a pocket-money account.
+  final PocketStatus? pocket;
+
   _Overview({
     required this.account,
     this.cycle,
@@ -85,6 +89,7 @@ class _Overview {
     this.balance,
     this.linkedAccount,
     this.debitCards = const [],
+    this.pocket,
   });
 
   factory _Overview.fromJson(Map<String, dynamic> json) => _Overview(
@@ -103,6 +108,9 @@ class _Overview {
                   last4: card['last4'] as String?,
                 ))
             .toList(),
+        pocket: json['pocket'] is Map<String, dynamic>
+            ? PocketStatus.fromJson(json['pocket'] as Map<String, dynamic>)
+            : null,
       );
 }
 
@@ -238,6 +246,43 @@ class _AccountsScreenState extends State<AccountsScreen> {
         ));
       }
     }
+  }
+
+  /// Set, change or stop pocket money. Null stops it; its past payments
+  /// stay where they are, only the badge and the monthly limit go.
+  Future<void> _savePocket(Account account, PocketMoney? pocket) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ApiClient.instance.patch('/accounts/${account.id}', {'pocketMoney': pocket?.toJson()});
+      await _load();
+    } catch (error) {
+      messenger.showSnackBar(SnackBar(
+        content: Text(error is ApiException ? error.message : "That didn't save just now."),
+      ));
+    }
+  }
+
+  Future<void> _editPocket(Account account) async {
+    final pocket = await showPocketMoneyDialog(context, current: account.pocketMoney);
+    if (pocket != null) await _savePocket(account, pocket);
+  }
+
+  Future<void> _stopPocket(Account account) async {
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Stop being pocket money?'),
+        content: Text(
+          '${account.label} goes back to being an ordinary account. Its payments stay, '
+          'without the pocket money mark, and count towards your daily budget again.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Keep it')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Stop')),
+        ],
+      ),
+    );
+    if (sure == true) await _savePocket(account, null);
   }
 
   /// The statement password on its own, rather than inside the whole edit
@@ -613,6 +658,13 @@ class _AccountsScreenState extends State<AccountsScreen> {
               ),
             ),
 
+          // A credit card bills you rather than holding money someone can
+          // be handed, so pocket money is for everything else.
+          if (!isCard) ...[
+            _pocket(row),
+            const SizedBox(height: 10),
+          ],
+
           if (isCard && row.cycle != null)
             _meter(row.cycle!, account)
           else
@@ -719,6 +771,133 @@ class _AccountsScreenState extends State<AccountsScreen> {
             ),
           ),
           ],
+        ],
+      ),
+    );
+  }
+
+  /// Pocket money: off, a line saying what it is for and a way to turn it
+  /// on; on, this month's spending against the limit and the top-up due.
+  Widget _pocket(_Overview row) {
+    final c = context.c;
+    final account = row.account;
+    final setting = account.pocketMoney;
+
+    final frame = BoxDecoration(
+      color: c.paper,
+      border: Border.all(color: c.line),
+      borderRadius: BorderRadius.circular(T.rMd),
+    );
+    final label = TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: c.muted);
+
+    if (setting == null) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(13, 12, 13, 8),
+        decoration: frame,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('POCKET MONEY', style: label),
+            const SizedBox(height: 5),
+            Text(
+              'For an account someone else spends from - a child without UPI, say. Give it a '
+              'monthly limit and a day it renews, and every payment from it is marked as theirs.',
+              style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                onPressed: () => _editPocket(account),
+                icon: const Icon(Icons.savings_outlined, size: 16),
+                label: const Text('Make this pocket money'),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // The overview always sends a status with a setting; this only covers
+    // an older server that sent the setting alone.
+    final status = row.pocket ??
+        PocketStatus(
+          holder: setting.holder,
+          limitMinor: setting.limitMinor,
+          renewDay: setting.renewDay,
+          spentMinor: 0,
+          leftMinor: setting.limitMinor,
+        );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(13, 12, 13, 6),
+      decoration: frame,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(pocketTitle(status.holder).toUpperCase(), style: label),
+          const SizedBox(height: 6),
+          PocketMeter(status: status),
+          const SizedBox(height: 4),
+          Text(
+            '${status.transactionCount} ${status.transactionCount == 1 ? 'payment' : 'payments'} this month · '
+            '${pocketRenews(status)}',
+            style: TextStyle(fontSize: 11.5, color: c.muted),
+          ),
+          if (status.renewsToday) ...[
+            const SizedBox(height: 10),
+            _topUp(status),
+          ],
+          Row(
+            children: [
+              TextButton(
+                style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 4)),
+                onPressed: () => _editPocket(account),
+                child: const Text('Edit'),
+              ),
+              const Spacer(),
+              TextButton(
+                style: TextButton.styleFrom(foregroundColor: c.debit),
+                onPressed: () => _stopPocket(account),
+                child: const Text('Stop being pocket money'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Renewal day: what has to go in, or what already did.
+  Widget _topUp(PocketStatus status) {
+    final c = context.c;
+    final done = status.toppedUpMinor > 0;
+    final text = done
+        ? 'Topped up ${formatMoney(status.toppedUpMinor)}'
+        : status.lastMonthSpentMinor > 0
+            ? 'Top up ${formatMoney(status.lastMonthSpentMinor)} today'
+            : 'Renews today - nothing was spent last month, so nothing to top up';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+      decoration: BoxDecoration(
+        color: done ? c.credit50 : c.warnBg,
+        borderRadius: BorderRadius.circular(T.rSm),
+      ),
+      child: Row(
+        children: [
+          Icon(done ? Icons.check_circle_outline : Icons.add_card_outlined,
+              size: 16, color: done ? c.credit : c.warn),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: done ? c.credit : c.warn),
+            ),
+          ),
         ],
       ),
     );

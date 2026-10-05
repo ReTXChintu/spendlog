@@ -86,6 +86,9 @@ class Account {
   /// The one emergency account, kept out of money on hand.
   final bool isSavings;
 
+  /// Set when someone else spends from this account on a monthly limit.
+  final PocketMoney? pocketMoney;
+
   Account({
     required this.id,
     required this.bankName,
@@ -104,6 +107,7 @@ class Account {
     this.isActive = true,
     this.hasStatementPassword = false,
     this.isSavings = false,
+    this.pocketMoney,
   });
 
   /// What to call it on screen: the name given to it, else the bank's own.
@@ -132,6 +136,7 @@ class Account {
         isActive: json['isActive'] as bool? ?? true,
         hasStatementPassword: json['hasStatementPassword'] as bool? ?? false,
         isSavings: json['isSavings'] as bool? ?? false,
+        pocketMoney: PocketMoney.maybe(json['pocketMoney']),
       );
 }
 
@@ -1529,6 +1534,9 @@ class DashboardData {
   /// Savings-plan rules being broken this month.
   final List<PlanRule> planWarnings;
 
+  /// Each pocket-money account and where it stands this month.
+  final List<PocketStatus> pocketMoney;
+
   DashboardData({
     required this.pace,
     required this.daily,
@@ -1551,6 +1559,7 @@ class DashboardData {
     MoneyOnHand? money,
     Earmarks? earmarks,
     this.planWarnings = const [],
+    this.pocketMoney = const [],
   })  : money = money ?? MoneyOnHand(),
         earmarks = earmarks ?? Earmarks();
 
@@ -1593,6 +1602,9 @@ class DashboardData {
       earmarks: Earmarks.fromJson(json['earmarks'] as Map<String, dynamic>? ?? {}),
       planWarnings: (json['planWarnings'] as List<dynamic>? ?? [])
           .map((w) => PlanRule.fromJson(w as Map<String, dynamic>))
+          .toList(),
+      pocketMoney: (json['pocketMoney'] as List<dynamic>? ?? [])
+          .map((p) => PocketStatus.fromJson(p as Map<String, dynamic>))
           .toList(),
     );
   }
