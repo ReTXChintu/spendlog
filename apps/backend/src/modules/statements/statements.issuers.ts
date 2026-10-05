@@ -364,6 +364,21 @@ const generic: StatementReader = {
  * statements.parse.ts. It also checks itself: a row whose balance does not
  * move by its own amount was misread, and is better dropped than guessed at.
  */
+/**
+ * The narration on its own. A value date, a reference or transaction id,
+ * and a transaction-type code ("TFR", "CLG") sit around it on the row, and
+ * none of them says what the payment was for.
+ */
+function cleanBankNarration(raw: string): string {
+  return raw
+    .replace(new RegExp(`^${SLASH_DATE}\\s+`), "")
+    .replace(new RegExp(`\\s+${SLASH_DATE}\\s*$`), "")
+    .replace(/\s+[A-Za-z]*[-/]?\d{6,}[A-Za-z0-9]*\s*$/, "")
+    .replace(/\s+(?:TFR|CLG|CSH|CASH|NEFT|IMPS|RTGS|INT|CHG|MB|IB)\s*$/i, "")
+    .replace(new RegExp(`\\s+${SLASH_DATE}\\s*$`), "")
+    .trim();
+}
+
 const bank: StatementReader = {
   kind: "BANK",
   name: "bank",
@@ -371,10 +386,51 @@ const bank: StatementReader = {
   matches(rows) {
     const hasBalance = anyRowMatches(rows, /closing\s*balance|balance\s*\(inr\)|running\s*balance/i);
     const hasColumns = anyRowMatches(rows, /withdrawal|deposit|debit\s*amount|credit\s*amount|narration/i);
-    return hasBalance && hasColumns;
+    if (hasBalance && hasColumns) return true;
+
+    // A column header naming withdrawals, deposits and a balance on one
+    // line is a bank statement wherever it sits. Federal Bank puts it on
+    // page two, under a page of summary, and calls the column just
+    // "Balance" - so neither test above found it, the generic reader took
+    // the document, and every running balance went in as a credit.
+    return rows.some(
+      (row) => /\bwithdrawals?\b/i.test(row) && /\bdeposits?\b/i.test(row) && /\bbalance\b/i.test(row)
+    );
   },
 
   row(row) {
+    // Federal Bank prints both columns on every row - the empty one as 0 -
+    // then the balance and whether it is in credit:
+    //
+    //   05/09/2026 05/09/2026 UPIOUT/6614.../Paid via /5812 TFR S69103968 28 0 14886.47 CR
+    //
+    // So three numbers, one of the first two zero, and the CR describes the
+    // balance rather than the payment. Which column is not zero says which
+    // way the money went.
+    const both = row.match(
+      new RegExp(
+        `^(${SLASH_DATE}|${NAMED_DATE})\\s+(.+?)\\s+(${AMOUNT})\\s+(${AMOUNT})\\s+(${AMOUNT})\\s*(CR|DR)?\\s*$`,
+        "i"
+      )
+    );
+    if (both) {
+      const withdrawal = parseFloat(both[3].replace(/,/g, ""));
+      const deposit = parseFloat(both[4].replace(/,/g, ""));
+      if ((withdrawal === 0) !== (deposit === 0)) {
+        const description = cleanBankNarration(both[2]);
+        if (!description) return null;
+        return {
+          date: both[1],
+          description,
+          amount: withdrawal > 0 ? both[3] : both[4],
+          // An overdrawn balance is printed DR; carried as negative so the
+          // balance check still sees it move the right way.
+          balance: both[6]?.toUpperCase() === "DR" ? `-${both[5]}` : both[5],
+          credit: deposit > 0,
+        };
+      }
+    }
+
     // The last two numbers on the row: the balance, and the amount before
     // it. Anything further left is a reference number or a value date.
     const match = row.match(
@@ -382,14 +438,7 @@ const bank: StatementReader = {
     );
     if (!match) return null;
 
-    // A reference number and a value date sit between the narration and the
-    // figures, and neither says anything about what the payment was for.
-    const description = match[2]
-      .replace(new RegExp(`\\s+${SLASH_DATE}\\s*$`), "")
-      .replace(/\s+[A-Za-z]*[-/]?\d{6,}[A-Za-z0-9]*\s*$/, "")
-      .replace(new RegExp(`\\s+${SLASH_DATE}\\s*$`), "")
-      .trim();
-
+    const description = cleanBankNarration(match[2]);
     if (!description) return null;
 
     return {

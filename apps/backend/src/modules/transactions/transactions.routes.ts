@@ -22,8 +22,8 @@ const listQuerySchema = z.object({
   // of the 11th as lived in India, not as UTC would have it.
   from: z.string().regex(IST_DAY).optional(),
   to: z.string().regex(IST_DAY).optional(),
-  categoryId: z.string().optional(),
-  accountId: z.string().optional(),
+  categoryId: z.string().regex(/^([0-9a-fA-F]{24}|none)$/).optional(),
+  accountId: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
   type: z.enum(TRANSACTION_TYPES).optional(),
   q: z.string().optional(),
   page: z.coerce.number().int().min(1).default(1),
@@ -37,17 +37,28 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function buildFilter(
+async function buildFilter(
   req: Parameters<typeof currentUserId>[0],
   filters: z.infer<typeof listQuerySchema>
-): FilterQuery<TransactionDoc> {
-  const filter: FilterQuery<TransactionDoc> = { userId: currentUserId(req) };
+): Promise<FilterQuery<TransactionDoc>> {
+  const userId = currentUserId(req);
+  const filter: FilterQuery<TransactionDoc> = { userId };
 
+  // Real ObjectIds, not the strings from the query: find() would cast them,
+  // but the day-grouped ledger runs this through an aggregation, which
+  // compares a string to an ObjectId, finds them unequal, and matched
+  // nothing at all for any account or category filter.
+  //
   // "none" filters for transactions nothing could categorize — the ones
   // that actually need the user's attention.
   if (filters.categoryId === "none") filter.categoryId = null;
-  else if (filters.categoryId) filter.categoryId = filters.categoryId;
-  if (filters.accountId) filter.accountId = filters.accountId;
+  else if (filters.categoryId) filter.categoryId = new Types.ObjectId(filters.categoryId);
+  if (filters.accountId) {
+    // A bank account's debit cards spend its money, so its transactions
+    // include theirs - the same rule its balance follows.
+    const cards = await Account.find({ userId, accountType: "DEBIT", linkedAccountId: filters.accountId }).select("_id");
+    filter.accountId = { $in: [new Types.ObjectId(filters.accountId), ...cards.map((card) => card._id)] };
+  }
   if (filters.type) filter.type = filters.type;
 
   if (filters.from || filters.to) {
@@ -71,7 +82,7 @@ transactionsRouter.get("/", async (req, res) => {
   const parsed = listQuerySchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const filter = buildFilter(req, parsed.data);
+  const filter = await buildFilter(req, parsed.data);
   const [items, total] = await Promise.all([
     Transaction.find(filter)
       .populate("category")
@@ -100,7 +111,7 @@ transactionsRouter.get("/by-day", async (req, res) => {
   const parsed = byDaySchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const filter = buildFilter(req, parsed.data);
+  const filter = await buildFilter(req, parsed.data);
   if (parsed.data.before) {
     // Continue below the oldest day already shown.
     filter.occurredAt = { ...(filter.occurredAt as object), $lt: parsed.data.before };

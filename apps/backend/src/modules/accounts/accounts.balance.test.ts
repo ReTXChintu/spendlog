@@ -187,3 +187,24 @@ describe("an account's billing cycles", () => {
     assert.equal(body.cycles.length, 2);
   });
 });
+
+describe("the ledger filtered to one account", () => {
+  it("finds that account's transactions, its debit cards' included", async () => {
+    const card = await models.Account.create({ userId, bankName: "HDFC Debit", last4: "2222", accountType: "DEBIT", linkedAccountId: bankId });
+    const other = await models.Account.create({ userId, bankName: "Axis", last4: "3333", accountType: "CARD" });
+    await move("DEBIT", 100_00, new Date().toISOString());
+    await models.Transaction.create({ userId, accountId: card._id, type: "DEBIT", amountMinor: 200_00, source: "MANUAL", occurredAt: new Date() });
+    await models.Transaction.create({ userId, accountId: other._id, type: "DEBIT", amountMinor: 999_00, source: "MANUAL", occurredAt: new Date() });
+
+    const body = (await (await call(`/transactions/by-day?accountId=${bankId}`)).json()) as {
+      days: { transactions: { amountMinor: number }[] }[];
+    };
+    const amounts = body.days.flatMap((day) => day.transactions.map((t) => t.amountMinor)).sort((a, b) => a - b);
+    assert.deepEqual(amounts, [100_00, 200_00]);
+
+    const cardOnly = (await (await call(`/transactions/by-day?accountId=${other.id}`)).json()) as {
+      days: { transactions: unknown[] }[];
+    };
+    assert.equal(cardOnly.days.flatMap((day) => day.transactions).length, 1);
+  });
+});

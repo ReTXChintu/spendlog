@@ -324,7 +324,10 @@ export function StatementShelf({
                                   </select>
                                 )}
 
-                              {statement.status !== "PARSED" && (
+                              {/* Also once whatever a read added has been
+                                  undone - which is how a statement read
+                                  wrongly gets read again. */}
+                              {(statement.status !== "PARSED" || statement.counts.added === 0) && (
                                 <button
                                   className="btn btn-sm"
                                   disabled={busy === statement.id}

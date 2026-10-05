@@ -164,3 +164,48 @@ describe("finding which account a bank statement is for", () => {
     assert.equal(parseStatementRows(rows).last4, "1377");
   });
 });
+
+/**
+ * Federal Bank: both columns printed on every row (the empty one as 0),
+ * then the balance and a CR/DR that describes the balance - not the
+ * payment. The column header is on page two, under a page of summary.
+ */
+const FEDERAL_ROWS = [
+  "Federal Bank",
+  "ACCOUNT STATEMENT",
+  "Customer ID (UCIC): XXXXX303 | Date of Issue: 05/10/2026",
+  ...Array.from({ length: 25 }, (_, index) => `Summary line ${index + 1}`),
+  "Savings Account Account Number: XXXXX5130",
+  "Available Balance: 3,649.88",
+  "Date Value Date Particulars Tran Type Tran id Cheque Details Withdrawal Deposits Balance Dr/ Cr",
+  "Opening Balance OPNBAL 14914.47 CR",
+  "05/09/2026 05/09/2026 UPIOUT/661497713819/Q6-44052013@ybl/Paid via /5812 TFR S69103968 28 0 14886.47 CR",
+  "05/09/2026 05/09/2026 UPIOUT/624884201040/am-azonpaybalanceload@yap-/6540 TFR S70064752 227.47 0 14659 CR",
+  "07/09/2026 07/09/2026 UPI IN/661617366541/poonam-k.pk84@okicici/UPI/000-0 TFR S90320479 0 50 14709 CR",
+  "07/09/2026 07/09/2026 UPI IN/625078912041/ TFR S98863504 0 5360 20069 CR",
+  "poonam-k.pk84@okicici/UPI/000-0",
+];
+
+describe("reading a Federal Bank statement", () => {
+  it("is recognised as a bank statement though its header is on page two", () => {
+    assert.equal(readerFor(FEDERAL_ROWS).name, "bank");
+  });
+
+  const parsed = parseStatementRows(FEDERAL_ROWS);
+
+  it("takes the withdrawal or the deposit, never the balance", () => {
+    assert.deepEqual(
+      parsed.lines.map((line) => [line.amountMinor, line.type]),
+      [
+        [28_00, "DEBIT"],
+        [227_47, "DEBIT"],
+        [50_00, "CREDIT"],
+        [5360_00, "CREDIT"],
+      ]
+    );
+  });
+
+  it("keeps the narration without the transaction type and id", () => {
+    assert.equal(parsed.lines[0].description, "UPIOUT/661497713819/Q6-44052013@ybl/Paid via /5812");
+  });
+});

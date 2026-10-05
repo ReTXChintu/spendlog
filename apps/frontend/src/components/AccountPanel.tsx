@@ -59,6 +59,7 @@ export function AccountPanel({
   const [removing, setRemoving] = useState<{ inUse: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [passwordOpen, setPasswordOpen] = useState(false);
 
   const [savingBusy, setSavingBusy] = useState(false);
   const [savingsError, setSavingsError] = useState<string | null>(null);
@@ -313,12 +314,86 @@ export function AccountPanel({
             <span className="status-pill status-off">Not set</span>
           )}
         </span>
-        <button className="btn btn-sm btn-ghost" onClick={onEdit}>
-          {account.hasStatementPassword ? "Change" : "Add"}
+        <button className="btn btn-sm btn-ghost" onClick={() => setPasswordOpen((open) => !open)}>
+          {passwordOpen ? "Cancel" : account.hasStatementPassword ? "Change" : "Add"}
         </button>
       </div>
       )}
+      {!isDebit && passwordOpen && (
+        <StatementPasswordForm
+          accountId={account.id}
+          hasPassword={Boolean(account.hasStatementPassword)}
+          onDone={() => {
+            setPasswordOpen(false);
+            onChanged();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * The statement password, set right where it is shown rather than inside
+ * the whole edit form - it is the one setting people come here to change.
+ */
+function StatementPasswordForm({
+  accountId,
+  hasPassword,
+  onDone,
+}: {
+  accountId: string;
+  hasPassword: boolean;
+  onDone: () => void;
+}) {
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save(value: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.put(`/statements/password/${accountId}`, { password: value });
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save that.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form
+      className="statement-password-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (password.trim()) save(password.trim());
+      }}
+    >
+      <input
+        autoFocus
+        className="filter-input"
+        type="password"
+        autoComplete="off"
+        placeholder={hasPassword ? "Type the new password" : "The password that opens this account's statement PDF"}
+        value={password}
+        onChange={(event) => setPassword(event.target.value)}
+        aria-label="Statement password"
+      />
+      <button className="btn btn-sm btn-primary" type="submit" disabled={busy || !password.trim()}>
+        {busy ? "Saving…" : "Save"}
+      </button>
+      {hasPassword && (
+        <button className="btn btn-sm btn-ghost btn-danger-text" type="button" disabled={busy} onClick={() => save("")}>
+          Remove
+        </button>
+      )}
+      <p className="field-hint">
+        Usually built from your date of birth and name — the statement email says the format. It's stored
+        encrypted and never shown again.
+      </p>
+      {error && <p className="form-error">{error}</p>}
+    </form>
   );
 }
 

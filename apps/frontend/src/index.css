@@ -1341,3 +1341,9 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
   border-radius:var(--radius-md);background:var(--warn-bg);color:var(--warn);font-size:13px;line-height:1.45}
 .sync-problem svg{width:15px;height:15px;flex-shrink:0}
 .sync-problem a{margin-left:auto;font-weight:700;color:var(--warn)}
+
+/* The statement password, set in place under its row. */
+.statement-password-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;padding:12px 14px;
+  background:var(--paper);border:1px solid var(--line);border-radius:var(--radius-md)}
+.statement-password-form .filter-input{flex:1;min-width:220px}
+.statement-password-form .field-hint{flex-basis:100%}

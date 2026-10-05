@@ -240,6 +240,65 @@ class _AccountsScreenState extends State<AccountsScreen> {
     }
   }
 
+  /// The statement password on its own, rather than inside the whole edit
+  /// sheet - it is the one setting people come to this row to change.
+  Future<void> _editStatementPassword(Account account) async {
+    final controller = TextEditingController();
+    final messenger = ScaffoldMessenger.of(context);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(account.hasStatementPassword ? 'Change statement password' : 'Statement password'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: controller,
+              autofocus: true,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Password that opens the statement PDF'),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Usually built from your date of birth and name - the statement email says the format. '
+              "It's stored encrypted and never shown again.",
+              style: TextStyle(fontSize: 12, color: context.c.muted),
+            ),
+          ],
+        ),
+        actions: [
+          if (account.hasStatementPassword)
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(''),
+              style: TextButton.styleFrom(foregroundColor: context.c.debit),
+              child: const Text('Remove'),
+            ),
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              final value = controller.text.trim();
+              if (value.isNotEmpty) Navigator.of(context).pop(value);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (result == null) return;
+
+    try {
+      await ApiClient.instance.put('/statements/password/${account.id}', {'password': result});
+      messenger.showSnackBar(SnackBar(content: Text(result.isEmpty ? 'Password removed.' : 'Password saved.')));
+      await _load();
+    } catch (error) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(error is ApiException ? error.message : "Couldn't save the password.")),
+      );
+    }
+  }
+
   Future<void> _open({Account? account}) async {
     final changed = await showEditAccountSheet(
       context,
@@ -634,7 +693,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
             account.hasStatementPassword ? 'Set' : 'Not set',
             on: account.hasStatementPassword,
             action: TextButton(
-              onPressed: () => _open(account: account),
+              onPressed: () => _editStatementPassword(account),
               child: Text(account.hasStatementPassword ? 'Change' : 'Add'),
             ),
           ),

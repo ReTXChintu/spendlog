@@ -568,7 +568,9 @@ class _StatementsScreenState extends State<StatementsScreen> {
                   onPressed: _busy == statement.id ? null : () => _assign(statement),
                   child: const Text('Pick the account'),
                 ),
-              if (!statement.isRead) ...[
+              // Also once whatever a read added has been undone - which is how a
+              // statement read wrongly gets read again.
+              if (!statement.isRead || statement.added == 0) ...[
                 const SizedBox(width: 8),
                 OutlinedButton(
                   onPressed: _busy == statement.id
