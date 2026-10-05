@@ -1347,3 +1347,15 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
   background:var(--paper);border:1px solid var(--line);border-radius:var(--radius-md)}
 .statement-password-form .filter-input{flex:1;min-width:220px}
 .statement-password-form .field-hint{flex-basis:100%}
+
+/* The month the ledger shows, salary day to salary day, above everything. */
+.month-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 18px 0;padding:10px 14px;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md)}
+.month-bar-label{display:flex;align-items:baseline;gap:8px;font-size:16px;font-weight:800;color:var(--ink);
+  min-width:0}
+.month-bar-note{font-size:12px;font-weight:600;color:var(--muted)}
+.month-bar-step{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;
+  border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--paper);color:var(--ink);cursor:pointer}
+.month-bar-step:disabled{opacity:.4;cursor:default}
+.month-bar-step:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.month-bar-step svg{width:16px;height:16px}

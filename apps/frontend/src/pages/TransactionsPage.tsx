@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { EditTransactionModal } from "../components/EditTransactionModal";
 import { CardStrip } from "../components/CardStrip";
@@ -23,6 +23,7 @@ import {
   Transaction,
   TransactionType,
   AccountCycles,
+  AnalyticsMonths,
   accountLabel,
 } from "../types";
 
@@ -32,7 +33,10 @@ interface ByDayResponse {
   nextBefore: string | null;
 }
 
-const DAYS_PER_PAGE = 30;
+/// A week of days at a time, more fetched as the list is scrolled - the
+/// ledger grows every day, and loading all of it to show the top was going
+/// to get slower for ever.
+const DAYS_PER_PAGE = 7;
 
 /**
  * The ledger. Browsing by day and searching used to be two pages showing
@@ -83,6 +87,21 @@ export function TransactionsPage() {
   const [direction, setDirection] = useState<TransactionType | "">("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  // The user's own months, salary day to salary day, newest first; the
+  // list shows one at a time. Typed dates or an account's statement cycle
+  // replace it with a range of their own until "Back to months".
+  const [months, setMonths] = useState<AnalyticsMonths | null>(null);
+  const [monthIndex, setMonthIndex] = useState(0);
+  const [customRange, setCustomRange] = useState(false);
+  const [monthsFailed, setMonthsFailed] = useState(false);
+  const month = months?.months[monthIndex] ?? null;
+
+  useEffect(() => {
+    api
+      .get<AnalyticsMonths>("/analytics/months")
+      .then(setMonths)
+      .catch(() => setMonthsFailed(true));
+  }, []);
 
   useEffect(() => {
     const id = window.setTimeout(() => setDebouncedSearch(search), 300);
@@ -107,6 +126,7 @@ export function TransactionsPage() {
         if (current) {
           setFrom(current.from);
           setTo(current.to);
+          setCustomRange(true);
         }
       })
       .catch(() => live && setCycles(null));
@@ -121,10 +141,12 @@ export function TransactionsPage() {
     if (value === "all") {
       setFrom("");
       setTo("");
+      setCustomRange(true);
     } else if (value !== "custom") {
       const [nextFrom, nextTo] = value.split("|");
       setFrom(nextFrom);
       setTo(nextTo);
+      setCustomRange(true);
     }
   }
 
@@ -134,10 +156,19 @@ export function TransactionsPage() {
     if (categoryId) params.set("categoryId", categoryId);
     if (accountId) params.set("accountId", accountId);
     if (direction) params.set("type", direction);
-    if (from) params.set("from", from);
-    if (to) params.set("to", to);
+    if (customRange) {
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
+    } else if (month) {
+      params.set("from", month.from);
+      params.set("to", month.to);
+    }
     return params;
-  }, [debouncedSearch, categoryId, accountId, direction, from, to]);
+  }, [debouncedSearch, categoryId, accountId, direction, from, to, customRange, month]);
+
+  /// Nothing is fetched until it is known which month to fetch - otherwise
+  /// the first load would be the whole ledger, the very thing this avoids.
+  const ready = customRange || month !== null || monthsFailed;
 
   /**
    * Fetches the ledger.
@@ -150,6 +181,7 @@ export function TransactionsPage() {
    * really is starting over.
    */
   const load = useCallback(async (options?: { keepVisible?: boolean }) => {
+    if (!ready) return;
     if (!options?.keepVisible) setDays(null);
     const params = new URLSearchParams(filterQuery);
     params.set("days", String(DAYS_PER_PAGE));
@@ -162,7 +194,7 @@ export function TransactionsPage() {
     } catch {
       setError(true);
     }
-  }, [filterQuery]);
+  }, [filterQuery, ready]);
 
   useEffect(() => {
     load();
@@ -220,7 +252,7 @@ export function TransactionsPage() {
   }, [daily]);
 
   async function loadMore() {
-    if (!nextBefore) return;
+    if (!nextBefore || loadingMore) return;
     setLoadingMore(true);
     const params = new URLSearchParams(filterQuery);
     params.set("days", String(DAYS_PER_PAGE));
@@ -233,6 +265,39 @@ export function TransactionsPage() {
     } finally {
       setLoadingMore(false);
     }
+  }
+
+  // The next week loads as the bottom of the list comes into view.
+  const sentinel = useRef<HTMLDivElement | null>(null);
+  const loadMoreRef = useRef(loadMore);
+  loadMoreRef.current = loadMore;
+  useEffect(() => {
+    const node = sentinel.current;
+    if (!node || !hasMore) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) loadMoreRef.current();
+      },
+      { rootMargin: "600px 0px" }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMore, days]);
+
+  // The rail's figures follow the month on screen.
+  useEffect(() => {
+    if (!month) return;
+    api
+      .get<AnalyticsSummary>(`/analytics/summary?month=${month.month}`)
+      .then(setSummary)
+      .catch(() => undefined);
+  }, [month]);
+
+  function backToMonths() {
+    setFrom("");
+    setTo("");
+    setAccountId("");
+    setCustomRange(false);
   }
 
   async function syncNow() {
@@ -307,7 +372,9 @@ export function TransactionsPage() {
   }
 
   const uncategorized = summary?.byCategory.find((c) => c.categoryId === null);
-  const filtersActive = Array.from(filterQuery.keys()).length > 0;
+  // The month itself is not a filter - it is where you are.
+  const filtersActive =
+    Boolean(debouncedSearch || categoryId || accountId || direction) || (customRange && Boolean(from || to));
 
   function clearFilters() {
     setSearch("");
@@ -316,6 +383,7 @@ export function TransactionsPage() {
     setDirection("");
     setFrom("");
     setTo("");
+    setCustomRange(false);
   }
 
   return (
@@ -356,6 +424,48 @@ export function TransactionsPage() {
           )}
         </div>
       </div>
+      <div className="month-bar" role="group" aria-label="Month">
+        {customRange ? (
+          <>
+            <span className="month-bar-label">
+              {from || to ? `${from ? shortDay(from) : "The start"} – ${to ? shortDay(to) : "today"}` : "All time"}
+              <span className="month-bar-note">your own range</span>
+            </span>
+            <button className="btn btn-sm" onClick={backToMonths}>
+              Back to months
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              className="month-bar-step"
+              onClick={() => setMonthIndex((index) => index + 1)}
+              disabled={!months || monthIndex >= months.months.length - 1}
+              aria-label="Previous month"
+            >
+              <Icon name="ic-chevron-left" />
+            </button>
+            <span className="month-bar-label">
+              {month ? `${shortDay(month.from)} – ${shortDay(month.to)}` : monthsFailed ? "All time" : "…"}
+              {month && monthIndex === 0 && <span className="month-bar-note">this month</span>}
+            </span>
+            <button
+              className="month-bar-step"
+              onClick={() => setMonthIndex((index) => Math.max(0, index - 1))}
+              disabled={monthIndex === 0}
+              aria-label="Next month"
+            >
+              <Icon name="ic-chevron-right" />
+            </button>
+            {monthIndex > 0 && (
+              <button className="btn btn-sm btn-ghost" onClick={() => setMonthIndex(0)}>
+                This month
+              </button>
+            )}
+          </>
+        )}
+      </div>
+
       {syncProblem && (
         <div className="sync-problem" role="alert">
           <Icon name="ic-alert" />
@@ -408,14 +518,20 @@ export function TransactionsPage() {
                 type="date"
                 className="filter-input"
                 value={from}
-                onChange={(e) => changeFilter(setFrom)(e.target.value)}
+                onChange={(e) => {
+                  setFrom(e.target.value);
+                  setCustomRange(Boolean(e.target.value || to));
+                }}
               />
               <span style={{ color: "var(--muted-light)" }}>–</span>
               <input
                 type="date"
                 className="filter-input"
                 value={to}
-                onChange={(e) => changeFilter(setTo)(e.target.value)}
+                onChange={(e) => {
+                  setTo(e.target.value);
+                  setCustomRange(Boolean(from || e.target.value));
+                }}
               />
             </div>
           </div>
@@ -587,9 +703,16 @@ export function TransactionsPage() {
               })}
 
               {hasMore && (
-                <div className="load-more">
+                <div className="load-more" ref={sentinel}>
                   <button className="btn" onClick={loadMore} disabled={loadingMore}>
-                    {loadingMore ? "Loading…" : "Load earlier days"}
+                    {loadingMore ? "Loading the week before…" : "Load the week before"}
+                  </button>
+                </div>
+              )}
+              {!hasMore && !customRange && month && months && monthIndex < months.months.length - 1 && (
+                <div className="load-more">
+                  <button className="btn btn-ghost" onClick={() => setMonthIndex((index) => index + 1)}>
+                    That's all for {shortDay(month.from)} – {shortDay(month.to)}. Go to the month before
                   </button>
                 </div>
               )}
@@ -599,7 +722,7 @@ export function TransactionsPage() {
 
         <div className="rail">
           <div className="card">
-            <div className="rail-title" title={summary?.label}>This month{summary?.label ? ` · ${summary.label}` : ""}</div>
+            <div className="rail-title" title={summary?.label}>{monthIndex === 0 ? "This month" : "That month"}{summary?.label ? ` · ${summary.label}` : ""}</div>
             <div className="stat-line">
               <span className="label">Spent</span>
               <span className="value num" style={{ color: "var(--debit)" }}>
@@ -698,4 +821,13 @@ function cycleLabel(from: string, to: string): string {
       timeZone: "Asia/Kolkata",
     });
   return `${format(from)} – ${format(to)}`;
+}
+
+/** "15 Sep" from a YYYY-MM-DD day. */
+function shortDay(day: string): string {
+  return new Date(`${day}T12:00:00+05:30`).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    timeZone: "Asia/Kolkata",
+  });
 }
