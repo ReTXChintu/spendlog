@@ -37,6 +37,11 @@ export function DailyBucket({ daily }: { daily: DailyBudget }) {
             includes {formatMoney(daily.extraIncomeMinor!)} extra money in
           </div>
         )}
+        {(daily.refundedBackMinor ?? 0) > 0 && (
+          <div className="bucket-simple-sub">
+            and {formatMoney(daily.refundedBackMinor!)} back from refunds
+          </div>
+        )}
       </div>
 
       {/* Said out loud, so the bucket never looks as though it simply

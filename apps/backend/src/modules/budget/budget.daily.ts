@@ -1,5 +1,6 @@
 import { Types } from "mongoose";
 import { DailyBudgetChange, Loan, Transaction, User } from "../../models";
+import { peopleCategoryId } from "../categories/categories.system";
 import { IST_OFFSET, IST_OFFSET_MS, istDayKey, istMonthKey, istMonthStart } from "../../time";
 import { BudgetPeriod } from "./budget.period";
 import { currentBudgetPeriod } from "./budget.pace";
@@ -29,6 +30,8 @@ export interface DailyBudgetDay {
   spentMinor: number;
   /** Money in on top of pay that day, which goes straight into the bucket. */
   incomeMinor: number;
+  /** Refunds that day for purchases the bucket had paid for. */
+  refundedMinor: number;
   /** The daily budget in force that day. */
   allowedMinor: number;
   /** Budget less spending, plus any extra money in: positive put by,
@@ -59,6 +62,9 @@ export type DailyBudget =
       /// Money in on top of pay this period - gifts, interest, cashback -
       /// already included in the bucket.
       extraIncomeMinor: number;
+      /// Refunds this period for purchases the bucket paid for, given back
+      /// to it on the day they arrived. Already included in the bucket.
+      refundedBackMinor: number;
       todaySpentMinor: number;
       /// What is left of today's allowance. Negative once today is over it.
       todayLeftMinor: number;
@@ -235,6 +241,13 @@ export async function dailyBudget(userId: Types.ObjectId, now = new Date()): Pro
   // not really income: refunds, settling up, transfers, money set aside for
   // a purchase and a split's other shares all count as zero already. Nor a
   // loan landing, which is borrowed, nor a credit marked as kept out.
+  //
+  // Nor money a person pays back. Lending it never came out of the bucket
+  // - a loan to a friend is not a day's spending - so its return does not
+  // go into it either. That covers anything with people on it and
+  // anything filed under Lent & borrowed, whether or not it was marked as
+  // settling up.
+  const peopleCategory = await peopleCategoryId();
   const loanCredits = (await Loan.find({ userId, disbursedTransactionId: { $ne: null } }).select("disbursedTransactionId"))
     .map((loan) => loan.disbursedTransactionId)
     .filter((id): id is Types.ObjectId => Boolean(id));
@@ -248,6 +261,8 @@ export async function dailyBudget(userId: Types.ObjectId, now = new Date()): Pro
         isSalary: { $ne: true },
         isSpecial: { $ne: true },
         _id: { $nin: loanCredits },
+        "people.0": { $exists: false },
+        ...(peopleCategory ? { categoryId: { $ne: peopleCategory } } : {}),
       },
     },
     {
@@ -259,18 +274,36 @@ export async function dailyBudget(userId: Types.ObjectId, now = new Date()): Pro
   ]);
   const incomeByDay = new Map(incomeRows.map((row) => [row._id, row.total]));
 
+  // A refund gives back to the bucket exactly what its purchase took out
+  // of it - on the day the money comes back, not by rewriting the day the
+  // purchase was made, which keeps the days already counted as they were.
+  // A purchase the bucket never paid for (a one-off, a trip, a fixed cost)
+  // gets nothing back when it is refunded, and neither does one bought
+  // with money set aside for it.
+  const { backByPurchaseDay, backByRefundDay } = await refundsForBucket(userId, period.start, now);
+  for (const [day, amount] of backByPurchaseDay) spentByDay.set(day, (spentByDay.get(day) ?? 0) + amount);
+
   // Every day from the start, not only the days something was spent on. A
   // day with no spending on it is the best kind of day for a bucket, and
   // leaving it out would silently drop what it put by.
   const days: DailyBudgetDay[] = daysUpToToday(period.start, now).map((day) => {
     const spentMinor = spentByDay.get(day) ?? 0;
     const incomeMinor = incomeByDay.get(day) ?? 0;
+    const refundedMinor = backByRefundDay.get(day) ?? 0;
     const allowedMinor = budget(day);
-    return { day, spentMinor, incomeMinor, allowedMinor, deltaMinor: allowedMinor - spentMinor + incomeMinor };
+    return {
+      day,
+      spentMinor,
+      incomeMinor,
+      refundedMinor,
+      allowedMinor,
+      deltaMinor: allowedMinor - spentMinor + incomeMinor + refundedMinor,
+    };
   });
 
   const spentMinor = days.reduce((sum, day) => sum + day.spentMinor, 0);
   const extraIncomeMinor = days.reduce((sum, day) => sum + day.incomeMinor, 0);
+  const refundedBackMinor = days.reduce((sum, day) => sum + day.refundedMinor, 0);
   const allowedMinor = days.reduce((sum, day) => sum + day.allowedMinor, 0);
   const today = days[days.length - 1];
   const todayBudget = budget(istDayKey(now));
@@ -285,8 +318,9 @@ export async function dailyBudget(userId: Types.ObjectId, now = new Date()): Pro
     daysLeft: period.daysLeft,
     allowedMinor,
     spentMinor,
-    bucketMinor: allowedMinor - spentMinor + extraIncomeMinor,
+    bucketMinor: allowedMinor - spentMinor + extraIncomeMinor + refundedBackMinor,
     extraIncomeMinor,
+    refundedBackMinor,
     todaySpentMinor: today?.spentMinor ?? 0,
     todayLeftMinor: todayBudget - (today?.spentMinor ?? 0),
     daysOver: days.filter((day) => day.spentMinor > day.allowedMinor).length,
@@ -294,4 +328,63 @@ export async function dailyBudget(userId: Types.ObjectId, now = new Date()): Pro
     keptOutCount: keptOut?.count ?? 0,
     days,
   };
+}
+
+/**
+ * Refunds, as the bucket sees them.
+ *
+ * The ledger nets a refund off its purchase (countedAmountMinor), which is
+ * right for spending totals but wrong for a bucket that keeps score day by
+ * day: it would quietly rewrite the day of the purchase. So the purchase's
+ * day keeps what it really cost on the day (backByPurchaseDay puts the
+ * refunded part back on it) and the refund lands on the day it arrived
+ * (backByRefundDay).
+ *
+ * Only for purchases the bucket paid for - scored against a day, not kept
+ * out as a one-off, a trip or a fixed cost - and only refunds proper:
+ * money set aside for a purchase is linked the same way, but that purchase
+ * never cost the user anything and stays netted off.
+ */
+async function refundsForBucket(userId: Types.ObjectId, periodStart: Date, now: Date) {
+  const backByPurchaseDay = new Map<string, number>();
+  const backByRefundDay = new Map<string, number>();
+
+  // Refunds rarely come later than six months after the purchase.
+  const lookback = new Date(periodStart.getTime() - 200 * 24 * 60 * 60 * 1000);
+  const credits = await Transaction.find({
+    userId,
+    type: "CREDIT",
+    isEarmarked: { $ne: true },
+    "refundOf.0": { $exists: true },
+    occurredAt: { $gte: lookback, $lte: now },
+  }).select("occurredAt refundOf");
+  if (credits.length === 0) return { backByPurchaseDay, backByRefundDay };
+
+  const purchaseIds = credits.flatMap((credit) => credit.refundOf.map((allocation) => allocation.transactionId));
+  const purchases = await Transaction.find({ _id: { $in: purchaseIds }, userId, type: "DEBIT" }).select(
+    "occurredAt isSpecial tripId commitmentId"
+  );
+  const scored = new Map(
+    purchases
+      .filter((purchase) => !purchase.isSpecial && !purchase.tripId && !purchase.commitmentId)
+      .map((purchase) => [purchase._id.toString(), purchase])
+  );
+
+  for (const credit of credits) {
+    for (const allocation of credit.refundOf) {
+      const purchase = scored.get(allocation.transactionId.toString());
+      if (!purchase) continue;
+
+      if (purchase.occurredAt >= periodStart && purchase.occurredAt <= now) {
+        const day = istDayKey(purchase.occurredAt);
+        backByPurchaseDay.set(day, (backByPurchaseDay.get(day) ?? 0) + allocation.amountMinor);
+      }
+      if (credit.occurredAt >= periodStart) {
+        const day = istDayKey(credit.occurredAt);
+        backByRefundDay.set(day, (backByRefundDay.get(day) ?? 0) + allocation.amountMinor);
+      }
+    }
+  }
+
+  return { backByPurchaseDay, backByRefundDay };
 }

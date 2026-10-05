@@ -412,6 +412,8 @@ export type DailyBudget =
       keptOutCount?: number;
       /** Money in on top of salary this period, already in bucketMinor. */
       extraIncomeMinor?: number;
+      /** Refunds for purchases the bucket paid for, given back on the day they came. */
+      refundedBackMinor?: number;
       days: DailyBudgetDay[];
     };
 

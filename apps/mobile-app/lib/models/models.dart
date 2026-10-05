@@ -760,6 +760,9 @@ class DailyBudget {
   /// Money in on top of salary this period, already added to bucketMinor.
   final int extraIncomeMinor;
 
+  /// Refunds for purchases the bucket paid for, given back on the day they came.
+  final int refundedBackMinor;
+
   DailyBudget({
     required this.configured,
     this.dailyBudgetMinor = 0,
@@ -776,6 +779,7 @@ class DailyBudget {
     this.keptOutCount = 0,
     this.days = const [],
     this.extraIncomeMinor = 0,
+    this.refundedBackMinor = 0,
   });
 
   factory DailyBudget.fromJson(Map<String, dynamic> json) => DailyBudget(
@@ -796,6 +800,7 @@ class DailyBudget {
             .map((row) => DailyBudgetDay.fromJson(row as Map<String, dynamic>))
             .toList(),
         extraIncomeMinor: json['extraIncomeMinor'] as int? ?? 0,
+        refundedBackMinor: json['refundedBackMinor'] as int? ?? 0,
       );
 }
 

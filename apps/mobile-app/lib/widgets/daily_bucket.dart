@@ -70,6 +70,13 @@ class DailyBucket extends StatelessWidget {
                   style: TextStyle(fontSize: 11.5, color: c.credit),
                 ),
               ],
+              if (daily.refundedBackMinor > 0) ...[
+                const SizedBox(height: 2),
+                Text(
+                  'And ${formatMoney(daily.refundedBackMinor)} back from refunds.',
+                  style: TextStyle(fontSize: 11.5, color: c.credit),
+                ),
+              ],
             ],
           ),
         ),

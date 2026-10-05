@@ -36,3 +36,7 @@ export async function ensureSystemCategories(): Promise<void> {
 export function transferCategoryId(): Promise<Types.ObjectId | null> {
   return ensure(TRANSFER_CATEGORY);
 }
+
+export function peopleCategoryId(): Promise<Types.ObjectId | null> {
+  return ensure(PEOPLE_CATEGORY);
+}

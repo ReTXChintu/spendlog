@@ -3,6 +3,7 @@ import { after, before, beforeEach, describe, it } from "node:test";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import mongoose, { Types } from "mongoose";
 import { Transaction, User } from "../../models";
+import { peopleCategoryId } from "../categories/categories.system";
 import { dailyBudget, withBudgetChange } from "./budget.daily";
 
 let mongod: MongoMemoryServer;
@@ -282,6 +283,84 @@ describe("the daily budget bucket", () => {
     assert.deepEqual(withBudgetChange({ dailyBudgetMinor: null, dailyBudgetHistory: [] }, 800_00, on("2026-09-10")), [
       { from: "0000-01-01", amountMinor: 800_00 },
     ]);
+  });
+
+  describe("money coming back", () => {
+    async function credit(day: string, rupees: number, extra: Record<string, unknown> = {}) {
+      return Transaction.create({
+        userId,
+        type: "CREDIT",
+        amountMinor: rupees * 100,
+        occurredAt: on(day),
+        source: "MANUAL",
+        ...extra,
+      });
+    }
+
+    it("keeps a person paying back out of the bucket, however it was marked", async () => {
+      await withUser({ dailyBudgetMinor: 1000_00, salaryDay: 1 });
+      const lentAndBorrowed = await peopleCategoryId();
+      await credit("2026-09-01", 2000, { categoryId: lentAndBorrowed }); // repayment, plain credit
+      await credit("2026-09-01", 1500, {
+        split: { myShareMinor: 500_00 },
+        people: [{ contactId: new Types.ObjectId(), amountMinor: 1000_00 }],
+      });
+      await credit("2026-09-01", 300); // a real gift
+
+      const result = await bucket(on("2026-09-01"));
+      assert.equal(result.extraIncomeMinor, 300_00);
+    });
+
+    it("gives a refund back on the day it arrives, leaving the purchase's day as it was", async () => {
+      await withUser({ dailyBudgetMinor: 1000_00, salaryDay: 1 });
+      await spend("2026-09-01", 1500); // -500 that day
+      const purchase = await Transaction.findOne({ userId }).orFail();
+      const refund = await credit("2026-09-03", 600, {
+        refundOf: [{ transactionId: purchase._id, amountMinor: 600_00 }],
+      });
+      purchase.refundedMinor = 600_00;
+      await purchase.save();
+      assert.equal(refund.countedAmountMinor, 0, "not income");
+
+      const result = await bucket(on("2026-09-03"));
+      assert.deepEqual(
+        result.days.map((day) => [day.day, day.deltaMinor]),
+        [
+          ["2026-09-01", -500_00],
+          ["2026-09-02", 1000_00],
+          ["2026-09-03", 1600_00],
+        ]
+      );
+      assert.equal(result.refundedBackMinor, 600_00);
+      assert.equal(result.bucketMinor, 2100_00);
+    });
+
+    it("gives nothing back for a purchase the bucket never paid for", async () => {
+      await withUser({ dailyBudgetMinor: 1000_00, salaryDay: 1 });
+      await spend("2026-09-01", 50_000, { isSpecial: true });
+      const laptop = await Transaction.findOne({ userId }).orFail();
+      await credit("2026-09-02", 50_000, { refundOf: [{ transactionId: laptop._id, amountMinor: 50_000_00 }] });
+
+      const result = await bucket(on("2026-09-02"));
+      assert.equal(result.refundedBackMinor, 0);
+      assert.equal(result.bucketMinor, 2000_00);
+    });
+
+    it("does not charge the bucket for a purchase paid with money set aside for it", async () => {
+      await withUser({ dailyBudgetMinor: 1000_00, salaryDay: 1 });
+      const fromDad = await credit("2026-09-01", 8000, { isEarmarked: true });
+      await spend("2026-09-02", 8000);
+      const purchase = await Transaction.findOne({ userId, type: "DEBIT" }).orFail();
+      fromDad.refundOf = [{ transactionId: purchase._id, amountMinor: 8000_00 }];
+      await fromDad.save();
+      purchase.refundedMinor = 8000_00;
+      await purchase.save();
+
+      const result = await bucket(on("2026-09-02"));
+      assert.equal(result.spentMinor, 0);
+      assert.equal(result.refundedBackMinor, 0);
+      assert.equal(result.bucketMinor, 2000_00);
+    });
   });
 
   it("counts today, so the bucket moves as the day is spent", async () => {
