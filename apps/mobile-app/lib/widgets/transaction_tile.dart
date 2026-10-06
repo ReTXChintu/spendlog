@@ -151,6 +151,7 @@ class TransactionTile extends StatelessWidget {
                     transaction.emiRole != null ||
                     transaction.split != null ||
                     transaction.isSettlement ||
+                    transaction.byKidName != null ||
                     transaction.editedAt != null) ...[
                   const SizedBox(height: 5),
                   Wrap(
@@ -214,6 +215,14 @@ class TransactionTile extends StatelessWidget {
                           label: 'Settling up',
                           background: context.c.credit50,
                           foreground: context.c.credit,
+                        ),
+                      // A kid added or changed this from their own login,
+                      // so the owner knows it wasn't the bank or themselves.
+                      if (transaction.byKidName != null)
+                        _Badge(
+                          label: 'by ${transaction.byKidName}',
+                          background: context.c.warnBg,
+                          foreground: context.c.warn,
                         ),
                       // Says plainly that these figures are the user's, not
                       // the bank's, so a corrected row isn't second-guessed.

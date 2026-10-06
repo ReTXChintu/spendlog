@@ -27,6 +27,9 @@ class ApiClient {
   static Future<void> setToken(String token) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_tokenKey, token);
+    // One person per phone at a time: an owner signing in ends any kid's.
+    await prefs.remove(_kidTokenKey);
+    await prefs.remove(_roleKey);
   }
 
   static Future<void> clearToken() async {
@@ -34,17 +37,64 @@ class ApiClient {
     await prefs.remove(_tokenKey);
   }
 
+  // A kid's session lives under its own key, not tokenStorageKey: the
+  // background SMS and reminder isolates read that key directly, so a kid's
+  // phone leaves them with no token and nothing to send.
+  static const _kidTokenKey = 'spendlog_kid_token';
+  static const _roleKey = 'spendlog_role';
+
+  /// Called once when a kid's session is refused (the parent reset the
+  /// password, or removed the login), so the app can go back to sign-in.
+  static void Function()? onKidSessionEnded;
+
+  static Future<String?> getKidToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_kidTokenKey);
+  }
+
+  static Future<void> setKidSession(String token) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_tokenKey);
+    await prefs.setString(_kidTokenKey, token);
+    await prefs.setString(_roleKey, 'kid');
+  }
+
+  static Future<void> clearKidSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kidTokenKey);
+    await prefs.remove(_roleKey);
+  }
+
+  /// Whether this phone is signed in as a kid. Owner-only start-up work
+  /// (SMS, reminders, Gmail, notifications) checks this before running.
+  static Future<bool> isKidSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_roleKey) == 'kid' && prefs.getString(_kidTokenKey) != null;
+  }
+
   Future<Map<String, String>> _headers() async {
-    final token = await getToken();
+    final token = await getKidToken() ?? await getToken();
     return {
       'Content-Type': 'application/json',
+      // The server only lets kids sign in from the phone app; harmless for owners.
+      'x-spendlog-client': 'mobile',
       if (token != null) 'Authorization': 'Bearer $token',
     };
   }
 
   dynamic _decode(http.Response res) {
-    if (res.statusCode == 401) {
-      clearToken();
+    final path = res.request?.url.path ?? '';
+    // A 401 from kid sign-in is a wrong password, not an ended session,
+    // so it falls through to show the server's own message.
+    if (res.statusCode == 401 && !path.endsWith('/kid/login')) {
+      if (path.contains('/kid/')) {
+        clearKidSession();
+        final ended = onKidSessionEnded;
+        onKidSessionEnded = null; // once, however many calls were in flight
+        ended?.call();
+      } else {
+        clearToken();
+      }
       throw ApiException(401, 'Session expired');
     }
     if (res.statusCode >= 400) {
@@ -112,7 +162,10 @@ class ApiClient {
     final token = await getToken();
     final res = await http.get(
       Uri.parse('$_baseUrl$path'),
-      headers: {if (token != null) 'Authorization': 'Bearer $token'},
+      headers: {
+        'x-spendlog-client': 'mobile',
+        if (token != null) 'Authorization': 'Bearer $token',
+      },
     );
 
     if (res.statusCode == 401) {

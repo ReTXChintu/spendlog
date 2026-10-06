@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
+import '../services/push_service.dart';
 import '../services/reminder_service.dart';
 import '../services/theme_service.dart';
 import '../services/sms_service.dart';
@@ -13,6 +14,7 @@ import '../theme.dart';
 import '../utils/format.dart';
 import '../version.dart';
 import '../widgets/commitment_amount.dart';
+import '../widgets/family_section.dart';
 import '../widgets/loan_dialog.dart';
 import 'accounts_screen.dart';
 import 'statements_screen.dart';
@@ -601,6 +603,9 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
   }
 
   Future<void> _signOut() async {
+    // First, while the session can still tell the server to stop waking
+    // this phone for kids' refreshes.
+    await PushService.instance.unregister();
     await AuthService.instance.signOut();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
@@ -848,6 +853,15 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
               OutlinedButton(onPressed: _openAccounts, child: const Text('Manage accounts')),
             ],
           ),
+        ),
+        const SizedBox(height: 14),
+        // Beside Accounts because a kid's login is built on the pocket
+        // money accounts marked there.
+        _SettingsCard(
+          icon: Icons.family_restroom_outlined,
+          title: 'Family',
+          subtitle: 'Logins for your kids',
+          child: FamilySection(onOpenAccounts: _openAccounts),
         ),
         const SizedBox(height: 14),
         // A card's statements are that card's paperwork, so they live with

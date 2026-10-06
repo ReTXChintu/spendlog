@@ -1,5 +1,6 @@
 import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
+import '../services/push_service.dart';
 import '../services/sms_service.dart';
 import '../theme.dart';
 import 'ask_screen.dart';
@@ -34,6 +35,9 @@ class _HomeShellState extends State<HomeShell> {
   void initState() {
     super.initState();
     _resumeSmsCapture();
+    // Here rather than at sign-in: this screen opens for the owner both on
+    // launch and right after signing in, and never for a kid.
+    PushService.instance.registerIfOwner();
   }
 
   /// The plugin only delivers a foreground SMS to a channel registered in

@@ -281,6 +281,11 @@ class Transaction {
   final Category? category;
   final Account? account;
 
+  /// Set when one of the owner's kids added or last changed this, so the
+  /// owner's ledger can say who it was.
+  final String? byKidId;
+  final String? byKidName;
+
   Transaction({
     required this.id,
     required this.amountMinor,
@@ -316,6 +321,8 @@ class Transaction {
     this.sources = const [],
     this.category,
     this.account,
+    this.byKidId,
+    this.byKidName,
   });
 
   /// The distinct kinds of message behind this row. Older rows predate the
@@ -378,6 +385,8 @@ class Transaction {
             .toList(),
         category: json['category'] != null ? Category.fromJson(json['category'] as Map<String, dynamic>) : null,
         account: json['account'] != null ? Account.fromJson(json['account'] as Map<String, dynamic>) : null,
+        byKidId: json['byKidId'] is String ? json['byKidId'] as String : null,
+        byKidName: json['byKidName'] as String?,
       );
 }
 

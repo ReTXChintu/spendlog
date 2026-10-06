@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import 'screens/home_shell.dart';
-import 'screens/login_screen.dart';
-import 'services/api_client.dart';
+import 'screens/start_screen.dart';
 import 'services/perk_import_watcher.dart';
 import 'services/reminder_service.dart';
 import 'services/theme_service.dart';
@@ -21,6 +19,15 @@ void main() {
   ErrorWidget.builder = (details) => CrashCard(details);
   // Loaded before the first frame so a dark-mode user never sees a light flash.
   ThemeService.instance.load();
+  _ownerStartup();
+  runApp(const SpendLogApp());
+}
+
+/// Start-up work that belongs to the owner's phone only. A kid's phone
+/// must never schedule reminders or background tasks, so the role is
+/// read first and a kid skips all of it.
+Future<void> _ownerStartup() async {
+  if (!runsOwnerStartup(await currentRole())) return;
   // Wired up on every launch, not only when a reminder is switched on: the
   // background task that checks yesterday needs a registered callback to
   // call back into, and it can fire long before anyone opens Settings.
@@ -28,7 +35,6 @@ void main() {
   // Routes the "coupons ready" tap, and keeps watching a screenshot import
   // that was still being read when the app was last closed.
   PerkImportWatcher.instance.resume().catchError((_) {});
-  runApp(const SpendLogApp());
 }
 
 class SpendLogApp extends StatelessWidget {
@@ -59,7 +65,7 @@ class _StartupGate extends StatefulWidget {
 }
 
 class _StartupGateState extends State<_StartupGate> {
-  late final Future<String?> _token = ApiClient.getToken();
+  late final Future<AppRole> _role = currentRole();
 
   @override
   void initState() {
@@ -77,13 +83,13 @@ class _StartupGateState extends State<_StartupGate> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<String?>(
-      future: _token,
+    return FutureBuilder<AppRole>(
+      future: _role,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
-        return snapshot.data != null ? const HomeShell() : const LoginScreen();
+        return startScreenFor(snapshot.data ?? AppRole.signedOut);
       },
     );
   }

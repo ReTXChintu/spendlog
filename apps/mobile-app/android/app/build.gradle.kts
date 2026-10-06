@@ -4,6 +4,13 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// The Firebase config is added by hand once the Firebase project exists.
+// The plugin fails the build without it, so it is only applied when the
+// file is there - until then the app builds and simply has no push.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 // Release signing, supplied through the environment rather than a
 // key.properties file, so the values live with every other secret in the
 // repo-root .env and in CI's secrets.
