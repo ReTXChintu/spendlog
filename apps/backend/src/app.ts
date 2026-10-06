@@ -7,9 +7,11 @@ import cors from "cors";
 import express, { NextFunction, Request, Response } from "express";
 import { accountsRouter } from "./modules/accounts/accounts.routes";
 import { aiRouter } from "./modules/ai/ai.routes";
-import { authRouter } from "./modules/auth/auth.routes";
+import { KidEmailError, authRouter } from "./modules/auth/auth.routes";
 import { categoriesRouter } from "./modules/categories/categories.routes";
 import { contactsRouter } from "./modules/contacts/contacts.routes";
+import { familyRouter } from "./modules/family/family.routes";
+import { kidRouter } from "./modules/family/kid.routes";
 import { analyticsRouter } from "./modules/analytics/analytics.routes";
 import { budgetRouter } from "./modules/budget/budget.routes";
 import { cardsRouter } from "./modules/cards/cards.routes";
@@ -65,6 +67,8 @@ app.use("/perks", perksRouter);
 app.use("/dashboard", dashboardRouter);
 app.use("/ai", aiRouter);
 app.use("/contacts", contactsRouter);
+app.use("/family", familyRouter);
+app.use("/kid", kidRouter);
 
 app.use((_req, res) => res.status(404).json({ error: "Not found" }));
 
@@ -74,6 +78,9 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   // fixable by retrying - the user has to reconnect, so say exactly that.
   if (err instanceof GmailNeedsReconnectError) {
     return res.status(409).json({ error: err.message, needsReconnect: true });
+  }
+  if (err instanceof KidEmailError) {
+    return res.status(403).json({ error: err.message });
   }
 
   console.error("Unhandled error:", err);

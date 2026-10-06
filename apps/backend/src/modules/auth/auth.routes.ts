@@ -139,7 +139,19 @@ export const googleCallbackHandler: RequestHandler = async (req, res) => {
 
 authRouter.get("/google/callback", googleCallbackHandler);
 
+/** Google sign-in with an email that belongs to a kid's login. */
+export class KidEmailError extends Error {
+  constructor() {
+    super("That email is used for a kid's login on SpendLog, so it can't sign in with Google.");
+  }
+}
+
 async function upsertUser(payload: TokenPayload) {
+  // A kid's email is typed in by a parent and never checked, so a Google
+  // account with the same address proves nothing about who holds it.
+  // Letting it through would hand that stranger the kid's record.
+  if (await User.exists({ email: payload.email, role: "KID" })) throw new KidEmailError();
+
   const user = await User.findOneAndUpdate(
     { email: payload.email },
     { $set: { googleId: payload.sub, name: payload.name ?? null } },

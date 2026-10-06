@@ -129,4 +129,9 @@ export type RuleMatchType = (typeof RULE_MATCH_TYPES)[number];
 export interface AuthUser {
   id: string;
   email: string;
+  /// Present only on a kid's session. An owner's token has none, which is
+  /// how every token issued before kids existed still reads as an owner.
+  role?: "KID";
+  /// The kid's password generation; a reset bumps it and ends the session.
+  v?: number;
 }

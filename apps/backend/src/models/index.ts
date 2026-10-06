@@ -103,6 +103,29 @@ export interface UserDoc {
   geminiApiKeyEnc?: string | null;
   /// Last four characters, so settings can say which key is saved.
   geminiApiKeyHint?: string | null;
+  /// OWNER is everyone who signed up; KID is a login an owner made for a
+  /// child to see their own pocket money. A kid owns no data: everything
+  /// they see and change belongs to parentId, and only the pocket-money
+  /// accounts in kidAccountIds. Missing means OWNER.
+  role?: "OWNER" | "KID";
+  parentId?: Types.ObjectId | null;
+  kidAccountIds?: Types.ObjectId[];
+  /// A kid's password, as an scrypt hash and its salt. Owners sign in with
+  /// Google and have none. Never leaves the server.
+  passwordHash?: string | null;
+  passwordSalt?: string | null;
+  /// Bumped when the password is reset, which ends every session signed
+  /// in with the old one.
+  tokenVersion?: number;
+  /// Wrong passwords in a row, and when sign-in is allowed again.
+  failedLogins?: number;
+  loginLockedUntil?: Date | null;
+  /// An owner's phones, for waking SpendLog to read new SMS when a kid
+  /// asks for fresh transactions.
+  fcmTokens?: { token: string; updatedAt: Date }[];
+  /// When a kid last woke the owner's phone, so it is not more than once
+  /// in ten minutes.
+  lastSmsPingAt?: Date | null;
   /// Which Gemini model answers. Null means the app's default.
   geminiModel?: string | null;
   createdAt: Date;
@@ -173,6 +196,19 @@ const userSchema = new Schema<UserDoc>(
     geminiApiKeyEnc: { type: String, default: null },
     geminiApiKeyHint: { type: String, default: null },
     geminiModel: { type: String, default: null },
+    role: { type: String, enum: ["OWNER", "KID"], default: "OWNER" },
+    parentId: { type: Schema.Types.ObjectId, ref: "User", default: null, index: true },
+    kidAccountIds: { type: [Schema.Types.ObjectId], default: [] },
+    passwordHash: { type: String, default: null },
+    passwordSalt: { type: String, default: null },
+    tokenVersion: { type: Number, default: 0 },
+    failedLogins: { type: Number, default: 0 },
+    loginLockedUntil: { type: Date, default: null },
+    fcmTokens: {
+      type: [new Schema({ token: { type: String, required: true }, updatedAt: { type: Date, required: true } }, { _id: false })],
+      default: [],
+    },
+    lastSmsPingAt: { type: Date, default: null },
   },
   {
     timestamps: true,
@@ -188,6 +224,14 @@ const userSchema = new Schema<UserDoc>(
         delete ret.vaultPin;
         ret.hasGeminiKey = Boolean(ret.geminiApiKeyEnc);
         delete ret.geminiApiKeyEnc;
+        // A kid's password and an owner's device tokens are nobody's
+        // business but the server's.
+        delete ret.passwordHash;
+        delete ret.passwordSalt;
+        delete ret.fcmTokens;
+        delete ret.failedLogins;
+        delete ret.loginLockedUntil;
+        delete ret.tokenVersion;
         return ret;
       },
     },
@@ -477,6 +521,10 @@ export interface TransactionDoc {
   /// refund, costs nothing of the user's own. Cleared once it is no longer
   /// waiting, at which point whatever is left counts as income.
   isEarmarked?: boolean;
+  /// The kid who added this, or last changed it, on their pocket money -
+  /// shown on the owner's ledger as "by Rahul".
+  byKidId?: Types.ObjectId | null;
+  byKidName?: string | null;
   /// A one-off that should not be scored against a day. A laptop, a
   /// flight, a wedding gift: real spending, counted everywhere else, but
   /// a day is not a bad day for having had it. Kept out of the daily
@@ -608,6 +656,8 @@ const transactionSchema = new Schema<TransactionDoc>(
     transferAccountId: { type: Schema.Types.ObjectId, ref: "Account", default: null },
     transferPairId: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
     isEarmarked: { type: Boolean, default: false },
+    byKidId: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    byKidName: { type: String, default: null },
     isSpecial: { type: Boolean, default: false },
     isSalary: { type: Boolean, default: false },
     cardPaymentFor: { type: Schema.Types.ObjectId, ref: "Account", default: null },
