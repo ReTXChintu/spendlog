@@ -129,6 +129,13 @@ export function TransactionRow({
                 <span className="badge badge-pocket">Pocket money · {account.pocketMoney.holder}</span>
               </div>
             )}
+            {/* Says which child added or last changed it, so the owner
+                can tell their own entries from a kid's. */}
+            {transaction.byKidName && (
+              <div className="row-badges">
+                <span className="badge badge-kid">by {transaction.byKidName}</span>
+              </div>
+            )}
             {transaction.trip && (
               <div className="row-badges">
                 <span className="badge badge-trip">{transaction.trip.name}</span>

@@ -49,6 +49,8 @@
   --banner-text:#C7D0E8;
   --banner-note:#9AA6C4;
   --on-brand:#FFFFFF;
+  --kid-bg:#F5EBFB;
+  --kid-ink:#7A3E9D;
 }
 
 /* ---------- dark theme ----------
@@ -95,6 +97,8 @@
     --banner-text:#B7C2DA;
     --banner-note:#8B95AC;
     --on-brand:#0E1119;
+    --kid-bg:#2A1B33;
+    --kid-ink:#D7A8F0;
   }
 }
 
@@ -134,6 +138,8 @@
   --banner-text:#B7C2DA;
   --banner-note:#8B95AC;
   --on-brand:#0E1119;
+  --kid-bg:#2A1B33;
+  --kid-ink:#D7A8F0;
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
@@ -1359,3 +1365,25 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
 .month-bar-step:disabled{opacity:.4;cursor:default}
 .month-bar-step:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .month-bar-step svg{width:16px;height:16px}
+
+/* ---------------------------------------------------------- family (kids' logins) */
+/* Its own hue so a kid's entry doesn't read as a pocket-money or edited badge. */
+.badge-kid{background:var(--kid-bg);color:var(--kid-ink)}
+.kid-list{list-style:none;margin:6px 0 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+.kid-row{padding:11px 12px;border:1px solid var(--line);border-radius:var(--radius-md);background:var(--surface)}
+.kid-row-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.kid-row-who{display:flex;flex-direction:column;gap:2px;min-width:0}
+.kid-row-name{font-size:13.6px;font-weight:700;color:var(--ink)}
+.kid-row-email{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.kid-row-accounts{font-size:12.4px;color:var(--ink-70)}
+.kid-form{display:flex;flex-direction:column;gap:12px;margin-top:12px}
+.kid-form .modal-actions{margin-top:4px}
+.kid-accounts{border:0;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;min-width:0}
+.kid-accounts legend{font-size:12px;font-weight:700;color:var(--muted);padding:0;margin-bottom:8px}
+.kid-accounts input:disabled+span{color:var(--muted-light)}
+.kid-taken{font-style:normal;color:var(--muted)}
+.kid-password{display:flex;gap:8px;align-items:center}
+.kid-password input{flex:1;min-width:0}
+@media (max-width:600px){
+  .kid-form .form-grid{grid-template-columns:1fr}
+}

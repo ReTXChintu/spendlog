@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { AccountModal } from "../components/AccountModal";
 import { AccountPanel } from "../components/AccountPanel";
 import { CommitmentModal } from "../components/CommitmentModal";
+import { FamilyTab } from "../components/FamilyTab";
 import { Icon } from "../components/Icon";
 import { LedgerStartCard } from "../components/LedgerStartCard";
 import { LoanModal } from "../components/LoanModal";
@@ -39,6 +40,7 @@ const TABS = [
   { id: "accounts", label: "Accounts and cards", icon: "ic-wallet" },
   { id: "budget", label: "Budget", icon: "ic-calendar" },
   { id: "presets", label: "Presets", icon: "ic-bolt" },
+  { id: "family", label: "Family", icon: "ic-people" },
   { id: "ai", label: "AI assistant", icon: "ic-spark" },
   { id: "you", label: "You", icon: "ic-lock" },
   { id: "about", label: "About", icon: "ic-info" },
@@ -102,6 +104,7 @@ export function SettingsPage() {
       {tab === "accounts" && <AccountsTab />}
       {tab === "budget" && <BudgetTab />}
       {tab === "presets" && <PresetsTab />}
+      {tab === "family" && <FamilyTab />}
       {tab === "ai" && <AiTab />}
       {tab === "you" && <YouTab />}
       {tab === "about" && <AboutTab />}

@@ -529,6 +529,25 @@ export interface Transaction {
   sources: TransactionSourceEntry[];
   category: Category | null;
   account: Account | null;
+  /** Set when a kid added or last changed this from the phone app. */
+  byKidId?: string | null;
+  byKidName?: string | null;
+}
+
+/** A child's login, made by the owner, for the phone app only. */
+export interface Kid {
+  id: string;
+  name: string;
+  email: string;
+  /** The pocket money accounts this kid can see and add to. */
+  accountIds: string[];
+  createdAt: string;
+}
+
+export interface KidsResponse {
+  kids: Kid[];
+  /** False when the server has no Firebase, so a kid's refresh can't wake the owner's phone. */
+  pushAvailable: boolean;
 }
 
 export interface PersonShare {
