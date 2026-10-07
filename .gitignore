@@ -47,3 +47,7 @@ apps/mobile-app/**/generated_plugin_registrant.dart
 .idea/
 .DS_Store
 Thumbs.db
+
+# Firebase — push config and the server key, never committed
+apps/mobile-app/android/app/google-services.json
+apps/backend/key.json
