@@ -3,7 +3,7 @@ import { Types } from "mongoose";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
-import { Contact, Transaction } from "../../models";
+import { Contact, ContactClearance, Transaction } from "../../models";
 import { Balance, NO_BALANCE, balances, normalisePhone } from "./contacts.people";
 
 export const contactsRouter = Router();
@@ -86,13 +86,14 @@ contactsRouter.get("/:id", validObjectIdParam("id"), async (req, res) => {
   const contact = await Contact.findOne({ _id: req.params.id, userId });
   if (!contact) return res.status(404).json({ error: "Not found" });
 
-  const [owed, transactions] = await Promise.all([
+  const [owed, transactions, clearances] = await Promise.all([
     balances(userId, [contact._id]),
     Transaction.find({ userId, "people.contactId": contact._id })
       .sort({ occurredAt: -1 })
       .limit(200)
       .populate("category")
       .populate("account"),
+    ContactClearance.find({ userId, contactId: contact._id }).sort({ on: -1, createdAt: -1 }).limit(200),
   ]);
 
   res.json({
@@ -105,8 +106,82 @@ contactsRouter.get("/:id", validObjectIdParam("id"), async (req, res) => {
         (transaction.people.find((person) => person.contactId.equals(contact._id))?.amountMinor ?? 0) *
         (transaction.type === "DEBIT" ? 1 : -1),
     })),
+    // Apart from the history rather than in it, so an app from before
+    // clearances still finds a transaction on every history row. Signed
+    // the same way: negative when it cleared some of what they owed.
+    clearances: clearances.map((clearance) => ({
+      ...clearance.toJSON(),
+      effectMinor: clearance.direction === "OWED_TO_ME" ? -clearance.amountMinor : clearance.amountMinor,
+    })),
   });
 });
+
+/** Rupees the way the apps show them: ₹1,000, or ₹999.50 when there are paise. */
+function rupees(minor: number): string {
+  return `₹${(minor / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+}
+
+const clearSchema = z.object({
+  amountMinor: z.number().int().positive(),
+  note: z.string().trim().max(200).nullable().optional(),
+  // The day it was settled; today when not given.
+  on: z.coerce.date().optional(),
+});
+
+// POST /contacts/:id/clear — part or all of what is owed, either way,
+// settled without money moving: a watch bought instead of the 1,000 owed.
+// Always towards zero, and never past it.
+contactsRouter.post("/:id/clear", validObjectIdParam("id"), async (req, res) => {
+  const parsed = clearSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Enter an amount greater than zero." });
+
+  const userId = currentUserId(req);
+  const contact = await Contact.findOne({ _id: req.params.id, userId });
+  if (!contact) return res.status(404).json({ error: "Not found" });
+
+  const before = withBalance(contact, (await balances(userId, [contact._id])).get(contact._id.toString()));
+  const outstanding = before.balanceMinor;
+  if (outstanding === 0) {
+    return res.status(400).json({ error: `Nothing is owed either way with ${contact.name}.` });
+  }
+  if (parsed.data.amountMinor > Math.abs(outstanding)) {
+    const owing =
+      outstanding > 0
+        ? `${contact.name} owes you ${rupees(outstanding)}`
+        : `You owe ${contact.name} ${rupees(-outstanding)}`;
+    return res.status(400).json({ error: `${owing} — you can clear up to that much, not more.` });
+  }
+
+  const clearance = await ContactClearance.create({
+    userId,
+    contactId: contact._id,
+    amountMinor: parsed.data.amountMinor,
+    direction: outstanding > 0 ? "OWED_TO_ME" : "OWED_BY_ME",
+    note: parsed.data.note || null,
+    on: parsed.data.on ?? new Date(),
+  });
+
+  const owed = await balances(userId, [contact._id]);
+  res.status(201).json({ ...withBalance(contact, owed.get(contact._id.toString())), clearance });
+});
+
+// DELETE /contacts/:id/clear/:clearanceId — undo a clearance; what it
+// cleared is owed again.
+contactsRouter.delete(
+  "/:id/clear/:clearanceId",
+  validObjectIdParam("id"),
+  validObjectIdParam("clearanceId"),
+  async (req, res) => {
+    const userId = currentUserId(req);
+    const deleted = await ContactClearance.findOneAndDelete({
+      _id: req.params.clearanceId,
+      contactId: req.params.id,
+      userId,
+    });
+    if (!deleted) return res.status(404).json({ error: "Not found" });
+    res.status(204).end();
+  }
+);
 
 // PATCH /contacts/:id — a new name or number.
 contactsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
@@ -134,7 +209,8 @@ contactsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
 
 // DELETE /contacts/:id — takes them off every transaction they were on.
 // The transactions themselves stay exactly as they were: a split is still
-// a split, only no longer said to be with anyone in particular.
+// a split, only no longer said to be with anyone in particular. What was
+// cleared with them goes too: it belonged to their balance alone.
 contactsRouter.delete("/:id", validObjectIdParam("id"), async (req, res) => {
   const userId = currentUserId(req);
   const contact = await Contact.findOne({ _id: req.params.id, userId });
@@ -144,6 +220,7 @@ contactsRouter.delete("/:id", validObjectIdParam("id"), async (req, res) => {
     { userId, "people.contactId": contact._id },
     { $pull: { people: { contactId: new Types.ObjectId(contact._id) } } }
   );
+  await ContactClearance.deleteMany({ userId, contactId: contact._id });
   await contact.deleteOne();
   res.status(204).end();
 });

@@ -1,5 +1,5 @@
 import { Types } from "mongoose";
-import { Contact, Transaction, TransactionDoc } from "../../models";
+import { Contact, ContactClearance, Transaction, TransactionDoc } from "../../models";
 
 /**
  * Who owes what, and the rules for saying so on a transaction.
@@ -65,51 +65,108 @@ export interface Balance {
   givenMinor: number;
   /** What has come back from them. */
   returnedMinor: number;
+  /**
+   * What was settled without money moving - see ContactClearance. Signed
+   * like the balance: positive cleared what they owed, negative cleared
+   * what the user owed them.
+   */
+  clearedMinor: number;
   transactionCount: number;
   lastAt: Date | null;
 }
 
-/** Every person's running balance, from the transactions that name them. */
+/**
+ * A clearance as it moves a balance: what they owed goes down, what the
+ * user owed goes up towards zero. The aggregation form of the same rule.
+ */
+const SIGNED_CLEARANCE = {
+  $cond: [{ $eq: ["$direction", "OWED_TO_ME"] }, "$amountMinor", { $multiply: ["$amountMinor", -1] }],
+};
+
+/**
+ * Every person's running balance, from the transactions that name them
+ * and whatever was cleared with them since. The opening balance is the
+ * contact's own, added by whoever has the contact to hand.
+ */
 export async function balances(userId: Types.ObjectId, contactIds?: Types.ObjectId[]) {
-  const rows = await Transaction.aggregate<{
-    _id: Types.ObjectId;
-    givenMinor: number;
-    returnedMinor: number;
-    transactionCount: number;
-    lastAt: Date;
-  }>([
-    { $match: { userId, "people.0": { $exists: true } } },
-    { $unwind: "$people" },
-    ...(contactIds ? [{ $match: { "people.contactId": { $in: contactIds } } }] : []),
-    {
-      $group: {
-        _id: "$people.contactId",
-        givenMinor: { $sum: { $cond: [{ $eq: ["$type", "DEBIT"] }, "$people.amountMinor", 0] } },
-        returnedMinor: { $sum: { $cond: [{ $eq: ["$type", "CREDIT"] }, "$people.amountMinor", 0] } },
-        transactionCount: { $sum: 1 },
-        lastAt: { $max: "$occurredAt" },
+  const [rows, cleared] = await Promise.all([
+    Transaction.aggregate<{
+      _id: Types.ObjectId;
+      givenMinor: number;
+      returnedMinor: number;
+      transactionCount: number;
+      lastAt: Date;
+    }>([
+      { $match: { userId, "people.0": { $exists: true } } },
+      { $unwind: "$people" },
+      ...(contactIds ? [{ $match: { "people.contactId": { $in: contactIds } } }] : []),
+      {
+        $group: {
+          _id: "$people.contactId",
+          givenMinor: { $sum: { $cond: [{ $eq: ["$type", "DEBIT"] }, "$people.amountMinor", 0] } },
+          returnedMinor: { $sum: { $cond: [{ $eq: ["$type", "CREDIT"] }, "$people.amountMinor", 0] } },
+          transactionCount: { $sum: 1 },
+          lastAt: { $max: "$occurredAt" },
+        },
       },
-    },
+    ]),
+    ContactClearance.aggregate<{ _id: Types.ObjectId; clearedMinor: number; lastAt: Date }>([
+      { $match: { userId, ...(contactIds ? { contactId: { $in: contactIds } } : {}) } },
+      { $group: { _id: "$contactId", clearedMinor: { $sum: SIGNED_CLEARANCE }, lastAt: { $max: "$on" } } },
+    ]),
   ]);
 
-  return new Map<string, Balance>(
+  const result = new Map<string, Balance>(
     rows.map((row) => [
       row._id.toString(),
       {
         balanceMinor: row.givenMinor - row.returnedMinor,
         givenMinor: row.givenMinor,
         returnedMinor: row.returnedMinor,
+        clearedMinor: 0,
         transactionCount: row.transactionCount,
         lastAt: row.lastAt,
       },
     ])
   );
+  for (const row of cleared) {
+    const key = row._id.toString();
+    const balance = result.get(key) ?? { ...NO_BALANCE };
+    result.set(key, {
+      ...balance,
+      balanceMinor: balance.balanceMinor - row.clearedMinor,
+      clearedMinor: row.clearedMinor,
+      lastAt: balance.lastAt && balance.lastAt > row.lastAt ? balance.lastAt : row.lastAt,
+    });
+  }
+  return result;
+}
+
+/**
+ * What people owe the user, net, beyond what their transactions say:
+ * every opening balance, less everything cleared. The pooled figures (the
+ * dashboard's, and analytics') start from split bills, which know nothing
+ * of either, and add this so that they agree with the People screen.
+ */
+export async function outsideTransactionsMinor(userId: Types.ObjectId): Promise<number> {
+  const [opening, cleared] = await Promise.all([
+    Contact.aggregate<{ total: number }>([
+      { $match: { userId } },
+      { $group: { _id: null, total: { $sum: { $ifNull: ["$openingBalanceMinor", 0] } } } },
+    ]),
+    ContactClearance.aggregate<{ total: number }>([
+      { $match: { userId } },
+      { $group: { _id: null, total: { $sum: SIGNED_CLEARANCE } } },
+    ]),
+  ]);
+  return (opening[0]?.total ?? 0) - (cleared[0]?.total ?? 0);
 }
 
 export const NO_BALANCE: Balance = {
   balanceMinor: 0,
   givenMinor: 0,
   returnedMinor: 0,
+  clearedMinor: 0,
   transactionCount: 0,
   lastAt: null,
 };

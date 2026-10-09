@@ -12,6 +12,7 @@ import {
 import { istDayKey, istDayStart } from "../../time";
 import { UserMonth, monthLabel, userMonth, userMonths } from "./budget.months";
 import { BucketSummary, bucketSummary } from "./budget.bucket";
+import { isCardBillCommitment } from "../cards/cards.billPayment";
 
 /**
  * One amount for the month, and everything the month costs held against it.
@@ -361,6 +362,11 @@ async function fixedStillDue(userId: Types.ObjectId, month: UserMonth): Promise<
   // current month is the month's own first day.
   for (const commitment of commitments) {
     if (commitment.paidForPeriod === month.from) continue;
+    // A card's bill is the month's card purchases, each already in spent.
+    // Holding it back as still to go out counts them a second time, and
+    // the payment itself counts nothing, so it would never even read as
+    // paid.
+    if (isCardBillCommitment(commitment)) continue;
     const shortfall = commitmentAmountFor(commitment, month.from) - (paid.get(commitment._id.toString()) ?? 0);
     if (shortfall > 0) add(commitment.categoryId?.toString() ?? "none", shortfall);
   }

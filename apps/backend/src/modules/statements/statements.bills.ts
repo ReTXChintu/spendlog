@@ -12,9 +12,8 @@ import { istDayKey } from "../../time";
  * worth telling someone about, and it is worth telling them once.
  *
  * Whether it has been paid is answered the way the rest of the app answers
- * it - by a payment marked against that card. There is no other way to
- * know: paying a bill produces one message, from the bank being debited,
- * and nothing on the card side to pair it with.
+ * it - by a payment marked against that card. Most are marked as they
+ * arrive, from the bank's message (cards.billPayment.ts); the rest by hand.
  */
 
 export interface UpcomingBill {

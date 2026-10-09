@@ -4,6 +4,7 @@ import { StatementLineResolution } from "../../types";
 import { categorizeTransaction } from "../../parsing/categorizer";
 import { tripForOccurredAt } from "../trips/trips.service";
 import { countsAsStatementSpend, isLedgerWorthy, looksLikeCardBill } from "./statements.classify";
+import { markCardBillPayment } from "../cards/cards.billPayment.service";
 
 /**
  * Matching a statement against the ledger, and adding what is missing.
@@ -291,7 +292,7 @@ async function addFromLine(
       ? await findCardNamedIn(statement.userId, line.description)
       : null;
 
-  return Transaction.create({
+  const created = await Transaction.create({
     userId: statement.userId,
     accountId: statement.accountId,
     categoryId,
@@ -316,6 +317,13 @@ async function addFromLine(
       },
     ],
   });
+
+  // The narrow check above only links a bill whose card number is printed.
+  // One that names the issuer, or goes through CRED, is still a card bill,
+  // and is kept out of spending the way an SMS for it would be - linked to
+  // a card only when one can be named without guessing.
+  if (statement.kind === "BANK" && created.type === "DEBIT") await markCardBillPayment(created);
+  return created;
 }
 
 /**

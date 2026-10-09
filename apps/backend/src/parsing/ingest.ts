@@ -9,6 +9,7 @@ import { tripForOccurredAt } from "../modules/trips/trips.service";
 import { findDuplicate, detectSelfTransfer } from "./dedupe";
 import { parseTransactionText } from "./parser";
 import { horizonFor } from "../modules/ledger/ledger.horizon";
+import { markCardBillPayment } from "../modules/cards/cards.billPayment.service";
 
 export interface IngestResult {
   status: "created" | "duplicate" | "ignored";
@@ -96,6 +97,11 @@ export async function ingestRawMessage(params: {
       }
 
       await duplicate.save();
+
+      // The second message may be the one that says what this was: a
+      // bank's email often names the card a bill went to where its SMS
+      // gave only an amount.
+      if (!duplicate.editedAt) await markCardBillPayment(duplicate);
     }
 
     return { status: "duplicate", transaction: duplicate };
@@ -136,11 +142,20 @@ export async function ingestRawMessage(params: {
   });
 
   await detectSelfTransfer(transaction);
-  // A monthly EMI debit looks like any other payment, so the schedule is
-  // ticked off here rather than waiting for someone to do it by hand.
-  await matchEmiInstalment(transaction);
-  // Same reasoning, for a loan taken outside a card.
-  await matchLoanInstalment(transaction);
+  // A card bill paid from the bank is the month's card purchases leaving
+  // a second time, and the card's "payment received" is that same money
+  // arriving. Neither is spending or income. See cards.billPayment.ts.
+  const isCardBill = await markCardBillPayment(transaction);
+  if (!isCardBill) {
+    // A monthly EMI debit looks like any other payment, so the schedule is
+    // ticked off here rather than waiting for someone to do it by hand.
+    // Not a card bill, though, however close its amount: a bill that
+    // happened to match an instalment would claim it and leave the real
+    // instalment looking unpaid.
+    await matchEmiInstalment(transaction);
+    // Same reasoning, for a loan taken outside a card.
+    await matchLoanInstalment(transaction);
+  }
 
   return { status: "created", transaction };
 }

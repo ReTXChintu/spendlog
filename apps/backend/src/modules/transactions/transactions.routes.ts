@@ -495,6 +495,17 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   }
   const { loanId: _handledAbove, people: _checkedAbove, ...fields } = parsed.data;
 
+  // Whether this edit changes what kind of transaction it is, as opposed
+  // to filing it. Compared against the row rather than read off the body,
+  // because a form sends every field whether it was touched or not - and
+  // only a real change should stop the card bill recogniser from deciding.
+  const kindChanged =
+    (parsed.data.type !== undefined && parsed.data.type !== existing.type) ||
+    (parsed.data.isTransfer !== undefined && parsed.data.isTransfer !== existing.isTransfer) ||
+    (parsed.data.isSettlement !== undefined && parsed.data.isSettlement !== existing.isSettlement) ||
+    (parsed.data.cardPaymentFor !== undefined &&
+      (parsed.data.cardPaymentFor ?? null) !== (existing.cardPaymentFor?.toString() ?? null));
+
   const updated = await Transaction.findOneAndUpdate(
     { _id: req.params.id, userId },
     {
@@ -503,6 +514,7 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
         ...transferFields,
         ...(people !== undefined ? { people } : {}),
         editedAt: new Date(),
+        ...(kindChanged ? { kindEditedAt: new Date() } : {}),
       },
     },
     { new: true }

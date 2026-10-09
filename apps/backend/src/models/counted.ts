@@ -19,9 +19,11 @@ export interface CountedInput {
    * was counted the day it happened, so the bill is that same money
    * reaching the bank a month later, not new spending.
    *
-   * Marked by hand: a bill payment usually produces one message, from the
-   * bank being debited, with nothing on the card side to pair it with -
-   * which is why detectSelfTransfer cannot find it.
+   * Recognised from the bank's message as it arrives (see
+   * modules/cards/cards.billPayment.ts), or marked by hand. A bill payment
+   * often produces one message only, from the bank being debited, and the
+   * card's own "payment received" can land days later - which is why
+   * detectSelfTransfer, with its ten-minute window, cannot find it.
    */
   cardPaymentFor?: unknown;
   isSettlement?: boolean | null;

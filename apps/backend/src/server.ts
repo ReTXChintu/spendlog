@@ -5,6 +5,8 @@ import path from "path";
 import { app } from "./app";
 import { connectDatabase } from "./db";
 import { env } from "./env";
+import { runLendingBackfill } from "./modules/contacts/contacts.backfill";
+import { runCardBillBackfill } from "./modules/cards/cards.billPayment.service";
 import { syncAllConnectedEmails } from "./modules/ingestion/gmail.service";
 
 const EMAIL_SYNC_INTERVAL_MS = 15 * 60 * 1000;
@@ -54,6 +56,13 @@ async function start() {
       console.log("Bound to loopback only — reachable through the frontend's /api proxy.");
     }
   });
+
+  // One-off repairs, once per user (see backfill.ts). In the background:
+  // a slow pass must not keep the server from answering.
+  runLendingBackfill().catch((err) => console.error("Lent & borrowed backfill failed:", err));
+  // Card bills imported before they were recognised, still counted as
+  // spending - and the card's "payment received", still counted as income.
+  runCardBillBackfill().catch((err) => console.error("Card bill backfill failed:", err));
 
   setInterval(() => {
     syncAllConnectedEmails().catch((err) => console.error("Background Gmail sync failed:", err));

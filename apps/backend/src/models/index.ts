@@ -36,6 +36,7 @@ import {
   TransactionType,
 } from "../types";
 import { resolveCountedAmount } from "./counted";
+import { LendingFields, LendingInput, contactForMerchant, isPlain, lendingFields, lendingKindOf } from "./lent";
 import { istMonthKey } from "../time";
 
 // Responses are serialized with `id` (a string) rather than Mongo's `_id`,
@@ -133,6 +134,10 @@ export interface UserDoc {
   lastSmsPingAt?: Date | null;
   /// Which Gemini model answers. Null means the app's default.
   geminiModel?: string | null;
+  /// One-off repairs to this user's data, by name, and the version of
+  /// each that has run. Checked at start-up so each runs once per user,
+  /// and again only when its version is raised.
+  backfills?: Map<string, number>;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -249,6 +254,7 @@ const userSchema = new Schema<UserDoc>(
       default: [],
     },
     lastSmsPingAt: { type: Date, default: null },
+    backfills: { type: Map, of: Number, default: undefined },
   },
   {
     timestamps: true,
@@ -272,6 +278,7 @@ const userSchema = new Schema<UserDoc>(
         delete ret.failedLogins;
         delete ret.loginLockedUntil;
         delete ret.tokenVersion;
+        delete ret.backfills;
         return ret;
       },
     },
@@ -609,6 +616,12 @@ export interface TransactionDoc {
   /// Set when a person edited the transaction by hand, so the UI can say so
   /// and automatic passes can leave their corrections alone.
   editedAt?: Date | null;
+  /// Set when a person changed what kind of transaction this is - its
+  /// direction, or whether it is a transfer, a card bill or a settlement.
+  /// Narrower than editedAt, which a new category also sets: recognising a
+  /// card bill should still fix a row whose category was corrected, and
+  /// must never undo someone saying "no, that one was real spending".
+  kindEditedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -707,6 +720,7 @@ const transactionSchema = new Schema<TransactionDoc>(
     pending: { type: Boolean, default: false },
     occurredAt: { type: Date, required: true },
     editedAt: { type: Date, default: null },
+    kindEditedAt: { type: Date, default: null },
     sources: { type: [transactionSourceSchema], default: [] },
     mergedFrom: { type: [mergedSnapshotSchema], default: [] },
     countedAmountMinor: { type: Number, default: 0 },
@@ -718,6 +732,53 @@ const transactionSchema = new Schema<TransactionDoc>(
   },
   { timestamps: true, ...serialization }
 );
+
+/**
+ * What a plain row in Lent & borrowed has to become before it is written,
+ * or null for every other row. See lent.ts for the rule.
+ *
+ * Shared by the write hooks below and the start-up backfill, so a row
+ * mended by either ends up exactly the same. Async because it needs the
+ * people category's id and, for a row that names nobody yet, the user's
+ * contacts to find the one its merchant is.
+ */
+export async function lendingPatch(
+  row: LendingInput & { _id?: unknown; userId?: unknown }
+): Promise<LendingFields | null> {
+  // Cheap checks first: most rows are not in the category at all, and
+  // finding its id is a query the first time round.
+  if (!row.categoryId || !isPlain(row)) return null;
+  // Imported here rather than at the top: categories.system reads the
+  // models this file defines.
+  const { peopleCategoryId } = await import("../modules/categories/categories.system");
+  const kind = lendingKindOf(row, await peopleCategoryId());
+  if (!kind) return null;
+  // A bank loan landing is borrowed money as well, but the loan accounts
+  // for it, and it is between the user and a bank, not a person.
+  if (kind === "PAID_BACK" && row._id && (await Loan.exists({ disbursedTransactionId: row._id }))) return null;
+
+  const named = (row.people ?? []).length > 0;
+  const contacts = named || !row.userId ? [] : await Contact.find({ userId: row.userId }).select("name").lean();
+  return lendingFields(row, kind, contactForMerchant(row.merchant, contacts));
+}
+
+// Registered before the counted-amount hooks below, which then count the
+// row as what it has just become.
+transactionSchema.pre("save", async function () {
+  const patch = await lendingPatch(this);
+  if (patch) Object.assign(this, patch);
+});
+
+transactionSchema.pre("findOneAndUpdate", async function () {
+  const update = this.getUpdate() as Record<string, unknown> | null;
+  if (!update) return;
+  const current = await this.model.findOne(this.getQuery()).lean();
+  if (!current) return;
+
+  const set = (update.$set as Record<string, unknown>) ?? {};
+  const patch = await lendingPatch({ ...current, ...update, ...set } as never);
+  if (patch) this.setUpdate({ ...update, $set: { ...set, ...patch } });
+});
 
 // Keeping the counted amount correct is the whole point of storing it, so
 // it is derived on every write rather than at any call site. save() covers
@@ -1656,6 +1717,52 @@ contactSchema.index(
 );
 
 export const Contact = model<ContactDoc>("Contact", contactSchema);
+
+/**
+ * Part or all of what stood between the user and a person, settled some
+ * other way than money: they owed 1,000 and bought the user a 999 watch.
+ *
+ * Not a transaction, on purpose. Nothing left or reached any account, so
+ * there is nothing to count as spending or income and nothing for an
+ * account's balance to move by - only the person's balance moves, towards
+ * zero.
+ */
+export interface ContactClearanceDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  contactId: Types.ObjectId;
+  /// Always positive. Which way it went is `direction`.
+  amountMinor: number;
+  /// Fixed when it is recorded, from the balance it cleared: what they
+  /// owed (OWED_TO_ME) or what the user owed them (OWED_BY_ME). Later
+  /// transactions can carry the balance past zero, and an old clearance
+  /// must not change sides when they do.
+  direction: ContactClearanceDirection;
+  note?: string | null;
+  /// The day it was settled, which is not always the day it was written down.
+  on: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export const CLEARANCE_DIRECTIONS = ["OWED_TO_ME", "OWED_BY_ME"] as const;
+export type ContactClearanceDirection = (typeof CLEARANCE_DIRECTIONS)[number];
+
+const contactClearanceSchema = new Schema<ContactClearanceDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    contactId: { type: Schema.Types.ObjectId, ref: "Contact", required: true },
+    amountMinor: { type: Number, required: true, min: 1 },
+    direction: { type: String, enum: CLEARANCE_DIRECTIONS, required: true },
+    note: { type: String, default: null, maxlength: 200 },
+    on: { type: Date, required: true },
+  },
+  { timestamps: true, ...serialization }
+);
+
+contactClearanceSchema.index({ userId: 1, contactId: 1, on: -1 });
+
+export const ContactClearance = model<ContactClearanceDoc>("ContactClearance", contactClearanceSchema);
 
 
 /**

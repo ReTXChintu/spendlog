@@ -13,6 +13,7 @@ import { loanProgress } from "../loans/loans.routes";
 import { planStatus } from "../ai/ai.coach";
 import { expectedBalances, tracksBalance } from "../accounts/accounts.balance";
 import { PocketStatus, pocketStatuses } from "../accounts/accounts.pocket";
+import { outsideTransactionsMinor } from "../contacts/contacts.people";
 
 export const dashboardRouter = Router();
 dashboardRouter.use(requireAuth);
@@ -379,10 +380,14 @@ async function owedBalance(userId: Types.ObjectId) {
     },
   ]);
 
+  // Opening balances and clearances are per person and outside every
+  // transaction; without them a debt cleared with a gift would still read
+  // as owed here while the People screen said it was settled.
+  const outside = await outsideTransactionsMinor(userId);
   const row = rows[0];
-  if (!row) return { balanceMinor: 0 };
+  if (!row) return { balanceMinor: outside };
 
-  return { balanceMinor: row.lent - row.settledIn + row.settledOut };
+  return { balanceMinor: row.lent - row.settledIn + row.settledOut + outside };
 }
 
 /**

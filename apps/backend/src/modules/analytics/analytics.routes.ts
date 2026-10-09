@@ -5,6 +5,7 @@ import { currentUserId, requireAuth } from "../../middleware/auth";
 import { Account, Transaction } from "../../models";
 import { IST_OFFSET, istDayKey } from "../../time";
 import { UserMonth, monthLabel, monthSoFar, userMonth, userMonths } from "../budget/budget.months";
+import { outsideTransactionsMinor } from "../contacts/contacts.people";
 
 export const analyticsRouter = Router();
 analyticsRouter.use(requireAuth);
@@ -187,7 +188,7 @@ analyticsRouter.get("/trend", async (req, res) => {
 analyticsRouter.get("/owed", async (req, res) => {
   const userId = currentUserId(req);
 
-  const [lent, settled] = await Promise.all([
+  const [lent, settled, outsideMinor] = await Promise.all([
     // What was paid on someone else's behalf: the part of a split bill
     // that was never the user's own spending.
     Transaction.aggregate<{ _id: null; amountMinor: number; count: number }>([
@@ -204,6 +205,9 @@ analyticsRouter.get("/owed", async (req, res) => {
       { $match: { userId, isSettlement: true } },
       { $group: { _id: "$type", amountMinor: { $sum: "$amountMinor" } } },
     ]),
+    // Per person and outside every transaction: what was owed before
+    // SpendLog, less what was cleared without money moving.
+    outsideTransactionsMinor(userId),
   ]);
 
   const lentMinor = lent[0]?.amountMinor ?? 0;
@@ -219,8 +223,9 @@ analyticsRouter.get("/owed", async (req, res) => {
     .populate("account");
 
   res.json({
-    balanceMinor: lentMinor - receivedMinor + paidMinor,
+    balanceMinor: lentMinor - receivedMinor + paidMinor + outsideMinor,
     lentMinor,
+    outsideMinor,
     settledInMinor: receivedMinor,
     settledOutMinor: paidMinor,
     splitCount: lent[0]?.count ?? 0,

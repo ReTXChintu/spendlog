@@ -1,5 +1,6 @@
 import { HydratedDocument, Types } from "mongoose";
 import { FixedCommitment, FixedCommitmentDoc, Transaction, User, commitmentAmountFor } from "../../models";
+import { isCardBillCommitment } from "../cards/cards.billPayment";
 
 /// How far back to look for the credit that opened this period. Wide
 /// enough for pay that came early or late, narrow enough that last
@@ -188,7 +189,7 @@ export async function budgetPace(userId: Types.ObjectId, now = new Date()) {
   // paid for a flat of three, split down to a share of 4,000, is a 4,000
   // commitment met in full - not a 4,000 commitment overpaid by three times
   // over, which is what the raw amount would have said.
-  const paidRows = await Transaction.aggregate<{ _id: Types.ObjectId; total: number }>([
+  const paidRows = await Transaction.aggregate<{ _id: Types.ObjectId; total: number; moved: number }>([
     {
       $match: {
         userId,
@@ -197,12 +198,24 @@ export async function budgetPace(userId: Types.ObjectId, now = new Date()) {
         occurredAt: { $gte: period.start, $lt: period.end },
       },
     },
-    { $group: { _id: "$commitmentId", total: { $sum: "$countedAmountMinor" } } },
+    {
+      $group: {
+        _id: "$commitmentId",
+        total: { $sum: "$countedAmountMinor" },
+        moved: { $sum: "$amountMinor" },
+      },
+    },
   ]);
-  const paidByCommitment = new Map(paidRows.map((row) => [row._id.toString(), row.total]));
+  const paidByCommitment = new Map(paidRows.map((row) => [row._id.toString(), row]));
 
   const commitmentState = commitments.map((commitment) => {
-    const paidMinor = paidByCommitment.get(commitment._id.toString()) ?? 0;
+    const paid = paidByCommitment.get(commitment._id.toString());
+    // A card's bill is the exception to counting what counts. Its payment
+    // counts nothing - the purchases on it were counted when they were
+    // made - so it is met by the money that went, and never holds any back:
+    // that would be the same purchases counted twice against the period.
+    const isCardBill = isCardBillCommitment(commitment);
+    const paidMinor = (isCardBill ? paid?.moved : paid?.total) ?? 0;
     // A hand-tick still means "consider this settled", for anything paid
     // in a way the app will never see.
     const ticked = commitment.paidForPeriod === period.key;
@@ -215,11 +228,12 @@ export async function budgetPace(userId: Types.ObjectId, now = new Date()) {
       paidMinor,
       ticked,
       dueMinor,
+      isCardBill,
       isPaid: ticked || paidMinor >= dueMinor,
       // Only what is still to go out. Holding back the whole amount once
       // part of it has been sent would count that part twice, since it is
       // already in the spending above.
-      shortfallMinor: ticked ? 0 : Math.max(0, dueMinor - paidMinor),
+      shortfallMinor: ticked || isCardBill ? 0 : Math.max(0, dueMinor - paidMinor),
     };
   });
 
@@ -280,6 +294,9 @@ export async function budgetPace(userId: Types.ObjectId, now = new Date()) {
       // Part of it sent and part not, which is the case worth a sentence
       // rather than a tick box.
       isPartial: row.paidMinor > 0 && row.paidMinor < row.dueMinor && !row.ticked,
+      // A card's bill: listed, so it can still be ticked off, but never
+      // held back from what is left to spend.
+      isCardBill: row.isCardBill,
     })),
     shortfallNote: shortfallNote(commitmentState, remainingMinor),
     configured: true as const,
