@@ -20,7 +20,11 @@ import 'transactions_screen.dart';
 /// stands this cycle, when it bills, its stored details, and its
 /// statements.
 class AccountsScreen extends StatefulWidget {
-  const AccountsScreen({super.key});
+  const AccountsScreen({super.key, this.initialAccountId});
+
+  /// The account to open on, when arriving from its face on Home - to add
+  /// its card details, say - rather than on the first chip.
+  final String? initialAccountId;
 
   @override
   State<AccountsScreen> createState() => _AccountsScreenState();
@@ -116,7 +120,7 @@ class _Overview {
 
 class _AccountsScreenState extends State<AccountsScreen> {
   List<_Overview>? _accounts;
-  String? _selectedId;
+  late String? _selectedId = widget.initialAccountId;
   bool _error = false;
   int _unfiled = 0;
   bool _reading = false;
@@ -274,7 +278,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
         title: const Text('Stop being pocket money?'),
         content: Text(
           '${account.label} goes back to being an ordinary account. Its payments stay, '
-          'without the pocket money mark, and count towards your daily budget again.',
+          'without the pocket money mark.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Keep it')),

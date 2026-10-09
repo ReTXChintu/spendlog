@@ -97,8 +97,7 @@ class _CardVaultPanelState extends State<CardVaultPanel> {
     }
   }
 
-  Future<String?> _askPin({required String action}) =>
-      showDialog<String>(context: context, builder: (_) => _PinDialog(action: action));
+  Future<String?> _askPin({required String action}) => askVaultPin(context, action: action);
 
   @override
   Widget build(BuildContext context) {
@@ -378,16 +377,24 @@ class _CardVaultPanelState extends State<CardVaultPanel> {
   }
 }
 
-class _PinDialog extends StatefulWidget {
-  const _PinDialog({required this.action});
+/// Asks for the vault PIN. Null when the dialog is cancelled.
+///
+/// The one prompt for it everywhere - the details here, and the eye on a
+/// card's face on Home - so the PIN is always asked for the same way.
+Future<String?> askVaultPin(BuildContext context, {String action = 'Show'}) =>
+    showDialog<String>(context: context, builder: (_) => VaultPinDialog(action: action));
 
+class VaultPinDialog extends StatefulWidget {
+  const VaultPinDialog({super.key, required this.action});
+
+  /// The confirm button's label: Show, Remove.
   final String action;
 
   @override
-  State<_PinDialog> createState() => _PinDialogState();
+  State<VaultPinDialog> createState() => _VaultPinDialogState();
 }
 
-class _PinDialogState extends State<_PinDialog> {
+class _VaultPinDialogState extends State<VaultPinDialog> {
   final _pin = TextEditingController();
 
   @override

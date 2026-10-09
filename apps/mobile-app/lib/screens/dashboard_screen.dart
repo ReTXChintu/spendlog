@@ -5,20 +5,21 @@ import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/format.dart';
 import '../services/reminder_service.dart';
-import '../widgets/card_limits.dart';
 import '../widgets/card_picker.dart';
 import '../widgets/commitment_amount.dart';
-import '../widgets/daily_bucket.dart';
 import '../widgets/home/earmarks_tile.dart';
 import '../widgets/home/home_grid.dart';
-import '../widgets/home/money_carousel.dart';
+import '../widgets/home/monthly_budget_card.dart';
 import '../widgets/home/plan_warnings.dart';
+import '../widgets/home/wallet.dart';
 import '../widgets/loan_dialog.dart';
 import '../widgets/pocket_money.dart';
 import '../widgets/state_block.dart';
 import 'accounts_screen.dart';
+import 'monthly_budget_screen.dart';
 import 'people_screen.dart';
 import 'perks_screen.dart';
+import 'transactions_screen.dart';
 
 /// The Dashboard tab of Home: what you need to know now.
 ///
@@ -98,9 +99,27 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
     await load();
   }
 
-  Future<void> _openAccounts() async {
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AccountsScreen()));
+  /// Every account, or straight to one of them - to add a card's details
+  /// from its face, say.
+  Future<void> _openAccounts([String? accountId]) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => AccountsScreen(initialAccountId: accountId)),
+    );
     await load();
+  }
+
+  /// A card's own transactions, starting on the statement cycle running now.
+  Future<void> _openCard(CardFace card) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => TransactionsScreen(initialAccountId: card.accountId)),
+    );
+    await load();
+  }
+
+  Future<void> _editBudget() async {
+    final data = _data;
+    if (data == null) return;
+    if (await MonthlyBudgetScreen.open(context, initial: data.budget)) await load();
   }
 
   Future<void> _togglePaid(FixedCommitment commitment, bool paid) async {
@@ -137,6 +156,10 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
     if (data == null) return const Center(child: CircularProgressIndicator());
 
     final pace = data.pace;
+    // Pocket money already shows on its account's tile in the wallet; a
+    // tile of its own is only for one that is not there.
+    final walletIds = data.wallet.banks.map((bank) => bank.accountId).toSet();
+    final loosePockets = data.pocketMoney.where((p) => !walletIds.contains(p.accountId));
 
     return RefreshIndicator(
       onRefresh: load,
@@ -160,32 +183,28 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
           // meant to change what you do next.
           PlanWarnings(warnings: data.planWarnings, onOpenPlan: widget.onOpenPlan ?? () {}),
 
-          MoneyCarousel(money: data.money, cards: data.cards, onOpenAccounts: _openAccounts),
+          // The month against its budget, first: the pace line is the one
+          // thing on this screen that should change what you spend today.
+          MonthlyBudgetCard(budget: data.budget, onEdit: _editBudget),
 
-          // Three groups, in the order the questions come. Today: what can
-          // I spend and which card. Cards: where each one stands. This
-          // month: how the month is going.
+          // Every card and account, so where one stands is here rather
+          // than two screens in.
+          const _Group('Wallet'),
+          WalletSection(
+            money: data.money,
+            wallet: data.wallet,
+            onOpenCard: _openCard,
+            onOpenAccount: _openAccounts,
+            onManage: _openAccounts,
+          ),
+
+          // Then two groups, in the order the questions come. Today: which
+          // card and what is set aside. This month: how the rest of it is
+          // going.
           const _Group('Today'),
           HomeGrid(items: [
-            if (data.daily.configured)
-              GridItem(HomeTile(
-                label: 'Daily budget',
-                icon: Icons.today_outlined,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    DailyBucket(daily: data.daily, framed: false),
-                    const SizedBox(height: 6),
-                    Text(
-                      '${formatMoneyShort(data.daily.dailyBudgetMinor)} a day',
-                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: context.c.muted),
-                    ),
-                  ],
-                ),
-              )),
             if (data.earmarks.count > 0) GridItem(EarmarksTile(earmarks: data.earmarks)),
-            for (final pocket in data.pocketMoney)
-              GridItem(_PocketTile(pocket: pocket, onTap: _openAccounts)),
+            for (final pocket in loosePockets) GridItem(_PocketTile(pocket: pocket, onTap: _openAccounts)),
             GridItem(
               HomeTile(
                 label: 'Which card today',
@@ -206,17 +225,13 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
             ),
           ]),
 
-          if (data.cards.isNotEmpty) ...[
-            const _Group('Cards'),
-            _Heading(title: 'Where the cards stand', sub: _cardsSub(data.cards)),
-            const SizedBox(height: 12),
-            CardLimits(cards: data.cards, onOpenAccounts: widget.onOpenSettings),
-          ],
-
           const _Group('This month'),
           HomeGrid(items: [
             GridItem(_SoFarTile(month: data.monthSoFar)),
-            GridItem(_PaceTile(pace: pace, onOpenSettings: widget.onOpenSettings)),
+            // The salary pace only until a monthly budget is set: after that
+            // the budget's own pace says it, and two paces would argue.
+            if (!data.budget.configured)
+              GridItem(_PaceTile(pace: pace, onOpenSettings: widget.onOpenSettings)),
             if (pace.configured && pace.commitments.isNotEmpty)
               GridItem(_FixedCostsTile(pace: pace, onTogglePaid: _togglePaid), span: 2),
             if (data.emiCount > 0)
@@ -830,18 +845,6 @@ class _PocketTile extends StatelessWidget {
       ),
     );
   }
-}
-
-/// What the card bars are saying at a glance, before any of them is read.
-String _cardsSub(List<CardStatus> cards) {
-  final over = cards.where((card) => card.limitMinor != null && card.spentMinor > card.limitMinor!);
-
-  if (over.isEmpty) {
-    return 'Spending this cycle against what the bank allows, with your own limit marked.';
-  }
-  return over.length == 1
-      ? '${over.first.name} is past what you meant to spend this month.'
-      : '${over.length} cards are past what you meant to spend this month.';
 }
 
 class _Heading extends StatelessWidget {

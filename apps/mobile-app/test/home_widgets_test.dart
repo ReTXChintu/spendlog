@@ -7,8 +7,9 @@ import 'package:spendlog/widgets/charts/daily_spend_chart.dart';
 import 'package:spendlog/widgets/charts/donut_chart.dart';
 import 'package:spendlog/widgets/home/earmarks_tile.dart';
 import 'package:spendlog/widgets/home/home_grid.dart';
-import 'package:spendlog/widgets/home/money_carousel.dart';
+import 'package:spendlog/widgets/home/monthly_budget_card.dart';
 import 'package:spendlog/widgets/home/plan_warnings.dart';
+import 'package:spendlog/widgets/home/wallet.dart';
 
 final _dashboardJson = <String, dynamic>{
   'money': {
@@ -37,7 +38,69 @@ final _dashboardJson = <String, dynamic>{
     {'text': 'Keep food delivery under ₹4,000 a month', 'category': 'Food & dining', 'monthlyCapMinor': 400000, 'spentMinor': 460000, 'expectedSoFarMinor': 260000, 'state': 'over'},
     {'text': 'Shopping at most ₹3,000', 'category': null, 'monthlyCapMinor': 300000, 'spentMinor': 200000, 'expectedSoFarMinor': 150000, 'state': 'watch'},
   ],
-  'daily': {'configured': true, 'bucketMinor': 120000, 'extraIncomeMinor': 500000},
+  'budget': {
+    'configured': true,
+    'everSet': true,
+    'month': {
+      'key': '2026-09', 'from': '2026-09-15', 'to': '2026-10-14', 'label': '15 Sep – 14 Oct', 'bySalary': true,
+      'isCurrent': true, 'isClosed': false, 'daysInMonth': 30, 'dayOfMonth': 25, 'daysLeft': 6,
+    },
+    'budgetMinor': 2000000,
+    'spentMinor': 1766000,
+    'leftMinor': 234000,
+    'isOver': false,
+    'pace': {
+      'status': 'high', 'dayOfMonth': 25, 'daysInMonth': 30, 'daysLeft': 6, 'remainingMinor': 234000,
+      'safeDailyMinor': 30000, 'expectedSpentMinor': 1600000, 'aheadByMinor': 166000, 'dailyAverageMinor': 60000,
+      'projectedSpentMinor': 2066000, 'runOutOn': '2026-10-12', 'fixedPaidMinor': 1000000, 'fixedStillDueMinor': 54000,
+    },
+    'categories': [
+      {'categoryId': 'cat1', 'name': 'Food & dining', 'icon': 'ic-food', 'color': '#F97316', 'limitMinor': 400000, 'spentMinor': 460000, 'leftMinor': -60000, 'isOver': true, 'pace': null},
+      {'categoryId': 'cat2', 'name': 'Groceries', 'icon': 'ic-basket', 'color': '#16A34A', 'limitMinor': 500000, 'spentMinor': 210000, 'leftMinor': 290000, 'isOver': false, 'pace': null},
+    ],
+    'unassigned': {
+      'amountMinor': 1100000, 'spentMinor': 1096000, 'leftMinor': 4000, 'isOver': false, 'pace': null,
+      'categories': [{'categoryId': 'cat9', 'name': 'Rent', 'spentMinor': 1000000}, {'categoryId': null, 'name': 'No category', 'spentMinor': 96000}],
+    },
+    'bucket': {'configured': true, 'balanceMinor': 4500000, 'balanceIfMonthEndedNowMinor': 4734000},
+    'suggestedMonthlyMinor': null,
+  },
+  'wallet': {
+    'cards': [
+      {
+        'accountId': 'k1', 'name': 'Amazon Pay ICICI credit card', 'bankName': 'ICICI Bank', 'issuer': null,
+        'network': 'VISA', 'last4': '4321', 'color': null, 'creditLimitMinor': 30000000, 'outstandingMinor': 1500000,
+        'outstandingIsEstimate': false, 'usedMinor': 4000000, 'availableMinor': 26000000, 'sharesLimitWith': [],
+        'cycleSpentMinor': 2500000, 'cycleStart': '2026-09-20', 'cycleEnd': '2026-10-19', 'periodIsCycle': true,
+        'statementOn': 19, 'lastStatement': null, 'nextDueOn': '2026-10-18', 'daysToDue': 9,
+        'spendLimitMinor': 3000000, 'state': 'close', 'hasCardDetails': true,
+      },
+      {
+        'accountId': 'k2', 'name': 'HDFC Millennia', 'bankName': 'HDFC Bank', 'network': 'MASTERCARD', 'last4': '8899',
+        'creditLimitMinor': null, 'usedMinor': 0, 'cycleSpentMinor': 120000, 'state': 'unset', 'hasCardDetails': false,
+      },
+    ],
+    'banks': [
+      {
+        'accountId': 'a1', 'name': 'HDFC', 'bankName': 'HDFC Bank', 'accountType': 'BANK', 'last4': '1234',
+        'balanceMinor': 4523000, 'isSavings': false, 'pocket': null,
+        'debitCards': [{'accountId': 'd1', 'last4': '5555', 'network': 'RUPAY', 'hasCardDetails': false}],
+        'hasCardDetails': false,
+      },
+      {'accountId': 'a2', 'name': 'ICICI', 'bankName': 'ICICI Bank', 'accountType': 'BANK', 'balanceMinor': null, 'debitCards': []},
+      {'accountId': 'c1', 'name': 'Cash', 'bankName': 'Cash', 'accountType': 'CASH', 'balanceMinor': 120000, 'debitCards': []},
+      {
+        'accountId': 'p1', 'name': 'Kotak', 'bankName': 'Kotak', 'accountType': 'BANK', 'balanceMinor': 150000,
+        'pocket': {
+          'holder': 'Rahul', 'limitMinor': 200000, 'renewDay': 1, 'from': '2026-10-01', 'to': '2026-10-31',
+          'renewsOn': '2026-11-01', 'spentMinor': 50000, 'leftMinor': 150000, 'transactionCount': 4,
+          'lastMonthSpentMinor': 180000, 'toppedUpMinor': 0, 'renewsToday': false,
+        },
+        'debitCards': [],
+      },
+      {'accountId': 's1', 'name': 'SBI', 'bankName': 'SBI', 'accountType': 'BANK', 'last4': '9876', 'balanceMinor': 50000000, 'isSavings': true, 'debitCards': []},
+    ],
+  },
 };
 
 Widget _wrap(Widget child, Brightness brightness) => MaterialApp(
@@ -55,7 +118,17 @@ void main() {
     expect(data.earmarks.items.first.label, 'New phone');
     expect(data.earmarks.items[1].label, 'Mum');
     expect(data.planWarnings.first.state, 'over');
-    expect(data.daily.extraIncomeMinor, 500000);
+    expect(data.budget.configured, isTrue);
+    expect(data.budget.pace!.status, 'high');
+    expect(data.budget.categories.first.isOver, isTrue);
+    expect(data.budget.unassigned!.categories.last.categoryId, isNull);
+    expect(data.budget.bucket.thisMonthMinor, 234000);
+    expect(data.wallet.cards.first.network, 'VISA');
+    expect(data.wallet.cards.first.state, 'close');
+    expect(data.wallet.cards.last.creditLimitMinor, isNull);
+    expect(data.wallet.banks.first.debitCards.single.network, 'RUPAY');
+    expect(data.wallet.banks[3].pocket!.holder, 'Rahul');
+    expect(data.wallet.banks.last.isSavings, isTrue);
   });
 
   test('pocket money reads off an account and the dashboard', () {
@@ -89,6 +162,9 @@ void main() {
     expect(data.money.accounts, isEmpty);
     expect(data.earmarks.count, 0);
     expect(data.planWarnings, isEmpty);
+    expect(data.budget.configured, isFalse);
+    expect(data.budget.pace, isNull);
+    expect(data.wallet.isEmpty, isTrue);
   });
 
   test('SavingsPlan reads rules and month', () {
@@ -116,21 +192,20 @@ void main() {
       addTearDown(tester.view.reset);
 
       final data = DashboardData.fromJson(_dashboardJson);
-      final card = CardStatus.fromJson({
-        'accountId': 'k1',
-        'name': 'Amazon Pay ICICI credit card',
-        'last4': '4321',
-        'spentMinor': 2500000,
-        'creditLimitMinor': 30000000,
-        'availableMinor': 26000000,
-        'state': 'ok',
-      });
 
       await tester.pumpWidget(_wrap(
         Column(
           children: [
             PlanWarnings(warnings: data.planWarnings, onOpenPlan: () {}),
-            MoneyCarousel(money: data.money, cards: [card], onOpenAccounts: () {}),
+            MonthlyBudgetCard(budget: data.budget, onEdit: () {}),
+            const SizedBox(height: 12),
+            WalletSection(
+              money: data.money,
+              wallet: data.wallet,
+              onOpenCard: (_) {},
+              onOpenAccount: (_) {},
+              onManage: () {},
+            ),
             const SizedBox(height: 12),
             HomeGrid(items: [
               GridItem(EarmarksTile(earmarks: data.earmarks)),
@@ -174,15 +249,18 @@ void main() {
       expect(find.text('Set balance'), findsOneWidget);
       expect(find.text('SET ASIDE FOR LATER'), findsOneWidget);
 
-      // The savings account sits last in the scroll, its amount hidden
-      // until asked for.
-      await tester.drag(find.byType(ListView), const Offset(-800, 0));
-      await tester.pumpAndSettle();
-      expect(find.text('Savings · not counted · tap to see'), findsOneWidget);
+      expect(find.text('Over by ₹600'), findsOneWidget);
+      expect(find.text('+₹2,340 if the month ended now'), findsOneWidget);
+
+      // The savings account sits last, its amount hidden until asked for.
+      final savings = find.text('Savings · tap to show');
+      expect(savings, findsOneWidget);
       expect(find.text('₹5,00,000.00'), findsNothing);
-      await tester.tap(find.text('Savings · not counted · tap to see'));
+      await tester.ensureVisible(savings);
+      await tester.tap(savings);
       await tester.pump();
       expect(find.text('₹5,00,000.00'), findsOneWidget);
+      expect(find.text('Savings · not counted · tap to hide'), findsOneWidget);
     });
   }
 }

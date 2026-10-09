@@ -72,7 +72,10 @@ class TransactionsScreenState extends State<TransactionsScreen> {
 
   List<CardStatus> _cards = [];
   BudgetPace? _pace;
-  DailyBudget? _daily;
+
+  /// The month on show against its budget, for the month bar. Null until
+  /// it arrives, and for a month with no budget the bar simply says less.
+  MonthlyBudgetStatus? _budget;
 
   String _query = '';
   String? _categoryId;
@@ -159,6 +162,7 @@ class TransactionsScreenState extends State<TransactionsScreen> {
     }
     if (!mounted) return;
     unawaited(_loadSummary());
+    unawaited(_loadBudget());
     if (thenLoadLedger) await load();
   }
 
@@ -166,6 +170,7 @@ class TransactionsScreenState extends State<TransactionsScreen> {
     if (index < 0 || index >= _months.length || index == _monthIndex) return;
     setState(() => _monthIndex = index);
     _loadSummary();
+    _loadBudget();
     load();
   }
 
@@ -325,14 +330,12 @@ class TransactionsScreenState extends State<TransactionsScreen> {
       // The ledger still works without the rollup and the chips.
     }
 
-    // Card cycles, the spending pace, and the daily savings bucket, for the
-    // strip above the list. All advisory, so none of them stops the ledger
-    // loading.
+    // Card cycles and the spending pace, for the strip above the list.
+    // Both advisory, so neither stops the ledger loading.
     try {
       final extras = await Future.wait([
         ApiClient.instance.get('/cards'),
         ApiClient.instance.get('/budget/pace'),
-        ApiClient.instance.get('/budget/daily'),
       ]);
       if (!mounted) return;
       setState(() {
@@ -340,7 +343,6 @@ class TransactionsScreenState extends State<TransactionsScreen> {
             .map((c) => CardStatus.fromJson(c as Map<String, dynamic>))
             .toList();
         _pace = BudgetPace.fromJson(extras[1] as Map<String, dynamic>);
-        _daily = DailyBudget.fromJson(extras[2] as Map<String, dynamic>);
       });
     } catch (_) {
       // Advisory only.
@@ -368,6 +370,24 @@ class TransactionsScreenState extends State<TransactionsScreen> {
       setState(() => _summary = summary);
     } catch (_) {
       // The ledger still works without the rollup.
+    }
+  }
+
+  /// The month on show against the budget it had, for the month bar.
+  /// Asked for by key, like the rollup, so a past month shows what it came
+  /// to against its own budget rather than this month's.
+  Future<void> _loadBudget() async {
+    final key = _month?.month;
+    // A refresh of the same month keeps its bar up until the new figures
+    // land; another month's must not linger under this one's name.
+    if (mounted && _budget?.month.key != key) setState(() => _budget = null);
+    try {
+      final path = key == null || key.isEmpty ? '/budget/monthly' : '/budget/monthly/${Uri.encodeComponent(key)}';
+      final budget = MonthlyBudgetStatus.fromJson(await ApiClient.instance.get(path) as Map<String, dynamic>);
+      if (!mounted || _month?.month != key) return;
+      setState(() => _budget = budget);
+    } catch (_) {
+      // The bar still steps through months without it.
     }
   }
 
@@ -475,17 +495,7 @@ class TransactionsScreenState extends State<TransactionsScreen> {
 
   /// Stays on the month (or range) already showing.
   Future<void> _refreshAll({bool keepVisible = false}) =>
-      Future.wait([load(keepVisible: keepVisible), _loadContext(), _loadSummary()]);
-
-  /// Keyed by IST day, so a day header can show what that day did to the
-  /// savings bucket alongside spend/income. Only covers the current pay
-  /// period — `by-day` can page further back than that, and those older
-  /// days simply show no second row.
-  Map<String, DailyBudgetDay> get _bucketByDate {
-    final daily = _daily;
-    if (daily == null || !daily.configured) return const {};
-    return {for (final day in daily.days) day.day: day};
-  }
+      Future.wait([load(keepVisible: keepVisible), _loadContext(), _loadSummary(), _loadBudget()]);
 
   void _search(String value) {
     _debounce?.cancel();
@@ -755,6 +765,8 @@ class TransactionsScreenState extends State<TransactionsScreen> {
     final canGoBack = !_ownRange && _monthIndex + 1 < _months.length;
     final canGoForward = !_ownRange && _monthIndex > _currentMonthIndex;
 
+    final budget = _ownRange ? null : _budget;
+
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 2, 16, 8),
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
@@ -763,46 +775,104 @@ class TransactionsScreenState extends State<TransactionsScreen> {
         border: Border.all(color: c.line),
         borderRadius: BorderRadius.circular(T.rMd),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          if (!_ownRange)
-            IconButton(
-              onPressed: canGoBack ? () => _goToMonth(_monthIndex + 1) : null,
-              icon: const Icon(Icons.chevron_left),
-              color: c.ink,
-              disabledColor: c.mutedLight,
-              tooltip: 'The month before',
-              visualDensity: VisualDensity.compact,
-            )
-          else
-            const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: _ownRange ? CrossAxisAlignment.start : CrossAxisAlignment.center,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: c.ink),
+          Row(
+            children: [
+              if (!_ownRange)
+                IconButton(
+                  onPressed: canGoBack ? () => _goToMonth(_monthIndex + 1) : null,
+                  icon: const Icon(Icons.chevron_left),
+                  color: c.ink,
+                  disabledColor: c.mutedLight,
+                  tooltip: 'The month before',
+                  visualDensity: VisualDensity.compact,
+                )
+              else
+                const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: _ownRange ? CrossAxisAlignment.start : CrossAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: c.ink),
+                    ),
+                    if (note.isNotEmpty)
+                      Text(note, style: TextStyle(fontSize: 11, color: c.muted, fontWeight: FontWeight.w600)),
+                  ],
                 ),
-                if (note.isNotEmpty)
-                  Text(note, style: TextStyle(fontSize: 11, color: c.muted, fontWeight: FontWeight.w600)),
-              ],
+              ),
+              if (!_ownRange)
+                IconButton(
+                  onPressed: canGoForward ? () => _goToMonth(_monthIndex - 1) : null,
+                  icon: const Icon(Icons.chevron_right),
+                  color: c.ink,
+                  disabledColor: c.mutedLight,
+                  tooltip: 'The month after',
+                  visualDensity: VisualDensity.compact,
+                ),
+              if (_ownRange)
+                TextButton(onPressed: _backToMonths, child: const Text('Back to months'))
+              else if (!_onCurrentMonth)
+                TextButton(onPressed: () => _goToMonth(_currentMonthIndex), child: const Text('This month')),
+            ],
+          ),
+          if (budget != null && budget.configured) _monthBudget(c, budget),
+        ],
+      ),
+    );
+  }
+
+  /// The month on show against its budget: a bar, what went, and what is
+  /// left - or, once the month is over, what it put into savings.
+  Widget _monthBudget(SpendColors c, MonthlyBudgetStatus budget) {
+    final total = budget.budgetMinor ?? 0;
+    final left = budget.leftMinor ?? total - budget.spentMinor;
+    final over = left < 0;
+    final tint = over ? c.debit : ((budget.pace?.isHigh ?? false) ? c.warn : c.brand);
+    final fraction = total > 0 ? (budget.spentMinor / total).clamp(0.0, 1.0) : 0.0;
+
+    final String outcome;
+    if (over) {
+      outcome = '${formatMoneyShort(-left)} over';
+    } else if (budget.month.isClosed) {
+      outcome = '${formatMoneyShort(left)} to savings';
+    } else {
+      outcome = '${formatMoneyShort(left)} left';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(100),
+            child: LinearProgressIndicator(
+              value: fraction,
+              minHeight: 5,
+              backgroundColor: c.track,
+              valueColor: AlwaysStoppedAnimation(tint),
             ),
           ),
-          if (!_ownRange)
-            IconButton(
-              onPressed: canGoForward ? () => _goToMonth(_monthIndex - 1) : null,
-              icon: const Icon(Icons.chevron_right),
-              color: c.ink,
-              disabledColor: c.mutedLight,
-              tooltip: 'The month after',
-              visualDensity: VisualDensity.compact,
-            ),
-          if (_ownRange)
-            TextButton(onPressed: _backToMonths, child: const Text('Back to months'))
-          else if (!_onCurrentMonth)
-            TextButton(onPressed: () => _goToMonth(_currentMonthIndex), child: const Text('This month')),
+          const SizedBox(height: 5),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${formatMoneyShort(budget.spentMinor)} of ${formatMoneyShort(total)} budget',
+                  style: kNum.copyWith(fontSize: 11.5, color: c.muted),
+                ),
+              ),
+              Text(
+                outcome,
+                style: kNum.copyWith(fontSize: 11.5, fontWeight: FontWeight.w700, color: over ? c.debit : c.ink70),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -941,7 +1011,7 @@ class TransactionsScreenState extends State<TransactionsScreen> {
               onReview: () => _setFilter(() => _categoryId = 'none'),
             ),
           for (final day in _days!) ...[
-            _DayHeader(day: day, bucketDay: _bucketByDate[day.date]),
+            _DayHeader(day: day),
             for (final transaction in day.transactions)
               TransactionTile(
                 transaction: transaction,
@@ -1161,77 +1231,43 @@ class _NudgeStrip extends StatelessWidget {
 
 class _DayHeader extends StatelessWidget {
   final DayGroup day;
-  final DailyBudgetDay? bucketDay;
-  const _DayHeader({required this.day, this.bucketDay});
+  const _DayHeader({required this.day});
 
   @override
   Widget build(BuildContext context) {
-    final bucketDay = this.bucketDay;
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 4),
       padding: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: context.c.ink, width: 2)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
+          Text(
+            formatDayLabel(day.date),
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: context.c.ink),
+          ),
           Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                formatDayLabel(day.date),
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: context.c.ink),
-              ),
-              Row(
-                children: [
-                  if (day.spendMinor > 0)
-                    Text(
-                      '−${formatMoney(day.spendMinor)}',
-                      style: kNum.copyWith(fontSize: 12.8, fontWeight: FontWeight.w700, color: context.c.debit),
-                    ),
-                  if (day.spendMinor > 0 && day.incomeMinor > 0)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      child: Text('·', style: TextStyle(color: context.c.mutedLight)),
-                    ),
-                  if (day.incomeMinor > 0)
-                    Text(
-                      '+${formatMoney(day.incomeMinor)}',
-                      style: kNum.copyWith(fontSize: 12.8, fontWeight: FontWeight.w700, color: context.c.credit),
-                    ),
-                ],
-              ),
+              if (day.spendMinor > 0)
+                Text(
+                  '−${formatMoney(day.spendMinor)}',
+                  style: kNum.copyWith(fontSize: 12.8, fontWeight: FontWeight.w700, color: context.c.debit),
+                ),
+              if (day.spendMinor > 0 && day.incomeMinor > 0)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Text('·', style: TextStyle(color: context.c.mutedLight)),
+                ),
+              if (day.incomeMinor > 0)
+                Text(
+                  '+${formatMoney(day.incomeMinor)}',
+                  style: kNum.copyWith(fontSize: 12.8, fontWeight: FontWeight.w700, color: context.c.credit),
+                ),
             ],
           ),
-          if (bucketDay != null) ...[
-            const SizedBox(height: 4),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Text(
-                  'SAVINGS  ',
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.4,
-                    color: context.c.mutedLight,
-                  ),
-                ),
-                Text(
-                  bucketDay.deltaMinor >= 0
-                      ? '+ ${formatMoney(bucketDay.deltaMinor)} put by'
-                      : '− ${formatMoney(-bucketDay.deltaMinor)} drawn out',
-                  style: kNum.copyWith(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w700,
-                    color: bucketDay.deltaMinor >= 0 ? context.c.credit : context.c.debit,
-                  ),
-                ),
-              ],
-            ),
-          ],
         ],
       ),
     );

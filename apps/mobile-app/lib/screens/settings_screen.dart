@@ -17,6 +17,7 @@ import '../widgets/commitment_amount.dart';
 import '../widgets/family_section.dart';
 import '../widgets/loan_dialog.dart';
 import 'accounts_screen.dart';
+import 'monthly_budget_screen.dart';
 import 'statements_screen.dart';
 import 'login_screen.dart';
 import 'permission_screen.dart';
@@ -59,7 +60,9 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
   List<Loan> _loans = [];
   int? _salaryMinor;
   int? _salaryDay;
-  int? _dailyBudgetMinor;
+
+  /// This month against its budget; null until loaded, or when it failed.
+  MonthlyBudgetStatus? _budget;
 
   bool _readingStatements = false;
   String? _statementResult;
@@ -344,7 +347,6 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
       setState(() {
         _salaryMinor = profile['salaryAmountMinor'] as int?;
         _salaryDay = profile['salaryDay'] as int?;
-        _dailyBudgetMinor = profile['dailyBudgetMinor'] as int?;
         _commitments = (results[1] as List<dynamic>)
             .map((c) => FixedCommitment.fromJson(c as Map<String, dynamic>))
             .toList();
@@ -358,6 +360,15 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
     } catch (_) {
       // Nothing set yet, which the card says for itself.
     }
+
+    // On its own, so a budget that fails to load costs its card and not
+    // the salary and fixed costs beside it.
+    try {
+      final json = await ApiClient.instance.get('/budget/monthly') as Map<String, dynamic>;
+      if (mounted) setState(() => _budget = MonthlyBudgetStatus.fromJson(json));
+    } catch (_) {
+      // The card says "Not set" and the editor loads it again itself.
+    }
   }
 
   Future<void> _editSalary() async {
@@ -368,12 +379,15 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
     if (saved == true) await _loadYou();
   }
 
-  Future<void> _editDailyBudget() async {
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (_) => _DailyBudgetDialog(amountMinor: _dailyBudgetMinor),
+  Future<void> _editBudget() async {
+    // Handed what is already loaded, so it opens filled in; it fetches for
+    // itself when the budget could not be loaded here.
+    final saved = await MonthlyBudgetScreen.open(
+      context,
+      initial: _budget,
+      categories: _budget == null || _categories.isEmpty ? null : _categories,
     );
-    if (saved == true) await _loadYou();
+    if (saved) await _loadYou();
   }
 
   Future<void> _editCommitment([FixedCommitment? commitment]) async {
@@ -933,7 +947,15 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
         ),
       ];
 
-  /// Facts about you: what lands each month, and signing out.
+  /// "₹20,000 a month · 4 category limits", or "Not set".
+  String _budgetSubtitle() {
+    final budget = _budget;
+    if (budget == null || !budget.configured) return 'Not set';
+    final limits = budget.categories.length;
+    return '${formatMoney(budget.budgetMinor!)} a month'
+        '${limits == 0 ? '' : ' · $limits ${limits == 1 ? 'category limit' : 'category limits'}'}';
+  }
+
   /// What is already spoken for each month: pay in, and the fixed payments
   /// out. Together these are what the dashboard paces a month against, and
   /// they used to sit in the same drawer as the sign-out button.
@@ -956,19 +978,18 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
         ),
         const SizedBox(height: 14),
         _SettingsCard(
-          icon: Icons.savings_outlined,
-          title: 'What a day should cost',
-          subtitle:
-              _dailyBudgetMinor != null ? '${formatMoney(_dailyBudgetMinor!)} a day' : 'Not set',
+          icon: Icons.donut_large_outlined,
+          title: 'Monthly budget',
+          subtitle: _budgetSubtitle(),
           child: _CardBody(
-            text: 'Every day under it puts the difference by, every day over it takes the '
-                'difference back. The running total is what there is to move into savings when '
-                'the next salary lands, and it starts again '
-                '${_salaryDay != null ? 'on your pay day' : 'on the 1st'}.',
+            text: 'One amount for the month, and everything counts against it - rent, EMIs and SIPs '
+                'included. Share it out across categories if you like; whatever is left when the '
+                'month ends goes into your savings bucket. A month runs '
+                '${_salaryDay != null ? 'pay day to pay day' : 'from the 1st'}.',
             actions: [
               OutlinedButton(
-                onPressed: _editDailyBudget,
-                child: Text(_dailyBudgetMinor != null ? 'Change it' : 'Set a daily budget'),
+                onPressed: _editBudget,
+                child: Text(_budget?.configured ?? false ? 'Edit budget' : 'Set a monthly budget'),
               ),
             ],
           ),
@@ -1438,67 +1459,6 @@ class _ToggleRow extends StatelessWidget {
 ///
 /// Two numbers rather than a whole profile screen, because they are the
 /// only two the pace arithmetic needs.
-/// What a day should cost. One field, because that is the whole setting.
-class _DailyBudgetDialog extends StatefulWidget {
-  final int? amountMinor;
-
-  const _DailyBudgetDialog({this.amountMinor});
-
-  @override
-  State<_DailyBudgetDialog> createState() => _DailyBudgetDialogState();
-}
-
-class _DailyBudgetDialogState extends State<_DailyBudgetDialog> {
-  late final _amount = TextEditingController(
-    text: widget.amountMinor != null ? (widget.amountMinor! ~/ 100).toString() : '',
-  );
-  bool _saving = false;
-
-  @override
-  void dispose() {
-    _amount.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    setState(() => _saving = true);
-    final navigator = Navigator.of(context);
-    final rupees = double.tryParse(_amount.text.trim());
-
-    try {
-      // An empty box clears it rather than being a mistake: that is how
-      // somebody turns the bucket off again.
-      await ApiClient.instance.patch('/budget/profile', {
-        'dailyBudgetMinor': rupees == null || rupees <= 0 ? null : (rupees * 100).round(),
-      });
-      navigator.pop(true);
-    } catch (_) {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('What a day should cost'),
-      content: TextField(
-        controller: _amount,
-        autofocus: true,
-        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        decoration: const InputDecoration(
-          labelText: 'A day',
-          prefixText: '₹ ',
-          hintText: '1000',
-        ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
-        FilledButton(onPressed: _saving ? null : _save, child: const Text('Save')),
-      ],
-    );
-  }
-}
-
 class _SalaryDialog extends StatefulWidget {
   final int? amountMinor;
   final int? day;

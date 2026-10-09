@@ -103,8 +103,9 @@ class _EditSheetState extends State<_EditSheet> {
   String? _transferAccountId;
   late DateTime _occurredAt;
 
-  /// DEBIT: a one-off kept out of the daily budget. CREDIT: kept out of the
-  /// savings bucket. Same field on the server, read by direction.
+  /// DEBIT: a one-off, still counted against the monthly budget. CREDIT:
+  /// kept out of the savings bucket. Same field on the server, read by
+  /// direction.
   late bool _isSpecial;
   late bool _isFixed;
   String? _cardPaymentFor;
@@ -1301,7 +1302,10 @@ class _EditSheetState extends State<_EditSheet> {
       if (main != null) main,
       if (_isDebit && _isFixed) _fixedPanel(),
       if (_isDebit && _isSpecial)
-        const _Hint('One-off: still counted as spending, just kept out of the daily budget.'),
+        const _Hint(
+          'One-off: marked as out of the ordinary. It still counts against your monthly budget, like '
+          'everything else.',
+        ),
       if (!_isDebit && _isSpecial)
         const _Hint("Kept out of your savings bucket - it won't be counted towards what you save."),
     ];

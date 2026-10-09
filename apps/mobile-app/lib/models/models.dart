@@ -1,6 +1,8 @@
 import '../utils/format.dart';
+import 'budget_models.dart';
 import 'home_models.dart';
 
+export 'budget_models.dart';
 export 'home_models.dart';
 
 class Category {
@@ -248,9 +250,9 @@ class Transaction {
   /// until it is no longer waiting.
   final bool isEarmarked;
 
-  /// A one-off the daily budget should not score a day against. Still
-  /// counted everywhere else, because the money still left. On a CREDIT:
-  /// keep this money out of the savings bucket.
+  /// On a DEBIT, a one-off: out of the ordinary, and still counted against
+  /// the monthly budget like everything else. On a CREDIT: keep this money
+  /// out of the savings bucket.
   final bool isSpecial;
 
   /// Marked by hand: the credit that opens a spending period.
@@ -726,96 +728,6 @@ class FixedCommitment {
 List<Category> categoriesFor(List<Category> categories, String type) {
   final refused = type == 'CREDIT' ? 'OUT' : 'IN';
   return categories.where((category) => category.direction != refused).toList();
-}
-
-/// One day of the daily budget: what went out, and what it left behind.
-class DailyBudgetDay {
-  final String day;
-  final int spentMinor;
-
-  /// Budget less spending: positive put by, negative taken back.
-  final int deltaMinor;
-
-  DailyBudgetDay({required this.day, required this.spentMinor, required this.deltaMinor});
-
-  factory DailyBudgetDay.fromJson(Map<String, dynamic> json) => DailyBudgetDay(
-        day: json['day'] as String? ?? '',
-        spentMinor: json['spentMinor'] as int? ?? 0,
-        deltaMinor: json['deltaMinor'] as int? ?? 0,
-      );
-}
-
-/// The daily allowance and the pot filling or draining behind it.
-///
-/// A different question from the pace: the pace forecasts whether you will
-/// reach payday, this keeps score against what you decided a day should
-/// cost. The bucket is what there is to move into savings when the next
-/// salary lands.
-class DailyBudget {
-  final bool configured;
-  final int dailyBudgetMinor;
-  final bool resetsOnSalary;
-  final int daysCounted;
-  final int daysLeft;
-  final int allowedMinor;
-  final int spentMinor;
-
-  /// Positive is put by, negative is spent out of what was put by.
-  final int bucketMinor;
-  final int todaySpentMinor;
-  final int todayLeftMinor;
-  final int daysOver;
-
-  /// One-offs and trips, kept out of the score and reported here.
-  final int keptOutMinor;
-  final int keptOutCount;
-  final List<DailyBudgetDay> days;
-
-  /// Money in on top of salary this period, already added to bucketMinor.
-  final int extraIncomeMinor;
-
-  /// Refunds for purchases the bucket paid for, given back on the day they came.
-  final int refundedBackMinor;
-
-  DailyBudget({
-    required this.configured,
-    this.dailyBudgetMinor = 0,
-    this.resetsOnSalary = false,
-    this.daysCounted = 0,
-    this.daysLeft = 0,
-    this.allowedMinor = 0,
-    this.spentMinor = 0,
-    this.bucketMinor = 0,
-    this.todaySpentMinor = 0,
-    this.todayLeftMinor = 0,
-    this.daysOver = 0,
-    this.keptOutMinor = 0,
-    this.keptOutCount = 0,
-    this.days = const [],
-    this.extraIncomeMinor = 0,
-    this.refundedBackMinor = 0,
-  });
-
-  factory DailyBudget.fromJson(Map<String, dynamic> json) => DailyBudget(
-        configured: json['configured'] as bool? ?? false,
-        dailyBudgetMinor: json['dailyBudgetMinor'] as int? ?? 0,
-        resetsOnSalary: json['resetsOnSalary'] as bool? ?? false,
-        daysCounted: json['daysCounted'] as int? ?? 0,
-        daysLeft: json['daysLeft'] as int? ?? 0,
-        allowedMinor: json['allowedMinor'] as int? ?? 0,
-        spentMinor: json['spentMinor'] as int? ?? 0,
-        bucketMinor: json['bucketMinor'] as int? ?? 0,
-        todaySpentMinor: json['todaySpentMinor'] as int? ?? 0,
-        todayLeftMinor: json['todayLeftMinor'] as int? ?? 0,
-        daysOver: json['daysOver'] as int? ?? 0,
-        keptOutMinor: json['keptOutMinor'] as int? ?? 0,
-        keptOutCount: json['keptOutCount'] as int? ?? 0,
-        days: (json['days'] as List<dynamic>? ?? [])
-            .map((row) => DailyBudgetDay.fromJson(row as Map<String, dynamic>))
-            .toList(),
-        extraIncomeMinor: json['extraIncomeMinor'] as int? ?? 0,
-        refundedBackMinor: json['refundedBackMinor'] as int? ?? 0,
-      );
 }
 
 /// How fast money is going out against how fast it can. A pace, not a
@@ -1514,7 +1426,13 @@ class UpcomingBill {
 /// Everything the landing screen needs, in one request.
 class DashboardData {
   final BudgetPace pace;
-  final DailyBudget daily;
+
+  /// The month against its budget: spent, left, the pace, the category
+  /// limits and the savings bucket.
+  final MonthlyBudgetStatus budget;
+
+  /// Every card and bank account as a face, for the wallet on Home.
+  final Wallet wallet;
   final List<CardStatus> cards;
   final CardPicks picks;
   final int needsCategoryYesterday;
@@ -1548,7 +1466,8 @@ class DashboardData {
 
   DashboardData({
     required this.pace,
-    required this.daily,
+    MonthlyBudgetStatus? budget,
+    Wallet? wallet,
     required this.cards,
     required this.picks,
     required this.needsCategoryYesterday,
@@ -1569,7 +1488,9 @@ class DashboardData {
     Earmarks? earmarks,
     this.planWarnings = const [],
     this.pocketMoney = const [],
-  })  : money = money ?? MoneyOnHand(),
+  })  : budget = budget ?? const MonthlyBudgetStatus(),
+        wallet = wallet ?? const Wallet(),
+        money = money ?? MoneyOnHand(),
         earmarks = earmarks ?? Earmarks();
 
   factory DashboardData.fromJson(Map<String, dynamic> json) {
@@ -1580,7 +1501,8 @@ class DashboardData {
 
     return DashboardData(
       pace: BudgetPace.fromJson(json['pace'] as Map<String, dynamic>? ?? {}),
-      daily: DailyBudget.fromJson(json['daily'] as Map<String, dynamic>? ?? {}),
+      budget: MonthlyBudgetStatus.fromJson(json['budget'] as Map<String, dynamic>? ?? {}),
+      wallet: Wallet.fromJson(json['wallet'] as Map<String, dynamic>?),
       cards: (json['cards'] as List<dynamic>? ?? [])
           .map((card) => CardStatus.fromJson(card as Map<String, dynamic>))
           .toList(),
