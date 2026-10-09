@@ -1,11 +1,14 @@
 import { Router } from "express";
+import { Types } from "mongoose";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
 import { Account, FixedCommitment, Transaction, User, commitmentAmountFor } from "../../models";
 import { COMMITMENT_KINDS } from "../../types";
 import { budgetPace, changeCommitmentAmount, commitmentPeriod } from "./budget.pace";
-import { dailyBudget, withBudgetChange } from "./budget.daily";
+import { checkMonthlyBudget, monthlyBudgetStatus, withMonthlyBudgetChange } from "./budget.monthly";
+import { savingsBucket } from "./budget.bucket";
+import { userMonths } from "./budget.months";
 
 export const budgetRouter = Router();
 budgetRouter.use(requireAuth);
@@ -13,48 +16,97 @@ budgetRouter.use(requireAuth);
 const profileSchema = z.object({
   salaryAmountMinor: z.number().int().nonnegative().nullable().optional(),
   salaryDay: z.number().int().min(1).max(31).nullable().optional(),
-  dailyBudgetMinor: z.number().int().nonnegative().nullable().optional(),
 });
 
 // GET /budget/profile — what is known about money coming in.
 budgetRouter.get("/profile", async (req, res) => {
-  const user = await User.findById(currentUserId(req)).select("salaryAmountMinor salaryDay dailyBudgetMinor").orFail();
+  const user = await User.findById(currentUserId(req)).select("salaryAmountMinor salaryDay").orFail();
   res.json({
     salaryAmountMinor: user.salaryAmountMinor ?? null,
     salaryDay: user.salaryDay ?? null,
-    dailyBudgetMinor: user.dailyBudgetMinor ?? null,
   });
 });
 
+// The daily budget that used to be set here is retired: a dailyBudgetMinor
+// sent by an older app is dropped by the schema like any unknown field,
+// rather than rejected, so that app's other settings still save.
 budgetRouter.patch("/profile", async (req, res) => {
   const parsed = profileSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  // A new daily budget applies from today: the days already counted keep
-  // the amount they were counted against.
-  const set: Record<string, unknown> = { ...parsed.data };
-  const next = parsed.data.dailyBudgetMinor;
-  if (next !== undefined && next !== null) {
-    const current = await User.findById(currentUserId(req)).select("dailyBudgetMinor dailyBudgetHistory").orFail();
-    if (next !== current.dailyBudgetMinor) set.dailyBudgetHistory = withBudgetChange(current, next);
-  }
-
-  const user = await User.findByIdAndUpdate(currentUserId(req), { $set: set }, { new: true }).orFail();
+  const user = await User.findByIdAndUpdate(currentUserId(req), { $set: parsed.data }, { new: true }).orFail();
 
   res.json({
     salaryAmountMinor: user.salaryAmountMinor ?? null,
     salaryDay: user.salaryDay ?? null,
-    dailyBudgetMinor: user.dailyBudgetMinor ?? null,
   });
 });
 
-// GET /budget/daily - the daily allowance and the bucket behind it.
+const monthKeySchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
+
+const monthlyBudgetSchema = z.object({
+  amountMinor: z.number().int().positive(),
+  categoryLimits: z
+    .array(
+      z.object({
+        categoryId: z.string().regex(/^[0-9a-fA-F]{24}$/),
+        amountMinor: z.number().int().nonnegative(),
+      })
+    )
+    .max(100)
+    .default([]),
+});
+
+// GET /budget/monthly — this month against its budget: spent, left, the
+// pace, each category's limit and the unassigned pool, and the bucket.
+budgetRouter.get("/monthly", async (req, res) => {
+  res.json(await monthlyBudgetStatus(currentUserId(req)));
+});
+
+// GET /budget/monthly/:key — any month by its key (YYYY-MM, the month of
+// the pay day that opens it), measured against the budget it had.
+budgetRouter.get("/monthly/:key", async (req, res) => {
+  if (!monthKeySchema.safeParse(req.params.key).success) {
+    return res.status(400).json({ error: "A month is YYYY-MM." });
+  }
+  res.json(await monthlyBudgetStatus(currentUserId(req), req.params.key));
+});
+
+// PUT /budget/monthly — the budget, and the category limits inside it.
 //
-// Its own route as well as riding on the dashboard, because the settings
-// screen shows it while the number is being chosen: typing 1,000 and
-// seeing what this period would have come to is the only way to pick one.
-budgetRouter.get("/daily", async (req, res) => {
-  res.json(await dailyBudget(currentUserId(req)));
+// Applies from the month running now: every month already over keeps the
+// budget it was measured against, and so keeps what it put in the bucket.
+// The limits are the whole set - a category left out has no limit.
+budgetRouter.put("/monthly", async (req, res) => {
+  const parsed = monthlyBudgetSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const userId = currentUserId(req);
+  const input = {
+    amountMinor: parsed.data.amountMinor,
+    categoryLimits: parsed.data.categoryLimits.map((limit) => ({
+      categoryId: new Types.ObjectId(limit.categoryId),
+      amountMinor: limit.amountMinor,
+    })),
+  };
+  const problem = await checkMonthlyBudget(userId, input);
+  if (problem) return res.status(400).json(problem);
+
+  const [user, months] = await Promise.all([
+    User.findById(userId).select("monthlyBudgetHistory").orFail(),
+    userMonths(userId, new Date(), 1),
+  ]);
+  await User.updateOne(
+    { _id: userId },
+    { $set: { monthlyBudgetHistory: withMonthlyBudgetChange(user, input, months.recent[0].key) } }
+  );
+
+  res.json(await monthlyBudgetStatus(userId));
+});
+
+// GET /budget/bucket — the savings bucket's balance, month by month.
+budgetRouter.get("/bucket", async (req, res) => {
+  res.json(await savingsBucket(currentUserId(req)));
 });
 
 const commitmentSchema = z.object({

@@ -2,6 +2,7 @@ import { Types } from "mongoose";
 import { AiInsight, FixedCommitment, Loan, SavingsPlan, SavingsPlanDoc, Transaction, User } from "../../models";
 import { istDayKey } from "../../time";
 import { UserMonth, userMonths } from "../budget/budget.months";
+import { monthlyBudgetStatus } from "../budget/budget.monthly";
 import { ask, askForJson } from "./ai.gemini";
 
 /**
@@ -101,11 +102,12 @@ const PLAN_SCHEMA = {
  * plan is built on the same totals the rest of the app shows.
  */
 export async function makeSavingsPlan(userId: Types.ObjectId, key: string, model: string, now = new Date()) {
-  const [user, months, commitments, loans] = await Promise.all([
-    User.findById(userId).select("salaryAmountMinor salaryDay dailyBudgetMinor").orFail(),
+  const [user, months, commitments, loans, budget] = await Promise.all([
+    User.findById(userId).select("salaryAmountMinor salaryDay").orFail(),
     userMonths(userId, now, 4),
     FixedCommitment.find({ userId, isActive: true }),
     Loan.find({ userId, status: "ACTIVE" }),
+    monthlyBudgetStatus(userId, undefined, now),
   ]);
 
   const lines: string[] = [];
@@ -113,7 +115,23 @@ export async function makeSavingsPlan(userId: Types.ObjectId, key: string, model
     `Months run ${months.bySalary ? `from pay day (the ${user.salaryDay}) to pay day` : "by the calendar"}.`
   );
   if (user.salaryAmountMinor) lines.push(`Salary: ${rupees(user.salaryAmountMinor)} a month.`);
-  if (user.dailyBudgetMinor) lines.push(`Daily budget they set: ${rupees(user.dailyBudgetMinor)} a day.`);
+  if (budget.configured) {
+    // One amount for the whole month, fixed costs included, so a plan can
+    // be written in the same terms the app holds them to.
+    lines.push(
+      `Monthly budget they set: ${rupees(budget.budgetMinor!)}, covering everything including fixed costs. ` +
+        `This month so far: ${rupees(budget.spentMinor)} spent, ${rupees(budget.leftMinor!)} left` +
+        (budget.pace ? `, pace ${budget.pace.status.replace("_", " ")}` : "") +
+        "."
+    );
+    if (budget.categories.length) {
+      lines.push(
+        `Category limits within it: ${budget.categories
+          .map((category) => `${category.name} ${rupees(category.limitMinor)} (spent ${rupees(category.spentMinor)})`)
+          .join(", ")}; everything else shares ${rupees(budget.unassigned!.amountMinor)}.`
+      );
+    }
+  }
   if (commitments.length) {
     lines.push(
       `Fixed each month: ${commitments.map((c) => `${c.name} ${rupees(c.amountMinor)}`).join(", ")}.`
@@ -142,7 +160,8 @@ export async function makeSavingsPlan(userId: Types.ObjectId, key: string, model
     "could actually follow this month. Give 3 to 6 rules. Where a rule caps a category, set category to exactly one",
     `of these names: ${[...categoryNames].join(", ") || "(none)"} - and set a realistic monthly cap, usually 10-25%`,
     "below what they have been spending there, never below what a fixed cost needs. Do not recommend specific",
-    "investment products. Amounts are in rupees.",
+    "investment products. Amounts are in rupees. Where they have a monthly budget, keep the plan inside it:",
+    "category caps should fit within it, and say so if their spending cannot.",
   ].join(" ");
 
   const answer = await askForJson<PlanAnswer>(key, model, instruction, lines.join("\n"), PLAN_SCHEMA);

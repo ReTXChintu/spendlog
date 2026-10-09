@@ -11,7 +11,7 @@ import { BudgetPeriod, budgetPeriodFor, budgetPeriodFromSalary } from "./budget.
  * The period a user's money is measured over, right now.
  *
  * Exported because more than one card is built on it - the pace and the
- * daily budget's bucket - and two of them working out separately when the
+ * user's months the monthly budget runs on - and two of them working out separately when the
  * month started is two of them eventually disagreeing about it.
  */
 export async function currentBudgetPeriod(

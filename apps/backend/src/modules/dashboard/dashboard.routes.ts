@@ -1,18 +1,18 @@
 import { Router } from "express";
 import { Types } from "mongoose";
 import { currentUserId, requireAuth } from "../../middleware/auth";
-import { Account, CardStatement, EmiInstalment, EmiPlan, Loan, LoanInstalment, Perk, Transaction } from "../../models";
+import { Account, CardStatement, CardVault, EmiInstalment, EmiPlan, Loan, LoanInstalment, Perk, Transaction } from "../../models";
 import { istDayEnd, istDayKey, istDayStart } from "../../time";
 import { monthSoFar as monthAgainstLast, userMonth } from "../budget/budget.months";
-import { cardStatuses, pickCards } from "../cards/cards.status";
+import { CardStatus, cardStatuses, normaliseNetwork, pickCards } from "../cards/cards.status";
 import { budgetPace } from "../budget/budget.pace";
-import { dailyBudget } from "../budget/budget.daily";
+import { monthlyBudgetStatus } from "../budget/budget.monthly";
 import { perkIsLive } from "../perks/perks.match";
 import { upcomingBills } from "../statements/statements.bills";
 import { loanProgress } from "../loans/loans.routes";
 import { planStatus } from "../ai/ai.coach";
 import { expectedBalances, tracksBalance } from "../accounts/accounts.balance";
-import { pocketStatuses } from "../accounts/accounts.pocket";
+import { PocketStatus, pocketStatuses } from "../accounts/accounts.pocket";
 
 export const dashboardRouter = Router();
 dashboardRouter.use(requireAuth);
@@ -43,7 +43,7 @@ dashboardRouter.get("/", async (req, res) => {
   // monthly figure in the app.
   const month = await userMonth(userId, undefined, now);
 
-  const [cards, pace, needsCategory, emis, loans, owed, perks, statements, monthSoFar, bills, daily, money, earmarks, plan, pocketMoney] =
+  const [cards, pace, needsCategory, emis, loans, owed, perks, statements, monthSoFar, bills, budget, money, earmarks, plan, pocketMoney, banks] =
     await Promise.all([
     cardStatuses(userId, now),
     budgetPace(userId, now),
@@ -55,11 +55,12 @@ dashboardRouter.get("/", async (req, res) => {
     statementsNeedingAttention(userId),
     monthAgainstLast(userId, now),
     upcomingBills(userId, now),
-    dailyBudget(userId, now),
+    monthlyBudgetStatus(userId, undefined, now),
     moneyOnHand(userId),
     openEarmarks(userId),
     planStatus(userId, now),
     pocketMoneyFor(userId, now),
+    bankFaces(userId, now),
   ]);
 
   // Only the ones close enough to act on. Settled: shown here, never as a
@@ -76,8 +77,14 @@ dashboardRouter.get("/", async (req, res) => {
   res.json({
     today,
     pace,
-    daily,
+    // The monthly budget: spent and left, the pace, each category's
+    // limit, and the savings bucket's balance.
+    budget,
     cards,
+    // Every card and bank account as a card face, with everything the
+    // front needs. The back - full number, expiry, name on card - is
+    // never here: it comes from POST /vault/cards/:id/reveal, PIN and all.
+    wallet: { cards: await cardFaces(userId, cards, now), banks },
     picks: pickCards(cards),
     needsCategory,
     emis,
@@ -131,6 +138,110 @@ async function moneyOnHand(userId: Types.ObjectId) {
     /// Bank or cash accounts with no starting balance yet, so not counted.
     untracked: rows.filter((row) => row.balanceMinor === null).length,
   };
+}
+
+/** Whole days from the start of today, in IST, to a date. */
+function daysUntil(now: Date, to: Date | null): number | null {
+  if (!to) return null;
+  return Math.round((to.getTime() - istDayStart(istDayKey(now)).getTime()) / (24 * 60 * 60 * 1000));
+}
+
+/**
+ * A credit card, as its face shows it.
+ *
+ * Built on the statuses the dashboard already has, so the face and the
+ * card strip cannot disagree about what is available. The due date worth
+ * counting down to is the unpaid bill's; with nothing unpaid, the one the
+ * cycle now running will fall due on.
+ */
+async function cardFaces(userId: Types.ObjectId, cards: CardStatus[], now: Date) {
+  const vaults = new Set(
+    (await CardVault.find({ userId }).select("accountId")).map((vault) => vault.accountId.toString())
+  );
+  return cards.map((card) => {
+    const owing = card.billIsPaid === false;
+    const nextDueOn = owing ? card.billDueOn : card.dueOn;
+    return {
+      accountId: card.accountId,
+      name: card.name,
+      bankName: card.bankName,
+      issuer: card.issuer,
+      network: card.network,
+      last4: card.last4,
+      color: card.color,
+      creditLimitMinor: card.creditLimitMinor,
+      outstandingMinor: card.outstandingMinor,
+      outstandingIsEstimate: card.outstandingIsEstimate,
+      usedMinor: card.groupUsedMinor ?? card.usedMinor,
+      availableMinor: card.availableMinor,
+      sharesLimitWith: card.sharesLimitWith,
+      cycleSpentMinor: card.spentMinor,
+      cycleStart: card.periodStart,
+      cycleEnd: card.cycleEnd ?? card.periodEnd,
+      periodIsCycle: card.periodIsCycle,
+      statementOn: card.statementOn,
+      lastStatement:
+        card.lastStatementMinor !== null
+          ? {
+              amountMinor: card.lastStatementMinor,
+              minimumDueMinor: card.minimumDueMinor,
+              statementOn: card.lastStatementOn,
+              dueOn: card.billDueOn,
+              owedMinor: card.outstandingMinor,
+              isPaid: card.billIsPaid,
+            }
+          : null,
+      nextDueOn,
+      daysToDue: owing ? card.billDaysUntilDue : daysUntil(now, nextDueOn),
+      spendLimitMinor: card.limitMinor,
+      state: card.state,
+      hasCardDetails: vaults.has(card.accountId),
+    };
+  });
+}
+
+/**
+ * Every bank account and cash, as a face: what it should hold, whether it
+ * is the savings account (shown, but hidden behind a tap by the screens),
+ * the debit cards that draw on it, and pocket money where it is that.
+ */
+async function bankFaces(userId: Types.ObjectId, now: Date) {
+  const accounts = await Account.find({ userId, isActive: true, accountType: { $in: ["BANK", "CASH", "DEBIT"] } });
+  const [balances, pockets, vaults] = await Promise.all([
+    expectedBalances(userId, accounts),
+    pocketStatuses(userId, accounts, now),
+    CardVault.find({ userId }).select("accountId"),
+  ]);
+  const stored = new Set(vaults.map((vault) => vault.accountId.toString()));
+
+  return accounts
+    .filter((account) => tracksBalance(account))
+    .map((account) => {
+      const id = account._id.toString();
+      const pocket: PocketStatus | null = pockets.get(id) ?? null;
+      return {
+        accountId: id,
+        name: account.nickname || account.bankName,
+        bankName: account.bankName,
+        accountType: account.accountType,
+        last4: account.last4 ?? null,
+        color: account.color ?? null,
+        /// Null until a starting balance has been entered.
+        balanceMinor: balances.get(id)?.expectedMinor ?? null,
+        isSavings: Boolean(account.isSavings),
+        pocket,
+        debitCards: accounts
+          .filter((card) => card.accountType === "DEBIT" && card.linkedAccountId?.equals(account._id))
+          .map((card) => ({
+            accountId: card._id.toString(),
+            last4: card.last4 ?? null,
+            network: normaliseNetwork(card.cardNetwork),
+            hasCardDetails: stored.has(card._id.toString()),
+          })),
+        hasCardDetails: stored.has(id),
+      };
+    })
+    .sort((a, b) => Number(a.isSavings) - Number(b.isSavings) || (a.accountType === "CASH" ? 1 : 0) - (b.accountType === "CASH" ? 1 : 0));
 }
 
 /**

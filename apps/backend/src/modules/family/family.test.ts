@@ -6,7 +6,9 @@ import mongoose, { Types } from "mongoose";
 
 process.env.DATABASE_URL ??= "mongodb://127.0.0.1:27017/spendlog_unused";
 process.env.JWT_SECRET ??= "family-secret";
-delete process.env.FIREBASE_SERVICE_ACCOUNT_FILE;
+// Empty rather than deleted: dotenv refills missing keys from a developer's
+// .env when the app loads, but leaves keys that already exist alone.
+process.env.FIREBASE_SERVICE_ACCOUNT_FILE = "";
 
 let mongod: MongoMemoryServer;
 let server: http.Server;

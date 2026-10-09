@@ -12,22 +12,25 @@ let server: http.Server;
 let baseUrl: string;
 let signToken: (user: { id: string; email: string }) => string;
 let models: typeof import("../../models");
-let daily: typeof import("../budget/budget.daily");
+let bucket: typeof import("../budget/budget.bucket");
+let months: typeof import("../budget/budget.months");
 let coach: typeof import("../ai/ai.coach");
 
 before(async () => {
   mongod = await MongoMemoryServer.create();
   await mongoose.connect(mongod.getUri("spendlog_money_test"));
-  const [{ app }, auth, loaded, loadedDaily, loadedCoach] = await Promise.all([
+  const [{ app }, auth, loaded, loadedBucket, loadedMonths, loadedCoach] = await Promise.all([
     import("../../app"),
     import("../../middleware/auth"),
     import("../../models"),
-    import("../budget/budget.daily"),
+    import("../budget/budget.bucket"),
+    import("../budget/budget.months"),
     import("../ai/ai.coach"),
   ]);
   signToken = auth.signSessionToken;
   models = loaded;
-  daily = loadedDaily;
+  bucket = loadedBucket;
+  months = loadedMonths;
   coach = loadedCoach;
   server = http.createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -210,16 +213,24 @@ describe("money set aside for a purchase still to come", () => {
 
 describe("money in on top of pay", () => {
   it("goes into the savings bucket, but not the salary or a refund", async () => {
-    const today = new Date();
+    const { recent } = await months.userMonths(userId, new Date(), 1);
+    await models.User.updateOne(
+      { _id: userId },
+      { monthlyBudgetHistory: [{ fromMonthKey: recent[0].key, amountMinor: 20_000_00, categoryLimits: [] }] }
+    );
     await tx({ type: "CREDIT", amountMinor: 1_500_00, merchant: "Gift" });
     await tx({ type: "CREDIT", amountMinor: 80_000_00, isSalary: true });
     await tx({ type: "CREDIT", amountMinor: 900_00, isSpecial: true });
     await tx({ type: "CREDIT", amountMinor: 2_000_00, isSettlement: true });
 
-    const result = await daily.dailyBudget(userId, today);
+    const result = await bucket.savingsBucket(userId);
     assert.ok(result.configured);
-    assert.equal(result.extraIncomeMinor, 1_500_00);
-    assert.equal(result.bucketMinor, result.allowedMinor - result.spentMinor + 1_500_00);
+    const thisMonth = result.months[0];
+    assert.equal(thisMonth.settled, false);
+    assert.equal(thisMonth.extraIncomeMinor, 1_500_00);
+    // In the day it arrives, before the month is over.
+    assert.equal(thisMonth.toBucketMinor, 1_500_00);
+    assert.equal(result.balanceMinor, result.openingFromDailyMinor + 1_500_00);
   });
 });
 

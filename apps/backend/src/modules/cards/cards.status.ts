@@ -22,11 +22,18 @@ export type CardState = "ok" | "close" | "over" | "unset";
 export interface CardStatus {
   accountId: string;
   name: string;
+  /// The bank's own name and the issuer, beside the nickname above, for a
+  /// card face that shows both.
+  bankName: string;
+  issuer: string | null;
+  color: string | null;
   last4: string | null;
   network: CardNetwork | null;
   statementDay: number | null;
   dueDay: number | null;
   cycleStart: Date | null;
+  /// The cycle's last day; the statement is drawn the day after.
+  cycleEnd: Date | null;
   statementOn: Date | null;
   dueOn: Date | null;
   floatDays: number | null;
@@ -55,6 +62,17 @@ export interface CardStatus {
   /// When that outstanding bill has to be paid. Distinct from dueOn, which
   /// is when the bill for the cycle now running will fall due.
   billDueOn: Date | null;
+  /// The newest statement as the bank drew it: its total, minimum, when it
+  /// was drawn, how many days are left to pay it (negative once late) and
+  /// whether it has been paid off. Null when no statement has been read.
+  lastStatementMinor: number | null;
+  minimumDueMinor: number | null;
+  lastStatementOn: Date | null;
+  billDaysUntilDue: number | null;
+  billIsPaid: boolean | null;
+  /// What this card holds against the limit: the outstanding bill plus
+  /// this cycle's spending.
+  usedMinor: number;
   /// The credit limit, less the outstanding bill, less this cycle. What is
   /// actually left to spend. Null without a credit limit to count from.
   ///
@@ -191,11 +209,15 @@ export async function cardStatuses(userId: Types.ObjectId, now = new Date()): Pr
       return {
         accountId: card.id,
         name: card.nickname?.trim() || card.bankName,
+        bankName: card.bankName,
+        issuer: card.issuer ?? null,
+        color: card.color ?? null,
         last4: card.last4 ?? null,
         network: normaliseNetwork(card.cardNetwork),
         statementDay: card.statementDay ?? null,
         dueDay: card.dueDay ?? null,
         cycleStart: cycle?.start ?? null,
+        cycleEnd: cycle?.endsOn ?? null,
         statementOn: cycle?.statementOn ?? null,
         dueOn: cycle?.dueOn ?? null,
         floatDays: floatDays(card, now),
@@ -206,6 +228,12 @@ export async function cardStatuses(userId: Types.ObjectId, now = new Date()): Pr
         outstandingMinor,
         outstandingIsEstimate: bill?.isEstimate ?? false,
         billDueOn: bill?.dueDate ?? null,
+        lastStatementMinor: bill?.totalDueMinor ?? null,
+        minimumDueMinor: bill?.minimumDueMinor ?? null,
+        lastStatementOn: bill?.statementDate ?? null,
+        billDaysUntilDue: bill?.daysUntilDue ?? null,
+        billIsPaid: bill ? bill.isPaid : null,
+        usedMinor: (outstandingMinor ?? 0) + spentMinor,
         availableMinor,
         sharesLimitWith: shared
           ? members.filter((name) => name !== (card.nickname?.trim() || card.bankName))

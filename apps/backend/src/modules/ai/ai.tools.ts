@@ -10,7 +10,7 @@ import {
 } from "../../models";
 import { IST_OFFSET, istDayEnd, istDayKey, istDayStart } from "../../time";
 import { budgetPace } from "../budget/budget.pace";
-import { dailyBudget } from "../budget/budget.daily";
+import { Pace, monthlyBudgetStatus } from "../budget/budget.monthly";
 import { loanProgress } from "../loans/loans.routes";
 import { UserMonths as Periods, userMonths as periodsFor } from "../budget/budget.months";
 
@@ -116,9 +116,11 @@ export const toolDeclarations: FunctionDeclaration[] = [
   {
     name: "budget_status",
     description:
-      "The user's budget right now: salary pace (what is left to spend until the next salary, per day), " +
-      "fixed monthly commitments such as rent and whether each is paid, and the daily budget's savings " +
-      "bucket. Use for 'how am I doing', 'can I afford', 'how much can I spend' questions.",
+      "The user's budget right now: the monthly budget for this salary month (spent, left, pace status " +
+      "on_track/high/over, a safe amount per day for the rest of the month, the day it runs out at the " +
+      "current pace), each category's limit within it and the unassigned rest, the savings bucket, the " +
+      "salary pace, and fixed monthly commitments such as rent and whether each is paid. Use for 'how am " +
+      "I doing', 'can I afford', 'how much can I spend' questions.",
   },
   {
     name: "loans_and_emis",
@@ -372,10 +374,62 @@ async function findTransactions(userId: Types.ObjectId, args: Args, periods: Per
   };
 }
 
+/** A pace block, in rupees and words the model can repeat. */
+function paceForModel(pace: Pace | null) {
+  if (!pace) return null;
+  return {
+    status: pace.status,
+    dayOfMonth: pace.dayOfMonth,
+    daysLeftIncludingToday: pace.daysLeft,
+    safePerDayRupees: rupees(pace.safeDailyMinor),
+    expectedByNowRupees: rupees(pace.expectedSpentMinor),
+    aheadOfPlanRupees: rupees(pace.aheadByMinor),
+    dayToDayAveragePerDayRupees: rupees(pace.dailyAverageMinor),
+    projectedMonthTotalRupees: rupees(pace.projectedSpentMinor),
+    runsOutOn: pace.runOutOn,
+    fixedCostsPaidRupees: rupees(pace.fixedPaidMinor),
+    fixedCostsStillDueRupees: rupees(pace.fixedStillDueMinor),
+  };
+}
+
 async function budgetStatus(userId: Types.ObjectId) {
-  const [pace, daily] = await Promise.all([budgetPace(userId), dailyBudget(userId)]);
+  const [pace, monthly] = await Promise.all([budgetPace(userId), monthlyBudgetStatus(userId)]);
 
   return {
+    // First, because it is the budget the user set and the one the app
+    // talks about: one amount for the month that everything counts
+    // against, rent and EMIs included.
+    monthlyBudget: monthly.configured
+      ? {
+          month: monthly.month.label,
+          from: monthly.month.from,
+          to: monthly.month.to,
+          budgetRupees: rupees(monthly.budgetMinor!),
+          spentRupees: rupees(monthly.spentMinor),
+          leftRupees: rupees(monthly.leftMinor!),
+          isOver: monthly.isOver,
+          pace: paceForModel(monthly.pace),
+          categoryLimits: monthly.categories.map((category) => ({
+            category: category.name,
+            limitRupees: rupees(category.limitMinor),
+            spentRupees: rupees(category.spentMinor),
+            leftRupees: rupees(category.leftMinor),
+            isOver: category.isOver,
+            paceStatus: category.pace?.status ?? null,
+            safePerDayRupees: category.pace ? rupees(category.pace.safeDailyMinor) : null,
+            runsOutOn: category.pace?.runOutOn ?? null,
+          })),
+          everythingElse: monthly.unassigned
+            ? {
+                amountRupees: rupees(monthly.unassigned.amountMinor),
+                spentRupees: rupees(monthly.unassigned.spentMinor),
+                leftRupees: rupees(monthly.unassigned.leftMinor),
+                isOver: monthly.unassigned.isOver,
+              }
+            : null,
+          savingsBucketRupees: monthly.bucket.configured ? rupees(monthly.bucket.balanceMinor) : null,
+        }
+      : "Not set up - the user has not set a monthly budget in Settings.",
     salaryPace: pace.configured
       ? {
           periodStart: istDayKey(pace.periodStart),
@@ -396,18 +450,6 @@ async function budgetStatus(userId: Types.ObjectId) {
           })),
         }
       : "Not set up - the user has not entered a salary and pay day in Settings.",
-    dailyBudget: daily.configured
-      ? {
-          perDayRupees: rupees(daily.dailyBudgetMinor),
-          daysCounted: daily.daysCounted,
-          allowedSoFarRupees: rupees(daily.allowedMinor),
-          spentSoFarRupees: rupees(daily.spentMinor),
-          savingsBucketRupees: rupees(daily.bucketMinor),
-          todaySpentRupees: rupees(daily.todaySpentMinor),
-          daysOverBudget: daily.daysOver,
-          keptOutRupees: rupees(daily.keptOutMinor),
-        }
-      : "Not set up - the user has not chosen a daily budget in Settings.",
   };
 }
 

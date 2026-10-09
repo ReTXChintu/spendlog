@@ -239,8 +239,15 @@ describe("a pocket-money account", () => {
     assert.equal(rows.find((row) => row.id === pocket.id)!.pocket?.holder, "Rahul");
   });
 
-  it("is kept out of the daily budget, though it still counts in the month", async () => {
-    await models.User.updateOne({ _id: userId }, { dailyBudgetMinor: 1000_00, salaryDay: 1 });
+  it("counts in the month, and against the monthly budget", async () => {
+    // It was kept out of the daily budget as a fixed allowance. The monthly
+    // budget counts everything the month costs, and this is part of it.
+    const { userMonths } = await import("../budget/budget.months");
+    const { recent } = await userMonths(userId, new Date(), 1);
+    await models.User.updateOne(
+      { _id: userId },
+      { salaryDay: 1, monthlyBudgetHistory: [{ fromMonthKey: recent[0].key, amountMinor: 20_000_00, categoryLimits: [] }] }
+    );
     const pocket = await models.Account.create({
       userId,
       bankName: "Rahul's wallet",
@@ -249,10 +256,10 @@ describe("a pocket-money account", () => {
     });
     await models.Transaction.create({ userId, accountId: pocket._id, type: "DEBIT", amountMinor: 500_00, source: "MANUAL", occurredAt: new Date() });
 
-    const { dailyBudget } = await import("../budget/budget.daily");
-    const daily = await dailyBudget(userId);
-    assert.ok(daily.configured);
-    assert.equal(daily.spentMinor, 0);
-    assert.equal(daily.keptOutMinor, 500_00);
+    const { monthlyBudgetStatus } = await import("../budget/budget.monthly");
+    const budget = await monthlyBudgetStatus(userId);
+    assert.ok(budget.configured);
+    assert.equal(budget.spentMinor, 500_00);
+    assert.equal(budget.leftMinor, 19_500_00);
   });
 });

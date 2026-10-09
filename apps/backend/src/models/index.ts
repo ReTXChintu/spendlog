@@ -63,19 +63,24 @@ export interface UserDoc {
   /// money arrives and then gets spent.
   salaryAmountMinor?: number | null;
   salaryDay?: number | null;
-  /// What you allow yourself to spend in a day.
+  /// What you allowed yourself to spend in a day, before the monthly
+  /// budget replaced it.
   ///
-  /// Separate from the salary pace, and answering a different question. The
-  /// pace says what is left per day to get to payday; this says what you
-  /// decided a day should cost. Every day under it puts the difference by,
-  /// every day over it takes the difference back, and the running total is
-  /// what there is to move into savings when the next salary lands.
+  /// No longer set by anything. Kept, with its history, because the months
+  /// scored under it keep the result they had: the savings bucket opens
+  /// with the last of them (see budget.bucket.ts), and a figure that was
+  /// already on screen is not rewritten by a change of rules. It is also
+  /// where a first monthly budget's suggested amount comes from.
   dailyBudgetMinor?: number | null;
   /// Every daily budget there has been, and the IST day it took effect.
-  /// A day is scored against the amount in force on it, so raising the
-  /// budget today changes today onwards and leaves the days already
-  /// counted exactly as they were. Oldest first.
+  /// Oldest first.
   dailyBudgetHistory?: DailyBudgetChange[];
+  /// Every monthly budget there has been, and the salary month it took
+  /// effect from. A month is measured against the entry in force for it,
+  /// so a change made today applies to this month onwards and leaves the
+  /// months already over exactly as they were. Oldest first; empty means
+  /// none has ever been set.
+  monthlyBudgetHistory?: MonthlyBudgetChange[];
   /// The first month SpendLog will import anything for, as YYYY-MM.
   ///
   /// Somebody who joins on the 13th of September does not want August's
@@ -146,6 +151,40 @@ const dailyBudgetChangeSchema = new Schema<DailyBudgetChange>(
   { _id: false }
 );
 
+/// What part of a monthly budget one category is allowed.
+export interface CategoryLimit {
+  categoryId: Types.ObjectId;
+  amountMinor: number;
+}
+
+export interface MonthlyBudgetChange {
+  /// The user month (budget.months.ts) it applies from, as YYYY-MM.
+  fromMonthKey: string;
+  /// Everything the month may cost - fixed costs and day-to-day alike.
+  amountMinor: number;
+  /// Parts of the amount set aside for particular categories. Never more
+  /// than the amount between them; what they leave over covers every
+  /// category without a limit of its own.
+  categoryLimits: CategoryLimit[];
+}
+
+const categoryLimitSchema = new Schema<CategoryLimit>(
+  {
+    categoryId: { type: Schema.Types.ObjectId, ref: "Category", required: true },
+    amountMinor: { type: Number, required: true, min: 0 },
+  },
+  { _id: false }
+);
+
+const monthlyBudgetChangeSchema = new Schema<MonthlyBudgetChange>(
+  {
+    fromMonthKey: { type: String, required: true },
+    amountMinor: { type: Number, required: true, min: 0 },
+    categoryLimits: { type: [categoryLimitSchema], default: [] },
+  },
+  { _id: false }
+);
+
 export interface PocketMoney {
   /// Whose it is, for "Pocket money · Rahul".
   holder: string;
@@ -191,6 +230,7 @@ const userSchema = new Schema<UserDoc>(
     salaryDay: { type: Number, default: null, min: 1, max: 31 },
     dailyBudgetMinor: { type: Number, default: null, min: 0 },
     dailyBudgetHistory: { type: [dailyBudgetChangeSchema], default: [] },
+    monthlyBudgetHistory: { type: [monthlyBudgetChangeSchema], default: [] },
     ledgerFrom: { type: String, default: null },
     vaultPin: { type: vaultPinSchema, default: null },
     geminiApiKeyEnc: { type: String, default: null },
@@ -312,8 +352,7 @@ export interface AccountDoc {
   /// Pocket money for someone who spends from this account - a child with
   /// no UPI of their own - topped back up to a monthly limit on a set day.
   /// Everything on it is theirs to spend: still the user's money, so it
-  /// counts in the month, but a fixed allowance rather than a day's
-  /// spending, so the daily budget leaves it out.
+  /// counts in the month and against the monthly budget.
   pocketMoney?: PocketMoney | null;
   isActive: boolean;
   color?: string | null;
@@ -525,11 +564,12 @@ export interface TransactionDoc {
   /// shown on the owner's ledger as "by Rahul".
   byKidId?: Types.ObjectId | null;
   byKidName?: string | null;
-  /// A one-off that should not be scored against a day. A laptop, a
-  /// flight, a wedding gift: real spending, counted everywhere else, but
-  /// a day is not a bad day for having had it. Kept out of the daily
-  /// budget's bucket alone; the month's total and the pace still see it,
-  /// because the money still left.
+  /// On a credit: money in that is not to go into the savings bucket.
+  ///
+  /// On a debit it marks a one-off - a laptop, a flight. The monthly
+  /// budget counts it like any other spending, because the money still
+  /// left; only the old daily rules kept it out, and they now score just
+  /// the one month the savings bucket carries over from them.
   isSpecial: boolean;
   /// Whether this credit is the month's pay. Marked by hand and never
   /// guessed: it lands a day either side of the date it is meant to, and a

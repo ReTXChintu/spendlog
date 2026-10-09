@@ -22,6 +22,12 @@ import { currentBudgetPeriod } from "./budget.pace";
  * Kept as a running sum rather than a stored balance. Nothing is written
  * down, so correcting a transaction from last Tuesday corrects the bucket
  * too - which a stored balance could only do by being recomputed anyway.
+ *
+ * Retired: the monthly budget (budget.monthly.ts) replaced it, and nothing
+ * shows it any more. What is left is the arithmetic, kept for one job -
+ * the month before the first monthly budget keeps the result these rules
+ * gave it, and the monthly savings bucket opens with that figure rather
+ * than quietly rewriting it (budget.bucket.ts).
  */
 
 export interface DailyBudgetDay {
@@ -104,30 +110,6 @@ export function budgetOn(
   return amount;
 }
 
-/**
- * The history after the daily budget is set to `next` today.
- *
- * The amount until now is kept for every day before today, so a change
- * applies from today onwards and the bucket already built stays as it was.
- * Changing it twice in one day keeps only the last.
- */
-export function withBudgetChange(
-  user: { dailyBudgetMinor?: number | null; dailyBudgetHistory?: DailyBudgetChange[] | null },
-  next: number,
-  now = new Date()
-): DailyBudgetChange[] {
-  const today = istDayKey(now);
-  const history = [...(user.dailyBudgetHistory ?? [])];
-  if (history.length === 0 && user.dailyBudgetMinor) {
-    history.push({ from: SINCE_ALWAYS, amountMinor: user.dailyBudgetMinor });
-  }
-  const kept = history.filter((change) => change.from < today);
-  // The first budget ever set covers the period it was set in, as it
-  // always has - there was nothing before it to keep.
-  kept.push({ from: kept.length === 0 ? SINCE_ALWAYS : today, amountMinor: next });
-  return kept;
-}
-
 /** The calendar month, shaped like a budget period, for someone with no pay day. */
 function calendarMonth(now: Date): BudgetPeriod {
   const start = istMonthStart(istMonthKey(now));
@@ -168,16 +150,28 @@ function daysUpToToday(start: Date, now: Date): string[] {
   return days;
 }
 
-export async function dailyBudget(userId: Types.ObjectId, now = new Date()): Promise<DailyBudget> {
+export async function dailyBudget(
+  userId: Types.ObjectId,
+  now = new Date(),
+  within?: Pick<BudgetPeriod, "start" | "end">
+): Promise<DailyBudget> {
   const user = await User.findById(userId).select("dailyBudgetMinor dailyBudgetHistory salaryDay").orFail();
   if (!user.dailyBudgetMinor || user.dailyBudgetMinor <= 0) return { configured: false };
 
   // Salary day to salary day where there is one, because that is when the
   // money to fill the bucket actually turns up. The calendar month is the
   // fallback rather than the intent.
-  const period = user.salaryDay
-    ? await currentBudgetPeriod(userId, user.salaryDay, now)
-    : calendarMonth(now);
+  //
+  // Or a month that is already over, scored to its last day: how the
+  // savings bucket finds what the daily rules made of the month before
+  // the monthly budget began. Nothing in it can still change but the
+  // transactions, so it is scored exactly as it would have been then.
+  const period: Pick<BudgetPeriod, "start" | "end" | "daysLeft"> = within
+    ? { start: within.start, end: within.end, daysLeft: 0 }
+    : user.salaryDay
+      ? await currentBudgetPeriod(userId, user.salaryDay, now)
+      : calendarMonth(now);
+  if (within) now = new Date(Math.min(now.getTime(), within.end.getTime() - 1));
 
   // Grouped by IST day in the database rather than in hand, so a hundred
   // transactions come back as thirty rows. Spending is counted the same
@@ -255,22 +249,11 @@ export async function dailyBudget(userId: Types.ObjectId, now = new Date()): Pro
   // go into it either. That covers anything with people on it and
   // anything filed under Lent & borrowed, whether or not it was marked as
   // settling up.
-  const peopleCategory = await peopleCategoryId();
-  const loanCredits = (await Loan.find({ userId, disbursedTransactionId: { $ne: null } }).select("disbursedTransactionId"))
-    .map((loan) => loan.disbursedTransactionId)
-    .filter((id): id is Types.ObjectId => Boolean(id));
   const incomeRows = await Transaction.aggregate<{ _id: string; total: number }>([
     {
       $match: {
-        userId,
-        type: "CREDIT",
+        ...(await extraIncomeMatch(userId)),
         occurredAt: { $gte: period.start, $lte: now },
-        countedAmountMinor: { $gt: 0 },
-        isSalary: { $ne: true },
-        isSpecial: { $ne: true },
-        _id: { $nin: loanCredits },
-        "people.0": { $exists: false },
-        ...(peopleCategory ? { categoryId: { $ne: peopleCategory } } : {}),
       },
     },
     {
@@ -335,6 +318,28 @@ export async function dailyBudget(userId: Types.ObjectId, now = new Date()): Pro
     keptOutMinor: keptOut?.total ?? 0,
     keptOutCount: keptOut?.count ?? 0,
     days,
+  };
+}
+
+/**
+ * Which credits are money in on top of pay, as a query - the rule above,
+ * written once so the monthly bucket (budget.bucket.ts) adds up exactly
+ * what the daily one did.
+ */
+export async function extraIncomeMatch(userId: Types.ObjectId): Promise<Record<string, unknown>> {
+  const peopleCategory = await peopleCategoryId();
+  const loanCredits = (await Loan.find({ userId, disbursedTransactionId: { $ne: null } }).select("disbursedTransactionId"))
+    .map((loan) => loan.disbursedTransactionId)
+    .filter((id): id is Types.ObjectId => Boolean(id));
+  return {
+    userId,
+    type: "CREDIT",
+    countedAmountMinor: { $gt: 0 },
+    isSalary: { $ne: true },
+    isSpecial: { $ne: true },
+    _id: { $nin: loanCredits },
+    "people.0": { $exists: false },
+    ...(peopleCategory ? { categoryId: { $ne: peopleCategory } } : {}),
   };
 }
 
