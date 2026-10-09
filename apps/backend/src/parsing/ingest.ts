@@ -9,7 +9,7 @@ import { tripForOccurredAt } from "../modules/trips/trips.service";
 import { findDuplicate, detectSelfTransfer } from "./dedupe";
 import { parseTransactionText } from "./parser";
 import { horizonFor } from "../modules/ledger/ledger.horizon";
-import { markCardBillPayment } from "../modules/cards/cards.billPayment.service";
+import { cardBillAccount, cardBillContext, markCardBillPayment } from "../modules/cards/cards.billPayment.service";
 
 export interface IngestResult {
   status: "created" | "duplicate" | "ignored";
@@ -54,7 +54,16 @@ export async function ingestRawMessage(params: {
     return { status: "ignored", transaction: null };
   }
 
-  const accountId = await resolveAccount(params.userId, parsed.account);
+  // A card bill payment names two accounts, and the parser alone files it
+  // under the wrong one: the bank's debit under the card it paid, the
+  // card's "payment received" under a bank account. See cardBillAccount.
+  const billAccount = await cardBillAccount(
+    params.userId,
+    params.rawText,
+    parsed,
+    await cardBillContext(params.userId)
+  );
+  const accountId = billAccount ? billAccount.accountId : await resolveAccount(params.userId, parsed.account);
 
   const duplicate = await findDuplicate({
     userId: params.userId,

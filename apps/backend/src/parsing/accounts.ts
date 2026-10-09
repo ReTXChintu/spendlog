@@ -36,6 +36,14 @@ export async function resolveAccount(
   }
 }
 
+/** resolveAccount without the creating: the account, if there is one yet. */
+export async function findAccount(
+  userId: Types.ObjectId,
+  detected: { bankName: string; last4: string | null; accountType: AccountType } | null
+): Promise<Types.ObjectId | null> {
+  return detected ? findByTuple(userId, detected) : null;
+}
+
 async function findByTuple(
   userId: Types.ObjectId,
   detected: { bankName: string; last4: string | null; accountType: AccountType }

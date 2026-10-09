@@ -2,6 +2,8 @@ import { HydratedDocument, Types } from "mongoose";
 import { runOncePerUser } from "../../backfill";
 import { Account, Transaction, TransactionDoc } from "../../models";
 import { AccountType } from "../../types";
+import { findAccount, resolveAccount } from "../../parsing/accounts";
+import { billPaymentAccount, ParsedTransaction, parseTransactionText } from "../../parsing/parser";
 import { transferCategoryId } from "../categories/categories.system";
 import { BillCard, CardBillMatch, recogniseCardBill } from "./cards.billPayment";
 
@@ -62,6 +64,39 @@ export async function cardBillContext(userId: Types.ObjectId): Promise<CardBillC
       })),
     accountTypeOf: new Map(accounts.map((account) => [account._id.toString(), account.accountType])),
   };
+}
+
+/**
+ * Which account a parsed message is filed under, when it is a card bill
+ * payment - or null when it is not one, and the parser's own pick stands.
+ *
+ *   bank side   the bank account debited, never the card it paid. The
+ *               card is linked as the bill paid (cardPaymentFor) once the
+ *               row exists. A message that does not say which account
+ *               paid gets no account, like any other debit naming none.
+ *   card side   the card the payment landed on: the user's own card where
+ *               the recogniser can name it, otherwise the card the message
+ *               describes - never a bank account that happens to share
+ *               its last four digits.
+ *
+ * Decided on the one message being filed, the same way the parser decides
+ * everything else about it, so an SMS and the email that follows it land
+ * on the same account and are recognised as one.
+ */
+export async function cardBillAccount(
+  userId: Types.ObjectId,
+  rawText: string,
+  parsed: Pick<ParsedTransaction, "type" | "account">,
+  context: CardBillContext
+): Promise<{ accountId: Types.ObjectId | null } | null> {
+  const match = recogniseCardBill(
+    { text: rawText, type: parsed.type, accountType: parsed.account?.accountType ?? null },
+    context.cards
+  );
+  if (!match) return null;
+
+  if (match.side === "PAYMENT_RECEIVED" && match.cardId) return { accountId: new Types.ObjectId(match.cardId) };
+  return { accountId: await resolveAccount(userId, billPaymentAccount(rawText, match.side)) };
 }
 
 /** Everything that was said about a transaction, as one piece of text. */
@@ -287,4 +322,95 @@ export async function runCardBillBackfill(): Promise<{ users: number; changed: n
     const { payments, received } = await backfillCardBills(userId);
     return payments + received;
   });
+}
+
+/// Bill payments imported before cardBillAccount existed, still filed
+/// where the parser alone put them.
+export const CARD_BILL_ACCOUNT_BACKFILL = "cardBillAccounts";
+export const CARD_BILL_ACCOUNT_BACKFILL_VERSION = 1;
+
+/** A leg's other account - unless it is the leg's own. */
+function otherThan(
+  own: Types.ObjectId | null | undefined,
+  there: Types.ObjectId | null | undefined
+): Types.ObjectId | null {
+  return there && !(own && own.equals(there)) ? there : null;
+}
+
+function sameAccount(a: Types.ObjectId | null | undefined, b: Types.ObjectId | null | undefined): boolean {
+  return a && b ? a.equals(b) : !a && !b;
+}
+
+/**
+ * Moves one user's already-imported bill payments onto the account they
+ * belong to: the bank's debit off the card it paid, the card's "payment
+ * received" off the bank account that shared its digits.
+ *
+ * Each row's own message is parsed again and filed the way ingest now
+ * files it, so a row moves only to where it would have gone had it arrived
+ * today. And only a row nobody can have meant to put there:
+ *
+ *   - from an SMS or an email, so the parser chose its account. A
+ *     statement's rows are filed under the statement's account, and one
+ *     matched to a statement has had its account confirmed by it;
+ *   - never edited (editedAt), since there is no marker narrower than that
+ *     for the account, and a person's choice outranks a parse;
+ *   - still on the account the parser picks for it today. Anywhere else,
+ *     something other than the parser put it there.
+ *
+ * A row moved off one leg of a pair takes the other leg's transferAccountId
+ * with it, so each leg keeps naming the other's account. Safe to run twice:
+ * a moved row is where it would be filed, and is left there.
+ */
+export async function backfillCardBillAccounts(userId: Types.ObjectId): Promise<number> {
+  const context = await cardBillContext(userId);
+  // Ids first and each row read fresh: moving one leg rewrites its pair,
+  // which may be a row still to come.
+  const ids = await Transaction.find({
+    userId,
+    source: { $in: ["SMS", "EMAIL"] },
+    editedAt: null,
+    kindEditedAt: null,
+    statementId: null,
+  })
+    .sort({ occurredAt: 1 })
+    .select("_id");
+
+  let moved = 0;
+  for (const { _id } of ids) {
+    const row = await Transaction.findById(_id);
+    const text = row?.rawText ?? row?.sources[0]?.rawText;
+    if (!row || !text) continue;
+
+    const parsed = parseTransactionText(text);
+    if (!parsed || parsed.type !== row.type) continue;
+    if (!sameAccount(await findAccount(userId, parsed.account), row.accountId)) continue;
+
+    const routed = await cardBillAccount(userId, text, parsed, context);
+    if (!routed || sameAccount(routed.accountId, row.accountId)) continue;
+
+    row.accountId = routed.accountId;
+    const partner = row.transferPairId ? await Transaction.findById(row.transferPairId) : null;
+    // What each leg names as the other account. A debit that paid a card
+    // names the card; otherwise it is whatever the other leg is filed under.
+    const across = (leg: HydratedDocument<TransactionDoc>, other: HydratedDocument<TransactionDoc> | null) =>
+      otherThan(
+        leg.accountId,
+        (leg.type === "DEBIT" ? leg.cardPaymentFor : null) ?? (other ? other.accountId : leg.transferAccountId)
+      );
+    if (row.isTransfer) row.transferAccountId = across(row, partner);
+    await row.save();
+
+    if (partner?.isTransfer) {
+      partner.transferAccountId = across(partner, row);
+      await partner.save();
+    }
+    moved += 1;
+  }
+  return moved;
+}
+
+/** The backfill above, for every user it has not run for (see backfill.ts). */
+export async function runCardBillAccountBackfill(): Promise<{ users: number; changed: number }> {
+  return runOncePerUser(CARD_BILL_ACCOUNT_BACKFILL, CARD_BILL_ACCOUNT_BACKFILL_VERSION, backfillCardBillAccounts);
 }

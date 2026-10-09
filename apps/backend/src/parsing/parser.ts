@@ -179,6 +179,61 @@ function extractAccount(core: string, full: string): ParsedTransaction["account"
   };
 }
 
+// A card a bank's message names as the thing being paid, with its issuer
+// before it and its number after: "HDFC Bank Credit Card XX5678", "ICICI
+// Credit Card XX2009", "SBI Card", "BILLDESK-HDFC CARDS", "CC XX5678".
+// The words before it may not be the ones joining it to the sentence, or
+// the bank being debited would go with it ("from HDFC Bank to ICICI
+// Credit Card").
+const NAMED_CARD_RE =
+  /(?:\b(?!(?:from|to|towards|for|of|on|in|at|by|via|your|ur|the|and)\b)[a-z&]+[\s-]+){0,3}\b(?:credit\s*cards?|cards?|cc)\b(?:\s*(?:no\.?|number|account|a\/c|acct|ending(?:\s+(?:in|with))?))?\s*:?\s*(?:\d{0,6}[x*•]+\s?\d{4,5}|\d{4})?(?!\d)/gi;
+// Every UPI handle. On a bank's debit they are the payee, never the
+// account debited - and a card's bill handle carries the card's number.
+const ANY_VPA_RE = /\b[\w.\-]{2,64}@[\w.\-]{2,20}\b/g;
+// A card's number as the issuer writes it on its own message: "Card XX2009",
+// "Card Account 4XXX2009", "Card No. 4375 XXXX XXXX 2009", "card ending 5678".
+const CARD_NUMBER_RE =
+  /\b(?:card|cc)\b\s*(?:no\.?|number|account|a\/c|acct)?\s*(?:no\.?)?\s*(?:ending(?:\s+(?:in|with))?)?\s*:?\s*(?:[\dx*•]+[\s-]?){0,4}?(\d{4})(?!\d)/i;
+
+/**
+ * The account a credit card bill payment belongs to, which is not always
+ * the one extractAccount picks.
+ *
+ * The bank's side ("PAYMENT") names two accounts: the one debited and the
+ * card being paid. extractAccount looks for a card number first, so "Rs
+ * 15,000 debited from A/c XX1234 towards HDFC Credit Card XX5678" was
+ * filed under the card and the bank's balance never saw the money go. Here
+ * the card is taken out of the message before looking, and whatever is
+ * left is a bank account - a card cannot pay its own bill. The card is not
+ * lost: the recogniser links it as the bill paid (cardPaymentFor).
+ *
+ * The card's side ("PAYMENT_RECEIVED") is the other way round. The issuer
+ * writes the card's number in ways the general patterns read as an
+ * account's - "Card Account 4XXX2009" came out as a bank account ending
+ * 2009 - so the number is looked for as a card's, and the result is a card.
+ *
+ * Only for a message the recogniser has already called a bill payment;
+ * everything else is filed by extractAccount as before. Null when the
+ * message names no account, which is what any other message naming none
+ * gets.
+ */
+export function billPaymentAccount(
+  text: string,
+  side: "PAYMENT" | "PAYMENT_RECEIVED"
+): ParsedTransaction["account"] {
+  if (side === "PAYMENT") {
+    const withoutCard = text.replace(NAMED_CARD_RE, " ").replace(ANY_VPA_RE, " ");
+    const account = extractAccount(stripBoilerplate(withoutCard), withoutCard);
+    return account ? { ...account, accountType: "BANK" } : null;
+  }
+
+  const core = stripBoilerplate(text);
+  const last4 = core.match(CARD_NUMBER_RE)?.[1] ?? core.match(MASKED_LAST4_RE)?.[1] ?? null;
+  const bankName = detectBankName(text);
+  if (!last4 && !bankName) return null;
+  return { bankName: bankName ?? "Unknown Bank", last4, accountType: "CARD" };
+}
+
 function detectType(core: string): TransactionType | null {
   const creditMatch = core.match(CREDIT_RE);
   const debitMatch = core.match(DEBIT_RE);

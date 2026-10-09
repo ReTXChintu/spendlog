@@ -6,7 +6,7 @@ import { app } from "./app";
 import { connectDatabase } from "./db";
 import { env } from "./env";
 import { runLendingBackfill } from "./modules/contacts/contacts.backfill";
-import { runCardBillBackfill } from "./modules/cards/cards.billPayment.service";
+import { runCardBillAccountBackfill, runCardBillBackfill } from "./modules/cards/cards.billPayment.service";
 import { syncAllConnectedEmails } from "./modules/ingestion/gmail.service";
 
 const EMAIL_SYNC_INTERVAL_MS = 15 * 60 * 1000;
@@ -60,9 +60,16 @@ async function start() {
   // One-off repairs, once per user (see backfill.ts). In the background:
   // a slow pass must not keep the server from answering.
   runLendingBackfill().catch((err) => console.error("Lent & borrowed backfill failed:", err));
-  // Card bills imported before they were recognised, still counted as
-  // spending - and the card's "payment received", still counted as income.
-  runCardBillBackfill().catch((err) => console.error("Card bill backfill failed:", err));
+  // Card bills filed under the wrong account - the bank's debit under the
+  // card it paid, the card's credit under a bank account - then, once they
+  // are where they belong, card bills imported before they were
+  // recognised, still counted as spending, and the card's "payment
+  // received", still counted as income. In that order, so the second pairs
+  // legs that are already on the right accounts.
+  runCardBillAccountBackfill()
+    .catch((err) => console.error("Card bill account backfill failed:", err))
+    .then(() => runCardBillBackfill())
+    .catch((err) => console.error("Card bill backfill failed:", err));
 
   setInterval(() => {
     syncAllConnectedEmails().catch((err) => console.error("Background Gmail sync failed:", err));

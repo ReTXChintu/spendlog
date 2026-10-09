@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseTransactionText } from "./parser";
+import { billPaymentAccount, parseTransactionText } from "./parser";
 
 // The four message formats that actually dominate this user's inbox.
 // These are regression tests — if a parser change breaks one of these,
@@ -165,4 +165,86 @@ describe("messages that must be ignored", () => {
       assert.equal(parseTransactionText(text), null);
     });
   }
+});
+
+describe("the account a card bill payment is filed under", () => {
+  // The bank's side names the account debited and the card paid. The
+  // account is the bank's; the card is linked as the bill paid instead.
+  const bankSide: [string, string, { bankName: string; last4: string | null } | null][] = [
+    [
+      "HDFC, towards the card by number",
+      "Rs.15,000.00 debited from A/c **9876 on 05-10-26 towards HDFC Bank Credit Card XX5678. Avl bal Rs 42,000.00 -HDFC Bank",
+      { bankName: "HDFC Bank", last4: "9876" },
+    ],
+    [
+      "ICICI, which masks its own account to three digits",
+      "ICICI Bank Acct XX876 debited for Rs 15000.00 on 05-Oct-26; ICICI Bank Credit Card XX2009 credited. UPI:627812345678. Call 18002662 for dispute.",
+      { bankName: "ICICI Bank", last4: null },
+    ],
+    [
+      "SBI Card, from an SBI account",
+      "Your A/C XXXXX9876 Debited INR 15,000.00 on 05/10/26 -Transferred to SBI Card. Avl Balance INR 40,000.00-SBI",
+      { bankName: "SBI", last4: "9876" },
+    ],
+    [
+      "Axis, over UPI to AXIS CC",
+      "INR 15000.00 debited A/c no. XX9876 05-10-26, 11:22:33 UPI/P2M/627812345678/AXIS CC Not you? SMS BLOCKUPI Cust ID to 919951860002 Axis Bank",
+      { bankName: "Axis Bank", last4: "9876" },
+    ],
+    [
+      "one bank's account paying another bank's card",
+      "Rs 15,000.00 sent from HDFC Bank A/c XX9876 to ICICI Bank Credit Card XX2009 on 05-10-26",
+      { bankName: "HDFC Bank", last4: "9876" },
+    ],
+    [
+      "a card's bill handle, whose digits are the card's",
+      "Rs.15000.00 debited on 05-10-26 to VPA ccpay.4375xxxxxxxx2009@icici. -Kotak Bank",
+      { bankName: "Kotak Bank", last4: null },
+    ],
+    [
+      "BBPS, which never says the account",
+      "Thank you for payment of Rs.15000.00 for ICICI Credit Card XX2009 on 05-10-2026 via Bharat BillPay (BBPS).",
+      null,
+    ],
+  ];
+
+  for (const [name, text, expected] of bankSide) {
+    it(`files the bank's side under the account debited: ${name}`, () => {
+      // The parser alone takes the card's number for the account.
+      const account = billPaymentAccount(text, "PAYMENT");
+      assert.deepEqual(account, expected && { ...expected, accountType: "BANK" });
+    });
+  }
+
+  const cardSide: [string, string, { bankName: string; last4: string | null }][] = [
+    [
+      "ICICI's Card Account 4XXX2009",
+      "Dear Customer, Payment of INR 15,000.00 has been received on your ICICI Bank Credit Card Account 4XXX2009 on 06-Oct-26. Thank you.",
+      { bankName: "ICICI Bank", last4: "2009" },
+    ],
+    [
+      "HDFC, card ending",
+      "DEAR CARDMEMBER, PAYMENT OF RS 15000.00 RECEIVED TOWARDS YOUR HDFC BANK CREDIT CARD ENDING 5678 ON 06/OCT/2026.",
+      { bankName: "HDFC Bank", last4: "5678" },
+    ],
+    [
+      "American Express, which prints five digits",
+      "We have received your payment of Rs 15,000.00 towards your American Express Card ending 51004. Thank you.",
+      { bankName: "American Express", last4: "1004" },
+    ],
+  ];
+
+  for (const [name, text, expected] of cardSide) {
+    it(`files the card's side under the card: ${name}`, () => {
+      assert.deepEqual(billPaymentAccount(text, "PAYMENT_RECEIVED"), { ...expected, accountType: "CARD" });
+    });
+  }
+
+  it("is what the parser alone gets wrong", () => {
+    // The two cases this exists for, as the general parse reads them.
+    const paid = parseTransactionText(bankSide[0][1]);
+    assert.deepEqual(paid?.account, { bankName: "HDFC Bank", last4: "5678", accountType: "CARD" });
+    const received = parseTransactionText(cardSide[0][1]);
+    assert.deepEqual(received?.account, { bankName: "ICICI Bank", last4: "2009", accountType: "BANK" });
+  });
 });
