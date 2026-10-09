@@ -400,56 +400,126 @@ export function commitmentAmountLabel(
     : `${format(now)} this month · ${format(commitment.amountMinor)} from next`;
 }
 
-/** One day of the daily budget: what went out, and what it left behind. */
-export interface DailyBudgetDay {
-  day: string;
+export type MonthPaceStatus = "on_track" | "high" | "over";
+
+/**
+ * How a month - or one category's share of it - is going.
+ *
+ * Fixed costs (rent, EMIs, SIPs) count in full like everything else, but
+ * they are expected on the day they go out rather than spread over the
+ * month, so paying the rent on the 1st is not a fast start.
+ */
+export interface MonthPace {
+  status: MonthPaceStatus;
+  dayOfMonth: number;
+  daysInMonth: number;
+  /** Counting today: money can still be spent today. */
+  daysLeft: number;
+  /** Negative once it is over. */
+  remainingMinor: number;
+  /** What can go out each day from here and still cover the fixed costs not yet paid. */
+  safeDailyMinor: number;
+  expectedSpentMinor: number;
+  /** Spent less expected. Positive is ahead of plan. */
+  aheadByMinor: number;
+  dailyAverageMinor: number;
+  projectedSpentMinor: number;
+  /** YYYY-MM-DD the money runs out at the current average, when that is inside the month. */
+  runOutOn: string | null;
+  fixedPaidMinor: number;
+  fixedStillDueMinor: number;
+}
+
+/** One category's limit inside the monthly budget, and how it is going. */
+export interface CategoryBudget {
+  categoryId: string;
+  name: string;
+  icon: string | null;
+  color: string | null;
+  limitMinor: number;
   spentMinor: number;
-  /** Budget less spending: positive put by, negative taken back. */
-  deltaMinor: number;
-  /** Money in that day on top of salary. */
-  incomeMinor?: number;
+  /** Negative once it is over. */
+  leftMinor: number;
+  isOver: boolean;
+  pace: MonthPace | null;
 }
 
 /**
- * The daily allowance and the pot behind it.
- *
- * A different question from the salary pace: the pace forecasts whether
- * you will reach payday, this keeps score against what you decided a day
- * should cost. The bucket is what there is to move into savings when the
- * next salary lands.
+ * The monthly budget: one amount for the user's month (salary day to
+ * salary day, or the calendar month), everything the month costs held
+ * against it, and the category limits that share it out. Whatever is left
+ * at month end goes into the savings bucket.
  */
-export type DailyBudget =
-  | { configured: false }
+export interface MonthlyBudgetStatus {
+  configured: boolean;
+  /** Whether a budget has ever been set, even if not for this month. */
+  everSet: boolean;
+  month: {
+    key: string;
+    from: string;
+    /** Inclusive. */
+    to: string;
+    label: string;
+    bySalary: boolean;
+    isCurrent: boolean;
+    isClosed: boolean;
+    daysInMonth: number;
+    /** Null for a month that is not running now. */
+    dayOfMonth: number | null;
+    daysLeft: number;
+  };
+  fromMonthKey: string | null;
+  budgetMinor: number | null;
+  spentMinor: number;
+  /** Negative when over. */
+  leftMinor: number | null;
+  isOver: boolean;
+  pace: MonthPace | null;
+  categories: CategoryBudget[];
+  /** What the limits leave over, which every other category spends from. */
+  unassigned: {
+    amountMinor: number;
+    spentMinor: number;
+    leftMinor: number;
+    isOver: boolean;
+    pace: MonthPace | null;
+    categories: { categoryId: string | null; name: string; spentMinor: number }[];
+  } | null;
+  bucket: { configured: false } | { configured: true; balanceMinor: number; balanceIfMonthEndedNowMinor: number };
+  /** A starting figure for setting one up, from what recent months cost. */
+  suggestedMonthlyMinor: number | null;
+}
+
+/** The savings bucket: every month's leftover, newest month first. */
+export type SavingsBucket =
+  | { configured: false; suggestedMonthlyMinor: number | null }
   | {
       configured: true;
-      dailyBudgetMinor: number;
-      periodStart: string;
-      periodEnd: string;
-      resetsOnSalary: boolean;
-      daysCounted: number;
-      daysLeft: number;
-      allowedMinor: number;
-      spentMinor: number;
-      /** Positive is put by, negative is spent out of what was put by. */
-      bucketMinor: number;
-      todaySpentMinor: number;
-      todayLeftMinor: number;
-      daysOver: number;
-      /** One-offs and trips, kept out of the score and reported here. */
-      keptOutMinor?: number;
-      keptOutCount?: number;
-      /** Money in on top of salary this period, already in bucketMinor. */
-      extraIncomeMinor?: number;
-      /** Refunds for purchases the bucket paid for, given back on the day they came. */
-      refundedBackMinor?: number;
-      days: DailyBudgetDay[];
+      balanceMinor: number;
+      /** What the retired daily budget had already put by. */
+      openingFromDailyMinor: number;
+      firstMonthKey: string;
+      balanceIfMonthEndedNowMinor: number;
+      months: {
+        key: string;
+        label: string;
+        from: string;
+        to: string;
+        era: "daily" | "monthly";
+        settled: boolean;
+        budgetMinor: number;
+        spentMinor: number;
+        leftMinor: number;
+        extraIncomeMinor: number;
+        refundedBackMinor: number;
+        toBucketMinor: number;
+        balanceAfterMinor: number;
+      }[];
     };
 
 export interface BudgetProfile {
   salaryAmountMinor: number | null;
   salaryDay: number | null;
-  /** What you decided a day should cost. Null until one is set. */
-  dailyBudgetMinor?: number | null;
 }
 
 export type BudgetPace =
@@ -505,8 +575,10 @@ export interface Transaction {
   transferPairId?: string | null;
   /** Credit only: money received for a purchase still to come. Not income. */
   isEarmarked?: boolean;
-  /// A one-off the daily budget should not score a day against. Still
-  /// counted everywhere else, because the money still left.
+  /// On a payment, a one-off: a rare big purchase, marked so it can be
+  /// told apart. It still counts against the monthly budget like
+  /// everything else, because the money still left. On money in, it keeps
+  /// that money out of the savings bucket.
   isSpecial?: boolean;
   /** Marked by hand: the credit that opens a spending period. */
   isSalary?: boolean;
@@ -778,8 +850,11 @@ export interface UpcomingBill {
 export interface DashboardData {
   today: string;
   pace: BudgetPace;
-  /// Optional because a page can outlive the server build that added it.
-  daily?: DailyBudget;
+  /// The monthly budget. Optional because a page can outlive the server
+  /// build that added it.
+  budget?: MonthlyBudgetStatus;
+  /// Every card and bank account as a face, for the wallet. Optional, like budget.
+  wallet?: { cards: CardFace[]; banks: BankFace[] };
   cards: CardStatus[];
   picks: CardPicks;
   needsCategory: { yesterday: number; month: number };
@@ -793,11 +868,71 @@ export interface DashboardData {
   };
   monthSoFar: MonthSoFar;
   bills: UpcomingBill[];
-  /// Optional, like daily: a cached page can outlive the server build.
+  /// Optional, like budget: a cached page can outlive the server build.
   money?: MoneyOnHand;
   earmarks?: EarmarkSummary;
   planWarnings?: PlanRule[];
   pocketMoney?: (PocketMoneyStatus & { accountId: string; name: string })[];
+}
+
+/**
+ * A credit card as its face on the dashboard shows it.
+ *
+ * Only ever the last four digits: the full number, expiry and name on the
+ * card come from the vault, one PIN at a time, and are never part of this.
+ */
+export interface CardFace {
+  accountId: string;
+  name: string;
+  bankName: string;
+  issuer: string | null;
+  network: CardNetwork | null;
+  last4: string | null;
+  color: string | null;
+  creditLimitMinor: number | null;
+  outstandingMinor: number | null;
+  outstandingIsEstimate: boolean;
+  /** Outstanding bill plus this cycle; the whole group's on a shared limit. */
+  usedMinor: number;
+  availableMinor: number | null;
+  sharesLimitWith: string[];
+  cycleSpentMinor: number;
+  cycleStart: string;
+  cycleEnd: string;
+  periodIsCycle: boolean;
+  statementOn: string | null;
+  lastStatement: {
+    amountMinor: number;
+    minimumDueMinor: number | null;
+    statementOn: string | null;
+    dueOn: string | null;
+    owedMinor: number | null;
+    isPaid: boolean | null;
+  } | null;
+  /** The unpaid bill's due date, else the one the running cycle falls due on. */
+  nextDueOn: string | null;
+  daysToDue: number | null;
+  /** What you allow yourself on it in a cycle - what `state` measures. */
+  spendLimitMinor: number | null;
+  state: CardState;
+  hasCardDetails: boolean;
+}
+
+/** A bank account or cash, as its tile on the dashboard shows it. */
+export interface BankFace {
+  accountId: string;
+  name: string;
+  bankName: string;
+  accountType: "BANK" | "CASH";
+  last4: string | null;
+  color: string | null;
+  /** Null until a starting balance is set. */
+  balanceMinor: number | null;
+  /** The emergency fund: shown last, its balance behind a tap. */
+  isSavings: boolean;
+  pocket: PocketMoneyStatus | null;
+  debitCards: { accountId: string; last4: string | null; network: CardNetwork | null; hasCardDetails: boolean }[];
+  hasCardDetails: boolean;
 }
 
 /** Bank and cash balances. onHandMinor leaves the savings account out. */

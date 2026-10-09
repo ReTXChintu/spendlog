@@ -86,8 +86,6 @@
 /* Existing pieces dropped into a card keep their insides but lose the
    spacing they had as page sections. */
 .home-card > .section-block { margin: 0; }
-.home-card .bucket-simple { border: none; padding: 0; background: none; margin-top: 8px; }
-.home-card .bucket-simple-figure { font-size: 32px; }
 .home-card .loan-list { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
 .home-card .budget-headline { gap: 18px; }
 .home-card .month-delta { margin-top: 4px; }
@@ -111,48 +109,14 @@
 
 .home-loading { min-height: 320px; border-radius: var(--radius-lg); background: var(--track); opacity: .5; }
 
-/* ------------------------------------------------------- money carousel */
-.money { margin-bottom: 20px; }
-.money-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+/* ------------------------------------------------------- money on hand */
+/* The headline over the wallet (styles/wallet.css draws the rest). */
 .money-label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; margin: 0; }
 /* The one hero figure on the page. Proportional digits: it stands alone. */
 .money-figure { font-size: clamp(34px, 4.6vw, 48px); font-weight: 800; letter-spacing: -0.025em; line-height: 1.1; margin-top: 4px; }
 .money-sub { font-size: 12.5px; color: var(--muted); margin: 4px 0 12px; }
 
-.money-row {
-  display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 10px;
-  scroll-snap-type: x mandatory; scroll-padding-left: 2px;
-  overscroll-behavior-x: contain;
-}
-.money-row:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
-.money-card {
-  flex: 0 0 214px; scroll-snap-align: start; min-width: 0;
-  display: flex; flex-direction: column; gap: 4px;
-  padding: 14px 15px; border: 1px solid var(--line); border-radius: var(--radius-md);
-  background: var(--surface);
-}
-.money-card-top { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 12.5px; font-weight: 700; color: var(--ink-70); }
-.money-card-top svg { width: 15px; height: 15px; color: var(--muted); flex-shrink: 0; }
-.money-card-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.money-card-last4 { font-family: var(--font-mono); font-size: 11px; color: var(--muted); font-weight: 500; flex-shrink: 0; }
-.money-card-figure { font-size: 20px; font-weight: 800; margin-top: 6px; }
-.money-card-figure.is-negative { color: var(--debit); }
-.money-card-sub { font-size: 11.5px; color: var(--muted); }
-.money-card-sub a { color: var(--brand); }
-.money-card-set {
-  display: inline-flex; align-items: center; gap: 5px; margin-top: 8px; font-size: 13px; font-weight: 700;
-  color: var(--brand); text-decoration: none;
-}
-.money-card-set svg { width: 13px; height: 13px; }
-.money-card-set:hover { text-decoration: underline; }
-.money-meter { height: 5px; background: var(--track); border-radius: 100px; overflow: hidden; margin-top: 6px; }
-.money-meter-fill { height: 100%; background: var(--brand); border-radius: 100px; transition: width .3s ease; }
-.money-card.is-close .money-meter-fill { background: var(--warn); }
-.money-card.is-over .money-meter-fill { background: var(--debit); }
-
-/* Savings: present, but quiet, and not counted. */
-.money-card.is-savings { background: var(--paper); border-style: dashed; border-color: var(--line-strong); }
-.money-card.is-savings .money-card-top { color: var(--muted); }
+/* The savings balance, behind a tap. */
 .money-reveal {
   align-self: flex-start; margin-top: 6px; padding: 3px 9px; border-radius: 100px;
   border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-70);
@@ -160,7 +124,6 @@
 }
 .money-reveal[aria-pressed="false"] { font-family: var(--font-sans); color: var(--muted); }
 .money-reveal:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
-.money-card.is-empty { flex-basis: 280px; justify-content: center; }
 
 /* ---------------------------------------------------------- plan warnings */
 .plan-warn {
@@ -314,11 +277,9 @@
 
 @media (max-width: 700px) {
   .home-card { min-height: 0; padding: 16px; }
-  .money-card { flex-basis: 78%; }
   .viz-filter, .viz-filter .filter-select { flex: 1; min-width: 0; width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .money-meter-fill, .rule-bar-fill, .viz-group .viz-col, .donut-arc { transition: none; }
-  .money-row { scroll-behavior: auto; }
+  .rule-bar-fill, .viz-group .viz-col, .donut-arc { transition: none; }
 }

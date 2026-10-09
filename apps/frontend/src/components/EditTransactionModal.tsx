@@ -410,7 +410,7 @@ export function EditTransactionModal({
           return { text: "Not spending — paying back what you owed", tone: "neutral" };
         default:
           return {
-            text: `${total} of spending${isSpecial ? " · not held against the daily budget" : ""}`,
+            text: `${total} of spending${isSpecial ? " · a one-off, still in the monthly budget" : ""}`,
             tone: "debit",
           };
       }
@@ -923,20 +923,22 @@ export function EditTransactionModal({
               <div className="tx-also">
                 <span className="tx-also-label">Also</span>
                 <div className="tx-also-toggles">
-                  {/* Real spending, counted everywhere - but a day is not a
-                      bad day for having had a laptop in it. On money in, the
-                      same flag keeps a windfall out of the daily bucket. */}
+                  {/* On a payment, a marker for a rare big purchase - the
+                      laptop, not the lunch - so it can be told apart. It is
+                      real spending and counts against the monthly budget
+                      like anything else. On money in, the same flag keeps a
+                      windfall out of the savings bucket. */}
                   {specialApplies && (
                     <label
                       className="tx-toggle"
                       title={
                         type === "DEBIT"
-                          ? "Counted everywhere else, just not against the daily budget"
-                          : "Money in normally tops up the daily savings bucket"
+                          ? "Marks a rare, big purchase so it stands out. It still counts against the monthly budget."
+                          : "Money in normally tops up the savings bucket at the end of the month"
                       }
                     >
                       <input type="checkbox" checked={isSpecial} onChange={(e) => setIsSpecial(e.target.checked)} />
-                      <span>{type === "DEBIT" ? "One-off — keep out of daily budget" : "Keep out of savings bucket"}</span>
+                      <span>{type === "DEBIT" ? "One-off purchase" : "Keep out of savings bucket"}</span>
                     </label>
                   )}
                   {/* Marking the payment rather than ticking a due date is

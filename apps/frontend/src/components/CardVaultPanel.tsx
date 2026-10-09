@@ -43,9 +43,6 @@ export function CardVaultPanel({
   const [status, setStatus] = useState<VaultStatus | null>(null);
   const [editing, setEditing] = useState(false);
   const [settingPin, setSettingPin] = useState(false);
-  const [pin, setPin] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api
@@ -57,21 +54,15 @@ export function CardVaultPanel({
   // A different account underneath is a different form.
   useEffect(() => {
     setEditing(false);
-    setPin("");
-    setError(null);
   }, [accountId]);
 
-  async function unlock() {
-    setBusy(true);
-    setError(null);
+  async function unlock(pin: string) {
     try {
       await unlockVault(pin);
-      setPin("");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "That didn't work.");
+      // A wrong PIN counts towards the lock, so what is left has changed.
       api.get<VaultStatus>("/vault").then(setStatus).catch(() => undefined);
-    } finally {
-      setBusy(false);
+      throw err;
     }
   }
 
@@ -184,32 +175,83 @@ export function CardVaultPanel({
           .
         </p>
       ) : (
-        <form
-          className="vault-pin"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (pin) unlock();
-          }}
-        >
-          <input
-            className="filter-input"
-            type="password"
-            inputMode="numeric"
-            autoComplete="off"
-            placeholder="PIN"
-            maxLength={6}
-            value={pin}
-            onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
-          />
-          <button className="btn btn-sm" type="submit" disabled={busy || pin.length < 4}>
-            {busy ? "Checking…" : "Unlock all"}
-          </button>
-          <span className="field-hint">Opens every card and account for five minutes.</span>
-        </form>
+        <VaultPinForm
+          key={accountId}
+          submitLabel="Unlock all"
+          hint="Opens every card and account for five minutes."
+          onSubmit={unlock}
+        />
       )}
-
-      {error && <p className="desc set-warn">{error}</p>}
     </div>
+  );
+}
+
+/**
+ * The PIN box: one field and a button, used wherever the vault is opened.
+ *
+ * `onSubmit` throws to refuse - its message (the server's, which says how
+ * many tries are left) is shown under the field and the field is cleared.
+ */
+export function VaultPinForm({
+  submitLabel,
+  hint,
+  autoFocus = false,
+  onSubmit,
+}: {
+  submitLabel: string;
+  hint?: string;
+  autoFocus?: boolean;
+  onSubmit: (pin: string) => Promise<void>;
+}) {
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    setBusy(true);
+    setError(null);
+    try {
+      await onSubmit(pin);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "That didn't work.");
+    } finally {
+      setPin("");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <form
+        className="vault-pin"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (pin.length >= 4) submit();
+        }}
+      >
+        <input
+          className="filter-input"
+          type="password"
+          inputMode="numeric"
+          autoComplete="off"
+          placeholder="PIN"
+          aria-label="PIN"
+          maxLength={6}
+          autoFocus={autoFocus}
+          value={pin}
+          onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
+        />
+        <button className="btn btn-sm" type="submit" disabled={busy || pin.length < 4}>
+          {busy ? "Checking…" : submitLabel}
+        </button>
+        {hint && <span className="field-hint">{hint}</span>}
+      </form>
+      {error && (
+        <p className="desc set-warn" role="alert">
+          {error}
+        </p>
+      )}
+    </>
   );
 }
 
@@ -249,7 +291,7 @@ function DetailFields({ details, isBank }: { details: OpenedDetails; isBank: boo
   );
 }
 
-function CopyButton({ text }: { text: string }) {
+export function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <button
@@ -295,7 +337,7 @@ function VaultHead({
 }
 
 /** Groups of four, which is how a card number is read aloud. */
-function spaced(number: string): string {
+export function spaced(number: string): string {
   return number.replace(/(.{4})/g, "$1 ").trim();
 }
 

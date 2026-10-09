@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AccountModal } from "../components/AccountModal";
 import { AccountPanel } from "../components/AccountPanel";
+import { BudgetEditor } from "../components/budget/BudgetEditor";
 import { CommitmentModal } from "../components/CommitmentModal";
 import { FamilyTab } from "../components/FamilyTab";
 import { Icon } from "../components/Icon";
@@ -23,7 +24,9 @@ import {
   FixedCommitment,
   Loan,
   MerchantPreset,
+  MonthlyBudgetStatus,
   NETWORK_LABELS,
+  SavingsBucket,
   accountLabel,
   commitmentAmountLabel,
 } from "../types";
@@ -661,8 +664,11 @@ function BudgetTab() {
   const [profile, setProfile] = useState<BudgetProfile | null>(null);
   const [salary, setSalary] = useState("");
   const [salaryDay, setSalaryDay] = useState("");
-  const [dailyBudget, setDailyBudget] = useState("");
   const [saved, setSaved] = useState(false);
+
+  const [budget, setBudget] = useState<MonthlyBudgetStatus | null>(null);
+  const [bucket, setBucket] = useState<SavingsBucket | null>(null);
+  const [editingBudget, setEditingBudget] = useState(false);
 
   const [commitments, setCommitments] = useState<FixedCommitment[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -681,8 +687,14 @@ function BudgetTab() {
     api.get<Loan[]>("/loans").then(setLoans).catch(() => setLoans([]));
   }, []);
 
+  const reloadBudget = useCallback(() => {
+    api.get<MonthlyBudgetStatus>("/budget/monthly").then(setBudget).catch(() => setBudget(null));
+    api.get<SavingsBucket>("/budget/bucket").then(setBucket).catch(() => setBucket(null));
+  }, []);
+
   useEffect(reloadCommitments, [reloadCommitments]);
   useEffect(reloadLoans, [reloadLoans]);
+  useEffect(reloadBudget, [reloadBudget]);
   useEffect(() => {
     api.get<Category[]>("/categories").then(setCategories).catch(() => setCategories([]));
   }, []);
@@ -694,20 +706,19 @@ function BudgetTab() {
         setProfile(next);
         if (next.salaryAmountMinor) setSalary((next.salaryAmountMinor / 100).toFixed(0));
         if (next.salaryDay) setSalaryDay(String(next.salaryDay));
-        if (next.dailyBudgetMinor) setDailyBudget((next.dailyBudgetMinor / 100).toFixed(0));
       })
       .catch(() => setProfile(null));
   }, []);
 
   async function save() {
     const rupees = Number.parseFloat(salary);
-    const dailyRupees = Number.parseFloat(dailyBudget);
     const next = await api.patch<BudgetProfile>("/budget/profile", {
       salaryAmountMinor: Number.isFinite(rupees) ? Math.round(rupees * 100) : null,
       salaryDay: Number.parseInt(salaryDay, 10) || null,
-      dailyBudgetMinor: dailyRupees > 0 ? Math.round(dailyRupees * 100) : null,
     });
     setProfile(next);
+    // A new pay day moves where the month starts and ends.
+    reloadBudget();
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   }
@@ -730,9 +741,8 @@ function BudgetTab() {
         </div>
 
         <p className="desc">
-          With these, the dashboard can say how much a day is left before the next one arrives. It is a
-          pace, not a balance — SpendLog reads messages about transactions and has never known what is
-          actually in an account.
+          Your month runs from pay day to the day before the next, and the budget, the ledger and Analytics
+          all go by it. Without a pay day, a month is simply the calendar month.
         </p>
 
         <div className="budget-setup">
@@ -762,41 +772,7 @@ function BudgetTab() {
         </div>
       </div>
 
-      <div className="card set-card">
-        <div className="set-card-head">
-          <div className="set-card-icon">
-            <Icon name="ic-trend" />
-          </div>
-          <div>
-            <h4>What a day should cost</h4>
-            <p className="set-card-sub">
-              {profile?.dailyBudgetMinor ? `${formatMoney(profile.dailyBudgetMinor)} a day` : "Not set"}
-            </p>
-          </div>
-        </div>
-
-        <p className="desc">
-          Every day under it puts the difference by, every day over it takes the difference back. The
-          running total is what there is to move into savings when the next salary lands, and it starts
-          again {profile?.salaryDay ? "on your pay day" : "on the 1st"}.
-        </p>
-
-        <div className="budget-setup">
-          <label className="field">
-            <span>A day (₹)</span>
-            <input
-              className="filter-input"
-              inputMode="decimal"
-              value={dailyBudget}
-              onChange={(e) => setDailyBudget(e.target.value)}
-              placeholder="1000"
-            />
-          </label>
-          <button className="btn btn-sm btn-primary" onClick={save}>
-            {saved ? "Saved" : "Save"}
-          </button>
-        </div>
-      </div>
+      <MonthlyBudgetSettings budget={budget} bucket={bucket} onEdit={() => setEditingBudget(true)} />
 
       <div className="card set-card">
         <div className="set-card-head">
@@ -814,8 +790,9 @@ function BudgetTab() {
         </div>
 
         <p className="desc">
-          Rent, a SIP, insurance — anything that goes out every month whatever else happens. They are held
-          back from what is left to spend, so the daily figure is what is actually free.
+          Rent, a SIP, insurance — anything that goes out every month whatever else happens. They count
+          against the monthly budget like everything else, and until one has gone out the budget keeps its
+          amount aside, so the safe-a-day figure is what is actually free.
         </p>
 
         {commitments.length > 0 && (
@@ -936,6 +913,118 @@ function BudgetTab() {
           onClose={() => setEditingLoan(null)}
         />
       )}
+
+      {editingBudget && (
+        <BudgetEditor
+          status={budget}
+          onSaved={(next) => {
+            setEditingBudget(false);
+            setBudget(next);
+            reloadBudget();
+          }}
+          onClose={() => setEditingBudget(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The monthly budget, its category limits, and the savings bucket its
+ * leftovers have filled, month by month. Changed in the same editor the
+ * dashboard opens.
+ */
+function MonthlyBudgetSettings({
+  budget,
+  bucket,
+  onEdit,
+}: {
+  budget: MonthlyBudgetStatus | null;
+  bucket: SavingsBucket | null;
+  onEdit: () => void;
+}) {
+  const set = budget?.configured && budget.budgetMinor !== null;
+  const months = bucket?.configured ? bucket.months.slice(0, 6) : [];
+
+  return (
+    <div className="card set-card set-card-wide">
+      <div className="set-card-head">
+        <div className="set-card-icon">
+          <Icon name="ic-trend" />
+        </div>
+        <div>
+          <h4>Monthly budget</h4>
+          <p className="set-card-sub">
+            {set
+              ? `${formatMoney(budget!.budgetMinor!)} a month${
+                  budget!.categories.length > 0
+                    ? ` · ${budget!.categories.length} category ${budget!.categories.length === 1 ? "limit" : "limits"}`
+                    : ""
+                }`
+              : "Not set"}
+          </p>
+        </div>
+      </div>
+
+      <p className="desc">
+        One amount for the month, and everything counts against it — rent, EMIs, SIPs and the day to day.
+        Categories can be given a share of it; the shares never add up to more than the whole. Whatever is
+        left when the month ends goes into the savings bucket below.
+      </p>
+
+      {set && budget!.categories.length > 0 && (
+        <ul className="budget-summary-limits">
+          {budget!.categories.map((category) => (
+            <li key={category.categoryId}>
+              {category.name} <b>{formatMoney(category.limitMinor)}</b>
+            </li>
+          ))}
+          {budget!.unassigned && (
+            <li>
+              Everything else <b>{formatMoney(budget!.unassigned.amountMinor)}</b>
+            </li>
+          )}
+        </ul>
+      )}
+
+      {bucket?.configured && (
+        <>
+          <div className="trip-settle-title">
+            Savings bucket · {formatMoney(bucket.balanceMinor)}
+            {bucket.balanceIfMonthEndedNowMinor !== bucket.balanceMinor &&
+              ` · ${formatMoney(bucket.balanceIfMonthEndedNowMinor)} if this month ended now`}
+          </div>
+          <ul className="bucket-months">
+            {months.map((month) => (
+              <li className="bucket-month" key={month.key}>
+                <div className="bucket-month-top">
+                  <span>{month.label}</span>
+                  <span className={month.toBucketMinor < 0 ? "is-down" : "is-up"}>
+                    {month.toBucketMinor < 0 ? "−" : "+"}
+                    {formatMoney(Math.abs(month.toBucketMinor))}
+                  </span>
+                </div>
+                <span className="bucket-month-sub">
+                  {formatMoney(month.spentMinor)} of {formatMoney(month.budgetMinor)}
+                  {month.era === "daily" ? " · on the old daily budget" : ""}
+                  {month.settled ? "" : " · still running"}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {bucket.openingFromDailyMinor !== 0 && (
+            <p className="field-hint" style={{ marginBottom: 12 }}>
+              Includes {formatMoney(bucket.openingFromDailyMinor)} carried over from the old daily budget.
+            </p>
+          )}
+        </>
+      )}
+
+      <div className="set-card-actions">
+        <button className={`btn btn-sm${set ? "" : " btn-primary"}`} onClick={onEdit}>
+          <Icon name={set ? "ic-pencil" : "ic-plus"} /> {set ? "Edit budget" : "Set a budget"}
+        </button>
+      </div>
     </div>
   );
 }

@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import { AccountOverview, PocketMoneySettings, PocketMoneyStatus } from "../types";
 import { api } from "../lib/api";
 import { formatMoney, formatShortDate } from "../lib/format";
@@ -145,26 +144,6 @@ export function PocketMoneyStatusView({ pocket }: { pocket: PocketMoneyStatus })
               : "Nothing to top up today — last month used none of it"}
         </p>
       )}
-    </div>
-  );
-}
-
-/** A dashboard card for one pocket-money account. */
-export function PocketMoneyCard({
-  pocket,
-}: {
-  pocket: PocketMoneyStatus & { accountId: string; name: string };
-}) {
-  return (
-    <div className="home-card">
-      <h3 className="home-card-title">{possessive(pocket.holder)} pocket money</h3>
-      <p className="section-sub">
-        From {pocket.name}. Spending here counts in the month, but not in your daily bucket.
-      </p>
-      <PocketMoneyStatusView pocket={pocket} />
-      <Link className="home-card-link" to={`/transactions?account=${pocket.accountId}`}>
-        See what it went on <Icon name="ic-arrow-right" />
-      </Link>
     </div>
   );
 }

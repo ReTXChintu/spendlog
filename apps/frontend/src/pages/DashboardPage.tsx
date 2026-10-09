@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { CardLimits } from "../components/CardLimits";
-import { DailyBucket } from "../components/DailyBucket";
+import { BudgetEditor } from "../components/budget/BudgetEditor";
+import { MonthlyBudgetCard } from "../components/budget/MonthlyBudgetCard";
 import { CardPicker } from "../components/CardPicker";
 import { EarmarksCard } from "../components/home/EarmarksCard";
-import { MoneyCarousel } from "../components/home/MoneyCarousel";
 import { PlanWarnings } from "../components/home/PlanWarnings";
-import { PocketMoneyCard, possessive } from "../components/PocketMoneyPanel";
+import { possessive } from "../components/PocketMoneyPanel";
 import { Icon } from "../components/Icon";
 import { LoanModal } from "../components/LoanModal";
 import { StateBlock } from "../components/States";
+import { Wallet } from "../components/wallet/Wallet";
 import { api } from "../lib/api";
 import { formatMoney, formatMoneyShort, formatShortDate } from "../lib/format";
 import {
@@ -28,9 +28,11 @@ import {
  * app? A card near its limit changes which card comes out of the wallet; a
  * chart of last March changes nothing, and lives on the Analytics tab.
  *
- * Laid out as a grid of compact cards, two to a row, so a wide screen is
- * used side to side instead of as one long column. A card takes the whole
- * row only when what it holds is genuinely wide (a list of loans).
+ * The wallet comes first, every card and account in full, so nothing needs
+ * a trip into Settings to find. Then the month's budget across the whole
+ * width - the one figure the rest of the month is measured against - and
+ * below it a grid of compact cards, two to a row, so a wide screen is used
+ * side to side instead of as one long column.
  *
  * One request draws the whole thing. Seven round trips to paint the screen
  * you land on is the slowest possible place to spend them.
@@ -39,6 +41,8 @@ export function DashboardTab() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [failed, setFailed] = useState(false);
   const [editingLoan, setEditingLoan] = useState<Loan | null>(null);
+  // The budget editor, and the total it starts from when there is none yet.
+  const [editingBudget, setEditingBudget] = useState<{ startFromMinor: number | null } | null>(null);
 
   const load = useCallback(() => {
     api
@@ -74,16 +78,17 @@ export function DashboardTab() {
 
   if (!data) return <div className="home-loading" aria-busy="true" />;
 
-  const { pace, daily, monthSoFar, needsCategory, emis, loans, owed, expiringPerks, statements, bills } = data;
+  const { pace, budget, monthSoFar, needsCategory, emis, loans, owed, expiringPerks, statements, bills } = data;
   const change = monthSoFar.changeMinor;
   const earmarks = data.earmarks;
   const pocketMoney = data.pocketMoney ?? [];
+  const commitments = pace.configured ? pace.commitments : [];
 
   return (
     <>
-      {/* What there is to spend comes first: every other figure on the
-          page is a question about it. */}
-      <MoneyCarousel money={data.money} cards={data.cards} />
+      {/* What there is, card by card and account by account, comes first:
+          every other figure on the page is a question about it. */}
+      <Wallet money={data.money} cards={data.wallet?.cards ?? []} banks={data.wallet?.banks ?? []} />
 
       {/* The plan's broken rules, while there is still month left to fix them. */}
       <PlanWarnings warnings={data.planWarnings ?? []} />
@@ -99,10 +104,12 @@ export function DashboardTab() {
       />
 
       <div className="home-grid">
-        {daily?.configured && (
-          <div className="home-card">
-            <DailyBucket daily={daily} />
-          </div>
+        {budget && (
+          <MonthlyBudgetCard
+            budget={budget}
+            onEdit={(startFromMinor) => setEditingBudget({ startFromMinor: startFromMinor ?? null })}
+            onSaved={load}
+          />
         )}
 
         <div className="home-card">
@@ -134,47 +141,17 @@ export function DashboardTab() {
 
         {earmarks && earmarks.count > 0 && <EarmarksCard earmarks={earmarks} />}
 
-        {pocketMoney.map((pocket) => (
-          <PocketMoneyCard key={pocket.accountId} pocket={pocket} />
-        ))}
-
-        {pace.configured ? (
+        {/* Rent, SIPs and the like count against the budget like anything
+            else; ticking one off here is how the budget's pace knows it has
+            gone out and stops holding money back for it. */}
+        {pace.configured && commitments.length > 0 && (
           <div className="home-card">
-            <h3 className="home-card-title">Spending pace</h3>
+            <h3 className="home-card-title">Fixed each month</h3>
             <p className="section-sub">
-              {pace.daysLeft} {pace.daysLeft === 1 ? "day" : "days"} until the next salary.
+              {pace.commitmentsRemainingMinor > 0
+                ? `${formatMoneyShort(pace.commitmentsRemainingMinor)} still to go out — the budget's safe-a-day figure already sets it aside.`
+                : "All gone out for this month."}
             </p>
-
-            <div className={`budget-headline home-pace is-${pace.state}`}>
-              <div>
-                <span className="emi-preview-label">Left to spend</span>
-                <span className="budget-figure num">{formatMoney(pace.remainingMinor)}</span>
-              </div>
-              <div>
-                <span className="emi-preview-label">A day from here</span>
-                <span className="budget-figure num">{formatMoney(pace.perDayMinor)}</span>
-              </div>
-              <div>
-                <span className="emi-preview-label">Lately</span>
-                <span className="budget-figure num">{formatMoney(pace.recentPerDayMinor)} a day</span>
-              </div>
-            </div>
-
-            <div className={`pace-source${pace.salaryIsActual ? "" : " is-guess"}`}>
-              <Icon name={pace.salaryIsActual ? "ic-check" : "ic-info"} />
-              {pace.salaryIsActual
-                ? `Built on the ${formatMoney(pace.salaryMinor)} that actually landed.`
-                : "Built on the salary in Settings. Tick the credit on your ledger as salary and this uses what really arrived."}
-            </div>
-
-            {pace.state !== "ok" && (
-              <p className="budget-verdict">
-                <Icon name="ic-alert" />
-                {pace.state === "over"
-                  ? "Past the salary for this period. Anything more comes out of something else."
-                  : "Carrying on at the last week's pace would run this period dry before payday."}
-              </p>
-            )}
 
             {/* Sending less than usual is worth a sentence rather than a
                 silently unticked box. */}
@@ -185,54 +162,34 @@ export function DashboardTab() {
               </p>
             )}
 
-            {pace.commitments.length > 0 && (
-              <div className="budget-commitments">
-                <div className="trip-settle-title">
-                  Fixed each month
-                  {pace.commitmentsRemainingMinor > 0 &&
-                    ` · ${formatMoneyShort(pace.commitmentsRemainingMinor)} still to go out`}
-                </div>
-                {pace.commitments.map((commitment) => (
-                  <label className="budget-commitment" key={commitment.id}>
-                    <input
-                      type="checkbox"
-                      checked={commitment.isPaid ?? false}
-                      onChange={(e) => togglePaid(commitment, e.target.checked)}
-                    />
-                    <span className={commitment.isPaid ? "is-paid" : ""}>
-                      {commitment.name} · {commitment.dayOfMonth}
-                      {ordinal(commitment.dayOfMonth)}
-                      {commitment.isPartial && (
-                        <em className="commitment-short">
-                          {formatMoneyShort(commitment.shortfallMinor ?? 0)} short
-                        </em>
-                      )}
-                    </span>
-                    <span className="num">
-                      {commitment.isPartial
-                        ? `${formatMoney(commitment.paidMinor ?? 0)} of ${formatMoney(
-                            commitment.thisPeriodAmountMinor ?? commitment.amountMinor
-                          )}`
-                        : commitmentAmountLabel(commitment, formatMoney)}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="home-card">
-            <h3 className="home-card-title">Spending pace</h3>
-            <p className="section-sub">
-              Tell SpendLog what lands each month and when, and it can say how much a day is left before the
-              next one. <Link to="/settings?tab=budget">Set your salary</Link>.
-            </p>
-          </div>
-        )}
-
-        {data.cards.length > 0 && (
-          <div className="home-card">
-            <CardLimits cards={data.cards} />
+            <div className="budget-commitments">
+              {commitments.map((commitment) => (
+                <label className="budget-commitment" key={commitment.id}>
+                  <input
+                    type="checkbox"
+                    checked={commitment.isPaid ?? false}
+                    onChange={(e) => togglePaid(commitment, e.target.checked)}
+                  />
+                  <span className={commitment.isPaid ? "is-paid" : ""}>
+                    {commitment.name} · {commitment.dayOfMonth}
+                    {ordinal(commitment.dayOfMonth)}
+                    {commitment.isPartial && (
+                      <em className="commitment-short">{formatMoneyShort(commitment.shortfallMinor ?? 0)} short</em>
+                    )}
+                  </span>
+                  <span className="num">
+                    {commitment.isPartial
+                      ? `${formatMoney(commitment.paidMinor ?? 0)} of ${formatMoney(
+                          commitment.thisPeriodAmountMinor ?? commitment.amountMinor
+                        )}`
+                      : commitmentAmountLabel(commitment, formatMoney)}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <Link className="home-card-link" to="/settings?tab=budget">
+              Change fixed costs <Icon name="ic-arrow-right" />
+            </Link>
           </div>
         )}
 
@@ -301,6 +258,18 @@ export function DashboardTab() {
           </div>
         )}
       </div>
+
+      {editingBudget && (
+        <BudgetEditor
+          status={budget ?? null}
+          initialAmountMinor={editingBudget.startFromMinor}
+          onSaved={() => {
+            setEditingBudget(null);
+            load();
+          }}
+          onClose={() => setEditingBudget(null)}
+        />
+      )}
 
       {editingLoan && (
         <LoanModal

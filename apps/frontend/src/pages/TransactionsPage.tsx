@@ -9,17 +9,17 @@ import { LedgerSkeleton, StateBlock } from "../components/States";
 import { RawMessageModal } from "../components/RawMessageModal";
 import { TransactionRow } from "../components/TransactionRow";
 import { api } from "../lib/api";
-import { formatDayLabel, formatMoney } from "../lib/format";
+import { formatDayLabel, formatMoney, formatMoneyShort } from "../lib/format";
+import "../styles/budget.css";
 import {
   Account,
   AnalyticsSummary,
   BudgetPace,
   CardStatus,
   Category,
-  DailyBudget,
-  DailyBudgetDay,
   DayGroup,
   EmailConnectionStatus,
+  MonthlyBudgetStatus,
   Transaction,
   TransactionType,
   AccountCycles,
@@ -68,7 +68,8 @@ export function TransactionsPage() {
   const [refundFor, setRefundFor] = useState<Transaction | null>(null);
   const [cards, setCards] = useState<CardStatus[]>([]);
   const [pace, setPace] = useState<BudgetPace | null>(null);
-  const [daily, setDaily] = useState<DailyBudget | null>(null);
+  // The month on screen against its budget, for the month bar.
+  const [monthBudget, setMonthBudget] = useState<MonthlyBudgetStatus | null>(null);
   // Rows picked for merging. Empty means selection mode is off.
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selecting, setSelecting] = useState(false);
@@ -217,39 +218,24 @@ export function TransactionsPage() {
       // The ledger still works without the rail populated.
     }
 
-    // Card cycles, the spending pace, and the daily savings bucket: all
-    // advisory, so none of them is allowed to stop the ledger loading.
+    // Card cycles and the spending pace: both advisory, so neither is
+    // allowed to stop the ledger loading.
     try {
-      const [cardStatus, budgetPace, dailyBudget] = await Promise.all([
+      const [cardStatus, budgetPace] = await Promise.all([
         api.get<CardStatus[]>("/cards"),
         api.get<BudgetPace>("/budget/pace"),
-        api.get<DailyBudget>("/budget/daily"),
       ]);
       setCards(cardStatus);
       setPace(budgetPace);
-      setDaily(dailyBudget);
     } catch {
       setCards([]);
       setPace(null);
-      setDaily(null);
     }
   }, []);
 
   useEffect(() => {
     loadContext();
   }, [loadContext]);
-
-  // Keyed by IST day, so a day header can show what that day did to the
-  // savings bucket alongside what it already shows for spend/income. Only
-  // covers the current pay period — `by-day` can page further back than
-  // that, and those older days simply show no second row.
-  const dailyByDate = useMemo(() => {
-    const map = new Map<string, DailyBudgetDay>();
-    if (daily?.configured) {
-      for (const day of daily.days) map.set(day.day, day);
-    }
-    return map;
-  }, [daily]);
 
   async function loadMore() {
     if (!nextBefore || loadingMore) return;
@@ -293,6 +279,18 @@ export function TransactionsPage() {
       .catch(() => undefined);
   }, [month]);
 
+  // So does the budget on the month bar. Refetched after an edit too,
+  // since an edit can move a payment in or out of the month.
+  const monthKey = month?.month ?? null;
+  const loadMonthBudget = useCallback(() => {
+    if (!monthKey) return;
+    api
+      .get<MonthlyBudgetStatus>(`/budget/monthly/${monthKey}`)
+      .then(setMonthBudget)
+      .catch(() => setMonthBudget(null));
+  }, [monthKey]);
+  useEffect(loadMonthBudget, [loadMonthBudget]);
+
   function backToMonths() {
     setFrom("");
     setTo("");
@@ -333,6 +331,7 @@ export function TransactionsPage() {
   const reloadAfterEdit = () => {
     load({ keepVisible: true });
     loadContext();
+    loadMonthBudget();
   };
 
   function toggleSelected(transaction: Transaction) {
@@ -462,6 +461,7 @@ export function TransactionsPage() {
                 This month
               </button>
             )}
+            {monthBudget && monthBudget.month.key === month?.month && <MonthBudgetLine budget={monthBudget} />}
           </>
         )}
       </div>
@@ -663,9 +663,7 @@ export function TransactionsPage() {
             )
           ) : (
             <>
-              {days.map((day) => {
-                const bucketDay = dailyByDate.get(day.date);
-                return (
+              {days.map((day) => (
                 <div className="day-group" key={day.date}>
                   <div className="day-header">
                     <span className="day-label">{formatDayLabel(day.date)}</span>
@@ -675,16 +673,6 @@ export function TransactionsPage() {
                       {day.incomeMinor > 0 && <span className="income num">+ {formatMoney(day.incomeMinor)}</span>}
                     </span>
                   </div>
-                  {bucketDay && (
-                    <div className="day-bucket-row">
-                      <span className="day-bucket-label">savings</span>
-                      <span className={`num ${bucketDay.deltaMinor >= 0 ? "to-savings" : "from-savings"}`}>
-                        {bucketDay.deltaMinor >= 0
-                          ? `+ ${formatMoney(bucketDay.deltaMinor)} put by`
-                          : `− ${formatMoney(-bucketDay.deltaMinor)} drawn out`}
-                      </span>
-                    </div>
-                  )}
                   {day.transactions.map((transaction) => (
                     <TransactionRow
                       key={transaction.id}
@@ -699,8 +687,7 @@ export function TransactionsPage() {
                     />
                   ))}
                 </div>
-                );
-              })}
+              ))}
 
               {hasMore && (
                 <div className="load-more" ref={sentinel}>
@@ -809,6 +796,34 @@ export function TransactionsPage() {
         />
       )}
     </section>
+  );
+}
+
+/**
+ * The month's budget, on the month bar: how much of it the month on
+ * screen has used, and what is left or how far over it went. Nothing for
+ * a month with no budget - a bar of nothing says nothing.
+ */
+function MonthBudgetLine({ budget }: { budget: MonthlyBudgetStatus }) {
+  if (!budget.configured || budget.budgetMinor === null) return null;
+  const left = budget.leftMinor ?? budget.budgetMinor - budget.spentMinor;
+  const state = budget.isOver ? "over" : budget.month.isCurrent && budget.pace?.status === "high" ? "high" : "ok";
+  const share = Math.min(100, Math.round((budget.spentMinor / Math.max(1, budget.budgetMinor)) * 100));
+
+  return (
+    <div className={`month-bar-budget is-${state}`}>
+      <div
+        className="month-bar-budget-bar"
+        role="img"
+        aria-label={`${share}% of the ${formatMoney(budget.budgetMinor)} budget used`}
+      >
+        <div className="month-bar-budget-fill" style={{ width: `${share}%` }} />
+      </div>
+      <span className="month-bar-budget-text">
+        <b>{formatMoneyShort(budget.spentMinor)}</b> of {formatMoneyShort(budget.budgetMinor)} ·{" "}
+        <b>{formatMoneyShort(Math.abs(left))}</b> {budget.isOver ? "over" : budget.month.isClosed ? "saved" : "left"}
+      </span>
+    </div>
   );
 }
 

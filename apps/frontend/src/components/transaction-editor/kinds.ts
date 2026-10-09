@@ -7,8 +7,10 @@ import { Transaction, TransactionType } from "../../types";
  * most of which contradict each other (a salary that is also a transfer
  * that is also settling up). Only one of these can be true of a
  * transaction, so they are one choice. The things that genuinely sit on
- * top of any of them - a one-off, a fixed monthly cost, keeping money out
- * of the savings bucket - are separate toggles.
+ * top of any of them - marking a one-off purchase, a fixed monthly cost,
+ * keeping money in out of the savings bucket - are separate toggles. None
+ * of them takes a payment out of the monthly budget: everything spent
+ * counts against it.
  */
 export type Kind =
   | "normal"
