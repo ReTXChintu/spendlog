@@ -1203,6 +1203,17 @@ svg.icon{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;fill:n
 .people-history-row .num{font-weight:700;font-family:var(--font-mono)}
 .people-history-row .num.debit{color:var(--debit)}
 .people-history-row .num.credit{color:var(--credit)}
+/* A clearance: no money moved, so neither spending red nor income green. */
+.people-clear-mark{width:24px;height:24px;background:var(--track);color:var(--muted)}
+.people-clear-mark svg{width:13px;height:13px}
+.people-history-row .num.people-clear-amount{color:var(--muted)}
+.people-clear{display:flex;flex-direction:column;gap:14px;width:520px}
+.people-clear .modal-sub{margin:0}
+.people-clear .modal-actions{margin-top:4px}
+.people-clear .people-clear-preview{font-size:12.5px;color:var(--ink);font-weight:600}
+.people-clear .people-clear-preview.is-wrong{color:var(--debit)}
+.people-clear-pair{display:grid;grid-template-columns:minmax(0,1fr) 170px;gap:12px}
+@media (max-width:560px){.people-clear-pair{grid-template-columns:1fr}}
 
 /* The picker inside the transaction form. */
 .people-picker{display:flex;flex-direction:column;gap:8px;padding:12px;border:1px solid var(--line);

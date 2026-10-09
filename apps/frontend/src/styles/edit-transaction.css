@@ -47,6 +47,10 @@
 .tx-counts.is-neutral{color:var(--muted)}
 
 .tx-presets{margin-top:6px}
+/* A person, offered as the merchant is typed: a button, not a saved chip. */
+.tx-person-chip{font-family:inherit;cursor:pointer;border-style:dashed}
+.tx-person-chip.is-current{border-style:solid}
+.tx-person-chip svg{width:12px;height:12px}
 
 /* ---------- kind chooser ---------- */
 .tx-kinds{display:flex;flex-wrap:wrap;gap:8px}

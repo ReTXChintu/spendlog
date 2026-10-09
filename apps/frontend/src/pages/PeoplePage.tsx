@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Icon } from "../components/Icon";
 import { StateBlock } from "../components/States";
 import { api } from "../lib/api";
-import { formatDayLabel, formatMoney } from "../lib/format";
-import { Contact, ContactDetail, ContactList } from "../types";
+import { formatDayLabel, formatMoney, formatMoneyShort, istToday } from "../lib/format";
+import { Contact, ContactClearance, ContactDetail, ContactList, Transaction } from "../types";
 
 /**
  * Who owes what.
@@ -184,6 +184,16 @@ function signedMinor(rupees: string, theyOwe: boolean): number {
   return theyOwe ? Math.abs(minor) : -Math.abs(minor);
 }
 
+/** ₹1,000 when there are no paise, ₹999.50 when there are. */
+function formatRupees(minor: number): string {
+  return minor % 100 === 0 ? formatMoneyShort(minor) : formatMoney(minor);
+}
+
+/** What a balance amounts to, said the way round it runs. */
+function owingSentence(name: string, balanceMinor: number, amount: string): string {
+  return balanceMinor > 0 ? `${name} owes you ${amount}` : `You owe ${name} ${amount}`;
+}
+
 function BalanceTag({ balanceMinor }: { balanceMinor: number }) {
   if (balanceMinor === 0) return <span className="people-tag">Settled up</span>;
   return (
@@ -275,14 +285,41 @@ function PersonDetail({
   const [owed, setOwed] = useState(opening ? (Math.abs(opening) / 100).toFixed(2) : "");
   const [theyOwe, setTheyOwe] = useState(opening >= 0);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     api
       .get<ContactDetail>(`/contacts/${contact.id}`)
       .then(setDetail)
       .catch(() => setError("Couldn't load their history."));
-  }, [contact.id, contact.balanceMinor]);
+  }, [contact.id]);
+
+  useEffect(reload, [reload, contact.balanceMinor]);
+
+  async function undoClearance(clearance: ContactClearance) {
+    setError(null);
+    try {
+      await api.delete(`/contacts/${contact.id}/clear/${clearance.id}`);
+      reload();
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't undo that.");
+    }
+  }
+
+  // Transactions and clearances in one list, newest first: a clearance
+  // happened on a day like anything else did.
+  const rows: (
+    | { kind: "transaction"; at: string; transaction: Transaction; amountMinor: number }
+    | { kind: "clearance"; at: string; clearance: ContactClearance }
+  )[] = detail
+    ? [
+        ...detail.history.map((row) => ({ kind: "transaction" as const, at: row.transaction.occurredAt, ...row })),
+        ...(detail.clearances ?? []).map((clearance) => ({ kind: "clearance" as const, at: clearance.on, clearance })),
+      ].sort((a, b) => b.at.localeCompare(a.at))
+    : [];
+  const cleared = contact.clearedMinor ?? 0;
 
   async function save() {
     setError(null);
@@ -317,6 +354,7 @@ function PersonDetail({
             {opening !== 0 &&
               `${opening > 0 ? "Owed you" : "You owed them"} ${formatMoney(Math.abs(opening))} before SpendLog · `}
             Lent or paid for {formatMoney(contact.givenMinor)} · paid back {formatMoney(contact.returnedMinor)}
+            {cleared !== 0 && ` · cleared ${formatMoney(Math.abs(cleared))} without money moving`}
           </p>
         </div>
         <BalanceTag balanceMinor={contact.balanceMinor} />
@@ -345,6 +383,15 @@ function PersonDetail({
         </div>
       ) : (
         <div className="set-card-actions">
+          {contact.balanceMinor !== 0 && (
+            <button
+              className="btn btn-sm"
+              onClick={() => setClearing(true)}
+              title="Settled some other way - a gift, a favour - with no money moving"
+            >
+              <Icon name="ic-check" /> Clear
+            </button>
+          )}
           <button className="btn btn-sm btn-ghost" onClick={() => setEditing(true)}>
             <Icon name="ic-pencil" /> Edit
           </button>
@@ -361,30 +408,62 @@ function PersonDetail({
 
       {detail === null ? (
         <p className="field-hint">Loading…</p>
-      ) : detail.history.length === 0 && opening === 0 ? (
+      ) : rows.length === 0 && opening === 0 ? (
         <p className="field-hint">
           Nothing with {contact.name} yet. If money changed hands before SpendLog, add it under Edit as what's
           already owed.
         </p>
       ) : (
         <div className="people-history">
-          {detail.history.map(({ transaction, amountMinor }) => (
-            <div className="people-history-row" key={transaction.id}>
-              <span className="people-history-main">
-                <span className="people-history-name">
-                  {transaction.merchant ?? transaction.split?.groupLabel ?? (amountMinor > 0 ? "Lent" : "Paid back")}
+          {rows.map((row) =>
+            row.kind === "transaction" ? (
+              <div className="people-history-row" key={row.transaction.id}>
+                <span className="people-history-main">
+                  <span className="people-history-name">
+                    {row.transaction.merchant ??
+                      row.transaction.split?.groupLabel ??
+                      (row.amountMinor > 0 ? "Lent" : "Paid back")}
+                  </span>
+                  <span className="people-history-sub">
+                    {formatDayLabel(row.transaction.occurredAt.slice(0, 10))}
+                    {row.transaction.isSettlement ? " · settling up" : row.transaction.split ? " · split" : ""}
+                  </span>
                 </span>
-                <span className="people-history-sub">
-                  {formatDayLabel(transaction.occurredAt.slice(0, 10))}
-                  {transaction.isSettlement ? " · settling up" : transaction.split ? " · split" : ""}
+                <span className={`num ${row.amountMinor > 0 ? "debit" : "credit"}`}>
+                  {row.amountMinor > 0 ? "+" : "−"}
+                  {formatMoney(Math.abs(row.amountMinor))}
                 </span>
-              </span>
-              <span className={`num ${amountMinor > 0 ? "debit" : "credit"}`}>
-                {amountMinor > 0 ? "+" : "−"}
-                {formatMoney(Math.abs(amountMinor))}
-              </span>
-            </div>
-          ))}
+              </div>
+            ) : (
+              <div className="people-history-row is-clearance" key={row.clearance.id}>
+                <span className="people-avatar people-clear-mark" aria-hidden="true">
+                  <Icon name="ic-check" />
+                </span>
+                <span className="people-history-main">
+                  <span className="people-history-name">
+                    Cleared {formatRupees(row.clearance.amountMinor)}
+                    {row.clearance.note && ` · ${row.clearance.note}`}
+                  </span>
+                  <span className="people-history-sub">
+                    {formatDayLabel(row.clearance.on.slice(0, 10))} ·{" "}
+                    {row.clearance.direction === "OWED_TO_ME" ? "off what they owed" : "off what you owed"}, no money
+                    moved
+                  </span>
+                </span>
+                <span className="num people-clear-amount">
+                  {row.clearance.effectMinor > 0 ? "+" : "−"}
+                  {formatMoney(Math.abs(row.clearance.effectMinor))}
+                </span>
+                <button
+                  className="btn btn-sm btn-ghost"
+                  onClick={() => undoClearance(row.clearance)}
+                  title="Undo: it is owed again"
+                >
+                  Undo
+                </button>
+              </div>
+            )
+          )}
           {/* Oldest, so last: where the running figure started. */}
           {opening !== 0 && (
             <div className="people-history-row">
@@ -400,6 +479,175 @@ function PersonDetail({
           )}
         </div>
       )}
+
+      {clearing && (
+        <ClearDialog
+          contact={contact}
+          onClose={() => setClearing(false)}
+          onCleared={() => {
+            setClearing(false);
+            reload();
+            onChanged();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Settles part or all of what is owed without money moving - they owed
+ * ₹1,000 and bought you a ₹999 watch, so ₹999 is cleared and ₹1 is still
+ * owed. Starts at the whole amount, since clearing everything is the usual
+ * case, and can be brought down for a part.
+ */
+function ClearDialog({
+  contact,
+  onClose,
+  onCleared,
+}: {
+  contact: Contact;
+  onClose: () => void;
+  onCleared: () => void;
+}) {
+  const outstanding = Math.abs(contact.balanceMinor);
+  const [amount, setAmount] = useState(
+    outstanding % 100 === 0 ? String(outstanding / 100) : (outstanding / 100).toFixed(2)
+  );
+  const [note, setNote] = useState("");
+  const [date, setDate] = useState(istToday());
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  const minor = Math.abs(signedMinor(amount, true));
+  const problem =
+    minor <= 0
+      ? "Enter an amount greater than zero."
+      : minor > outstanding
+        ? `Only ${formatRupees(outstanding)} is owed — you can't clear more than that.`
+        : null;
+  const left = outstanding - minor;
+
+  async function save() {
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await api.post(`/contacts/${contact.id}/clear`, {
+        amountMinor: minor,
+        note: note.trim() || null,
+        // Midday in India, so the day reads the same wherever it is shown.
+        on: `${date}T12:00:00+05:30`,
+      });
+      onCleared();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't clear that.");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className="overlay"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <form
+        className="modal people-clear"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="people-clear-title"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!saving) void save();
+        }}
+      >
+        <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
+          <Icon name="ic-x" />
+        </button>
+        <h3 id="people-clear-title">Clear with {contact.name}</h3>
+        <div className="modal-sub">
+          Settled some other way — a gift, a favour. No money moves, and nothing counts as spending or income.
+        </div>
+
+        <label className="field">
+          <span>Amount to clear</span>
+          <div className="amount-input">
+            <span className="prefix">₹</span>
+            <input
+              autoFocus
+              className="filter-input"
+              inputMode="decimal"
+              value={amount}
+              onChange={(event) => {
+                setAmount(event.target.value);
+                setError(null);
+              }}
+              aria-describedby="people-clear-preview"
+            />
+          </div>
+          <span id="people-clear-preview" className={`people-clear-preview${problem ? " is-wrong" : ""}`}>
+            {owingSentence(contact.name, contact.balanceMinor, formatRupees(outstanding))}
+            {" → "}
+            {problem
+              ? problem
+              : left === 0
+                ? "settled up after this"
+                : `${formatRupees(left)} left after this`}
+          </span>
+        </label>
+
+        <div className="people-clear-pair">
+          <label className="field">
+            <span>Note (optional)</span>
+            <input
+              className="filter-input"
+              value={note}
+              maxLength={200}
+              onChange={(event) => setNote(event.target.value)}
+              placeholder="Bought me a watch"
+            />
+          </label>
+          <label className="field">
+            <span>Date</span>
+            <input
+              type="date"
+              className="filter-input"
+              value={date}
+              max={istToday()}
+              onChange={(event) => setDate(event.target.value || istToday())}
+            />
+          </label>
+        </div>
+
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+
+        <div className="modal-actions">
+          <span className="modal-actions-spacer" />
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={saving || !!problem}>
+            {saving ? "Clearing…" : `Clear ${minor > 0 && !problem ? formatRupees(minor) : ""}`.trim()}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

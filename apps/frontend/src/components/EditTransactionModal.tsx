@@ -211,9 +211,68 @@ export function EditTransactionModal({
   function applyPreset(preset: MerchantPreset) {
     setMerchant(preset.merchant);
     setMerchantTouched(true);
-    if (preset.categoryId) setCategoryId(preset.categoryId);
+    if (preset.categoryId) changeCategory(preset.categoryId, preset.merchant);
     // Ordering only: a shortcut must not wait on a round trip.
     api.post(`/merchant-presets/${preset.id}/used`).catch(() => undefined);
+  }
+
+  /**
+   * A person picked as the merchant: the money went to them, or came from
+   * them - lent, or paid back, all of it theirs. Never spending or income,
+   * and the server reads a plain row in Lent & borrowed the same way, so
+   * the form shows here what will be saved rather than "Normal".
+   */
+  function pickPerson(contact: Contact) {
+    if (kind === "transfer") leaveTransfer();
+    setMerchant(contact.name);
+    setMerchantTouched(true);
+    setAutoMerchant(null);
+    if (peopleCategoryId) setCategoryId(peopleCategoryId);
+    becomePersonKind(contact.id);
+  }
+
+  /** The one contact a merchant names exactly, as the server matches it. */
+  function contactNamed(name: string): string | null {
+    const wanted = name.trim().toLowerCase();
+    const matches = wanted ? (contacts ?? []).filter((contact) => contact.name.trim().toLowerCase() === wanted) : [];
+    return matches.length === 1 ? matches[0].id : null;
+  }
+
+  /**
+   * Lent on a payment, paid back on money in, with `contactId` (when
+   * known) down for the whole amount. A payment already marked as split
+   * or as paying someone back keeps that, with the person added.
+   */
+  function becomePersonKind(contactId: string | null) {
+    setIsSpecial(false);
+    setFixedOn(false);
+    setCardPaymentFor("");
+    setLoanId("");
+    if (type === "DEBIT" && kind !== "settle") {
+      const keepSplit = kind === "split";
+      setSplitDraft((draft) => {
+        const already = !contactId || draft.people.some((person) => person.contactId === contactId);
+        const people = already ? draft.people : [...(keepSplit ? draft.people : []), { contactId, amountMinor: 0 }];
+        return keepSplit ? { ...draft, people } : { ...draft, includeMe: false, mode: "equal", people };
+      });
+      setKind(keepSplit ? "split" : "lent");
+      return;
+    }
+    if (contactId && !settlePeople.some((person) => person.contactId === contactId)) {
+      // Whatever is not already on someone, as SettlePanel adds a person.
+      const assigned = settlePeople.reduce((sum, person) => sum + person.amountMinor, 0);
+      setSettlePeople([...settlePeople, { contactId, amountMinor: Math.max(0, totalMinor - assigned) }]);
+    }
+    setKind("settle");
+  }
+
+  /**
+   * Filing something plain under Lent & borrowed means it was lent or paid
+   * back - the server will save it so - so the kind follows the category.
+   */
+  function changeCategory(id: string, merchantName = merchant) {
+    setCategoryId(id);
+    if (id && id === peopleCategoryId && kind === "normal") becomePersonKind(contactNamed(merchantName));
   }
 
   async function savePreset() {
@@ -825,8 +884,17 @@ export function EditTransactionModal({
                 value={merchant}
                 placeholder={type === "DEBIT" ? "Who was paid" : "Who paid you"}
                 presets={presets}
+                people={contacts}
+                personPicked={
+                  kind === "lent" || kind === "split"
+                    ? (splitDraft.people[0]?.contactId ?? null)
+                    : kind === "settle"
+                      ? (settlePeople[0]?.contactId ?? null)
+                      : null
+                }
                 onType={typeMerchant}
                 onPreset={applyPreset}
+                onPerson={pickPerson}
                 onSavePreset={savePreset}
                 onRemovePreset={removePreset}
               />
@@ -836,7 +904,7 @@ export function EditTransactionModal({
                   id="e-category"
                   className="filter-select"
                   value={categoryId}
-                  onChange={(e) => setCategoryId(e.target.value)}
+                  onChange={(e) => changeCategory(e.target.value)}
                 >
                   <option value="">Uncategorized</option>
                   {categoriesFor(categories, type).map((category) => (

@@ -640,8 +640,28 @@ export interface Contact {
   openingBalanceMinor?: number;
   givenMinor: number;
   returnedMinor: number;
+  /** Settled without money moving. Same sign as balanceMinor: positive
+      cleared what they owed, negative what you owed them. */
+  clearedMinor?: number;
   transactionCount: number;
   lastAt: string | null;
+}
+
+/**
+ * Part of what was owed, settled some other way than money - they owed
+ * ₹1,000 and bought you a ₹999 watch. Moves only the person's balance:
+ * no account, no spending, no income.
+ */
+export interface ContactClearance {
+  id: string;
+  contactId: string;
+  amountMinor: number;
+  /** Which way it went: what they owed you, or what you owed them. */
+  direction: "OWED_TO_ME" | "OWED_BY_ME";
+  note: string | null;
+  on: string;
+  /** Signed like a history row: negative when it cleared what they owed. */
+  effectMinor: number;
 }
 
 export interface ContactList {
@@ -653,6 +673,8 @@ export interface ContactList {
 export interface ContactDetail extends Contact {
   /** Newest first. amountMinor is signed: positive added to what they owe. */
   history: { transaction: Transaction; amountMinor: number }[];
+  /** Newest first. Kept apart from history, which is transactions only. */
+  clearances?: ContactClearance[];
 }
 
 /** The running balance with everyone the user splits bills with. */
