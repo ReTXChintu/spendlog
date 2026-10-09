@@ -1635,6 +1635,10 @@ class Contact {
 
   /// What has come back from them.
   final int returnedMinor;
+
+  /// Settled without money moving - see [ContactClearance]. Same signs as
+  /// the balance: positive cleared what they owed, negative what you owed.
+  final int clearedMinor;
   final int transactionCount;
   final DateTime? lastAt;
 
@@ -1646,6 +1650,7 @@ class Contact {
     this.openingBalanceMinor = 0,
     this.givenMinor = 0,
     this.returnedMinor = 0,
+    this.clearedMinor = 0,
     this.transactionCount = 0,
     this.lastAt,
   });
@@ -1661,6 +1666,7 @@ class Contact {
         openingBalanceMinor: json['openingBalanceMinor'] as int? ?? 0,
         givenMinor: json['givenMinor'] as int? ?? 0,
         returnedMinor: json['returnedMinor'] as int? ?? 0,
+        clearedMinor: json['clearedMinor'] as int? ?? 0,
         transactionCount: json['transactionCount'] as int? ?? 0,
         lastAt: json['lastAt'] != null ? DateTime.tryParse(json['lastAt'] as String) : null,
       );
@@ -1697,16 +1703,60 @@ class ContactHistoryEntry {
       );
 }
 
+/// Part of what was owed, settled some other way than money - they owed
+/// ₹1,000 and bought you a ₹999 watch. Moves only the person's balance: no
+/// account, no spending, no income.
+class ContactClearance {
+  final String id;
+  final int amountMinor;
+
+  /// What they owed you, or what you owed them.
+  final bool clearedTheirs;
+  final String? note;
+  final DateTime on;
+
+  /// Signed like a history entry: negative when it cleared what they owed.
+  final int effectMinor;
+
+  ContactClearance({
+    required this.id,
+    required this.amountMinor,
+    required this.clearedTheirs,
+    this.note,
+    required this.on,
+    required this.effectMinor,
+  });
+
+  factory ContactClearance.fromJson(Map<String, dynamic> json) {
+    final amount = json['amountMinor'] as int? ?? 0;
+    final theirs = json['direction'] != 'OWED_BY_ME';
+    return ContactClearance(
+      id: json['id'] as String,
+      amountMinor: amount,
+      clearedTheirs: theirs,
+      note: json['note'] as String?,
+      on: DateTime.tryParse(json['on'] as String? ?? '') ?? DateTime.now(),
+      effectMinor: json['effectMinor'] as int? ?? (theirs ? -amount : amount),
+    );
+  }
+}
+
 class ContactDetail {
   final Contact contact;
   final List<ContactHistoryEntry> history;
 
-  ContactDetail({required this.contact, this.history = const []});
+  /// Newest first. Kept apart from [history], which is transactions only.
+  final List<ContactClearance> clearances;
+
+  ContactDetail({required this.contact, this.history = const [], this.clearances = const []});
 
   factory ContactDetail.fromJson(Map<String, dynamic> json) => ContactDetail(
         contact: Contact.fromJson(json),
         history: (json['history'] as List<dynamic>? ?? [])
             .map((h) => ContactHistoryEntry.fromJson(h as Map<String, dynamic>))
+            .toList(),
+        clearances: (json['clearances'] as List<dynamic>? ?? [])
+            .map((c) => ContactClearance.fromJson(c as Map<String, dynamic>))
             .toList(),
       );
 }

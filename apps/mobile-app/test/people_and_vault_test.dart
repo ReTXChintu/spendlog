@@ -234,4 +234,42 @@ void main() {
       expect(session.isUnlocked, isTrue);
     });
   });
+
+  group('clearing what someone owes', () {
+    test('reads clearances apart from the transaction history', () {
+      final detail = ContactDetail.fromJson({
+        'id': 'c1',
+        'name': 'Rahul',
+        'balanceMinor': 100,
+        'openingBalanceMinor': 100000,
+        'clearedMinor': 99900,
+        'history': [],
+        'clearances': [
+          {
+            'id': 'k1',
+            'amountMinor': 99900,
+            'direction': 'OWED_TO_ME',
+            'note': 'Bought me a watch',
+            'on': '2026-10-01T06:30:00.000Z',
+            'effectMinor': -99900,
+          },
+          {'id': 'k2', 'amountMinor': 5000, 'direction': 'OWED_BY_ME', 'on': '2026-09-01T06:30:00.000Z'},
+        ],
+      });
+      expect(detail.contact.clearedMinor, 99900);
+      expect(detail.history, isEmpty);
+      expect(detail.clearances.length, 2);
+      expect(detail.clearances.first.clearedTheirs, isTrue);
+      expect(detail.clearances.first.note, 'Bought me a watch');
+      // An older server without effectMinor: worked out from the direction.
+      expect(detail.clearances.last.clearedTheirs, isFalse);
+      expect(detail.clearances.last.effectMinor, 5000);
+    });
+
+    test('a server from before clearances still reads', () {
+      final detail = ContactDetail.fromJson({'id': 'c1', 'name': 'Rahul', 'history': []});
+      expect(detail.clearances, isEmpty);
+      expect(detail.contact.clearedMinor, 0);
+    });
+  });
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
 import '../services/phone_contacts.dart';
@@ -226,6 +227,7 @@ class PersonScreen extends StatefulWidget {
 class _PersonScreenState extends State<PersonScreen> {
   late Contact _contact = widget.contact;
   List<ContactHistoryEntry>? _history;
+  List<ContactClearance> _clearances = const [];
   bool _failed = false;
 
   @override
@@ -242,6 +244,7 @@ class _PersonScreenState extends State<PersonScreen> {
       setState(() {
         _contact = detail.contact;
         _history = detail.history;
+        _clearances = detail.clearances;
         _failed = false;
       });
     } catch (_) {
@@ -298,6 +301,37 @@ class _PersonScreenState extends State<PersonScreen> {
     }
   }
 
+  /// Part or all of what is owed, settled without money moving - they
+  /// owed ₹1,000 and bought you a ₹999 watch.
+  Future<void> _clear() async {
+    final cleared = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.c.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(T.rLg)),
+      ),
+      builder: (_) => _ClearSheet(contact: _contact),
+    );
+    if (cleared == true) await _load();
+  }
+
+  /// Takes a clearance back: what it cleared is owed again.
+  Future<void> _undoClearance(ContactClearance clearance) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ApiClient.instance.delete('/contacts/${_contact.id}/clear/${clearance.id}');
+      await _load();
+      messenger.showSnackBar(SnackBar(
+        content: Text('Undone - ${_plainMoney(clearance.amountMinor)} is owed again.'),
+      ));
+    } catch (error) {
+      messenger.showSnackBar(SnackBar(
+        content: Text(error is ApiException ? error.message : "Couldn't undo that."),
+      ));
+    }
+  }
+
   Future<void> _delete() async {
     final sure = await showDialog<bool>(
       context: context,
@@ -325,6 +359,18 @@ class _PersonScreenState extends State<PersonScreen> {
         content: Text(error is ApiException ? error.message : "Couldn't remove them."),
       ));
     }
+  }
+
+  /// Transactions and clearances as one history, newest first: a
+  /// clearance happened on a day like anything else did.
+  List<Widget> _rows() {
+    final rows = <(DateTime, Widget)>[
+      for (final entry in _history ?? const <ContactHistoryEntry>[])
+        (entry.transaction.occurredAt, _HistoryRow(entry: entry)),
+      for (final clearance in _clearances)
+        (clearance.on, _ClearanceRow(clearance: clearance, onUndo: () => _undoClearance(clearance))),
+    ]..sort((a, b) => b.$1.compareTo(a.$1));
+    return [for (final (_, row) in rows) row];
   }
 
   @override
@@ -373,6 +419,7 @@ class _PersonScreenState extends State<PersonScreen> {
                           [
                             'Lent ${formatMoney(contact.givenMinor)}',
                             'paid back ${formatMoney(contact.returnedMinor)}',
+                            if (contact.clearedMinor != 0) 'cleared ${formatMoney(contact.clearedMinor.abs())}',
                             if (contact.phone != null) contact.phone!,
                           ].join(' · '),
                           style: TextStyle(fontSize: 12, color: c.muted),
@@ -386,17 +433,32 @@ class _PersonScreenState extends State<PersonScreen> {
                             style: TextStyle(fontSize: 12, color: c.muted),
                           ),
                         ],
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: TextButton(
-                            onPressed: _setOpening,
-                            style: TextButton.styleFrom(
-                              padding: EdgeInsets.zero,
-                              minimumSize: const Size(0, 32),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        Wrap(
+                          spacing: 12,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            TextButton(
+                              onPressed: _setOpening,
+                              style: TextButton.styleFrom(
+                                padding: EdgeInsets.zero,
+                                minimumSize: const Size(0, 32),
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              child: Text(opening == 0 ? 'Set starting balance' : 'Change starting balance'),
                             ),
-                            child: Text(opening == 0 ? 'Set starting balance' : 'Change starting balance'),
-                          ),
+                            // Settled some other way: a gift, a favour.
+                            if (contact.balanceMinor != 0)
+                              FilledButton.tonalIcon(
+                                onPressed: _clear,
+                                style: FilledButton.styleFrom(
+                                  minimumSize: const Size(0, 32),
+                                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                icon: const Icon(Icons.done_all, size: 16),
+                                label: const Text('Clear'),
+                              ),
+                          ],
                         ),
                       ],
                     ),
@@ -418,7 +480,7 @@ class _PersonScreenState extends State<PersonScreen> {
                 padding: EdgeInsets.symmetric(vertical: 24),
                 child: Center(child: CircularProgressIndicator()),
               )
-            else if (_history!.isEmpty && opening == 0)
+            else if (_history!.isEmpty && _clearances.isEmpty && opening == 0)
               Text(
                 'Nothing yet. On a transaction, tick Split or Settling up and add '
                 '${contact.name} under who it was with.',
@@ -433,13 +495,13 @@ class _PersonScreenState extends State<PersonScreen> {
                 ),
                 child: Column(
                   children: [
-                    for (final (i, entry) in _history!.indexed) ...[
+                    for (final (i, row) in _rows().indexed) ...[
                       if (i > 0) Divider(height: 1, color: c.line),
-                      _HistoryRow(entry: entry),
+                      row,
                     ],
                     // Newest first, so what came before SpendLog goes last.
                     if (opening != 0) ...[
-                      if (_history!.isNotEmpty) Divider(height: 1, color: c.line),
+                      if (_history!.isNotEmpty || _clearances.isNotEmpty) Divider(height: 1, color: c.line),
                       _StartingRow(amountMinor: opening),
                     ],
                   ],
@@ -451,6 +513,9 @@ class _PersonScreenState extends State<PersonScreen> {
     );
   }
 }
+
+/// The rupees without ".00" when there are no paise: ₹1,000, ₹999.50.
+String _plainMoney(int paise) => paise % 100 == 0 ? formatMoneyShort(paise) : formatMoney(paise);
 
 /// The starting balance, drawn as the oldest line of the history so the
 /// rows still add up to the balance at the top.
@@ -627,6 +692,251 @@ class _HistoryRow extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Something settled without money moving, as a line of the history. Kept
+/// in neutral ink: it was neither spending nor money coming back.
+class _ClearanceRow extends StatelessWidget {
+  const _ClearanceRow({required this.clearance, required this.onUndo});
+
+  final ContactClearance clearance;
+  final VoidCallback onUndo;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final effect = clearance.effectMinor;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 8, 4, 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  [
+                    'Cleared ${_plainMoney(clearance.amountMinor)}',
+                    if (clearance.note != null && clearance.note!.trim().isNotEmpty) clearance.note!,
+                  ].join(' · '),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 13.4, fontWeight: FontWeight.w700, color: c.ink),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${formatShortDate(clearance.on)} · no money moved',
+                  style: TextStyle(fontSize: 11.5, color: c.muted),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '${effect > 0 ? '+' : '−'}${formatMoney(effect.abs())}',
+                style: kNum.copyWith(fontSize: 13.4, fontWeight: FontWeight.w700, color: c.muted),
+              ),
+              Text(
+                clearance.clearedTheirs ? 'they owed' : 'you owed',
+                style: TextStyle(fontSize: 11, color: c.muted),
+              ),
+            ],
+          ),
+          IconButton(
+            tooltip: 'Undo - it is owed again',
+            onPressed: onUndo,
+            icon: Icon(Icons.undo, size: 18, color: c.muted),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Clears part or all of what is owed, either way, with no money moving.
+/// Starts at the whole amount - clearing everything is the usual case -
+/// and can be brought down for a part. Pops true once saved.
+class _ClearSheet extends StatefulWidget {
+  const _ClearSheet({required this.contact});
+
+  final Contact contact;
+
+  @override
+  State<_ClearSheet> createState() => _ClearSheetState();
+}
+
+class _ClearSheetState extends State<_ClearSheet> {
+  late final int _outstanding = widget.contact.balanceMinor.abs();
+  late final _amount = TextEditingController(
+    text: _outstanding % 100 == 0 ? '${_outstanding ~/ 100}' : (_outstanding / 100).toStringAsFixed(2),
+  );
+  final _note = TextEditingController();
+
+  /// The day it was settled, as IST wall-clock; today unless changed.
+  DateTime _on = istWallClock(DateTime.now());
+  bool _saving = false;
+  String? _error;
+
+  int get _minor => parseRupees(_amount.text) ?? 0;
+
+  String? get _problem {
+    if (_minor <= 0) return 'Enter an amount greater than zero.';
+    if (_minor > _outstanding) {
+      return "Only ${_plainMoney(_outstanding)} is owed - you can't clear more than that.";
+    }
+    return null;
+  }
+
+  @override
+  void dispose() {
+    _amount.dispose();
+    _note.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDate() async {
+    final today = istWallClock(DateTime.now());
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _on,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(today.year, today.month, today.day),
+    );
+    if (picked != null) setState(() => _on = picked);
+  }
+
+  Future<void> _save() async {
+    final problem = _problem;
+    if (problem != null) {
+      setState(() => _error = problem);
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      final note = _note.text.trim();
+      await ApiClient.instance.post('/contacts/${widget.contact.id}/clear', {
+        'amountMinor': _minor,
+        'note': note.isEmpty ? null : note,
+        // Midday in India, so the day reads the same wherever it is shown.
+        'on': fromIstWallClock(DateTime(_on.year, _on.month, _on.day, 12)).toIso8601String(),
+      });
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = error is ApiException ? error.message : "Couldn't clear that.";
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final contact = widget.contact;
+    final problem = _problem;
+    final owing = contact.balanceMinor > 0
+        ? '${contact.name} owes you ${_plainMoney(_outstanding)}'
+        : 'You owe ${contact.name} ${_plainMoney(_outstanding)}';
+    final left = _outstanding - _minor;
+    final after = problem ?? (left == 0 ? 'settled up after this' : '${_plainMoney(left)} left after this');
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Clear with ${contact.name}',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: c.ink),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Settled some other way - a gift, a favour. No money moves, and nothing counts as '
+                'spending or income.',
+                style: TextStyle(fontSize: 12.5, height: 1.45, color: c.muted),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _amount,
+                autofocus: true,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                onChanged: (_) => setState(() => _error = null),
+                style: kNum.copyWith(fontSize: 18, fontWeight: FontWeight.w700, color: c.ink),
+                decoration: const InputDecoration(
+                  labelText: 'Amount to clear',
+                  prefixText: '₹ ',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '$owing → $after',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: problem == null ? c.ink : c.debit,
+                ),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: _note,
+                maxLength: 200,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  labelText: 'Note (optional)',
+                  hintText: 'Bought me a watch',
+                  border: OutlineInputBorder(),
+                  counterText: '',
+                ),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _pickDate,
+                style: OutlinedButton.styleFrom(alignment: Alignment.centerLeft),
+                icon: const Icon(Icons.calendar_today_outlined, size: 16),
+                label: Text(DateFormat('EEE, d MMM yyyy').format(_on)),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Text(_error!, style: TextStyle(fontSize: 12.5, color: c.debit)),
+              ],
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: _saving ? null : () => Navigator.of(context).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: _saving || problem != null ? null : _save,
+                    child: Text(_saving
+                        ? 'Clearing…'
+                        : problem == null
+                            ? 'Clear ${_plainMoney(_minor)}'
+                            : 'Clear'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

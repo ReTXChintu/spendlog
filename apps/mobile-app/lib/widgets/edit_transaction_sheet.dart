@@ -145,6 +145,7 @@ class _EditSheetState extends State<_EditSheet> {
   List<Loan> _loans = [];
   List<MerchantPreset> _presets = [];
   List<CardStatus> _cards = [];
+  List<Contact> _contacts = [];
 
   bool _showMore = false;
   bool _saving = false;
@@ -215,7 +216,7 @@ class _EditSheetState extends State<_EditSheet> {
     }
     // Parts saved before are the user's own, not an even split to redo.
     _autoSettle = _people.isEmpty;
-    if (_people.isNotEmpty) _loadNames();
+    _loadContacts();
 
     _loadCommitments();
     _loadLoans();
@@ -249,19 +250,23 @@ class _EditSheetState extends State<_EditSheet> {
 
   // ---- Loading -------------------------------------------------------
 
-  /// The transaction only knows who by id.
-  Future<void> _loadNames() async {
+  /// Everyone the user has, for offering as the merchant is typed - and
+  /// the names of whoever is already on it, since the transaction only
+  /// knows them by id.
+  Future<void> _loadContacts() async {
     try {
       final json = await ApiClient.instance.get('/contacts') as Map<String, dynamic>;
       if (!mounted) return;
-      final names = {for (final c in ContactBalance.fromJson(json).contacts) c.id: c.name};
+      final contacts = ContactBalance.fromJson(json).contacts;
+      final names = {for (final c in contacts) c.id: c.name};
       setState(() {
+        _contacts = contacts;
         for (final person in _people) {
           person.name = names[person.contactId] ?? person.name;
         }
       });
     } catch (_) {
-      // "Someone" until the next open.
+      // "Someone" until the next open, and no people offered.
     }
   }
 
@@ -541,6 +546,78 @@ class _EditSheetState extends State<_EditSheet> {
         _ => _isDebit ? 'Who was it split with?' : 'Whose money is in this?',
       };
 
+  String? get _lentCategoryId => categoriesFor(widget.categories, _type)
+      .where((category) => category.name == 'Lent & borrowed')
+      .firstOrNull
+      ?.id;
+
+  /// A person picked as the merchant: the money went to them, or came
+  /// from them - lent, or paid back, all of it theirs. Never spending or
+  /// income, and the server reads a plain row in Lent & borrowed the same
+  /// way, so the sheet shows here what will be saved rather than Spending.
+  void _pickPerson(Contact contact) {
+    setState(() {
+      _error = null;
+      _merchant.text = contact.name;
+      _merchantTyped = true;
+      _autoMerchant = null;
+      final lent = _lentCategoryId;
+      if (lent != null) _categoryId = lent;
+      _becomePersonKind(contact);
+    });
+  }
+
+  /// The one contact a merchant names exactly, as the server matches it.
+  Contact? _contactNamed(String name) {
+    final wanted = name.trim().toLowerCase();
+    if (wanted.isEmpty) return null;
+    final matches = _contacts.where((contact) => contact.name.trim().toLowerCase() == wanted).toList();
+    return matches.length == 1 ? matches.first : null;
+  }
+
+  /// Lent on a payment, paid back on money in, with [contact] (when known)
+  /// down for the whole amount. A payment already marked as split, or as
+  /// paying someone back, keeps that with the person added. Called inside
+  /// setState.
+  void _becomePersonKind(Contact? contact) {
+    _isSpecial = false;
+    _isFixed = false;
+    _cardPaymentFor = null;
+    _loanId = null;
+    bool isOn() => contact != null && _people.any((person) => person.contactId == contact.id);
+
+    if (_isDebit && _kind != _Kind.settlement) {
+      final keepSplit = _kind == _Kind.split && _includeMe;
+      if (!keepSplit) {
+        // Lent to this one person: anyone else on it goes.
+        if (contact != null) {
+          for (final person in _people.where((person) => person.contactId != contact.id).toList()) {
+            _people.remove(person);
+            person.amount.dispose();
+          }
+        }
+        _includeMe = false;
+        _custom = false;
+      }
+      if (contact != null && !isOn()) _people.add(_Person(contactId: contact.id, name: contact.name));
+      _kind = _Kind.split;
+      return;
+    }
+    if (contact != null && !isOn()) _people.add(_Person(contactId: contact.id, name: contact.name));
+    _kind = _Kind.settlement;
+    if (_autoSettle) _resplitSettlement();
+  }
+
+  /// Filing something plain under Lent & borrowed means it was lent or
+  /// paid back - the server will save it so - so the kind follows the
+  /// category. Called inside setState.
+  void _setCategory(String? id) {
+    _categoryId = id;
+    if (id != null && id == _lentCategoryId && _kind == _Kind.normal) {
+      _becomePersonKind(_contactNamed(_merchant.text));
+    }
+  }
+
   // ---- Presets -------------------------------------------------------
 
   /// Fills the name and its usual category in one go.
@@ -548,7 +625,7 @@ class _EditSheetState extends State<_EditSheet> {
     setState(() {
       _merchant.text = preset.merchant;
       _merchantTyped = true;
-      if (preset.categoryId != null) _categoryId = preset.categoryId;
+      if (preset.categoryId != null) _setCategory(preset.categoryId);
     });
     // Ordering only: a shortcut must not wait on a round trip.
     ApiClient.instance.post('/merchant-presets/${preset.id}/used').catchError((_) => null);
@@ -841,6 +918,7 @@ class _EditSheetState extends State<_EditSheet> {
                 Expanded(flex: 10, child: _categoryPicker()),
               ],
             ),
+            _personRow(),
             _presetRow(),
             const SizedBox(height: 10),
 
@@ -1091,7 +1169,7 @@ class _EditSheetState extends State<_EditSheet> {
             ),
           ),
       ],
-      onChanged: (value) => setState(() => _categoryId = value),
+      onChanged: (value) => setState(() => _setCategory(value)),
     );
   }
 
@@ -1133,6 +1211,45 @@ class _EditSheetState extends State<_EditSheet> {
           ),
       ],
       onChanged: onChanged,
+    );
+  }
+
+  /// The people a typed merchant could be: names starting with it first,
+  /// then any containing it. Picking one makes it money between the user
+  /// and them - see [_pickPerson].
+  Widget _personRow() {
+    final c = context.c;
+    final typed = _merchant.text.trim().toLowerCase();
+    if (typed.isEmpty || _contacts.isEmpty) return const SizedBox.shrink();
+    int rank(Contact contact) => contact.name.toLowerCase().startsWith(typed) ? 0 : 1;
+    final matches = _contacts.where((contact) => contact.name.toLowerCase().contains(typed)).toList()
+      ..sort((a, b) => rank(a) != rank(b) ? rank(a) - rank(b) : a.name.compareTo(b.name));
+    if (matches.isEmpty) return const SizedBox.shrink();
+    final picked = _kind == _Kind.split || _kind == _Kind.settlement ? _people.firstOrNull?.contactId : null;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            for (final contact in matches.take(4))
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: ActionChip(
+                  avatar: Icon(Icons.person_outline, size: 15, color: c.brandDark),
+                  label: Text(contact.name),
+                  labelStyle: TextStyle(fontSize: 11.5, color: c.ink, fontWeight: FontWeight.w600),
+                  visualDensity: VisualDensity.compact,
+                  side: BorderSide(color: contact.id == picked ? c.brand : c.lineStrong),
+                  backgroundColor: contact.id == picked ? c.brand50 : c.surface,
+                  tooltip: 'Money between you and ${contact.name} - not spending or income',
+                  onPressed: () => _pickPerson(contact),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
