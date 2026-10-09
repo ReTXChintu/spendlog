@@ -151,17 +151,19 @@ function daysUntil(now: Date, to: Date | null): number | null {
  * A credit card, as its face shows it.
  *
  * Built on the statuses the dashboard already has, so the face and the
- * card strip cannot disagree about what is available. The due date worth
- * counting down to is the unpaid bill's; with nothing unpaid, the one the
- * cycle now running will fall due on.
+ * card strip cannot disagree about what is available. Every figure is on
+ * the card's own cycle. The due date worth counting down to is the unpaid
+ * bill's; with nothing unpaid, the one the cycle now running will fall
+ * due on.
  */
 async function cardFaces(userId: Types.ObjectId, cards: CardStatus[], now: Date) {
   const vaults = new Set(
     (await CardVault.find({ userId }).select("accountId")).map((vault) => vault.accountId.toString())
   );
   return cards.map((card) => {
-    const owing = card.billIsPaid === false;
-    const nextDueOn = owing ? card.billDueOn : card.dueOn;
+    const bill = card.lastBill;
+    const owing = bill !== null && !bill.isPaid;
+    const nextDueOn = owing ? bill.dueOn : card.dueOn;
     return {
       accountId: card.accountId,
       name: card.name,
@@ -170,31 +172,39 @@ async function cardFaces(userId: Types.ObjectId, cards: CardStatus[], now: Date)
       network: card.network,
       last4: card.last4,
       color: card.color,
+      statementDay: card.statementDay,
+      dueDay: card.dueDay,
+      statementDayInferred: card.statementDayInferred,
+      cycleKnown: card.cycleKnown,
       creditLimitMinor: card.creditLimitMinor,
+      // What is left of the last bill, what has been charged since, and the
+      // two together - which is what the limit has lost.
+      billedUnpaidMinor: card.billedUnpaidMinor,
+      unbilledMinor: card.unbilledMinor,
       outstandingMinor: card.outstandingMinor,
       outstandingIsEstimate: card.outstandingIsEstimate,
       usedMinor: card.groupUsedMinor ?? card.usedMinor,
       availableMinor: card.availableMinor,
       sharesLimitWith: card.sharesLimitWith,
-      cycleSpentMinor: card.spentMinor,
-      cycleStart: card.periodStart,
-      cycleEnd: card.cycleEnd ?? card.periodEnd,
-      periodIsCycle: card.periodIsCycle,
+      cycleStart: card.cycleStart,
+      cycleEnd: card.cycleEnd,
       statementOn: card.statementOn,
-      lastStatement:
-        card.lastStatementMinor !== null
-          ? {
-              amountMinor: card.lastStatementMinor,
-              minimumDueMinor: card.minimumDueMinor,
-              statementOn: card.lastStatementOn,
-              dueOn: card.billDueOn,
-              owedMinor: card.outstandingMinor,
-              isPaid: card.billIsPaid,
-            }
-          : null,
+      lastStatement: bill
+        ? {
+            amountMinor: bill.amountMinor,
+            minimumDueMinor: bill.minimumDueMinor,
+            statementOn: bill.statementOn,
+            dueOn: bill.dueOn,
+            paidMinor: bill.paidMinor,
+            owedMinor: bill.owedMinor,
+            isPaid: bill.isPaid,
+            isEstimate: bill.isEstimate,
+            fromStatement: bill.fromStatement,
+          }
+        : null,
+      billIsPaid: card.billIsPaid,
       nextDueOn,
-      daysToDue: owing ? card.billDaysUntilDue : daysUntil(now, nextDueOn),
-      spendLimitMinor: card.limitMinor,
+      daysToDue: owing ? bill.daysUntilDue : daysUntil(now, nextDueOn),
       state: card.state,
       hasCardDetails: vaults.has(card.accountId),
     };

@@ -1,23 +1,65 @@
 import { Types } from "mongoose";
 import { Account, Transaction } from "../../models";
-import { istDayEnd, istDayKey, istMonthKey, istMonthStart } from "../../time";
+import { istDayKey } from "../../time";
 import { CardNetwork, CARD_NETWORKS } from "../../types";
-import { cycleFor, floatDays } from "./cards.cycle";
-import { outstandingByCard } from "../statements/statements.bills";
+import { BillingCycle, cycleFor, floatDays } from "./cards.cycle";
+import { cycleDaysFor } from "./cards.learn";
+import { outstandingByCard, paidTowards, UpcomingBill } from "../statements/statements.bills";
 
 /**
- * Where every card stands: its cycle, its limit, and how long it would be
- * before a payment made today had to be paid for.
+ * Where every card stands: its own billing cycle, what it owes the bank,
+ * how much of its credit limit is left, and how long it would be before a
+ * payment made today had to be paid for.
  *
  * Lives here rather than in the route because three screens want the same
  * figures - the card strip, the dashboard and the perk lookup - and three
  * places computing nearly the same thing is three things to keep in step.
+ *
+ * Every figure follows the card's own statement day. Two cards billing on
+ * the 5th and the 20th are in different cycles on the same morning, and
+ * neither is ever measured over the salary month: a card with no known
+ * statement day says so (cycleKnown false) rather than borrowing a period
+ * that has nothing to do with its bill.
  */
 
-/** The point at which knowing you are near a limit changes a decision. */
-const CLOSE_FRACTION = 0.8;
+/**
+ * How much of the credit limit can go before the bar changes colour: fine
+ * below 70%, close from 70%, over from 90% - and over past the limit
+ * itself. Later than a lender's comfort zone on purpose: the bar is about
+ * running out, not about a credit score.
+ */
+export const CREDIT_CLOSE_AT = 0.7;
+export const CREDIT_OVER_AT = 0.9;
+
+/**
+ * How far before the cycle's opening day a statement can be dated and
+ * still be the bill for the cycle just closed. Banks draw a day early now
+ * and then, and a statement whose own date could not be read is dated by
+ * the close of its period instead - the day before.
+ */
+const STATEMENT_SLACK_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type CardState = "ok" | "close" | "over" | "unset";
+
+/** The last bill, as the bank drew it or as near as SpendLog can tell. */
+export interface CardBill {
+  amountMinor: number;
+  minimumDueMinor: number | null;
+  statementOn: Date | null;
+  dueOn: Date | null;
+  /// Negative once the due date has gone past.
+  daysUntilDue: number | null;
+  /// Paid against it since it was drawn, and covered some other way
+  /// (cashback, points) - both already taken off owedMinor.
+  paidMinor: number;
+  owedMinor: number;
+  isPaid: boolean;
+  /// Read off a statement whose total was printed: false. Worked out from
+  /// a statement's rows, or - with no statement for the cycle just closed
+  /// - from what that cycle charged the card: true, and said as "about".
+  isEstimate: boolean;
+  fromStatement: boolean;
+}
 
 export interface CardStatus {
   accountId: string;
@@ -29,56 +71,51 @@ export interface CardStatus {
   color: string | null;
   last4: string | null;
   network: CardNetwork | null;
+  /// The days the card bills and falls due on: stored, or read off its
+  /// newest statement when it has never been told (statementDayInferred).
   statementDay: number | null;
   dueDay: number | null;
+  statementDayInferred: boolean;
+  /// Whether this card has a cycle at all. Without a statement day there is
+  /// no telling which purchases are billed and which are not, so every
+  /// figure that depends on it is null rather than a confident guess.
+  cycleKnown: boolean;
   cycleStart: Date | null;
   /// The cycle's last day; the statement is drawn the day after.
   cycleEnd: Date | null;
+  /// When the cycle now running will be billed, and when that bill falls
+  /// due. Distinct from the last bill's own dates, below.
   statementOn: Date | null;
   dueOn: Date | null;
   floatDays: number | null;
-  spentMinor: number;
-  /// What you allow yourself on this card in a period, and what the bank
-  /// allows. Different things, and the one worth warning about is the
-  /// first: being 90% through your own budget matters at a till, and
-  /// being 30% through a credit limit tells you nothing.
-  limitMinor: number | null;
   creditLimitMinor: number | null;
-  /// What you have left of your own budget this cycle.
-  remainingMinor: number | null;
-  /// Last statement's bill, less anything paid against it since. Null when
-  /// no statement has been read, which is not the same as nothing owed.
-  ///
-  /// This is money the bank is still holding against the credit limit. A
-  /// card with a 25,000 limit and a 14,000 bill outstanding has 11,000 of
-  /// room before this cycle's spending is counted at all - and a card bar
-  /// that ignores it tells you that you have the whole limit to play with
-  /// on the one day of the month when you have least of it.
+  /// Charged to the card since its last statement, net of refunds and
+  /// anything else credited back - the cycle now running, not yet on a
+  /// bill. What the bank charged rather than the user's share of it: a
+  /// dinner split three ways is still the whole bill on this card.
+  unbilledMinor: number | null;
+  /// What is left to pay of the last bill. Zero once it is paid off.
+  billedUnpaidMinor: number | null;
+  /// Everything the card owes the bank right now: the unpaid part of the
+  /// last bill plus everything since. Once the bill is paid, only the
+  /// running cycle. This is what the credit limit has lost.
   outstandingMinor: number | null;
-  /// Whether the outstanding figure is the one the bank printed or one
-  /// worked out from the statement's rows, for a statement whose summary
-  /// block could not be read. Shown as "about" rather than hidden.
+  /// Whether the bill in that figure is the one the bank printed, or one
+  /// worked out (see CardBill.isEstimate). Shown as "about" rather than
+  /// hidden.
   outstandingIsEstimate: boolean;
-  /// When that outstanding bill has to be paid. Distinct from dueOn, which
-  /// is when the bill for the cycle now running will fall due.
-  billDueOn: Date | null;
-  /// The newest statement as the bank drew it: its total, minimum, when it
-  /// was drawn, how many days are left to pay it (negative once late) and
-  /// whether it has been paid off. Null when no statement has been read.
-  lastStatementMinor: number | null;
-  minimumDueMinor: number | null;
-  lastStatementOn: Date | null;
-  billDaysUntilDue: number | null;
+  lastBill: CardBill | null;
   billIsPaid: boolean | null;
-  /// What this card holds against the limit: the outstanding bill plus
-  /// this cycle's spending.
-  usedMinor: number;
-  /// The credit limit, less the outstanding bill, less this cycle. What is
-  /// actually left to spend. Null without a credit limit to count from.
+  /// What this card holds against the limit - its outstanding, by another
+  /// name, kept because a shared limit needs both.
+  usedMinor: number | null;
+  /// The credit limit less the outstanding. What is actually left to
+  /// spend. Null without a credit limit to count from, or without a cycle
+  /// to say what is outstanding.
   ///
   /// For a card that shares its limit, this is the group's figure: the one
-  /// limit, less every member's bill and every member's cycle. Spend on
-  /// either card and both show less, which is what the bank does.
+  /// limit, less every member's outstanding. Spend on either card and both
+  /// show less, which is what the bank does.
   availableMinor: number | null;
   /// The other cards this one shares a limit with, named. Empty for a card
   /// with a limit of its own.
@@ -86,12 +123,8 @@ export interface CardStatus {
   /// What the group as a whole has used, when there is a group. Null
   /// otherwise, so a screen can tell "this card's share" from "the pot".
   groupUsedMinor: number | null;
-  /// Whether spentMinor covers a billing cycle or a calendar month. A card
-  /// with no statement day has no cycle to measure, and a period of
-  /// "nothing" used to report nothing spent.
-  periodIsCycle: boolean;
-  periodStart: Date;
-  periodEnd: Date;
+  /// How much of the credit limit is used: ok | close (70%) | over (90%,
+  /// or past it). Unset with no credit limit, or no cycle to measure.
   state: CardState;
 }
 
@@ -107,75 +140,178 @@ export function normaliseNetwork(raw: string | null | undefined): CardNetwork | 
   return (CARD_NETWORKS as readonly string[]).includes(folded) ? (folded as CardNetwork) : null;
 }
 
+/** ok | close | over for so much used of a limit; unset with nothing to measure. */
+export function creditState(usedMinor: number | null, limitMinor: number | null): CardState {
+  if (usedMinor === null || !limitMinor || limitMinor <= 0) return "unset";
+  const share = usedMinor / limitMinor;
+  if (share >= CREDIT_OVER_AT) return "over";
+  if (share >= CREDIT_CLOSE_AT) return "close";
+  return "ok";
+}
+
+/**
+ * What the bank charged a card between two instants (the second one not
+ * included), less what it credited back.
+ *
+ * The bank's figure, so the whole amount of every purchase rather than
+ * the user's counted share of it, and refunds when they land on the card.
+ * Left out: the card's own bill payments, which are paid towards the bill
+ * rather than charged (see paidTowards), and an EMI's parent purchase,
+ * whose instalments are what the bank bills instead.
+ */
+export async function chargedBetween(
+  userId: Types.ObjectId,
+  cardId: Types.ObjectId,
+  from: Date,
+  to: Date
+): Promise<number> {
+  const [row] = await Transaction.aggregate<{ total: number }>([
+    {
+      $match: {
+        userId,
+        accountId: cardId,
+        occurredAt: { $gte: from, $lt: to },
+        cardPaymentFor: null,
+        emiRole: { $ne: "PARENT" },
+        $or: [{ type: "DEBIT" }, { type: "CREDIT", isTransfer: { $ne: true } }],
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        total: { $sum: { $cond: [{ $eq: ["$type", "DEBIT"] }, "$amountMinor", { $multiply: ["$amountMinor", -1] }] } },
+      },
+    },
+  ]);
+
+  return Math.max(0, row?.total ?? 0);
+}
+
+/** Whole days from the start of today, in IST, to a date. */
+function daysUntil(now: Date, to: Date | null): number | null {
+  if (!to) return null;
+  const today = Date.parse(`${istDayKey(now)}T00:00:00.000+05:30`);
+  return Math.round((to.getTime() - today) / (24 * 60 * 60 * 1000));
+}
+
+/**
+ * The bill for the cycle that has just closed.
+ *
+ * The statement, when one was read for it: the bank's total, less what was
+ * paid and waived since (upcomingBills has worked that out already). A
+ * statement older than the cycle just closed is last month's bill, not
+ * this one, so it does not stand in for it.
+ *
+ * Without one - no statement password, a bank that does not email, the
+ * mail not in yet - the bill is estimated as what that cycle charged the
+ * card, less what has been paid towards the card since it closed. Close to
+ * the bank's figure for a card that is paid off every month, which is the
+ * card this app is for; marked as an estimate wherever it is shown.
+ */
+async function lastBillFor(
+  userId: Types.ObjectId,
+  cardId: Types.ObjectId,
+  cycle: BillingCycle,
+  previous: BillingCycle,
+  statement: UpcomingBill | undefined,
+  now: Date
+): Promise<CardBill> {
+  const statementFits =
+    statement?.statementDate && statement.statementDate.getTime() >= cycle.start.getTime() - STATEMENT_SLACK_MS;
+
+  if (statement && statementFits) {
+    const dueOn = statement.dueDate ?? previous.dueOn;
+    return {
+      amountMinor: statement.totalDueMinor,
+      minimumDueMinor: statement.minimumDueMinor,
+      statementOn: statement.statementDate,
+      dueOn,
+      daysUntilDue: statement.daysUntilDue ?? daysUntil(now, dueOn),
+      paidMinor: statement.paidMinor + statement.waivedMinor,
+      owedMinor: statement.owedMinor,
+      isPaid: statement.isPaid,
+      isEstimate: statement.isEstimate,
+      fromStatement: true,
+    };
+  }
+
+  const [amountMinor, paidMinor] = await Promise.all([
+    chargedBetween(userId, cardId, previous.start, cycle.start),
+    paidTowards(userId, cardId, cycle.start),
+  ]);
+  const owedMinor = Math.max(0, amountMinor - paidMinor);
+
+  return {
+    amountMinor,
+    minimumDueMinor: null,
+    statementOn: cycle.start,
+    dueOn: previous.dueOn,
+    daysUntilDue: daysUntil(now, previous.dueOn),
+    paidMinor,
+    owedMinor,
+    isPaid: owedMinor <= 0,
+    isEstimate: true,
+    fromStatement: false,
+  };
+}
+
 export async function cardStatuses(userId: Types.ObjectId, now = new Date()): Promise<CardStatus[]> {
   const [cards, bills] = await Promise.all([
     Account.find({ userId, accountType: "CARD", isActive: true }),
     outstandingByCard(userId, now),
   ]);
+  const days = await cycleDaysFor(userId, cards);
 
   const measured = await Promise.all(
     cards.map(async (card) => {
-      const cycle = cycleFor(card, now);
+      const own = days.get(card.id) ?? { statementDay: null, dueDay: null, inferred: false };
+      const cycle = cycleFor(own, now);
 
-      // The cycle where the card has one, and the calendar month where it
-      // does not. A card with no statement day used to report nothing
-      // spent - not "unknown", but a confident zero beside a real limit,
-      // which is the most misleading figure this could produce.
-      const from = cycle?.start ?? istMonthStart(istMonthKey(now));
-      // To the end of the cycle's last day, which is the day before the
-      // next statement. Taken as an inclusive instant rather than as a
-      // midnight, so a purchase at eight in the evening on the last day
-      // still falls inside the cycle it belongs to.
-      const to = cycle ? istDayEnd(istDayKey(cycle.endsOn)) : now;
+      // No statement day, stored or learned: no cycle, and so nothing to
+      // say about what is billed and what is not. Not the salary month in
+      // its place - a card is billed on its own day, and a figure measured
+      // over the wrong period is worse than none.
+      if (!cycle) {
+        return { card, own, cycle, unbilledMinor: null, bill: null, outstandingMinor: null };
+      }
 
-      const spentMinor =
-        (
-          await Transaction.aggregate<{ total: number }>([
-            {
-              $match: {
-                userId,
-                accountId: card._id,
-                type: "DEBIT",
-                occurredAt: { $gte: from, $lte: to },
-              },
-            },
-            { $group: { _id: null, total: { $sum: "$countedAmountMinor" } } },
-          ])
-        )[0]?.total ?? 0;
+      // The cycle before this one, whose bill is the one now to pay.
+      const previous = cycleFor(own, new Date(cycle.start.getTime() - 1))!;
 
-      // What last month's bill is still holding, and so what is genuinely
-      // left. Cleared the moment a payment is marked against the card, or
-      // the moment the remainder is marked as covered by cashback or
-      // points - owedMinor already nets both out, so this does not
-      // recompute a figure upcomingBills has already worked out.
-      const bill = bills.get(card.id);
-      const outstandingMinor = bill ? bill.owedMinor : null;
+      const [unbilledMinor, bill] = await Promise.all([
+        chargedBetween(userId, card._id, cycle.start, cycle.statementOn),
+        lastBillFor(userId, card._id, cycle, previous, bills.get(card.id), now),
+      ]);
 
       return {
         card,
+        own,
         cycle,
-        from,
-        to,
-        spentMinor,
+        unbilledMinor,
         bill,
-        outstandingMinor,
-        usedMinor: (outstandingMinor ?? 0) + spentMinor,
+        // The unpaid part of the last bill, and everything since. Once the
+        // bill is paid off only the running cycle is left; a part payment
+        // takes off exactly what was paid.
+        outstandingMinor: bill.owedMinor + unbilledMinor,
       };
     })
   );
 
   // The bank's ceiling, which may be one pot shared by several cards. Each
   // card is answered with its group's limit less everything every member
-  // has used - the holder's limit, because a card that shares has none of
-  // its own. Worked out after every card's own figures exist, since a
-  // group's total is the sum of its members' and cannot be had sooner.
+  // owes - the holder's limit, because a card that shares has none of its
+  // own. Worked out after every card's own figures exist, since a group's
+  // total is the sum of its members' and cannot be had sooner. A member
+  // with no cycle leaves the pot unknown rather than looking emptier than
+  // it is.
   const holderOf = (card: (typeof measured)[number]["card"]) =>
     (card.sharesLimitWith ?? card._id).toString();
-  const usedByHolder = new Map<string, number>();
+  const usedByHolder = new Map<string, number | null>();
   const membersByHolder = new Map<string, string[]>();
   for (const row of measured) {
     const holder = holderOf(row.card);
-    usedByHolder.set(holder, (usedByHolder.get(holder) ?? 0) + row.usedMinor);
+    const sofar = usedByHolder.has(holder) ? usedByHolder.get(holder)! : 0;
+    usedByHolder.set(holder, sofar === null || row.outstandingMinor === null ? null : sofar + row.outstandingMinor);
     membersByHolder.set(holder, [
       ...(membersByHolder.get(holder) ?? []),
       row.card.nickname?.trim() || row.card.bankName,
@@ -183,72 +319,56 @@ export async function cardStatuses(userId: Types.ObjectId, now = new Date()): Pr
   }
   const byId = new Map(measured.map((row) => [row.card.id, row.card]));
 
-  const rows = measured.map(({ card, cycle, from, to, spentMinor, bill, outstandingMinor }): CardStatus => {
-    {
-      const holder = holderOf(card);
-      const holderCard = byId.get(holder) ?? card;
-      const members = membersByHolder.get(holder) ?? [];
-      const shared = members.length > 1;
+  const rows = measured.map(({ card, own, cycle, unbilledMinor, bill, outstandingMinor }): CardStatus => {
+    const holder = holderOf(card);
+    const holderCard = byId.get(holder) ?? card;
+    const members = membersByHolder.get(holder) ?? [];
+    const shared = members.length > 1;
 
-      const creditLimitMinor = holderCard.creditLimitMinor ?? null;
-      const groupUsedMinor = shared ? (usedByHolder.get(holder) ?? 0) : null;
-      const availableMinor =
-        creditLimitMinor === null
-          ? null
-          : Math.max(0, creditLimitMinor - (groupUsedMinor ?? (outstandingMinor ?? 0) + spentMinor));
+    const creditLimitMinor = holderCard.creditLimitMinor ?? null;
+    const groupUsedMinor = shared ? (usedByHolder.get(holder) ?? null) : null;
+    const usedAgainstLimit = shared ? groupUsedMinor : outstandingMinor;
+    const availableMinor =
+      creditLimitMinor === null || usedAgainstLimit === null
+        ? null
+        : Math.max(0, creditLimitMinor - usedAgainstLimit);
 
-      const limitMinor = card.spendLimitMinor ?? null;
-      const state: CardState = !limitMinor
-        ? "unset"
-        : spentMinor >= limitMinor
-          ? "over"
-          : spentMinor >= limitMinor * CLOSE_FRACTION
-            ? "close"
-            : "ok";
-
-      return {
-        accountId: card.id,
-        name: card.nickname?.trim() || card.bankName,
-        bankName: card.bankName,
-        issuer: card.issuer ?? null,
-        color: card.color ?? null,
-        last4: card.last4 ?? null,
-        network: normaliseNetwork(card.cardNetwork),
-        statementDay: card.statementDay ?? null,
-        dueDay: card.dueDay ?? null,
-        cycleStart: cycle?.start ?? null,
-        cycleEnd: cycle?.endsOn ?? null,
-        statementOn: cycle?.statementOn ?? null,
-        dueOn: cycle?.dueOn ?? null,
-        floatDays: floatDays(card, now),
-        spentMinor,
-        limitMinor,
-        creditLimitMinor,
-        remainingMinor: limitMinor === null ? null : Math.max(0, limitMinor - spentMinor),
-        outstandingMinor,
-        outstandingIsEstimate: bill?.isEstimate ?? false,
-        billDueOn: bill?.dueDate ?? null,
-        lastStatementMinor: bill?.totalDueMinor ?? null,
-        minimumDueMinor: bill?.minimumDueMinor ?? null,
-        lastStatementOn: bill?.statementDate ?? null,
-        billDaysUntilDue: bill?.daysUntilDue ?? null,
-        billIsPaid: bill ? bill.isPaid : null,
-        usedMinor: (outstandingMinor ?? 0) + spentMinor,
-        availableMinor,
-        sharesLimitWith: shared
-          ? members.filter((name) => name !== (card.nickname?.trim() || card.bankName))
-          : [],
-        groupUsedMinor,
-        periodIsCycle: cycle !== null,
-        periodStart: from,
-        periodEnd: to,
-        state,
-      };
-    }
+    return {
+      accountId: card.id,
+      name: card.nickname?.trim() || card.bankName,
+      bankName: card.bankName,
+      issuer: card.issuer ?? null,
+      color: card.color ?? null,
+      last4: card.last4 ?? null,
+      network: normaliseNetwork(card.cardNetwork),
+      statementDay: own.statementDay,
+      dueDay: own.dueDay,
+      statementDayInferred: own.inferred,
+      cycleKnown: cycle !== null,
+      cycleStart: cycle?.start ?? null,
+      cycleEnd: cycle?.endsOn ?? null,
+      statementOn: cycle?.statementOn ?? null,
+      dueOn: cycle?.dueOn ?? null,
+      floatDays: floatDays(own, now),
+      creditLimitMinor,
+      unbilledMinor,
+      billedUnpaidMinor: bill?.owedMinor ?? null,
+      outstandingMinor,
+      outstandingIsEstimate: bill?.isEstimate ?? false,
+      lastBill: bill,
+      billIsPaid: bill ? bill.isPaid : null,
+      usedMinor: outstandingMinor,
+      availableMinor,
+      sharesLimitWith: shared
+        ? members.filter((name) => name !== (card.nickname?.trim() || card.bankName))
+        : [],
+      groupUsedMinor,
+      state: creditState(usedAgainstLimit, creditLimitMinor),
+    };
   });
 
-  // A card at its limit is not the answer however long its float, so the
-  // limit outranks it. Nothing is filtered out, though - "why is it not
+  // A card nearly out of credit is not the answer however long its float,
+  // so that outranks it. Nothing is filtered out, though - "why is it not
   // suggesting my usual card" should never be a mystery.
   return rows.sort((a, b) => {
     if ((a.state === "over") !== (b.state === "over")) return a.state === "over" ? 1 : -1;
@@ -273,8 +393,9 @@ export interface CardPicks {
  * Which card to reach for, one answer per network.
  *
  * `cardStatuses` has already put them in order, so the first of each group
- * is that group's answer. A card over its limit is skipped: suggesting one
- * would be advice to make a bad month worse.
+ * is that group's answer. A card with 90% or more of its credit limit used
+ * is skipped: suggesting one would be advice to run it out. So is a card
+ * with no cycle, which has no float to rank it by.
  */
 export function pickCards(statuses: CardStatus[]): CardPicks {
   const usable = statuses.filter((card) => card.state !== "over" && card.floatDays !== null);

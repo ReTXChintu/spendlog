@@ -53,7 +53,6 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
   late final TextEditingController _last4;
   late final TextEditingController _cardNetwork;
   late final TextEditingController _creditLimit;
-  late final TextEditingController _spendLimit;
   late final TextEditingController _statementDay;
 
   /// Never pre-filled: the stored value is not readable, by design.
@@ -83,9 +82,6 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
     _creditLimit = TextEditingController(
       text: a?.creditLimitMinor != null ? (a!.creditLimitMinor! ~/ 100).toString() : '',
     );
-    _spendLimit = TextEditingController(
-      text: a?.spendLimitMinor != null ? (a!.spendLimitMinor! ~/ 100).toString() : '',
-    );
     _statementDay = TextEditingController(text: a?.statementDay?.toString() ?? '');
     _dueDay = TextEditingController(text: a?.dueDay?.toString() ?? '');
     _type = a?.accountType ?? 'BANK';
@@ -102,7 +98,6 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
       _last4,
       _cardNetwork,
       _creditLimit,
-      _spendLimit,
       _statementDay,
       _statementPassword,
       _dueDay,
@@ -131,6 +126,16 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
       setState(() => _error = 'Last digits should be 2 to 6 numbers, or left blank.');
       return;
     }
+    if (_type == 'CARD') {
+      for (final (label, field) in [('Statement day', _statementDay), ('Due day', _dueDay)]) {
+        final text = field.text.trim();
+        final day = int.tryParse(text);
+        if (text.isNotEmpty && (day == null || day < 1 || day > 31)) {
+          setState(() => _error = '$label should be a day of the month, 1 to 31.');
+          return;
+        }
+      }
+    }
 
     setState(() {
       _saving = true;
@@ -150,7 +155,6 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
       'sharesLimitWith': _type == 'CARD' ? _sharesLimitWith : null,
       'cardNetwork': _cardNetwork.text.trim().isEmpty ? null : _cardNetwork.text.trim(),
       'creditLimitMinor': limit == null ? null : limit * 100,
-      'spendLimitMinor': _intOrNull(_spendLimit) == null ? null : _intOrNull(_spendLimit)! * 100,
       'statementDay': _intOrNull(_statementDay),
       'dueDay': _intOrNull(_dueDay),
       'isActive': _isActive,
@@ -290,19 +294,6 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
               _Field(label: 'Last digits', controller: _last4, hint: '1377', numeric: true),
             ],
 
-            // A limit you set on a bank account is worth exactly as much
-            // as one on a card. It was only ever a card field because
-            // cards were the only thing with a period attached.
-            if (_type != 'CASH') ...[
-              const SizedBox(height: 14),
-              _Field(
-                label: _type == 'CARD' ? 'My limit a cycle (₹)' : 'My limit a month (₹)',
-                controller: _spendLimit,
-                hint: '30000',
-                numeric: true,
-              ),
-            ],
-
             // What a debit card draws on. Its spending is that account's
             // money, so it is counted there and shows on that account's
             // statement - and a debit card whose account SpendLog has
@@ -367,6 +358,15 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
                     child: _Field(label: 'Due day', controller: _dueDay, hint: '7', numeric: true),
                   ),
                 ],
+              ),
+              const SizedBox(height: 6),
+              // The one thing every figure on the card hangs off. Each card
+              // bills on its own day, so nothing here borrows the salary
+              // month - without it the card simply has no cycle yet.
+              Text(
+                "Statement day is when the bill is drawn. This card's cycle, what it owes and what is left "
+                'of its limit all count from it. A statement read for this card fills both in.',
+                style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
               ),
               const SizedBox(height: 14),
 

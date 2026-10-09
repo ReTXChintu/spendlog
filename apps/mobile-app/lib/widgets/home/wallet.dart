@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../../models/models.dart';
 import '../../theme.dart';
@@ -34,8 +35,8 @@ class WalletSection extends StatelessWidget {
   /// An account's own page - its balance, its stored details.
   final void Function(String accountId) onOpenAccount;
 
-  /// An account's editor - for a card with no limit of either kind, to
-  /// set one. Its page instead when not given.
+  /// An account's editor - for a card with no billing date or no credit
+  /// limit, to set it. Its page instead when not given.
   final void Function(String accountId)? onEditAccount;
 
   /// Every account, for adding one.
@@ -111,7 +112,7 @@ class WalletSection extends StatelessWidget {
             cards: wallet.cards,
             onOpenCard: onOpenCard,
             onAddDetails: onOpenAccount,
-            onSetLimit: onEditAccount ?? onOpenAccount,
+            onEdit: onEditAccount ?? onOpenAccount,
           ),
         ],
         if (wallet.banks.isNotEmpty) ...[
@@ -139,16 +140,16 @@ class CardPager extends StatefulWidget {
     required this.cards,
     required this.onOpenCard,
     required this.onAddDetails,
-    this.onSetLimit,
+    this.onEdit,
   });
 
   final List<CardFace> cards;
   final void Function(CardFace card) onOpenCard;
   final void Function(String accountId) onAddDetails;
 
-  /// Where a card with no limit of either kind gets one. The account's
-  /// page, like [onAddDetails], when not given.
-  final void Function(String accountId)? onSetLimit;
+  /// Where a card with no billing date or credit limit gets one. The
+  /// account's page, like [onAddDetails], when not given.
+  final void Function(String accountId)? onEdit;
 
   @override
   State<CardPager> createState() => _CardPagerState();
@@ -194,7 +195,8 @@ class _CardPagerState extends State<CardPager> {
           ? width.clamp(0.0, _maxCardWidth)
           : (width * 0.86).clamp(0.0, _maxCardWidth);
       final fraction = ((cardWidth + _gap) / width).clamp(0.1, 1.0);
-      final height = (cardWidth / kCardAspect) + 10 + captionLine * 2 + 6;
+      // A line for the limit, and up to two for the bill and the cycle.
+      final height = (cardWidth / kCardAspect) + 10 + captionLine * 3 + 6;
       final controller = _controllerFor(fraction);
 
       return Column(
@@ -223,7 +225,7 @@ class _CardPagerState extends State<CardPager> {
                       const SizedBox(height: 10),
                       _CardCaption(
                         card: card,
-                        onSetLimit: () => (widget.onSetLimit ?? widget.onAddDetails)(card.accountId),
+                        onEdit: () => (widget.onEdit ?? widget.onAddDetails)(card.accountId),
                       ),
                     ],
                   ),
@@ -256,64 +258,97 @@ class _CardPagerState extends State<CardPager> {
   }
 }
 
-/// The bank's limit in words, under the face. With no limit of either kind
-/// it is only the cycle's spend: the caption offers to set one after it.
+/// The first line under a face: credit used against the limit, and what is
+/// left of it. With no credit limit only what is used; with no billing
+/// date, nothing that depends on one - the caption offers to set whichever
+/// is missing after it.
 String cardLimitLine(CardFace card) {
   final limit = card.creditLimitMinor;
-  if (limit == null || limit <= 0) {
-    final spent = '${formatMoneyShort(card.cycleSpentMinor)} spent this cycle';
-    return cardBar(card).basis == CardBarBasis.none ? spent : '$spent · no credit limit set';
+  if (!card.cycleKnown) {
+    return limit != null && limit > 0 ? '${formatMoneyShort(limit)} credit limit' : 'Cycle unknown';
   }
   final used = creditUsedMinor(card);
-  final available = card.availableMinor ?? limit - used;
-  return '${formatMoneyShort(used)} of ${formatMoneyShort(limit)} credit used · '
-      '${formatMoneyShort(available)} free';
+  if (limit == null || limit <= 0) return '${formatMoneyShort(used)} used';
+  final available = card.availableMinor ?? math.max(0, limit - used);
+  return '${formatMoneyShort(used)} of ${formatMoneyShort(limit)} used · '
+      '${formatMoneyShort(available)} available';
 }
 
-/// The limit you set yourself, which is the one that should change what
-/// you do at the till; else the last bill when it is still unpaid.
-String? cardSecondLine(CardFace card) {
-  final own = card.spendLimitMinor;
-  if (own != null && own > 0) {
-    final left = own - card.cycleSpentMinor;
-    return left < 0
-        ? '${formatMoneyShort(-left)} past your ${formatMoneyShort(own)} limit this cycle'
-        : '${formatMoneyShort(left)} left of your ${formatMoneyShort(own)} limit this cycle';
-  }
+/// The last bill, if any of it is still to pay.
+bool _billOwing(CardFace card) {
   final bill = card.lastStatement;
-  if (bill != null && bill.isPaid == false && (bill.owedMinor ?? bill.amountMinor) > 0) {
-    final minimum = bill.minimumDueMinor;
-    return 'Bill ${formatMoneyShort(bill.owedMinor ?? bill.amountMinor)} unpaid'
-        '${minimum != null && minimum > 0 ? ' · minimum ${formatMoneyShort(minimum)}' : ''}';
-  }
-  if (card.sharesLimitWith.isNotEmpty) return 'Limit shared with ${card.sharesLimitWith.join(', ')}';
-  return null;
+  return bill != null && bill.isPaid == false && (bill.owedMinor ?? bill.amountMinor) > 0;
 }
 
-/// Two lines under a face. The line that matches the bar is the one
-/// coloured with it: your own limit's line when the bar measures that, the
-/// credit line's when it measures the bank's limit.
+/// "in 3 days", "today", "2 days late" - how soon an unpaid bill is due.
+String? _dueIn(int? days) {
+  if (days == null) return null;
+  if (days < 0) return days == -1 ? '1 day late' : '${-days} days late';
+  if (days == 0) return 'due today';
+  if (days == 1) return 'tomorrow';
+  return 'in $days days';
+}
+
+/// The second line: the bill and the cycle. Until the last bill is paid,
+/// what is left of it and when it is due, then what has been charged since
+/// it was drawn; once it is paid, only the running cycle and when it
+/// closes. Nothing for a card with no cycle to speak of.
+String? cardSecondLine(CardFace card) {
+  if (!card.cycleKnown) return null;
+  final bill = card.lastStatement;
+  final unbilled = formatMoneyShort(card.unbilledMinor ?? 0);
+
+  if (bill != null && _billOwing(card)) {
+    final owed = bill.owedMinor ?? bill.amountMinor;
+    final due = formatCardDate(bill.dueOn ?? card.nextDueOn);
+    final when = _dueIn(card.daysToDue);
+    return [
+      'Bill ${bill.isEstimate ? 'about ' : ''}${formatMoneyShort(owed)}${due.isEmpty ? ' unpaid' : ' due $due'}',
+      if (when != null) when,
+      '$unbilled spent since statement',
+    ].join(' · ');
+  }
+
+  final closes = formatCardDate(card.cycleEnd);
+  final cycle = '$unbilled spent this cycle${closes.isEmpty ? '' : ' (closes $closes)'}';
+  return bill != null && bill.amountMinor > 0 ? 'Bill paid · $cycle' : 'No bill due · $cycle';
+}
+
+/// Whether the unpaid bill is due within three days, or late: the second
+/// line goes red.
+bool cardBillUrgent(CardFace card) {
+  final days = card.daysToDue;
+  return card.cycleKnown && _billOwing(card) && days != null && days <= 3;
+}
+
+/// Two lines under a face. The first is coloured by the bar - how much of
+/// the credit limit is gone - and the second goes red when the bill is
+/// close to due or late. A card missing what its figures need - a billing
+/// date, a credit limit - says so, with a way straight to its editor.
 class _CardCaption extends StatelessWidget {
-  const _CardCaption({required this.card, required this.onSetLimit});
+  const _CardCaption({required this.card, required this.onEdit});
 
   final CardFace card;
 
-  /// The card's account, to put a limit on it.
-  final VoidCallback onSetLimit;
+  /// The card's editor, to set its billing date or its credit limit.
+  final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
     final second = cardSecondLine(card);
     final bar = cardBar(card);
-    final warning = bar.state == 'over' || bar.state == 'close';
     final tint = switch (bar.state) {
       'over' => c.debit,
       'close' => c.warn,
       _ => null,
     };
-    final onCredit = bar.basis == CardBarBasis.creditLimit;
-    final onOwn = bar.basis == CardBarBasis.ownLimit;
+    final urgent = cardBillUrgent(card);
+    final action = !card.cycleKnown
+        ? 'Set billing date'
+        : bar.basis == CardBarBasis.none
+            ? 'Set a credit limit'
+            : null;
 
     final first = Text(
       cardLimitLine(card),
@@ -321,8 +356,8 @@ class _CardCaption extends StatelessWidget {
       overflow: TextOverflow.ellipsis,
       style: kNum.copyWith(
         fontSize: 12,
-        fontWeight: onCredit && warning ? FontWeight.w700 : FontWeight.w600,
-        color: (onCredit ? tint : null) ?? c.ink70,
+        fontWeight: tint != null ? FontWeight.w700 : FontWeight.w600,
+        color: tint ?? c.ink70,
       ),
     );
 
@@ -331,7 +366,7 @@ class _CardCaption extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (bar.basis == CardBarBasis.none)
+          if (action != null)
             Row(
               children: [
                 Flexible(child: first),
@@ -339,10 +374,10 @@ class _CardCaption extends StatelessWidget {
                 Semantics(
                   button: true,
                   child: InkWell(
-                    onTap: onSetLimit,
+                    onTap: onEdit,
                     borderRadius: BorderRadius.circular(4),
                     child: Text(
-                      'Set a credit limit',
+                      action,
                       maxLines: 1,
                       style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: c.brandDark),
                     ),
@@ -355,12 +390,13 @@ class _CardCaption extends StatelessWidget {
           if (second != null)
             Text(
               second,
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 11.5,
-                fontWeight: onOwn && warning ? FontWeight.w700 : FontWeight.w500,
-                color: (onOwn ? tint : null) ?? c.muted,
+                height: 1.3,
+                fontWeight: urgent ? FontWeight.w700 : FontWeight.w500,
+                color: urgent ? c.debit : c.muted,
               ),
             ),
         ],

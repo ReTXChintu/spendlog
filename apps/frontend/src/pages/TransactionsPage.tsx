@@ -555,6 +555,13 @@ export function TransactionsPage() {
             </select>
           </div>
 
+          {cycles && cycles.cycleKnown === false && (
+            <div className="filter-group">
+              <label>Statement cycle</label>
+              <p className="field-hint">No billing date set for this card — showing all of it.</p>
+            </div>
+          )}
+
           {cycles && cycles.cycles.length > 0 && (
             <div className="filter-group">
               <label htmlFor="f-cycle">{cycles.byStatement ? "Statement cycle" : "Month"}</label>

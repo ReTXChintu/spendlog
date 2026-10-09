@@ -76,7 +76,9 @@ class Account {
   /// holds the limit. Its own creditLimitMinor is then ignored.
   final String? sharesLimitWith;
   final int? creditLimitMinor;
-  final int? spendLimitMinor;
+
+  /// The day the card's bill is drawn and the day it falls due. Every card
+  /// figure is measured from the first - each card on its own cycle.
   final int? statementDay;
   final int? dueDay;
   final bool isActive;
@@ -103,7 +105,6 @@ class Account {
     this.linkedAccountId,
     this.sharesLimitWith,
     this.creditLimitMinor,
-    this.spendLimitMinor,
     this.statementDay,
     this.dueDay,
     this.isActive = true,
@@ -132,7 +133,6 @@ class Account {
         linkedAccountId: json['linkedAccountId'] as String?,
         sharesLimitWith: json['sharesLimitWith'] as String?,
         creditLimitMinor: json['creditLimitMinor'] as int?,
-        spendLimitMinor: json['spendLimitMinor'] as int?,
         statementDay: json['statementDay'] as int?,
         dueDay: json['dueDay'] as int?,
         isActive: json['isActive'] as bool? ?? true,
@@ -546,7 +546,8 @@ class MerchantPreset {
       );
 }
 
-/// A card, with where it is in its cycle and what is left of its limit.
+/// A card, with where it is in its own cycle, what it owes and what is
+/// left of its credit limit.
 class CardStatus {
   final String accountId;
   final String name;
@@ -555,33 +556,31 @@ class CardStatus {
   /// Matters at a till rather than in the ledger: a RuPay credit card pays
   /// over UPI and a Visa one does not.
   final String? network;
+
+  /// Whether the card has a cycle at all - a statement day, stored or read
+  /// off a statement. Without one the figures below are null.
+  final bool cycleKnown;
   final DateTime? statementOn;
   final DateTime? dueOn;
   final int? floatDays;
-  final int spentMinor;
-
-  /// What you allow yourself on this card in a period, and what the bank
-  /// allows. Different things: being 90% through your own limit matters at
-  /// a till, and being 30% through a credit limit tells you nothing.
-  final int? limitMinor;
   final int? creditLimitMinor;
-  final int? remainingMinor;
 
-  /// Last statement's bill, less anything paid against it. Money the bank
-  /// is still holding against the credit limit. Null when no statement has
-  /// been read, which is not the same as nothing owed.
+  /// Charged since the last statement, net of refunds.
+  final int? unbilledMinor;
+
+  /// What is left to pay of the last bill.
+  final int? billedUnpaidMinor;
+
+  /// The two together: what the card owes the bank now, and so what the
+  /// credit limit has lost.
   final int? outstandingMinor;
 
-  /// Whether that figure was printed on the statement or worked out from
-  /// its rows. Shown as "about" rather than hidden.
+  /// Whether the bill in that figure was printed on a statement or worked
+  /// out. Shown as "about" rather than hidden.
   final bool outstandingIsEstimate;
 
-  /// When that bill has to be paid - not the same as dueOn, which is when
-  /// the cycle now running will fall due.
-  final DateTime? billDueOn;
-
-  /// The credit limit, less the outstanding bill, less this cycle. For a
-  /// card on a shared limit, the group's figure.
+  /// The credit limit, less the outstanding. For a card on a shared limit,
+  /// the group's figure.
   final int? availableMinor;
 
   /// The other cards this one shares a limit with, named.
@@ -590,11 +589,8 @@ class CardStatus {
   /// What the whole group has used, when there is one.
   final int? groupUsedMinor;
 
-  /// Whether spentMinor covers a billing cycle or a calendar month. A card
-  /// with no statement day has no cycle to measure.
-  final bool periodIsCycle;
-
-  /// "ok" | "close" | "over" | "unset"
+  /// "ok" | "close" | "over" | "unset" - credit used against the limit:
+  /// close from 70%, over from 90%.
   final String state;
 
   CardStatus({
@@ -602,20 +598,18 @@ class CardStatus {
     required this.name,
     this.last4,
     this.network,
+    this.cycleKnown = true,
     this.statementOn,
     this.dueOn,
     this.floatDays,
-    required this.spentMinor,
-    this.limitMinor,
     this.creditLimitMinor,
-    this.remainingMinor,
+    this.unbilledMinor,
+    this.billedUnpaidMinor,
     this.outstandingMinor,
     this.outstandingIsEstimate = false,
-    this.billDueOn,
     this.availableMinor,
     this.sharesLimitWith = const [],
     this.groupUsedMinor,
-    this.periodIsCycle = true,
     required this.state,
   });
 
@@ -624,24 +618,34 @@ class CardStatus {
         name: json['name'] as String,
         last4: json['last4'] as String?,
         network: json['network'] as String?,
+        cycleKnown: json['cycleKnown'] as bool? ?? true,
         statementOn:
             json['statementOn'] != null ? DateTime.parse(json['statementOn'] as String) : null,
         dueOn: json['dueOn'] != null ? DateTime.parse(json['dueOn'] as String) : null,
         floatDays: json['floatDays'] as int?,
-        spentMinor: json['spentMinor'] as int? ?? 0,
-        limitMinor: json['limitMinor'] as int?,
         creditLimitMinor: json['creditLimitMinor'] as int?,
-        remainingMinor: json['remainingMinor'] as int?,
+        unbilledMinor: json['unbilledMinor'] as int?,
+        billedUnpaidMinor: json['billedUnpaidMinor'] as int?,
         outstandingMinor: json['outstandingMinor'] as int?,
         outstandingIsEstimate: json['outstandingIsEstimate'] as bool? ?? false,
-        billDueOn: json['billDueOn'] != null ? DateTime.parse(json['billDueOn'] as String) : null,
         availableMinor: json['availableMinor'] as int?,
         sharesLimitWith:
             (json['sharesLimitWith'] as List<dynamic>? ?? []).map((name) => name as String).toList(),
         groupUsedMinor: json['groupUsedMinor'] as int?,
-        periodIsCycle: json['periodIsCycle'] as bool? ?? true,
         state: json['state'] as String? ?? 'unset',
       );
+}
+
+/// What a warning about a card's credit says, for a card that is close to
+/// or over 90% of its limit - the strip, the picker and a new payment on
+/// it all say it the same way.
+String cardCreditWarning(CardStatus card) {
+  final left = card.availableMinor;
+  if (left == null) return '${card.name} is close to its credit limit.';
+  if (left <= 0) return '${card.name} is at its credit limit.';
+  return card.state == 'over'
+      ? '${card.name} is nearly out of credit - ${formatMoney(left)} left.'
+      : '${card.name} has ${formatMoney(left)} of its credit limit left.';
 }
 
 class FixedCommitment {
@@ -1786,16 +1790,20 @@ class AccountCycle {
       );
 }
 
-/// `GET /accounts/:id/cycles` — newest first. [byStatement] is false when
-/// the account has no statement day and the cycles are pay months instead.
+/// `GET /accounts/:id/cycles` — newest first. [byStatement] is false for
+/// an account that is not a credit card, whose cycles are pay months
+/// instead. A credit card with no billing date has none at all
+/// ([cycleKnown] false) - never the pay month in their place.
 class AccountCycles {
   final bool byStatement;
+  final bool cycleKnown;
   final List<AccountCycle> cycles;
 
-  AccountCycles({required this.byStatement, required this.cycles});
+  AccountCycles({required this.byStatement, this.cycleKnown = true, required this.cycles});
 
   factory AccountCycles.fromJson(Map<String, dynamic> json) => AccountCycles(
         byStatement: json['byStatement'] as bool? ?? false,
+        cycleKnown: json['cycleKnown'] as bool? ?? true,
         cycles: (json['cycles'] as List<dynamic>? ?? const [])
             .map((c) => AccountCycle.fromJson(c as Map<String, dynamic>))
             .toList(),

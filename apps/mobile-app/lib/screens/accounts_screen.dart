@@ -34,20 +34,50 @@ class AccountsScreen extends StatefulWidget {
   State<AccountsScreen> createState() => _AccountsScreenState();
 }
 
-/// What a card has spent this cycle, and against what. Null for anything
-/// without a billing cycle — a savings account has no limit and no month,
-/// and an empty bar drawn for one would mean nothing.
+/// A credit card's own billing cycle and where it stands against its credit
+/// limit. Null for anything that is not a credit card - a savings account
+/// has no limit and no bill, and an empty bar drawn for one would mean
+/// nothing.
 class _Cycle {
-  final int spentMinor;
-  final int? limitMinor;
+  /// Whether the card has a statement day, stored or read off a statement.
+  /// Without one there is no cycle, and the figures below are null.
+  final bool cycleKnown;
   final int? floatDays;
+  final int? unbilledMinor;
+  final int? billedUnpaidMinor;
+  final int? outstandingMinor;
+  final bool outstandingIsEstimate;
+  final int? creditLimitMinor;
+  final int? usedMinor;
+  final int? availableMinor;
 
-  _Cycle({required this.spentMinor, this.limitMinor, this.floatDays});
+  /// ok | close | over | unset - credit used against the limit.
+  final String state;
+
+  _Cycle({
+    this.cycleKnown = true,
+    this.floatDays,
+    this.unbilledMinor,
+    this.billedUnpaidMinor,
+    this.outstandingMinor,
+    this.outstandingIsEstimate = false,
+    this.creditLimitMinor,
+    this.usedMinor,
+    this.availableMinor,
+    this.state = 'unset',
+  });
 
   factory _Cycle.fromJson(Map<String, dynamic> json) => _Cycle(
-        spentMinor: json['spentMinor'] as int? ?? 0,
-        limitMinor: json['limitMinor'] as int?,
+        cycleKnown: json['cycleKnown'] as bool? ?? true,
         floatDays: json['floatDays'] as int?,
+        unbilledMinor: json['unbilledMinor'] as int?,
+        billedUnpaidMinor: json['billedUnpaidMinor'] as int?,
+        outstandingMinor: json['outstandingMinor'] as int?,
+        outstandingIsEstimate: json['outstandingIsEstimate'] as bool? ?? false,
+        creditLimitMinor: json['creditLimitMinor'] as int?,
+        usedMinor: json['usedMinor'] as int?,
+        availableMinor: json['availableMinor'] as int?,
+        state: json['state'] as String? ?? 'unset',
       );
 }
 
@@ -681,8 +711,8 @@ class _AccountsScreenState extends State<AccountsScreen> {
             const SizedBox(height: 10),
           ],
 
-          if (isCard && row.cycle != null)
-            _meter(row.cycle!, account)
+          if (isCard && row.cycle != null && row.cycle!.cycleKnown)
+            _meter(row.cycle!)
           else
             _figure(
               'This account',
@@ -736,7 +766,11 @@ class _AccountsScreenState extends State<AccountsScreen> {
           _row(
             Icons.receipt_outlined,
             'Transactions',
-            account.accountType == 'CARD' && account.statementDay != null ? 'This statement cycle' : 'This month',
+            !isCard
+                ? 'This month'
+                : row.cycle?.cycleKnown == true
+                    ? 'This statement cycle'
+                    : 'All of it - no billing date yet',
             on: true,
             action: TextButton(
               onPressed: () async {
@@ -930,21 +964,20 @@ class _AccountsScreenState extends State<AccountsScreen> {
     return isCard ? 'Set a statement day to see a cycle' : 'No billing cycle to track';
   }
 
-  /// How much of this cycle is gone.
-  ///
-  /// Drawn against whichever limit was set for this card, falling back to
-  /// the bank's. Those are different things — one is what you allow and the
-  /// other is what you are allowed — and showing 40% of a credit limit
-  /// while already past your own budget would be reassuring and wrong.
-  Widget _meter(_Cycle cycle, Account account) {
+  /// What the card owes and how much of its credit limit that is: the
+  /// unpaid part of the last bill and everything charged since, on the
+  /// card's own cycle.
+  Widget _meter(_Cycle cycle) {
     final c = context.c;
-    final capIsMine = account.spendLimitMinor != null;
-    final cap = account.spendLimitMinor ?? cycle.limitMinor;
-
-    final used = (cap != null && cap > 0) ? (cycle.spentMinor / cap).clamp(0.0, 1.0) : null;
-    final over = cap != null && cycle.spentMinor > cap;
-    final close = used != null && used >= 0.8 && !over;
-    final tint = over ? c.debit : (close ? c.warn : c.brand);
+    final limit = cycle.creditLimitMinor;
+    final owed = cycle.outstandingMinor ?? 0;
+    final used = cycle.usedMinor ?? owed;
+    final fraction = limit != null && limit > 0 ? (used / limit).clamp(0.0, 1.0) : null;
+    final tint = switch (cycle.state) {
+      'over' => c.debit,
+      'close' => c.warn,
+      _ => c.brand,
+    };
 
     return Container(
       width: double.infinity,
@@ -958,7 +991,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'THIS CYCLE',
+            'OWED ON THIS CARD',
             style: TextStyle(
               fontSize: 9.5,
               fontWeight: FontWeight.w800,
@@ -971,49 +1004,53 @@ class _AccountsScreenState extends State<AccountsScreen> {
             crossAxisAlignment: CrossAxisAlignment.baseline,
             textBaseline: TextBaseline.alphabetic,
             children: [
-              Text(formatMoney(cycle.spentMinor), style: kNum.copyWith(fontSize: 21)),
-              if (cap != null) ...[
+              Text(formatMoney(owed), style: kNum.copyWith(fontSize: 21)),
+              if (limit != null && limit > 0) ...[
                 const SizedBox(width: 7),
-                Text('of ${formatMoney(cap)}',
+                Text('of ${formatMoney(limit)} limit',
                     style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: c.muted)),
               ],
             ],
           ),
-          if (used != null) ...[
+          if (fraction != null) ...[
             const SizedBox(height: 9),
             ClipRRect(
               borderRadius: BorderRadius.circular(100),
               child: LinearProgressIndicator(
-                value: used,
+                value: fraction,
                 minHeight: 6,
                 backgroundColor: c.track,
                 valueColor: AlwaysStoppedAnimation(tint),
               ),
             ),
-            const SizedBox(height: 7),
-            Text(
-              _meterNote(cycle.spentMinor, cap!, capIsMine: capIsMine, over: over),
-              style: TextStyle(
-                fontSize: 11.5,
-                color: over || close ? tint : c.muted,
-                fontWeight: over ? FontWeight.w700 : FontWeight.w400,
-              ),
-            ),
-          ] else ...[
-            const SizedBox(height: 6),
-            Text('Set a limit to see how much is left',
-                style: TextStyle(fontSize: 11.5, color: c.muted)),
           ],
+          const SizedBox(height: 7),
+          Text(
+            _meterNote(cycle),
+            style: TextStyle(
+              fontSize: 11.5,
+              height: 1.4,
+              color: cycle.state == 'over' || cycle.state == 'close' ? tint : c.muted,
+              fontWeight: cycle.state == 'over' ? FontWeight.w700 : FontWeight.w400,
+            ),
+          ),
         ],
       ),
     );
   }
 
-  String _meterNote(int spentMinor, int cap, {required bool capIsMine, required bool over}) {
-    if (over) {
-      return '${formatMoney(spentMinor - cap)} over your ${capIsMine ? 'own cap' : 'limit'}';
-    }
-    return '${formatMoney(cap - spentMinor)} left${capIsMine ? ' on your cap' : ''}';
+  /// What is left, what of the last bill is unpaid, and what this cycle has
+  /// charged so far.
+  String _meterNote(_Cycle cycle) {
+    final billed = cycle.billedUnpaidMinor ?? 0;
+    return [
+      if (cycle.availableMinor != null)
+        '${formatMoney(cycle.availableMinor!)} available'
+      else
+        'Set a credit limit to see what is left',
+      if (billed > 0) '${cycle.outstandingIsEstimate ? 'about ' : ''}${formatMoney(billed)} of the last bill unpaid',
+      '${formatMoney(cycle.unbilledMinor ?? 0)} spent since statement',
+    ].join(' · ');
   }
 
   Widget _dates(Account account, _Cycle? cycle) {

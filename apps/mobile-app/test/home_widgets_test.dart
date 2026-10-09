@@ -69,15 +69,21 @@ final _dashboardJson = <String, dynamic>{
     'cards': [
       {
         'accountId': 'k1', 'name': 'Amazon Pay ICICI credit card', 'bankName': 'ICICI Bank', 'issuer': null,
-        'network': 'VISA', 'last4': '4321', 'color': null, 'creditLimitMinor': 30000000, 'outstandingMinor': 1500000,
+        'network': 'VISA', 'last4': '4321', 'color': null, 'statementDay': 20, 'dueDay': 8,
+        'statementDayInferred': false, 'cycleKnown': true, 'creditLimitMinor': 30000000,
+        'billedUnpaidMinor': 1500000, 'unbilledMinor': 2500000, 'outstandingMinor': 4000000,
         'outstandingIsEstimate': false, 'usedMinor': 4000000, 'availableMinor': 26000000, 'sharesLimitWith': [],
-        'cycleSpentMinor': 2500000, 'cycleStart': '2026-09-20', 'cycleEnd': '2026-10-19', 'periodIsCycle': true,
-        'statementOn': 19, 'lastStatement': null, 'nextDueOn': '2026-10-18', 'daysToDue': 9,
-        'spendLimitMinor': 3000000, 'state': 'close', 'hasCardDetails': true,
+        'cycleStart': '2026-09-20', 'cycleEnd': '2026-10-19', 'statementOn': '2026-10-20',
+        'lastStatement': {
+          'amountMinor': 1500000, 'minimumDueMinor': 75000, 'statementOn': '2026-09-20', 'dueOn': '2026-10-08',
+          'paidMinor': 0, 'owedMinor': 1500000, 'isPaid': false, 'isEstimate': false, 'fromStatement': true,
+        },
+        'billIsPaid': false, 'nextDueOn': '2026-10-08', 'daysToDue': -1, 'state': 'close', 'hasCardDetails': true,
       },
       {
         'accountId': 'k2', 'name': 'HDFC Millennia', 'bankName': 'HDFC Bank', 'network': 'MASTERCARD', 'last4': '8899',
-        'creditLimitMinor': null, 'usedMinor': 0, 'cycleSpentMinor': 120000, 'state': 'unset', 'hasCardDetails': false,
+        'cycleKnown': false, 'creditLimitMinor': null, 'usedMinor': null, 'unbilledMinor': null, 'state': 'unset',
+        'hasCardDetails': false,
       },
     ],
     'banks': [
@@ -126,6 +132,11 @@ void main() {
     expect(data.wallet.cards.first.network, 'VISA');
     expect(data.wallet.cards.first.state, 'close');
     expect(data.wallet.cards.last.creditLimitMinor, isNull);
+    expect(data.wallet.cards.first.billedUnpaidMinor, 1500000);
+    expect(data.wallet.cards.first.unbilledMinor, 2500000);
+    expect(data.wallet.cards.first.statementOn, '2026-10-20');
+    expect(data.wallet.cards.first.lastStatement!.fromStatement, isTrue);
+    expect(data.wallet.cards.last.cycleKnown, isFalse);
     expect(data.wallet.banks.first.debitCards.single.network, 'RUPAY');
     expect(data.wallet.banks[3].pocket!.holder, 'Rahul');
     expect(data.wallet.banks.last.isSavings, isTrue);

@@ -9,10 +9,9 @@
  * statement as it arrives. That only helps from the next statement on,
  * and the ones already read know the answer - so this walks them.
  *
- * Worth doing rather than waiting a month, because until a card knows its
- * statement day its personal spend limit is measured over the calendar
- * month. It resets on the 1st instead of on the day the bill is drawn,
- * which for most cards is wrong for most of the month.
+ * Worth doing rather than waiting a month. The card screens already read a
+ * missing day off the newest statement as they draw, but only for as long
+ * as that statement is in the database - stored, the day stays put.
  *
  * Newest statement last, so a card with several ends up on the most recent
  * one, and through learnCycleFromStatement rather than a second copy of

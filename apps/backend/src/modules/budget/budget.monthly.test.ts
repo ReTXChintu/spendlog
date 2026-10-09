@@ -479,7 +479,7 @@ describe("the budget routes", () => {
       daily?: unknown;
       budget: { configured: boolean };
       wallet: {
-        cards: { accountId: string; name: string; bankName: string; network: string; last4: string; creditLimitMinor: number; cycleSpentMinor: number; usedMinor: number; availableMinor: number; cycleStart: string; cycleEnd: string; lastStatement: unknown; daysToDue: number | null; hasCardDetails: boolean }[];
+        cards: { accountId: string; name: string; bankName: string; network: string; last4: string; creditLimitMinor: number; cycleKnown: boolean; unbilledMinor: number; usedMinor: number; availableMinor: number; cycleStart: string; cycleEnd: string; lastStatement: { amountMinor: number; isEstimate: boolean; fromStatement: boolean } | null; daysToDue: number | null; hasCardDetails: boolean }[];
         banks: { accountId: string; name: string; last4: string | null; balanceMinor: number | null; isSavings: boolean; pocket: unknown; debitCards: { last4: string; network: string }[] }[];
       };
     };
@@ -492,11 +492,16 @@ describe("the budget routes", () => {
     assert.equal(face.network, "VISA");
     assert.equal(face.last4, "4321");
     assert.equal(face.creditLimitMinor, 1_00_000_00);
-    assert.equal(face.cycleSpentMinor, 2_500_00);
+    assert.equal(face.cycleKnown, true);
+    assert.equal(face.unbilledMinor, 2_500_00);
     assert.equal(face.usedMinor, 2_500_00);
     assert.equal(face.availableMinor, 97_500_00);
     assert.ok(face.cycleStart && face.cycleEnd);
-    assert.equal(face.lastStatement, null);
+    // No statement read, and nothing charged in the cycle before: an
+    // estimated bill of nothing, rather than no bill at all.
+    assert.equal(face.lastStatement?.amountMinor, 0);
+    assert.equal(face.lastStatement?.isEstimate, true);
+    assert.equal(face.lastStatement?.fromStatement, false);
     assert.equal(typeof face.daysToDue, "number");
     assert.equal(face.hasCardDetails, false);
 

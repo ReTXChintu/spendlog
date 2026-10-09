@@ -879,6 +879,11 @@ class TransactionsScreenState extends State<TransactionsScreen> {
     final String value;
     if (_loadingCycles) {
       value = 'Loading…';
+    } else if (cycles != null && !cycles.cycleKnown) {
+      // A card with no billing date has no cycles to pick - not pay
+      // months in their place, which would cut its bill in the wrong
+      // places. Everything on it, until the date is set.
+      value = 'No billing date set · all time';
     } else if (cycle == null) {
       value = 'All time';
     } else {

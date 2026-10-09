@@ -388,7 +388,8 @@ class _EditSheetState extends State<_EditSheet> {
     }
   }
 
-  /// The card this is going on, when it is near or past its own limit.
+  /// The card this is going on, when 70% or more of its credit limit is
+  /// already used.
   CardStatus? get _cardWarning {
     if (_accountId == null) return null;
     for (final card in _cards) {
@@ -1113,10 +1114,7 @@ class _EditSheetState extends State<_EditSheet> {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              over
-                  ? '${card.name} is already past its limit for this billing cycle.'
-                  : '${card.name} has ${formatMoney(card.remainingMinor ?? 0)} left of its limit '
-                      'this cycle.',
+              cardCreditWarning(card),
               style: TextStyle(fontSize: 12, height: 1.4, color: over ? c.debit : c.warn),
             ),
           ),

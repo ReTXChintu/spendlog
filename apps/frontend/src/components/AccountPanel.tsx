@@ -50,7 +50,7 @@ export function AccountPanel({
   // while, and a deployment restarts the two halves seconds apart. A
   // missing field threw here, and with nothing catching it React replaced
   // the whole app with a blank page. Neither is worth that.
-  const month = account.month ?? { spentMinor: 0, limitMinor: null };
+  const month = account.month ?? { spentMinor: 0 };
   const debitCards = account.debitCards ?? [];
 
   /// Null until Remove is pressed, then the number of transactions that
@@ -181,21 +181,8 @@ export function AccountPanel({
             which every account has. The two are different periods and the
             label says which, because a figure whose period is a guess is
             not a figure. */}
-        {isCard && cycle ? (
-          <Meter
-            spentMinor={cycle.spentMinor}
-            capMinor={account.spendLimitMinor ?? cycle.limitMinor}
-            capIsMine={account.spendLimitMinor != null}
-            bankLimitMinor={account.creditLimitMinor}
-          />
-        ) : month.limitMinor !== null ? (
-          <Meter
-            label="This month"
-            spentMinor={month.spentMinor}
-            capMinor={month.limitMinor}
-            capIsMine
-            bankLimitMinor={null}
-          />
+        {isCard && cycle?.cycleKnown ? (
+          <Meter cycle={cycle} />
         ) : (
           <div className="figure-card">
             <span className="figure-label">This month</span>
@@ -409,59 +396,42 @@ function standingNote(account: AccountOverview, isCard: boolean, isDebit: boolea
   }
 
   return isCard
-    ? "Set a limit and a statement day to track a cycle"
-    : "Set a monthly limit to be warned as you approach it";
+    ? "Set a statement day to track this card's own cycle"
+    : "Salary day to salary day";
 }
 
 /**
- * How much of this cycle is gone.
- *
- * The bar is drawn against whichever limit the person actually set for
- * themselves, falling back to the bank's. Those are different things: one
- * is what you allow, the other is what you are allowed, and showing 40% of
- * a credit limit when you are already past your own budget would be
- * reassuring and wrong.
+ * What a card owes and how much of its credit limit that is: the unpaid
+ * part of the last bill and everything charged since, on the card's own
+ * cycle. Coloured by the server's state - close from 70%, over from 90%.
  */
-function Meter({
-  label = "This cycle",
-  spentMinor,
-  capMinor,
-  capIsMine,
-  bankLimitMinor,
-}: {
-  label?: string;
-  spentMinor: number;
-  capMinor: number | null;
-  capIsMine: boolean;
-  bankLimitMinor: number | null;
-}) {
-  const used = capMinor && capMinor > 0 ? Math.min(1, spentMinor / capMinor) : null;
-  const over = capMinor != null && spentMinor > capMinor;
-  const close = used != null && used >= 0.8 && !over;
+function Meter({ cycle }: { cycle: NonNullable<AccountOverview["cycle"]> }) {
+  const owed = cycle.outstandingMinor ?? 0;
+  const used = cycle.usedMinor ?? owed;
+  const limit = cycle.creditLimitMinor;
+  const share = limit && limit > 0 ? Math.min(1, used / limit) : null;
+  const billed = cycle.billedUnpaidMinor ?? 0;
+  const notes = [
+    cycle.availableMinor !== null
+      ? `${formatMoney(cycle.availableMinor)} available`
+      : "Set a credit limit to see what is left",
+    billed > 0 ? `${cycle.outstandingIsEstimate ? "about " : ""}${formatMoney(billed)} of the last bill unpaid` : null,
+    `${formatMoney(cycle.unbilledMinor ?? 0)} spent since statement`,
+  ].filter(Boolean);
 
   return (
-    <div className={`figure-card is-meter ${over ? "is-over" : close ? "is-close" : ""}`}>
-      <span className="figure-label">{label}</span>
+    <div className={`figure-card is-meter ${cycle.state === "over" ? "is-over" : cycle.state === "close" ? "is-close" : ""}`}>
+      <span className="figure-label">Owed on this card</span>
       <span className="figure-value">
-        {formatMoney(spentMinor)}
-        {capMinor != null && <span className="figure-of">of {formatMoney(capMinor)}</span>}
+        {formatMoney(owed)}
+        {limit != null && <span className="figure-of">of {formatMoney(limit)} limit</span>}
       </span>
-
-      {used != null ? (
-        <>
-          <div className="meter" role="img" aria-label={`${Math.round(used * 100)}% used`}>
-            <div className="meter-fill" style={{ width: `${Math.round(used * 100)}%` }} />
-          </div>
-          <span className="figure-note">
-            {over
-              ? `${formatMoney(spentMinor - capMinor!)} over your ${capIsMine ? "own cap" : "limit"}`
-              : `${formatMoney(capMinor! - spentMinor)} left${capIsMine ? " on your cap" : ""}`}
-            {capIsMine && bankLimitMinor ? ` · bank allows ${formatMoney(bankLimitMinor)}` : ""}
-          </span>
-        </>
-      ) : (
-        <span className="figure-note">Set a limit to see how much is left</span>
+      {share != null && (
+        <div className="meter" role="img" aria-label={`${Math.round(share * 100)}% of the credit limit used`}>
+          <div className="meter-fill" style={{ width: `${Math.round(share * 100)}%` }} />
+        </div>
       )}
+      <span className="figure-note">{notes.join(" · ")}</span>
     </div>
   );
 }

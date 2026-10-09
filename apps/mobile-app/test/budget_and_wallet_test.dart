@@ -38,7 +38,7 @@ CardFace _card({bool hasDetails = true, String state = 'ok'}) => CardFace.fromJs
       'creditLimitMinor': 30000000,
       'usedMinor': 4000000,
       'availableMinor': 26000000,
-      'cycleSpentMinor': 2500000,
+      'unbilledMinor': 2500000,
       'nextDueOn': '2026-10-18',
       'daysToDue': 9,
       'state': state,
@@ -129,6 +129,20 @@ void main() {
 
       await tester.pumpWidget(_wrap(CardStrip(cards: const [], pace: currentMonthPace(month(isCurrent: false)))));
       expect(find.byType(Text), findsNothing);
+    });
+
+    testWidgets('warns about a card by its credit limit, not a limit of your own', (tester) async {
+      _phone(tester);
+      CardStatus card(String name, String state, int available) =>
+          CardStatus(accountId: name, name: name, state: state, creditLimitMinor: 10000000, availableMinor: available);
+      await tester.pumpWidget(_wrap(CardStrip(cards: [
+        card('Regalia', 'close', 2500000),
+        card('Millennia', 'over', 500000),
+        card('Axis', 'ok', 9000000),
+      ])));
+      expect(find.text('Regalia has ₹25,000.00 of its credit limit left.'), findsOneWidget);
+      expect(find.text('Millennia is nearly out of credit - ₹5,000.00 left.'), findsOneWidget);
+      expect(find.textContaining('Axis'), findsNothing);
     });
   });
 
@@ -393,38 +407,77 @@ void main() {
       expect(find.text('₹5,00,000.00'), findsNothing);
     });
 
-    test('the caption under a card says what is used and what you allowed', () {
-      final card = CardFace.fromJson({
-        'accountId': 'k1',
-        'creditLimitMinor': 30000000,
-        'usedMinor': 4000000,
-        'availableMinor': 26000000,
-        'cycleSpentMinor': 3500000,
-        'spendLimitMinor': 3000000,
-        'state': 'over',
-      });
-      expect(cardLimitLine(card), '₹40,000 of ₹3,00,000 credit used · ₹2,60,000 free');
-      expect(cardSecondLine(card), '₹5,000 past your ₹30,000 limit this cycle');
-      // An own limit keeps the bar as it was: filled by the bank's limit,
-      // coloured by your own.
-      final bar = cardBar(card);
-      expect(bar.basis, CardBarBasis.ownLimit);
-      expect(bar.state, 'over');
-      expect(cardBarFraction(card), closeTo(4000000 / 30000000, 1e-9));
+    CardFace billed({
+      bool isPaid = false,
+      bool isEstimate = false,
+      int billMinor = 1500000,
+      int? daysToDue = 3,
+    }) =>
+        CardFace.fromJson({
+          'accountId': 'k1',
+          'cycleKnown': true,
+          'creditLimitMinor': 10000000,
+          'billedUnpaidMinor': isPaid ? 0 : billMinor,
+          'unbilledMinor': 2500000,
+          'outstandingMinor': (isPaid ? 0 : billMinor) + 2500000,
+          'usedMinor': (isPaid ? 0 : billMinor) + 2500000,
+          'availableMinor': 10000000 - (isPaid ? 0 : billMinor) - 2500000,
+          'cycleStart': '2026-09-16',
+          'cycleEnd': '2026-10-15',
+          'lastStatement': {
+            'amountMinor': billMinor,
+            'dueOn': '2026-10-12',
+            'owedMinor': isPaid ? 0 : billMinor,
+            'paidMinor': isPaid ? billMinor : 0,
+            'isPaid': isPaid,
+            'isEstimate': isEstimate,
+            'fromStatement': !isEstimate,
+          },
+          'billIsPaid': isPaid,
+          'nextDueOn': isPaid ? '2026-11-12' : '2026-10-12',
+          'daysToDue': daysToDue,
+          'state': 'ok',
+        });
+
+    test('an unpaid bill: used of the limit, then the bill and what has been spent since', () {
+      final card = billed();
+      expect(cardLimitLine(card), '₹40,000 of ₹1,00,000 used · ₹60,000 available');
+      expect(cardSecondLine(card), 'Bill ₹15,000 due 12 Oct · in 3 days · ₹25,000 spent since statement');
+      expect(cardBillUrgent(card), isTrue, reason: 'three days out is close');
+      expect(cardBillUrgent(billed(daysToDue: 9)), isFalse);
     });
 
-    test('with an own limit and no credit limit, the bar fills against your own', () {
+    test('an estimated bill says about, and a late one says how late', () {
+      final card = billed(isEstimate: true, daysToDue: -2);
+      expect(cardSecondLine(card), 'Bill about ₹15,000 due 12 Oct · 2 days late · ₹25,000 spent since statement');
+      expect(cardBillUrgent(card), isTrue);
+    });
+
+    test('a paid bill leaves only the running cycle, and when it closes', () {
+      final card = billed(isPaid: true, daysToDue: 33);
+      expect(cardLimitLine(card), '₹25,000 of ₹1,00,000 used · ₹75,000 available');
+      expect(cardSecondLine(card), 'Bill paid · ₹25,000 spent this cycle (closes 15 Oct)');
+      expect(cardBillUrgent(card), isFalse);
+    });
+
+    test('a cycle with nothing billed says no bill is due', () {
+      final card = billed(isPaid: true, billMinor: 0);
+      expect(cardSecondLine(card), 'No bill due · ₹25,000 spent this cycle (closes 15 Oct)');
+    });
+
+    test('a card with no billing date shows nothing that needs one', () {
       final card = CardFace.fromJson({
         'accountId': 'k1',
-        'cycleSpentMinor': 2400000,
-        'spendLimitMinor': 3000000,
-        'state': 'close',
+        'cycleKnown': false,
+        'creditLimitMinor': 10000000,
+        'unbilledMinor': null,
+        'availableMinor': null,
+        'state': 'unset',
       });
-      final bar = cardBar(card);
-      expect(bar.basis, CardBarBasis.ownLimit);
-      expect(bar.fraction, closeTo(0.8, 1e-9));
-      expect(bar.state, 'close');
-      expect(cardLimitLine(card), '₹24,000 spent this cycle · no credit limit set');
+      expect(cardLimitLine(card), '₹1,00,000 credit limit');
+      expect(cardSecondLine(card), isNull);
+      expect(cardBar(card).basis, CardBarBasis.none);
+      expect(cardBar(card).fraction, 0);
     });
 
     test('credit utilisation turns close at 70% and over at 90%', () {
@@ -437,23 +490,25 @@ void main() {
       expect(creditUtilisationState(50, 0), 'unset');
     });
 
-    test('with no limit of its own, a card is measured against its credit line', () {
-      CardFace card(int used) => CardFace.fromJson({
+    test('the bar is credit used against the credit limit, coloured by the server', () {
+      CardFace card(int used, {String state = 'unset'}) => CardFace.fromJson({
             'accountId': 'k1',
             'creditLimitMinor': 10000000,
             'usedMinor': used,
-            'cycleSpentMinor': 500000,
-            'state': 'unset',
+            'unbilledMinor': 500000,
+            'state': state,
           });
 
-      final nearlyMaxed = cardBar(card(9500000));
+      final nearlyMaxed = cardBar(card(9500000, state: 'over'));
       expect(nearlyMaxed.basis, CardBarBasis.creditLimit);
       expect(nearlyMaxed.state, 'over');
       expect(nearlyMaxed.fraction, closeTo(0.95, 1e-9));
+      expect(cardBar(card(2000000, state: 'ok')).state, 'ok');
+      expect(cardBar(card(12000000, state: 'over')).fraction, 1.0);
+      // The server's word is final; a face that came without one is
+      // worked out the same way.
       expect(cardBar(card(7500000)).state, 'close');
-      expect(cardBar(card(2000000)).state, 'ok');
-      expect(cardBar(card(12000000)).fraction, 1.0);
-      expect(cardLimitLine(card(7500000)), '₹75,000 of ₹1,00,000 credit used · ₹25,000 free');
+      expect(cardLimitLine(card(7500000)), '₹75,000 of ₹1,00,000 used · ₹25,000 available');
 
       // No used figure, but an outstanding one: that is what has gone.
       final fromOutstanding = cardBar(CardFace.fromJson({
@@ -466,16 +521,16 @@ void main() {
       expect(fromOutstanding.fraction, closeTo(0.8, 1e-9));
     });
 
-    test('with neither limit, the bar is an empty track', () {
-      final card = CardFace.fromJson({'accountId': 'k1', 'cycleSpentMinor': 500000, 'state': 'unset'});
+    test('with no credit limit, the bar is an empty track', () {
+      final card = CardFace.fromJson({'accountId': 'k1', 'usedMinor': 500000, 'unbilledMinor': 500000, 'state': 'unset'});
       final bar = cardBar(card);
       expect(bar.basis, CardBarBasis.none);
       expect(bar.fraction, 0);
       expect(bar.state, 'unset');
-      expect(cardLimitLine(card), '₹5,000 spent this cycle');
+      expect(cardLimitLine(card), '₹5,000 used');
     });
 
-    testWidgets('a card with no limit at all offers to set one, on its account', (tester) async {
+    testWidgets('a card with no credit limit offers to set one, on its account', (tester) async {
       _phone(tester);
       String? edited;
       String? opened;
@@ -483,7 +538,7 @@ void main() {
         money: MoneyOnHand(),
         wallet: Wallet.fromJson({
           'cards': [
-            {'accountId': 'bare', 'name': 'Millennia', 'cycleSpentMinor': 500000, 'state': 'unset'},
+            {'accountId': 'bare', 'name': 'Millennia', 'usedMinor': 500000, 'unbilledMinor': 500000, 'state': 'unset'},
           ],
         }),
         onOpenCard: (_) {},
@@ -493,19 +548,53 @@ void main() {
       )));
 
       expect(tester.takeException(), isNull);
-      expect(find.text('₹5,000 spent this cycle'), findsOneWidget);
+      expect(find.text('₹5,000 used'), findsOneWidget);
+      expect(find.text('Set billing date'), findsNothing);
       await tester.tap(find.text('Set a credit limit'));
       expect(edited, 'bare');
       expect(opened, isNull);
     });
 
-    testWidgets('a card near its credit line says so in colour, with no limit of its own', (tester) async {
+    testWidgets('a card with no billing date asks for one, on its editor', (tester) async {
+      _phone(tester);
+      String? edited;
+      await tester.pumpWidget(_wrap(WalletSection(
+        money: MoneyOnHand(),
+        wallet: Wallet.fromJson({
+          'cards': [
+            {'accountId': 'nodate', 'name': 'Axis', 'cycleKnown': false, 'creditLimitMinor': 10000000, 'state': 'unset'},
+          ],
+        }),
+        onOpenCard: (_) {},
+        onOpenAccount: (_) {},
+        onEditAccount: (id) => edited = id,
+        onManage: () {},
+      )));
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('₹1,00,000 credit limit'), findsOneWidget);
+      expect(find.text('Set a credit limit'), findsNothing);
+      await tester.tap(find.text('Set billing date'));
+      expect(edited, 'nodate');
+    });
+
+    testWidgets('a card near its credit line says so in colour, and a bill close to due in red', (tester) async {
       _phone(tester);
       await tester.pumpWidget(_wrap(WalletSection(
         money: MoneyOnHand(),
         wallet: Wallet.fromJson({
           'cards': [
-            {'accountId': 'k1', 'name': 'Regalia', 'creditLimitMinor': 10000000, 'usedMinor': 9500000, 'state': 'unset'},
+            {
+              'accountId': 'k1',
+              'name': 'Regalia',
+              'creditLimitMinor': 10000000,
+              'usedMinor': 9500000,
+              'availableMinor': 500000,
+              'unbilledMinor': 1500000,
+              'lastStatement': {'amountMinor': 8000000, 'owedMinor': 8000000, 'isPaid': false, 'dueOn': '2026-10-12'},
+              'daysToDue': 2,
+              'state': 'over',
+            },
           ],
         }),
         onOpenCard: (_) {},
@@ -514,9 +603,11 @@ void main() {
       )));
 
       expect(find.text('Set a credit limit'), findsNothing);
-      final line = tester.widget<Text>(find.text('₹95,000 of ₹1,00,000 credit used · ₹5,000 free'));
       final context = tester.element(find.byType(WalletSection));
+      final line = tester.widget<Text>(find.text('₹95,000 of ₹1,00,000 used · ₹5,000 available'));
       expect(line.style?.color, context.c.debit);
+      final bill = tester.widget<Text>(find.text('Bill ₹80,000 due 12 Oct · in 2 days · ₹15,000 spent since statement'));
+      expect(bill.style?.color, context.c.debit);
     });
 
     for (final brightness in Brightness.values) {
@@ -533,10 +624,12 @@ void main() {
                 'last4': '1234',
                 'creditLimitMinor': 30000000,
                 'usedMinor': 29000000,
-                'cycleSpentMinor': 123456789,
-                'spendLimitMinor': 3000000,
+                'unbilledMinor': 123456789,
+                'cycleEnd': '2026-10-15',
+                'lastStatement': {'amountMinor': 987654321, 'owedMinor': 987654321, 'isPaid': false, 'isEstimate': true, 'dueOn': '2026-10-10'},
                 'nextDueOn': '2026-10-10',
                 'daysToDue': 1,
+                'cycleKnown': network != 'RUPAY',
                 'state': state,
                 'hasCardDetails': network != 'AMEX',
               },

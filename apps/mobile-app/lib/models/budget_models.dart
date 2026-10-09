@@ -324,22 +324,35 @@ class MonthlyBudgetStatus {
   }
 }
 
-/// A credit card's last statement, as the face needs it.
+/// A credit card's last bill, as the face needs it: the statement the bank
+/// drew, or - with no statement read for the cycle just closed - an
+/// estimate from what that cycle charged the card.
 class CardLastStatement {
   final int amountMinor;
   final int? minimumDueMinor;
   final String? statementOn;
   final String? dueOn;
+
+  /// Paid against it since it was drawn, cashback and points included.
+  final int paidMinor;
   final int? owedMinor;
   final bool? isPaid;
+
+  /// Worked out rather than printed - from a statement's rows, or from the
+  /// cycle's charges when there was no statement. Said as "about".
+  final bool isEstimate;
+  final bool fromStatement;
 
   const CardLastStatement({
     required this.amountMinor,
     this.minimumDueMinor,
     this.statementOn,
     this.dueOn,
+    this.paidMinor = 0,
     this.owedMinor,
     this.isPaid,
+    this.isEstimate = false,
+    this.fromStatement = true,
   });
 
   static CardLastStatement? maybe(Object? value) {
@@ -350,14 +363,20 @@ class CardLastStatement {
       minimumDueMinor: _intOrNull(json['minimumDueMinor']),
       statementOn: _str(json['statementOn']),
       dueOn: _str(json['dueOn']),
+      paidMinor: _int(json['paidMinor']),
       owedMinor: _intOrNull(json['owedMinor']),
       isPaid: json['isPaid'] as bool?,
+      isEstimate: _bool(json['isEstimate']),
+      fromStatement: json['fromStatement'] as bool? ?? true,
     );
   }
 }
 
 /// A credit card as its face shows it. The back - full number, expiry,
 /// name - is never in here; it comes from the vault, behind the PIN.
+///
+/// Every figure is on the card's own billing cycle, from its own statement
+/// day - never the salary month.
 class CardFace {
   final String accountId;
   final String name;
@@ -370,28 +389,50 @@ class CardFace {
 
   /// "#RRGGBB" picked for the account, when one was.
   final String? color;
+
+  /// The days the card bills and falls due on - stored, or read off its
+  /// newest statement ([statementDayInferred]).
+  final int? statementDay;
+  final int? dueDay;
+  final bool statementDayInferred;
+
+  /// Whether the card has a cycle at all. Without a statement day there is
+  /// no telling what is billed and what is not, so the figures that depend
+  /// on it are null and the face asks for the billing date instead.
+  final bool cycleKnown;
   final int? creditLimitMinor;
+
+  /// What is left to pay of the last bill: zero once it is paid.
+  final int? billedUnpaidMinor;
+
+  /// Charged since the last statement - the cycle now running, net of
+  /// refunds.
+  final int? unbilledMinor;
+
+  /// The two together: everything the card owes the bank now.
   final int? outstandingMinor;
   final bool outstandingIsEstimate;
 
-  /// What the limit has lost: the unpaid bill plus this cycle, or the
-  /// shared group's figure when the limit is shared.
+  /// What the limit has lost: the outstanding, or the shared group's
+  /// figure when the limit is shared.
   final int usedMinor;
   final int? availableMinor;
   final List<String> sharesLimitWith;
-  final int cycleSpentMinor;
   final String? cycleStart;
   final String? cycleEnd;
-  final bool periodIsCycle;
-  final int? statementOn;
+
+  /// When the cycle now running will be billed.
+  final String? statementOn;
   final CardLastStatement? lastStatement;
+  final bool? billIsPaid;
+
+  /// The unpaid bill's due date while one is owed; the running cycle's
+  /// otherwise.
   final String? nextDueOn;
   final int? daysToDue;
 
-  /// The user's own limit for a cycle, as against the bank's.
-  final int? spendLimitMinor;
-
-  /// ok | close | over | unset - against [spendLimitMinor].
+  /// ok | close | over | unset - credit used against [creditLimitMinor],
+  /// worked out on the server: close from 70%, over from 90%.
   final String state;
   final bool hasCardDetails;
 
@@ -403,21 +444,25 @@ class CardFace {
     this.network,
     this.last4,
     this.color,
+    this.statementDay,
+    this.dueDay,
+    this.statementDayInferred = false,
+    this.cycleKnown = true,
     this.creditLimitMinor,
+    this.billedUnpaidMinor,
+    this.unbilledMinor,
     this.outstandingMinor,
     this.outstandingIsEstimate = false,
     this.usedMinor = 0,
     this.availableMinor,
     this.sharesLimitWith = const [],
-    this.cycleSpentMinor = 0,
     this.cycleStart,
     this.cycleEnd,
-    this.periodIsCycle = false,
     this.statementOn,
     this.lastStatement,
+    this.billIsPaid,
     this.nextDueOn,
     this.daysToDue,
-    this.spendLimitMinor,
     this.state = 'unset',
     this.hasCardDetails = false,
   });
@@ -432,21 +477,28 @@ class CardFace {
       network: _str(json['network'])?.toUpperCase(),
       last4: _str(json['last4']),
       color: _str(json['color']),
+      statementDay: _intOrNull(json['statementDay']),
+      dueDay: _intOrNull(json['dueDay']),
+      statementDayInferred: _bool(json['statementDayInferred']),
+      // Absent only from a server older than per-card cycles, whose cards
+      // were never "unknown" - so read as known rather than asking every
+      // card for a billing date.
+      cycleKnown: json['cycleKnown'] as bool? ?? true,
       creditLimitMinor: _intOrNull(json['creditLimitMinor']),
+      billedUnpaidMinor: _intOrNull(json['billedUnpaidMinor']),
+      unbilledMinor: _intOrNull(json['unbilledMinor']),
       outstandingMinor: _intOrNull(json['outstandingMinor']),
       outstandingIsEstimate: _bool(json['outstandingIsEstimate']),
       usedMinor: _int(json['usedMinor']),
       availableMinor: _intOrNull(json['availableMinor']),
       sharesLimitWith: (json['sharesLimitWith'] as List<dynamic>? ?? []).whereType<String>().toList(),
-      cycleSpentMinor: _int(json['cycleSpentMinor']),
       cycleStart: _str(json['cycleStart']),
       cycleEnd: _str(json['cycleEnd']),
-      periodIsCycle: _bool(json['periodIsCycle']),
-      statementOn: _intOrNull(json['statementOn']),
+      statementOn: _str(json['statementOn']),
       lastStatement: CardLastStatement.maybe(json['lastStatement']),
+      billIsPaid: json['billIsPaid'] as bool?,
       nextDueOn: _str(json['nextDueOn']),
       daysToDue: _intOrNull(json['daysToDue']),
-      spendLimitMinor: _intOrNull(json['spendLimitMinor']),
       state: state == 'ok' || state == 'close' || state == 'over' ? state as String : 'unset',
       hasCardDetails: _bool(json['hasCardDetails']),
     );

@@ -18,6 +18,7 @@ import {
   categoriesFor,
 } from "../types";
 import { Icon } from "./Icon";
+import { creditWarning } from "./CardStrip";
 import { RawMessageModal } from "./RawMessageModal";
 import { AccountSelect, fromPickerValue, pickerValueName, toPickerValue } from "./transaction-editor/AccountSelect";
 import { Kind, initialKind, kindAfterTypeChange, kindsFor, looksRaw } from "./transaction-editor/kinds";
@@ -949,16 +950,7 @@ export function EditTransactionModal({
               <div className={`card-strip-row is-${cardWarning.state}`}>
                 <Icon name="ic-alert" />
                 <span>
-                  {cardWarning.state === "over" ? (
-                    <>
-                      <b>{cardWarning.name}</b> is already past its limit for this billing cycle.
-                    </>
-                  ) : (
-                    <>
-                      <b>{cardWarning.name}</b> has {formatMoney(cardWarning.remainingMinor ?? 0)} left of its
-                      limit this cycle.
-                    </>
-                  )}
+                  <b>{cardWarning.name}</b> {creditWarning(cardWarning)}.
                 </span>
               </div>
             )}

@@ -332,14 +332,14 @@ export interface AccountDoc {
   /// Two cards from the same bank often draw on a single limit: spend on
   /// either and the other has less. Points at the card that holds the
   /// limit; creditLimitMinor on this one is then ignored. Each card keeps
-  /// its own cycle, its own statement and its own personal limit - only
-  /// the bank's ceiling is shared.
+  /// its own cycle and its own statement - only the bank's ceiling is
+  /// shared.
   sharesLimitWith?: Types.ObjectId | null;
   creditLimitMinor?: number | null;
-  /// What the user allows themselves on this card in a billing cycle, as
-  /// distinct from creditLimitMinor, which is what the bank allows.
-  spendLimitMinor?: number | null;
   /// Day of month the card statement is generated, and the day it is due.
+  /// Each card bills on its own day, and every card figure - what was
+  /// spent since the last bill, what is owed, what is left of the limit -
+  /// is measured from it. Learned from statements as they arrive.
   statementDay?: number | null;
   dueDay?: number | null;
   /// The password that opens this card's statement PDFs, encrypted. Stored
@@ -389,7 +389,6 @@ const accountSchema = new Schema<AccountDoc>(
     linkedAccountId: { type: Schema.Types.ObjectId, ref: "Account", default: null },
     sharesLimitWith: { type: Schema.Types.ObjectId, ref: "Account", default: null },
     creditLimitMinor: { type: Number, default: null },
-    spendLimitMinor: { type: Number, default: null, min: 0 },
     statementDay: { type: Number, default: null, min: 1, max: 31 },
     dueDay: { type: Number, default: null, min: 1, max: 31 },
     // AES-256-GCM ciphertext, never the password itself, and never

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../theme.dart';
-import '../utils/format.dart';
 import 'home/monthly_budget_card.dart';
 
 /// The pace the strip can warn about: the monthly budget's, and only for
@@ -12,7 +11,9 @@ MonthPace? currentMonthPace(MonthlyBudgetStatus? budget) {
   return budget.pace;
 }
 
-/// Anything that needs saying before the next payment rather than after it.
+/// Anything that needs saying before the next payment rather than after it:
+/// a card with 70% or more of its credit limit used, on its own cycle, and
+/// the month's budget running hot.
 ///
 /// Only warnings. Which card to reach for is a decision, so it lives on the
 /// dashboard with the other decisions - two screens answering the same
@@ -48,11 +49,7 @@ class CardStrip extends StatelessWidget {
             _Row(
               state: card.state,
               icon: Icons.error_outline,
-              text: card.state == 'over'
-                  ? '${card.name} is past its ${formatMoneyShort(card.limitMinor ?? 0)} limit '
-                      'for this cycle.'
-                  : '${card.name} has ${formatMoney(card.remainingMinor ?? 0)} left of its limit '
-                      'this cycle.',
+              text: cardCreditWarning(card),
             ),
           if (paceWarning != null)
             _Row(

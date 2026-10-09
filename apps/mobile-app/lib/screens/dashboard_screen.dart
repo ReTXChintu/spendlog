@@ -108,8 +108,8 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
     await load();
   }
 
-  /// An account's editor, over its page - to set a card's credit limit
-  /// from its face.
+  /// An account's editor, over its page - to set a card's billing date or
+  /// credit limit from its face.
   Future<void> _editAccount(String accountId) async {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => AccountsScreen(initialAccountId: accountId, editOnOpen: true)),

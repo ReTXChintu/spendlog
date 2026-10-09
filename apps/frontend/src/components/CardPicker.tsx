@@ -63,10 +63,10 @@ function PickTile({ label, card, isBest }: { label: string; card: CardStatus; is
       <div className="pick-float num">
         {card.floatDays} <span>days to pay</span>
       </div>
-      {card.state === "close" && card.remainingMinor !== null && (
+      {card.state === "close" && card.availableMinor !== null && (
         <div className="pick-warn">
           <Icon name="ic-alert" />
-          {formatMoney(card.remainingMinor)} left of its limit
+          {formatMoney(card.availableMinor)} of credit left
         </div>
       )}
     </div>

@@ -8,8 +8,9 @@ cardsRouter.use(requireAuth);
 export type { CardState, CardStatus } from "./cards.status";
 
 /**
- * Every card, with where it is in its cycle and how much of its own limit
- * is left — ordered so the first one is the card to pay with today.
+ * Every card, with where it is in its own cycle, what it owes and how much
+ * of its credit limit is left — ordered so the first one is the card to pay
+ * with today.
  *
  * One endpoint rather than two because the warning strip, the card
  * suggestion and the account screen all want the same figures, and two

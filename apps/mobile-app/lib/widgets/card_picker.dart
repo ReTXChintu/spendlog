@@ -148,7 +148,7 @@ class _Tile extends StatelessWidget {
               ),
             ],
           ),
-          if (card.state == 'close' && card.remainingMinor != null) ...[
+          if (card.state == 'close' && card.availableMinor != null) ...[
             const SizedBox(height: 5),
             Row(
               children: [
@@ -156,7 +156,7 @@ class _Tile extends StatelessWidget {
                 const SizedBox(width: 5),
                 Expanded(
                   child: Text(
-                    '${formatMoney(card.remainingMinor!)} left of its limit',
+                    '${formatMoney(card.availableMinor!)} of credit left',
                     style: TextStyle(fontSize: 11, color: c.warn),
                   ),
                 ),

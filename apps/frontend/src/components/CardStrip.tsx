@@ -1,4 +1,4 @@
-import { formatMoney, formatMoneyShort } from "../lib/format";
+import { formatMoney } from "../lib/format";
 import { BudgetPace, CardStatus } from "../types";
 import { Icon } from "./Icon";
 
@@ -11,7 +11,20 @@ import { Icon } from "./Icon";
  *
  * Deliberately quiet when there is nothing wrong. A warning that is always
  * on screen stops being read, and then so does the real one.
+ *
+ * A card is warned about by its credit limit, on its own cycle: 70% or
+ * more of it used is close, 90% or more is over.
  */
+
+/** What a warning about a card's credit says, after its name. */
+export function creditWarning(card: CardStatus): string {
+  const left = card.availableMinor;
+  if (left === null) return "is close to its credit limit";
+  if (left <= 0) return "is at its credit limit";
+  return card.state === "over"
+    ? `is nearly out of credit — ${formatMoney(left)} left`
+    : `has ${formatMoney(left)} of its credit limit left`;
+}
 export function CardStrip({ cards, pace }: { cards: CardStatus[]; pace: BudgetPace | null }) {
   const warnings = cards.filter((card) => card.state === "over" || card.state === "close");
   const paceWarning = pace?.configured && pace.state !== "ok" ? pace : null;
@@ -25,9 +38,7 @@ export function CardStrip({ cards, pace }: { cards: CardStatus[]; pace: BudgetPa
           <Icon name="ic-alert" />
           <span>
             <b>{card.name}</b>{" "}
-            {card.state === "over"
-              ? `is past its ${formatMoneyShort(card.limitMinor ?? 0)} limit for this cycle`
-              : `has ${formatMoney(card.remainingMinor ?? 0)} left of its limit this cycle`}
+            {creditWarning(card)}
             {card.statementOn && ` · bills ${new Date(card.statementOn).getDate()}${ordinal(
               new Date(card.statementOn).getDate()
             )}`}

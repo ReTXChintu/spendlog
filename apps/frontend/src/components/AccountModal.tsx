@@ -44,9 +44,6 @@ export function AccountModal({
   const [creditLimit, setCreditLimit] = useState(
     account?.creditLimitMinor != null ? (account.creditLimitMinor / 100).toFixed(0) : ""
   );
-  const [spendLimit, setSpendLimit] = useState(
-    account?.spendLimitMinor != null ? (account.spendLimitMinor / 100).toFixed(0) : ""
-  );
   const [statementDay, setStatementDay] = useState(account?.statementDay?.toString() ?? "");
   const [dueDay, setDueDay] = useState(account?.dueDay?.toString() ?? "");
   const [isActive, setIsActive] = useState(account?.isActive ?? true);
@@ -101,10 +98,6 @@ export function AccountModal({
       // gets the same word whatever was typed before the picker existed.
       cardNetwork: normaliseNetwork(cardNetwork) || null,
       creditLimitMinor: limit === null ? null : limit * 100,
-      spendLimitMinor: (() => {
-        const own = numberOrNull(spendLimit);
-        return own === null ? null : own * 100;
-      })(),
       statementDay: numberOrNull(statementDay),
       dueDay: numberOrNull(dueDay),
       isActive,
@@ -243,22 +236,6 @@ export function AccountModal({
             </>
           )}
 
-          {!isCash && (
-            <label className="field">
-              <span>{isCard ? "My limit a cycle (₹)" : "My limit a month (₹)"}</span>
-              <input
-                value={spendLimit}
-                onChange={(e) => setSpendLimit(e.target.value)}
-                placeholder="30000"
-                inputMode="numeric"
-              />
-              <span className="field-hint">
-                What you mean to spend, as opposed to what the bank allows. The dashboard warns you
-                as you approach it{isCard ? " and marks it on this card's bar" : ""}.
-              </span>
-            </label>
-          )}
-
           {isDebit && (
             <label className="field field-wide">
               <span>Draws on</span>
@@ -296,7 +273,7 @@ export function AccountModal({
               <span className="field-hint">
                 Two cards from one bank often draw on a single limit: spend on either and the other
                 has less. Pick the card that holds the limit, and the credit limit above is ignored
-                for this one. Its cycle, statement and your own limit stay its own.
+                for this one. Its cycle and statement stay its own.
               </span>
             </label>
           )}

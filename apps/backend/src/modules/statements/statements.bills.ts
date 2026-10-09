@@ -129,21 +129,7 @@ export async function upcomingBills(userId: Types.ObjectId, now = new Date()): P
     if (!accountId || seen.has(accountId)) continue;
     seen.add(accountId);
 
-    // Anything marked as paying this card since the statement was drawn.
-    // Summed, because a bill can be cleared in more than one go.
-    const [paid] = await Transaction.aggregate<{ total: number }>([
-      {
-        $match: {
-          userId,
-          cardPaymentFor: statement.accountId,
-          type: "DEBIT",
-          occurredAt: { $gte: statementDate },
-        },
-      },
-      { $group: { _id: null, total: { $sum: "$amountMinor" } } },
-    ]);
-
-    const paidMinor = paid?.total ?? 0;
+    const paidMinor = await paidTowards(userId, statement.accountId!, statementDate);
 
     // The bank's own figure where it was found, and the rows where it was
     // not. A statement that yields neither has nothing to say.
@@ -192,6 +178,34 @@ export async function outstandingByCard(
 ): Promise<Map<string, UpcomingBill>> {
   const bills = await upcomingBills(userId, now);
   return new Map(bills.map((bill) => [bill.accountId, bill]));
+}
+
+/**
+ * Everything paid towards a card's bill since a moment.
+ *
+ * Summed, because a bill can be cleared in more than one go. Two kinds of
+ * row say a payment was made: the bank's debit, marked as paying this card
+ * (cardPaymentFor), and the card's own "payment received" - a transfer in
+ * - for a payment whose bank side SpendLog never saw, because it left an
+ * account that does not text. A card-side credit already paired with its
+ * debit is the same money as that debit, so only an unpaired one counts.
+ */
+export async function paidTowards(userId: Types.ObjectId, cardId: Types.ObjectId, since: Date): Promise<number> {
+  const [paid] = await Transaction.aggregate<{ total: number }>([
+    {
+      $match: {
+        userId,
+        occurredAt: { $gte: since },
+        $or: [
+          { type: "DEBIT", cardPaymentFor: cardId },
+          { type: "CREDIT", accountId: cardId, isTransfer: true, transferPairId: null, cardPaymentFor: null },
+        ],
+      },
+    },
+    { $group: { _id: null, total: { $sum: "$amountMinor" } } },
+  ]);
+
+  return paid?.total ?? 0;
 }
 
 /** Whole days from the start of today, in IST, to a date. */

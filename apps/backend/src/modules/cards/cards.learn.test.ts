@@ -136,8 +136,7 @@ describe("a statement teaching its card the cycle", () => {
   });
 
   it("keeps its hands off a bank statement", async () => {
-    // A bank account has a period but no billing cycle, and no personal
-    // spend limit resetting on the back of one.
+    // A bank account has a period but no billing cycle to learn.
     const bank = await Account.create({
       userId,
       bankName: "CSB",
@@ -181,7 +180,7 @@ describe("a statement teaching its card the cycle", () => {
   });
 });
 
-describe("the personal spend limit, once the cycle is known", () => {
+describe("a card's own cycle, once it is known", () => {
   async function spend(accountId: Types.ObjectId, day: string, rupees: number) {
     await Transaction.create({
       userId,
@@ -194,21 +193,28 @@ describe("the personal spend limit, once the cycle is known", () => {
     });
   }
 
-  it("counts the calendar month while the card has no statement day", async () => {
+  it("has no cycle, and no figures, while the card has no statement day", async () => {
+    // Not the calendar month and not the salary month in its place: a
+    // period the card is not billed on would say something confident and
+    // wrong about what has been billed.
     const hdfc = await Account.create({
       userId,
       bankName: "HDFC",
       last4: "4321",
       accountType: "CARD",
-      spendLimitMinor: 50_000_00,
+      creditLimitMinor: 50_000_00,
     });
 
     await spend(hdfc._id, "2026-09-03", 4000);
     await spend(hdfc._id, "2026-09-20", 1000);
 
     const [status] = await cardStatuses(userId, on("2026-09-25"));
-    assert.equal(status.periodIsCycle, false);
-    assert.equal(status.spentMinor, 5000_00);
+    assert.equal(status.cycleKnown, false);
+    assert.equal(status.cycleStart, null);
+    assert.equal(status.unbilledMinor, null);
+    assert.equal(status.outstandingMinor, null);
+    assert.equal(status.availableMinor, null);
+    assert.equal(status.state, "unset");
   });
 
   it("resets on the statement day once a statement has taught it one", async () => {
@@ -217,7 +223,7 @@ describe("the personal spend limit, once the cycle is known", () => {
       bankName: "HDFC",
       last4: "4321",
       accountType: "CARD",
-      spendLimitMinor: 50_000_00,
+      creditLimitMinor: 50_000_00,
     });
 
     // Before the statement day, and after it.
@@ -232,10 +238,11 @@ describe("the personal spend limit, once the cycle is known", () => {
 
     const [status] = await cardStatuses(userId, on("2026-09-25"));
 
-    // The 4,000 was billed on the 17th and is somebody else's problem now.
-    assert.equal(status.periodIsCycle, true);
-    assert.equal(status.spentMinor, 1000_00);
-    assert.equal(status.remainingMinor, 49_000_00);
+    // The 4,000 was billed on the 17th: it is the bill, not this cycle.
+    assert.equal(status.cycleKnown, true);
+    assert.equal(status.unbilledMinor, 1000_00);
+    assert.equal(status.billedUnpaidMinor, 4000_00);
+    assert.equal(status.availableMinor, 45_000_00);
     assert.equal(status.state, "ok");
   });
 
@@ -249,7 +256,6 @@ describe("the personal spend limit, once the cycle is known", () => {
       last4: "4321",
       accountType: "CARD",
       statementDay: 17,
-      spendLimitMinor: 50_000_00,
     });
 
     await spend(hdfc._id, "2026-09-16", 5000);
@@ -258,16 +264,16 @@ describe("the personal spend limit, once the cycle is known", () => {
     // The 16th is the closing cycle's last day, and the 17th has not
     // happened yet as far as this moment is concerned.
     const [before] = await cardStatuses(userId, on("2026-09-16"));
-    assert.equal(before.spentMinor, 5000_00);
+    assert.equal(before.unbilledMinor, 5000_00);
 
     // Come the 17th the counter has reset, and the day's own spending is
     // the only thing on it.
     const [onTheDay] = await cardStatuses(userId, on("2026-09-17"));
-    assert.equal(onTheDay.spentMinor, 2000_00);
+    assert.equal(onTheDay.unbilledMinor, 2000_00);
 
     // And it is still there tomorrow - the same cycle, one day older.
     const [dayAfter] = await cardStatuses(userId, on("2026-09-18"));
-    assert.equal(dayAfter.spentMinor, 2000_00);
+    assert.equal(dayAfter.unbilledMinor, 2000_00);
   });
 });
 
@@ -281,7 +287,6 @@ describe("what is actually left on the card", () => {
       statementDay: 17,
       dueDay: 6,
       creditLimitMinor: 25_000_00,
-      spendLimitMinor: 10_000_00,
     });
 
     await CardStatement.create({
@@ -320,14 +325,12 @@ describe("what is actually left on the card", () => {
     const [status] = await cardStatuses(userId, on("2026-09-20"));
 
     assert.equal(status.creditLimitMinor, 25_000_00);
-    assert.equal(status.outstandingMinor, 14_000_00);
-    assert.equal(status.spentMinor, 3000_00);
+    assert.equal(status.billedUnpaidMinor, 14_000_00);
+    assert.equal(status.unbilledMinor, 3000_00);
+    assert.equal(status.outstandingMinor, 17_000_00);
     assert.equal(status.availableMinor, 8000_00);
-
-    // The personal budget is a separate question with a separate answer:
-    // 3,000 of the 10,000 allowed, and the bill has nothing to do with it.
-    assert.equal(status.limitMinor, 10_000_00);
-    assert.equal(status.remainingMinor, 7000_00);
+    // 17,000 of 25,000 is 68%: not yet close.
+    assert.equal(status.state, "ok");
   });
 
   it("gives the limit back when the bill is paid", async () => {
@@ -351,11 +354,13 @@ describe("what is actually left on the card", () => {
 
     const [status] = await cardStatuses(userId, on("2026-09-26"));
 
-    assert.equal(status.outstandingMinor, 0);
+    assert.equal(status.billedUnpaidMinor, 0);
+    assert.equal(status.billIsPaid, true);
+    assert.equal(status.outstandingMinor, 3000_00, "only this cycle is owed now");
     assert.equal(status.availableMinor, 22_000_00, "the 14,000 came back");
 
-    // And paying the bill is not spending: it must not eat the budget.
-    assert.equal(status.spentMinor, 3000_00);
+    // And paying the bill is not a charge on the card.
+    assert.equal(status.unbilledMinor, 3000_00);
   });
 
   it("gives the limit back when the last of the bill was cashback, not money", async () => {
@@ -377,7 +382,7 @@ describe("what is actually left on the card", () => {
     });
 
     const before = (await cardStatuses(userId, on("2026-09-26")))[0];
-    assert.equal(before.outstandingMinor, 50_00, "fifty short, before it is explained");
+    assert.equal(before.billedUnpaidMinor, 50_00, "fifty short, before it is explained");
 
     const statement = await CardStatement.findOne({ userId, accountId: hdfc._id }).orFail();
     statement.waivedMinor = 50_00;
@@ -385,7 +390,7 @@ describe("what is actually left on the card", () => {
     await statement.save();
 
     const after = (await cardStatuses(userId, on("2026-09-26")))[0];
-    assert.equal(after.outstandingMinor, 0, "the fifty is accounted for, not still owed");
+    assert.equal(after.billedUnpaidMinor, 0, "the fifty is accounted for, not still owed");
     assert.equal(after.availableMinor, 25_000_00, "the whole limit is free again");
   });
 
@@ -406,14 +411,16 @@ describe("what is actually left on the card", () => {
     }
 
     const [status] = await cardStatuses(userId, on("2026-09-30"));
+    assert.equal(status.billedUnpaidMinor, 3000_00);
     assert.equal(status.outstandingMinor, 3000_00);
     assert.equal(status.availableMinor, 22_000_00);
   });
 
-  it("says nothing rather than zero when no statement has been read", async () => {
+  it("estimates the bill from the last cycle when no statement has been read", async () => {
     // A card with no statement is not a card with no bill. Reporting 0
     // would put the whole limit on the screen as available on the one day
-    // of the month when it is least likely to be.
+    // of the month when it is least likely to be - so the cycle that just
+    // closed stands in for it, marked as an estimate.
     const hdfc = await Account.create({
       userId,
       bankName: "Axis",
@@ -422,11 +429,15 @@ describe("what is actually left on the card", () => {
       statementDay: 17,
       creditLimitMinor: 25_000_00,
     });
+    await spend(hdfc._id, "2026-09-10", 6000);
     await spend(hdfc._id, "2026-09-20", 3000);
 
     const [status] = await cardStatuses(userId, on("2026-09-20"));
-    assert.equal(status.outstandingMinor, null);
-    assert.equal(status.availableMinor, 22_000_00);
+    assert.equal(status.billedUnpaidMinor, 6000_00);
+    assert.equal(status.outstandingIsEstimate, true);
+    assert.equal(status.lastBill?.fromStatement, false);
+    assert.equal(status.outstandingMinor, 9000_00);
+    assert.equal(status.availableMinor, 16_000_00);
   });
 
   it("falls back to the statement's rows when the total was never printed", async () => {
@@ -463,7 +474,7 @@ describe("what is actually left on the card", () => {
     const [status] = await cardStatuses(userId, on("2026-09-17"));
 
     // 10,000 + 5,000 spent, 1,000 back.
-    assert.equal(status.outstandingMinor, 14_000_00);
+    assert.equal(status.billedUnpaidMinor, 14_000_00);
     assert.equal(status.outstandingIsEstimate, true, "worked out, not printed");
     assert.equal(status.availableMinor, 11_000_00);
   });
@@ -494,11 +505,11 @@ describe("what is actually left on the card", () => {
     });
 
     const [status] = await cardStatuses(userId, on("2026-09-17"));
-    assert.equal(status.outstandingMinor, 14_500_00);
+    assert.equal(status.billedUnpaidMinor, 14_500_00);
     assert.equal(status.outstandingIsEstimate, false);
   });
 
-  it("says nothing for a statement with neither a total nor any rows", async () => {
+  it("falls back to the cycle's own charges for a statement with neither a total nor any rows", async () => {
     const hdfc = await Account.create({
       userId,
       bankName: "Jupiter",
@@ -518,8 +529,11 @@ describe("what is actually left on the card", () => {
       lines: [],
     });
 
+    // Nothing was charged in the cycle it would have covered, so the
+    // estimate is nothing.
     const [status] = await cardStatuses(userId, on("2026-09-17"));
-    assert.equal(status.outstandingMinor, null);
+    assert.equal(status.billedUnpaidMinor, 0);
+    assert.equal(status.outstandingIsEstimate, true);
     assert.equal(status.availableMinor, 25_000_00);
   });
 
@@ -552,7 +566,7 @@ describe("what is actually left on the card", () => {
     });
 
     const [status] = await cardStatuses(userId, on("2026-09-18"));
-    assert.equal(status.outstandingMinor, 14_000_00);
+    assert.equal(status.billedUnpaidMinor, 14_000_00);
     assert.equal(status.availableMinor, 11_000_00);
   });
 
@@ -589,7 +603,7 @@ describe("what is actually left on the card", () => {
     });
 
     const [status] = await cardStatuses(userId, on("2026-09-18"));
-    assert.equal(status.outstandingMinor, 14_000_00);
+    assert.equal(status.billedUnpaidMinor, 14_000_00);
     assert.equal(status.outstandingIsEstimate, true);
     assert.equal(status.availableMinor, 11_000_00);
   });
@@ -644,10 +658,9 @@ describe("two cards on one limit", () => {
       assert.equal(status.availableMinor, 60_000_00, `${name} has the pot less both`);
     }
 
-    // Each still knows its own spending, which is what its own personal
-    // limit is measured against.
-    assert.equal(byName.get("Regalia")!.spentMinor, 30_000_00);
-    assert.equal(byName.get("Millennia")!.spentMinor, 10_000_00);
+    // Each still knows what it owes on its own.
+    assert.equal(byName.get("Regalia")!.outstandingMinor, 30_000_00);
+    assert.equal(byName.get("Millennia")!.outstandingMinor, 10_000_00);
 
     assert.deepEqual(byName.get("Regalia")!.sharesLimitWith, ["Millennia"]);
     assert.deepEqual(byName.get("Millennia")!.sharesLimitWith, ["Regalia"]);

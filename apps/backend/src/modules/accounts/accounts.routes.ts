@@ -7,6 +7,7 @@ import { Account, CardVault, Transaction } from "../../models";
 import { cardStatuses } from "../cards/cards.status";
 import { userMonth, userMonths } from "../budget/budget.months";
 import { cycleFor } from "../cards/cards.cycle";
+import { cycleDaysFor } from "../cards/cards.learn";
 import { istDayKey } from "../../time";
 import { upcomingBills } from "../statements/statements.bills";
 import { expectedBalances, tracksBalance } from "./accounts.balance";
@@ -75,27 +76,29 @@ accountsRouter.get("/overview", async (req, res) => {
 
       return {
         ...account.toJSON(),
-        /// A credit card's own billing cycle, where it has one. Everything
-        /// here is about a period that ends in a bill.
+        /// A credit card's own billing cycle and where it stands against its
+        /// credit limit. Everything here is about a period that ends in a
+        /// bill, and it is the card's own period - never the salary month.
         cycle: status
           ? {
+              cycleKnown: status.cycleKnown,
               statementOn: status.statementOn,
               dueOn: status.dueOn,
               floatDays: status.floatDays,
-              spentMinor: status.spentMinor,
-              limitMinor: status.limitMinor,
-              remainingMinor: status.remainingMinor,
+              unbilledMinor: status.unbilledMinor,
+              billedUnpaidMinor: status.billedUnpaidMinor,
+              outstandingMinor: status.outstandingMinor,
+              outstandingIsEstimate: status.outstandingIsEstimate,
+              creditLimitMinor: status.creditLimitMinor,
+              usedMinor: status.groupUsedMinor ?? status.usedMinor,
+              availableMinor: status.availableMinor,
               state: status.state,
             }
           : null,
-        /// What this account has spent this month (salary day to salary day), and
-        /// what you allowed yourself. Every account has this, because a
-        /// limit you set on a bank account is worth just as much as one on
-        /// a card - it was only ever a card field because cards were the
-        /// only thing with a period attached.
+        /// What this account has spent this month, salary day to salary
+        /// day - the user's month, which is what a bank account is read by.
         month: {
           spentMinor: monthSpend.get(id) ?? 0,
-          limitMinor: account.spendLimitMinor ?? null,
         },
         /// The last bill read off a statement, which is the only figure
         /// here that comes from the bank rather than from adding up
@@ -177,7 +180,6 @@ const accountFields = {
     .nullable()
     .optional(),
   creditLimitMinor: z.number().int().nonnegative().nullable().optional(),
-  spendLimitMinor: z.number().int().nonnegative().nullable().optional(),
   statementDay: z.number().int().min(1).max(31).nullable().optional(),
   dueDay: z.number().int().min(1).max(31).nullable().optional(),
   isActive: z.boolean().optional(),
@@ -468,10 +470,18 @@ accountsRouter.post("/:id/merge", validObjectIdParam("id"), async (req, res) => 
  * GET /accounts/:id/cycles — this account's billing cycles, newest first,
  * for looking at everything spent on it bill by bill.
  *
- * A card with a statement day runs statement day to the day before the
- * next one - the same cycle its bill covers. Anything without one (a bank
- * account, a debit card, a card whose day isn't known) runs by the user's
- * own months instead, salary day to salary day.
+ * A credit card runs statement day to the day before the next - the same
+ * cycle its bill covers - on its own statement day, stored or read off its
+ * newest statement. A card with neither has no cycles to offer (cycleKnown
+ * false), not the salary month in their place: its bill is not drawn on
+ * payday, and a period that looks like a cycle but is not one is worse
+ * than being told the billing date is missing. Anything that is not a
+ * card (a bank account, a debit card) runs by the user's own months,
+ * salary day to salary day.
+ *
+ * A card's cycle comes to what the bank charged it, net of credits back -
+ * the same figure as its face's "spent since statement". Anything else's
+ * comes to what was counted.
  */
 accountsRouter.get("/:id/cycles", validObjectIdParam("id"), async (req, res) => {
   const userId = currentUserId(req);
@@ -482,10 +492,15 @@ accountsRouter.get("/:id/cycles", validObjectIdParam("id"), async (req, res) => 
   const now = new Date();
   const ranges: { from: string; to: string; start: Date; end: Date }[] = [];
 
-  if (account.statementDay) {
+  const isCard = account.accountType === "CARD";
+  const own = isCard
+    ? (await cycleDaysFor(userId, [account])).get(account.id)!
+    : { statementDay: account.statementDay ?? null, dueDay: account.dueDay ?? null, inferred: false };
+
+  if (own.statementDay) {
     let at = now;
     for (let i = 0; i < count; i += 1) {
-      const cycle = cycleFor(account, at)!;
+      const cycle = cycleFor(own, at)!;
       ranges.push({
         from: istDayKey(cycle.start),
         to: istDayKey(cycle.endsOn),
@@ -494,6 +509,8 @@ accountsRouter.get("/:id/cycles", validObjectIdParam("id"), async (req, res) => 
       });
       at = new Date(cycle.start.getTime() - 1);
     }
+  } else if (isCard) {
+    return res.json({ byStatement: false, cycleKnown: false, cycles: [] });
   } else {
     const { recent } = await userMonths(userId, now, count);
     ranges.push(...recent.map((month) => ({ from: month.from, to: month.to, start: month.start, end: month.end })));
@@ -505,8 +522,14 @@ accountsRouter.get("/:id/cycles", validObjectIdParam("id"), async (req, res) => 
       $match: {
         userId,
         accountId: account._id,
-        type: "DEBIT",
         occurredAt: { $gte: ranges[ranges.length - 1].start, $lt: ranges[0].end },
+        ...(isCard
+          ? {
+              cardPaymentFor: null,
+              emiRole: { $ne: "PARENT" },
+              $or: [{ type: "DEBIT" }, { type: "CREDIT", isTransfer: { $ne: true } }],
+            }
+          : { type: "DEBIT" }),
       },
     },
     {
@@ -520,21 +543,24 @@ accountsRouter.get("/:id/cycles", validObjectIdParam("id"), async (req, res) => 
             default: -1,
           },
         },
-        spentMinor: { $sum: "$countedAmountMinor" },
-        count: { $sum: 1 },
+        spentMinor: isCard
+          ? { $sum: { $cond: [{ $eq: ["$type", "DEBIT"] }, "$amountMinor", { $multiply: ["$amountMinor", -1] }] } }
+          : { $sum: "$countedAmountMinor" },
+        count: { $sum: { $cond: [{ $eq: ["$type", "DEBIT"] }, 1, 0] } },
       },
     },
   ]);
 
   res.json({
-    byStatement: Boolean(account.statementDay),
+    byStatement: Boolean(own.statementDay),
+    cycleKnown: true,
     cycles: ranges.map((range, index) => {
       const row = rows.find((candidate) => candidate._id === index);
       return {
         from: range.from,
         to: range.to,
         current: index === 0,
-        spentMinor: row?.spentMinor ?? 0,
+        spentMinor: Math.max(0, row?.spentMinor ?? 0),
         count: row?.count ?? 0,
       };
     }),

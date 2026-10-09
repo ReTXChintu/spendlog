@@ -81,11 +81,11 @@ Color cardStateTint(String state) => switch (state) {
       _ => const Color(0xD9FFFFFF),
     };
 
-/// For a card with no limit of your own, how much of the bank's credit
-/// line can go before the bar changes colour: fine below 70%, close from
-/// 70%, over from 90% - and over past the limit itself. Later than a
-/// lender's comfort zone on purpose: the bar is about running out, not
-/// about a credit score.
+/// How much of the bank's credit line can go before the bar changes
+/// colour: fine below 70%, close from 70%, over from 90% - and over past
+/// the limit itself. Later than a lender's comfort zone on purpose: the bar
+/// is about running out, not about a credit score. The server works the
+/// same state out (cards.status.ts); this is for a face it sent none for.
 const double kCreditCloseAt = 0.70;
 const double kCreditOverAt = 0.90;
 
@@ -101,13 +101,12 @@ String creditUtilisationState(int usedMinor, int limitMinor) {
 
 /// What a card's bar is measuring.
 enum CardBarBasis {
-  /// The limit you set yourself for a cycle.
-  ownLimit,
-
-  /// No limit of your own: credit used against the bank's limit.
+  /// Credit used against the bank's limit: the bill still unpaid plus
+  /// everything charged since.
   creditLimit,
 
-  /// Neither limit known: an empty track, and an offer to set one.
+  /// No credit limit known, or no billing cycle to say what is owed: an
+  /// empty track, and an offer to set whichever is missing.
   none,
 }
 
@@ -118,27 +117,17 @@ typedef CardBar = ({CardBarBasis basis, double fraction, String state});
 /// What the limit has lost, by the best figure there is.
 int creditUsedMinor(CardFace card) => card.usedMinor > 0 ? card.usedMinor : (card.outstandingMinor ?? 0);
 
-/// Every card gets a bar that means something. Your own limit first, as it
-/// always was; without one, the bank's limit - so a card with no limit of
-/// your own still turns amber as its credit line runs out instead of
-/// sitting grey; and with neither, an empty track.
+/// Every card's bar is credit used against its credit limit, coloured by
+/// the server's state. With no limit, or no cycle to count from, an empty
+/// track.
 CardBar cardBar(CardFace card) {
-  final own = card.spendLimitMinor;
   final limit = card.creditLimitMinor;
-  if (own != null && own > 0 && card.state != 'unset') {
-    // Filled by the bank's limit when there is one, your own otherwise;
-    // coloured by your own either way.
-    final fraction = limit != null && limit > 0
-        ? (card.usedMinor / limit).clamp(0.0, 1.0)
-        : (card.cycleSpentMinor / own).clamp(0.0, 1.0);
-    return (basis: CardBarBasis.ownLimit, fraction: fraction, state: card.state);
-  }
-  if (limit != null && limit > 0) {
+  if (card.cycleKnown && limit != null && limit > 0) {
     final used = creditUsedMinor(card);
     return (
       basis: CardBarBasis.creditLimit,
       fraction: (used / limit).clamp(0.0, 1.0),
-      state: creditUtilisationState(used, limit),
+      state: card.state != 'unset' ? card.state : creditUtilisationState(used, limit),
     );
   }
   return (basis: CardBarBasis.none, fraction: 0.0, state: 'unset');
@@ -170,10 +159,10 @@ Future<VaultDetails> _revealFromServer(String accountId, String pin) async => Va
 ///
 /// The front is what anyone looking over your shoulder could see on the
 /// plastic anyway: the bank, the chip, the last four digits, the network.
-/// To that it adds what the plastic cannot - this cycle's spend, when the
-/// bill is due, and a bar along the bottom for how much of the limit is
-/// gone, coloured by how close the card is to the limit you set for it -
-/// or, with no limit of your own, to the bank's (see [cardBar]).
+/// To that it adds what the plastic cannot - what has been charged since the
+/// last statement, when the bill is due, and a bar along the bottom for how
+/// much of the credit limit is gone (see [cardBar]). All of it on the
+/// card's own billing cycle.
 ///
 /// The eye turns it over. The back is fetched for that one card after the
 /// vault PIN, held in this widget's memory and nowhere else - never in
@@ -588,7 +577,13 @@ class _Front extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Flexible(
-                        child: _Field(label: 'THIS CYCLE', value: formatMoneyShort(card.cycleSpentMinor), ink: ink),
+                        child: _Field(
+                          label: 'THIS CYCLE',
+                          // No billing date, no cycle: nothing to put here
+                          // that would not be a guess.
+                          value: card.unbilledMinor == null ? '—' : formatMoneyShort(card.unbilledMinor!),
+                          ink: ink,
+                        ),
                       ),
                       const SizedBox(width: 22),
                       Flexible(child: _Field(label: 'BILL DUE', value: _dueLabel(card), ink: ink)),
@@ -611,9 +606,20 @@ class _Front extends StatelessWidget {
   }
 }
 
+/// "14 Oct", for a date the server sent: a plain YYYY-MM-DD as it is, an
+/// instant by the day it falls on in IST. A due date stored as midnight in
+/// Delhi is the evening before in UTC, and read as UTC it named the wrong
+/// day.
+String formatCardDate(String? iso) {
+  if (iso == null || iso.isEmpty) return '';
+  final parsed = DateTime.tryParse(iso);
+  if (parsed == null) return '';
+  return iso.length <= 10 ? formatIsoShortDate(iso) : formatShortDate(parsed);
+}
+
 /// "14 Oct", with how soon when it is close.
 String _dueLabel(CardFace card) {
-  final date = formatIsoShortDate(card.nextDueOn ?? '');
+  final date = formatCardDate(card.nextDueOn);
   if (date.isEmpty) return '—';
   final days = card.daysToDue;
   if (days == null || days > 7) return date;

@@ -6,6 +6,7 @@ import { app } from "./app";
 import { connectDatabase } from "./db";
 import { env } from "./env";
 import { runLendingBackfill } from "./modules/contacts/contacts.backfill";
+import { runSpendLimitBackfill } from "./modules/accounts/accounts.backfill";
 import { runCardBillAccountBackfill, runCardBillBackfill } from "./modules/cards/cards.billPayment.service";
 import { syncAllConnectedEmails } from "./modules/ingestion/gmail.service";
 
@@ -60,6 +61,9 @@ async function start() {
   // One-off repairs, once per user (see backfill.ts). In the background:
   // a slow pass must not keep the server from answering.
   runLendingBackfill().catch((err) => console.error("Lent & borrowed backfill failed:", err));
+  // The personal spend limit, retired: cleared off every account so it
+  // stops travelling out with them.
+  runSpendLimitBackfill().catch((err) => console.error("Spend limit backfill failed:", err));
   // Card bills filed under the wrong account - the bank's debit under the
   // card it paid, the card's credit under a bank account - then, once they
   // are where they belong, card bills imported before they were

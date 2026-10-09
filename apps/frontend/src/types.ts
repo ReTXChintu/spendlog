@@ -57,7 +57,8 @@ export interface Account {
   /// holds the limit. Its own creditLimitMinor is then ignored.
   sharesLimitWith?: string | null;
   creditLimitMinor: number | null;
-  spendLimitMinor: number | null;
+  /// The day the card's bill is drawn and the day it falls due. Every card
+  /// figure counts from the first - each card on its own cycle.
   statementDay: number | null;
   dueDay: number | null;
   isActive: boolean;
@@ -102,24 +103,29 @@ export interface PocketMoneyStatus extends PocketMoneySettings {
  * waterfall for numbers that exist together.
  */
 export interface AccountOverview extends Account {
-  /// Null for anything without a billing cycle - a savings account has no
-  /// limit and no month, and an empty bar drawn for one means nothing.
+  /// A credit card's own billing cycle and where it stands against its
+  /// credit limit. Null for anything that is not a credit card. A card with
+  /// no statement day has cycleKnown false and no figures - never the
+  /// salary month in their place.
   cycle: {
+    cycleKnown: boolean;
     statementOn: string | null;
     dueOn: string | null;
     floatDays: number | null;
-    spentMinor: number;
-    limitMinor: number | null;
-    remainingMinor: number | null;
+    unbilledMinor: number | null;
+    billedUnpaidMinor: number | null;
+    outstandingMinor: number | null;
+    outstandingIsEstimate: boolean;
+    creditLimitMinor: number | null;
+    usedMinor: number | null;
+    availableMinor: number | null;
     state: "ok" | "close" | "over" | "unset";
   } | null;
-  /// What this account has spent since the first of the month, and what
-  /// you allowed yourself. Every account has this; only a credit card has
-  /// a cycle.
+  /// What this account has spent this month, salary day to salary day.
   /// Optional because a page can outlive the server build that added
   /// it: a browser holds a cached bundle, and a deployment restarts the
   /// two halves seconds apart.
-  month?: { spentMinor: number; limitMinor: number | null };
+  month?: { spentMinor: number };
   /// The last bill read off a statement - the only figure on the panel
   /// that comes from the bank rather than from adding up messages.
   bill: {
@@ -328,43 +334,37 @@ export const NETWORK_LABELS: Record<CardNetwork, string> = {
 
 export type CardState = "ok" | "close" | "over" | "unset";
 
-/** A card, with where it is in its cycle and what is left of its limit. */
+/** A card, with where it is in its own cycle, what it owes and what is left of its credit limit. */
 export interface CardStatus {
   accountId: string;
   name: string;
   last4: string | null;
   network: CardNetwork | null;
+  /// Whether the card has a statement day, stored or read off a statement.
+  /// Without one there is no cycle, and the figures below are null - never
+  /// the salary month in its place.
+  cycleKnown: boolean;
   statementOn: string | null;
   dueOn: string | null;
   floatDays: number | null;
-  spentMinor: number;
-  /// What you allow yourself on this card in a period, and what the bank
-  /// allows. Different things: being 90% through your own limit matters
-  /// at a till, and being 30% through a credit limit tells you nothing.
-  limitMinor: number | null;
-  creditLimitMinor?: number | null;
-  remainingMinor: number | null;
-  /// Last statement's bill, less anything paid against it. Money the bank
-  /// is still holding against the credit limit. Undefined from a server
-  /// older than this field; null when no statement has been read, which is
-  /// not the same as nothing owed.
-  outstandingMinor?: number | null;
-  /// Whether that figure was printed on the statement or worked out from
-  /// its rows. Shown as "about" rather than hidden.
-  outstandingIsEstimate?: boolean;
-  /// When that bill has to be paid — not the same as dueOn, which is when
-  /// the cycle now running will fall due.
-  billDueOn?: string | null;
-  /// The credit limit, less the outstanding bill, less this cycle. For a
-  /// card on a shared limit, the group's figure.
-  availableMinor?: number | null;
+  creditLimitMinor: number | null;
+  /// Charged since the last statement, net of refunds.
+  unbilledMinor: number | null;
+  /// What is left to pay of the last bill.
+  billedUnpaidMinor: number | null;
+  /// The two together: what the card owes the bank now.
+  outstandingMinor: number | null;
+  /// Whether the bill in that figure was printed or worked out. Shown as
+  /// "about" rather than hidden.
+  outstandingIsEstimate: boolean;
+  /// The credit limit, less the outstanding. For a card on a shared limit,
+  /// the group's figure.
+  availableMinor: number | null;
   /// The other cards this one shares a limit with, named.
   sharesLimitWith?: string[];
   /// What the whole group has used, when there is one.
   groupUsedMinor?: number | null;
-  /// Whether spentMinor covers a billing cycle or a calendar month. A card
-  /// with no statement day has no cycle to measure.
-  periodIsCycle?: boolean;
+  /// Credit used against the limit: close from 70%, over from 90%.
   state: CardState;
 }
 
@@ -911,31 +911,45 @@ export interface CardFace {
   network: CardNetwork | null;
   last4: string | null;
   color: string | null;
+  statementDay: number | null;
+  dueDay: number | null;
+  /** Whether statementDay was read off the newest statement rather than set. */
+  statementDayInferred: boolean;
+  /** No statement day, no cycle: the figures that need one are null. */
+  cycleKnown: boolean;
   creditLimitMinor: number | null;
+  /** What is left to pay of the last bill. */
+  billedUnpaidMinor: number | null;
+  /** Charged since the last statement, net of refunds. */
+  unbilledMinor: number | null;
+  /** The two together: what the card owes now. */
   outstandingMinor: number | null;
   outstandingIsEstimate: boolean;
-  /** Outstanding bill plus this cycle; the whole group's on a shared limit. */
-  usedMinor: number;
+  /** The outstanding; the whole group's on a shared limit. */
+  usedMinor: number | null;
   availableMinor: number | null;
   sharesLimitWith: string[];
-  cycleSpentMinor: number;
-  cycleStart: string;
-  cycleEnd: string;
-  periodIsCycle: boolean;
+  cycleStart: string | null;
+  cycleEnd: string | null;
+  /** When the cycle now running will be billed. */
   statementOn: string | null;
+  /** The last bill: the statement, or an estimate from the cycle just closed. */
   lastStatement: {
     amountMinor: number;
     minimumDueMinor: number | null;
     statementOn: string | null;
     dueOn: string | null;
+    paidMinor: number;
     owedMinor: number | null;
     isPaid: boolean | null;
+    isEstimate: boolean;
+    fromStatement: boolean;
   } | null;
+  billIsPaid: boolean | null;
   /** The unpaid bill's due date, else the one the running cycle falls due on. */
   nextDueOn: string | null;
   daysToDue: number | null;
-  /** What you allow yourself on it in a cycle - what `state` measures. */
-  spendLimitMinor: number | null;
+  /** Credit used against the limit: close from 70%, over from 90%. */
   state: CardState;
   hasCardDetails: boolean;
 }
@@ -1042,5 +1056,7 @@ export interface AccountSpend {
 export interface AccountCycles {
   /** True for a card with a statement day; otherwise the user's months. */
   byStatement: boolean;
+  /** False for a credit card with no billing date: no cycles at all, never pay months in their place. */
+  cycleKnown?: boolean;
   cycles: { from: string; to: string; current: boolean; spentMinor: number; count: number }[];
 }

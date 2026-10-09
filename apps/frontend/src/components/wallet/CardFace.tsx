@@ -149,14 +149,10 @@ function Front({
   onEye: () => void;
 }) {
   const limit = card.creditLimitMinor;
-  const spendLimit = card.spendLimitMinor;
-  // The bank's limit when there is one; otherwise your own, against this
-  // cycle. Neither, and there is nothing to measure against.
-  const fraction = limit
-    ? card.usedMinor / limit
-    : spendLimit
-      ? card.cycleSpentMinor / spendLimit
-      : null;
+  const used = card.usedMinor ?? card.outstandingMinor ?? 0;
+  // Credit used against the bank's limit, on the card's own cycle. No
+  // limit, or no billing date to say what is owed: nothing to measure.
+  const fraction = limit && card.cycleKnown ? used / limit : null;
   const width = fraction === null ? 0 : Math.min(100, Math.max(0, Math.round(fraction * 100)));
 
   const owing = card.lastStatement !== null && card.lastStatement.isPaid === false;
@@ -219,10 +215,9 @@ function Front({
 
       <div className="wcard-foot">
         <div className="wcard-stat">
-          <span className="wcard-stat-label">{card.periodIsCycle ? "This cycle" : "This month"}</span>
+          <span className="wcard-stat-label">This cycle</span>
           <span className="wcard-stat-value">
-            {formatMoneyShort(card.cycleSpentMinor)}
-            {spendLimit ? <small> / {formatMoneyShort(spendLimit)}</small> : null}
+            {card.unbilledMinor === null ? "—" : formatMoneyShort(card.unbilledMinor)}
           </span>
         </div>
         <div className={`wcard-stat${owing && (card.daysToDue ?? 99) <= 3 ? " is-urgent" : ""}`}>
@@ -237,21 +232,18 @@ function Front({
 
       <div className="wcard-limit">
         <div className="wcard-limit-text">
-          {limit ? (
+          {!card.cycleKnown ? (
+            <span>No billing date set</span>
+          ) : limit ? (
             <>
-              <span>{formatMoneyShort(card.usedMinor)} used</span>
+              <span>{formatMoneyShort(used)} used</span>
               <span>
-                {card.availableMinor !== null ? `${formatMoneyShort(card.availableMinor)} free of ` : "of "}
+                {card.availableMinor !== null ? `${formatMoneyShort(card.availableMinor)} available of ` : "of "}
                 {formatMoneyShort(limit)}
               </span>
             </>
-          ) : spendLimit ? (
-            <>
-              <span>{formatMoneyShort(card.cycleSpentMinor)} spent</span>
-              <span>your limit {formatMoneyShort(spendLimit)}</span>
-            </>
           ) : (
-            <span>No limit set</span>
+            <span>No credit limit set</span>
           )}
         </div>
         <div
@@ -260,7 +252,7 @@ function Front({
           aria-label={
             fraction === null
               ? "No limit to measure against"
-              : `${width}% of the ${limit ? "credit limit" : "spending limit"} in use`
+              : `${width}% of the credit limit in use`
           }
         >
           <div className="wcard-bar-fill" style={{ width: `${width}%` }} />
