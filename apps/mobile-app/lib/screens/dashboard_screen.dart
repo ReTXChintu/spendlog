@@ -108,6 +108,15 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
     await load();
   }
 
+  /// An account's editor, over its page - to set a card's credit limit
+  /// from its face.
+  Future<void> _editAccount(String accountId) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => AccountsScreen(initialAccountId: accountId, editOnOpen: true)),
+    );
+    await load();
+  }
+
   /// A card's own transactions, starting on the statement cycle running now.
   Future<void> _openCard(CardFace card) async {
     await Navigator.of(context).push(
@@ -155,7 +164,7 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
     final data = _data;
     if (data == null) return const Center(child: CircularProgressIndicator());
 
-    final pace = data.pace;
+    final fixed = data.fixedCosts;
     // Pocket money already shows on its account's tile in the wallet; a
     // tile of its own is only for one that is not there.
     final walletIds = data.wallet.banks.map((bank) => bank.accountId).toSet();
@@ -195,6 +204,7 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
             wallet: data.wallet,
             onOpenCard: _openCard,
             onOpenAccount: _openAccounts,
+            onEditAccount: _editAccount,
             onManage: _openAccounts,
           ),
 
@@ -228,12 +238,9 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
           const _Group('This month'),
           HomeGrid(items: [
             GridItem(_SoFarTile(month: data.monthSoFar)),
-            // The salary pace only until a monthly budget is set: after that
-            // the budget's own pace says it, and two paces would argue.
-            if (!data.budget.configured)
-              GridItem(_PaceTile(pace: pace, onOpenSettings: widget.onOpenSettings)),
-            if (pace.configured && pace.commitments.isNotEmpty)
-              GridItem(_FixedCostsTile(pace: pace, onTogglePaid: _togglePaid), span: 2),
+            // No pace tile: the monthly budget card above is the one pace.
+            if (fixed.configured && fixed.commitments.isNotEmpty)
+              GridItem(_FixedCostsTile(fixed: fixed, onTogglePaid: _togglePaid), span: 2),
             if (data.emiCount > 0)
               GridItem(HomeTile(
                 label: 'EMIs running',
@@ -545,120 +552,27 @@ class _SoFarTile extends StatelessWidget {
   }
 }
 
-/// How much is left until the salary and what that allows a day.
-class _PaceTile extends StatelessWidget {
-  final BudgetPace pace;
-  final VoidCallback? onOpenSettings;
-
-  const _PaceTile({required this.pace, this.onOpenSettings});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-
-    if (!pace.configured) {
-      return HomeTile(
-        label: 'Spending pace',
-        icon: Icons.speed_outlined,
-        onTap: onOpenSettings,
-        child: Text(
-          'Tell SpendLog what lands each month and when, and it can say how much a day is left. '
-          'Set it under Settings.',
-          style: TextStyle(fontSize: 12, height: 1.45, color: c.muted),
-        ),
-      );
-    }
-
-    final (background, foreground) = switch (pace.state) {
-      'over' => (c.debit50, c.debit),
-      'watch' => (c.warnBg, c.warn),
-      _ => (null, c.brandDark),
-    };
-
-    return HomeTile(
-      label: 'Spending pace',
-      icon: Icons.speed_outlined,
-      background: background,
-      accent: background == null ? null : foreground,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TileFigure(formatMoneyShort(pace.remainingMinor)),
-          Text(
-            'left · ${pace.daysLeft} ${pace.daysLeft == 1 ? 'day' : 'days'} to salary',
-            style: TextStyle(fontSize: 11.5, color: c.muted),
-          ),
-          const SizedBox(height: 8),
-          Text.rich(
-            TextSpan(children: [
-              TextSpan(
-                text: formatMoneyShort(pace.perDayMinor),
-                style: kNum.copyWith(fontWeight: FontWeight.w800, color: c.ink),
-              ),
-              const TextSpan(text: ' a day from here'),
-            ]),
-            style: TextStyle(fontSize: 12, color: c.ink70),
-          ),
-          Text.rich(
-            TextSpan(children: [
-              const TextSpan(text: 'Lately '),
-              TextSpan(
-                text: formatMoneyShort(pace.recentPerDayMinor),
-                style: kNum.copyWith(fontWeight: FontWeight.w700, color: c.ink70),
-              ),
-              const TextSpan(text: ' a day'),
-            ]),
-            style: TextStyle(fontSize: 12, color: c.muted),
-          ),
-          if (pace.state != 'ok') ...[
-            const SizedBox(height: 6),
-            Text(
-              pace.state == 'over'
-                  ? "Past this period's salary. Anything more comes out of something else."
-                  : "At last week's pace this runs dry before payday.",
-              style: TextStyle(fontSize: 11.5, height: 1.4, color: foreground),
-            ),
-          ],
-          // Sending less than usual is worth a sentence rather than a
-          // silently unticked box.
-          if (pace.shortfallNote != null) ...[
-            const SizedBox(height: 6),
-            Text(pace.shortfallNote!, style: TextStyle(fontSize: 11.5, height: 1.4, color: foreground)),
-          ],
-          const SizedBox(height: 6),
-          // Where the figure came from, said plainly rather than left to be
-          // guessed from a number that moves when a month has leave in it.
-          Text(
-            pace.salaryIsActual
-                ? 'From the ${formatMoneyShort(pace.salaryMinor)} that landed.'
-                : 'From the salary in Settings - tick the credit as salary to use what arrived.',
-            style: TextStyle(fontSize: 10.5, height: 1.35, color: pace.salaryIsActual ? c.mutedLight : c.warn),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// The fixed costs as a checklist, ticked off as they go out.
+/// The fixed costs as a checklist, ticked off as they go out. They count
+/// against the monthly budget like anything else; the ticks are what say
+/// which are still to come.
 class _FixedCostsTile extends StatelessWidget {
-  final BudgetPace pace;
+  final FixedCosts fixed;
   final Future<void> Function(FixedCommitment, bool) onTogglePaid;
 
-  const _FixedCostsTile({required this.pace, required this.onTogglePaid});
+  const _FixedCostsTile({required this.fixed, required this.onTogglePaid});
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
 
     return HomeTile(
-      label: pace.commitmentsRemainingMinor > 0
-          ? 'Fixed each month · ${formatMoneyShort(pace.commitmentsRemainingMinor)} still to go out'
+      label: fixed.commitmentsRemainingMinor > 0
+          ? 'Fixed each month · ${formatMoneyShort(fixed.commitmentsRemainingMinor)} still to go out'
           : 'Fixed each month',
       icon: Icons.checklist_outlined,
       child: Column(
         children: [
-          for (final commitment in pace.commitments)
+          for (final commitment in fixed.commitments)
             CheckboxListTile(
               value: commitment.isPaid,
               onChanged: (value) => onTogglePaid(commitment, value ?? false),

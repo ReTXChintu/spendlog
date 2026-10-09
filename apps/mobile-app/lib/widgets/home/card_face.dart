@@ -73,7 +73,7 @@ Color _inkOn(List<Color> gradient) {
 }
 
 /// The bar along the bottom of a face, coloured by where the card stands
-/// against the limit you set for it. Bright enough to read on any card.
+/// against whatever the bar measures. Bright enough to read on any card.
 Color cardStateTint(String state) => switch (state) {
       'over' => const Color(0xFFFF6B6B),
       'close' => const Color(0xFFFFC145),
@@ -81,15 +81,71 @@ Color cardStateTint(String state) => switch (state) {
       _ => const Color(0xD9FFFFFF),
     };
 
-/// How much of the bar is filled: the bank's limit when there is one,
-/// your own cycle limit when that is all there is.
-double cardBarFraction(CardFace card) {
-  final limit = card.creditLimitMinor;
-  if (limit != null && limit > 0) return (card.usedMinor / limit).clamp(0.0, 1.0);
-  final own = card.spendLimitMinor;
-  if (own != null && own > 0) return (card.cycleSpentMinor / own).clamp(0.0, 1.0);
-  return 0;
+/// For a card with no limit of your own, how much of the bank's credit
+/// line can go before the bar changes colour: fine below 70%, close from
+/// 70%, over from 90% - and over past the limit itself. Later than a
+/// lender's comfort zone on purpose: the bar is about running out, not
+/// about a credit score.
+const double kCreditCloseAt = 0.70;
+const double kCreditOverAt = 0.90;
+
+/// ok | close | over, for [usedMinor] of a [limitMinor] credit line;
+/// unset when there is no limit to measure against.
+String creditUtilisationState(int usedMinor, int limitMinor) {
+  if (limitMinor <= 0) return 'unset';
+  final share = usedMinor / limitMinor;
+  if (share >= kCreditOverAt) return 'over';
+  if (share >= kCreditCloseAt) return 'close';
+  return 'ok';
 }
+
+/// What a card's bar is measuring.
+enum CardBarBasis {
+  /// The limit you set yourself for a cycle.
+  ownLimit,
+
+  /// No limit of your own: credit used against the bank's limit.
+  creditLimit,
+
+  /// Neither limit known: an empty track, and an offer to set one.
+  none,
+}
+
+/// The bar along the bottom of a face: what it measures, how full it is,
+/// and the state that colours it (ok | close | over | unset).
+typedef CardBar = ({CardBarBasis basis, double fraction, String state});
+
+/// What the limit has lost, by the best figure there is.
+int creditUsedMinor(CardFace card) => card.usedMinor > 0 ? card.usedMinor : (card.outstandingMinor ?? 0);
+
+/// Every card gets a bar that means something. Your own limit first, as it
+/// always was; without one, the bank's limit - so a card with no limit of
+/// your own still turns amber as its credit line runs out instead of
+/// sitting grey; and with neither, an empty track.
+CardBar cardBar(CardFace card) {
+  final own = card.spendLimitMinor;
+  final limit = card.creditLimitMinor;
+  if (own != null && own > 0 && card.state != 'unset') {
+    // Filled by the bank's limit when there is one, your own otherwise;
+    // coloured by your own either way.
+    final fraction = limit != null && limit > 0
+        ? (card.usedMinor / limit).clamp(0.0, 1.0)
+        : (card.cycleSpentMinor / own).clamp(0.0, 1.0);
+    return (basis: CardBarBasis.ownLimit, fraction: fraction, state: card.state);
+  }
+  if (limit != null && limit > 0) {
+    final used = creditUsedMinor(card);
+    return (
+      basis: CardBarBasis.creditLimit,
+      fraction: (used / limit).clamp(0.0, 1.0),
+      state: creditUtilisationState(used, limit),
+    );
+  }
+  return (basis: CardBarBasis.none, fraction: 0.0, state: 'unset');
+}
+
+/// How much of the bar is filled.
+double cardBarFraction(CardFace card) => cardBar(card).fraction;
 
 /// "•••• •••• •••• 1234" - the only part of the number a face ever shows.
 String maskedCardNumber(String? last4) => '•••• •••• •••• ${last4 ?? '••••'}';
@@ -116,7 +172,8 @@ Future<VaultDetails> _revealFromServer(String accountId, String pin) async => Va
 /// plastic anyway: the bank, the chip, the last four digits, the network.
 /// To that it adds what the plastic cannot - this cycle's spend, when the
 /// bill is due, and a bar along the bottom for how much of the limit is
-/// gone, coloured by how close the card is to the limit you set for it.
+/// gone, coloured by how close the card is to the limit you set for it -
+/// or, with no limit of your own, to the bank's (see [cardBar]).
 ///
 /// The eye turns it over. The back is fetched for that one card after the
 /// vault PIN, held in this widget's memory and nowhere else - never in
@@ -445,6 +502,7 @@ class _Front extends StatelessWidget {
     final soft = ink.withValues(alpha: .72);
     final title = card.bankName.isNotEmpty ? card.bankName : card.name;
     final subtitle = card.name != title ? card.name : null;
+    final bar = cardBar(card);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 12, 16),
@@ -545,7 +603,7 @@ class _Front extends StatelessWidget {
           const SizedBox(height: 10),
           Padding(
             padding: const EdgeInsets.only(right: 8),
-            child: _Bar(fraction: cardBarFraction(card), tint: cardStateTint(card.state), ink: ink),
+            child: _Bar(fraction: bar.fraction, tint: cardStateTint(bar.state), ink: ink),
           ),
         ],
       ),

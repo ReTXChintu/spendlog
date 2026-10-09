@@ -24,9 +24,8 @@ List<Map<String, dynamic>> _maps(Object? value) =>
 
 /// How a month - or one category's share of it - is going.
 ///
-/// A different thing from [BudgetPace], which paces the salary to the next
-/// pay day: this paces the budget you set, and says what a day can cost
-/// from here and still leave the bills still due covered.
+/// The one pace in the app: it paces the budget you set, and says what a
+/// day can cost from here and still leave the bills still due covered.
 class MonthPace {
   /// on_track | high | over
   final String status;

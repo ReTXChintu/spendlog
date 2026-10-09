@@ -157,6 +157,26 @@ void main() {
     expect(pocket.topUpDue, isTrue);
   });
 
+  test('DashboardData keeps only the fixed costs from the old salary pace', () {
+    final data = DashboardData.fromJson({
+      'pace': {
+        'configured': true,
+        'state': 'watch',
+        'perDayMinor': 50000,
+        'commitmentsRemainingMinor': 1500000,
+        'commitments': [
+          {'id': 'rent', 'name': 'Rent', 'amountMinor': 1500000, 'dayOfMonth': 5, 'isPaid': false},
+          {'id': 'sip', 'name': 'SIP', 'amountMinor': 500000, 'dayOfMonth': 10, 'isPaid': true},
+        ],
+      },
+    });
+    expect(data.fixedCosts.configured, isTrue);
+    expect(data.fixedCosts.commitmentsRemainingMinor, 1500000);
+    expect(data.fixedCosts.commitments.map((c) => c.name), ['Rent', 'SIP']);
+    expect(data.fixedCosts.commitments.last.isPaid, isTrue);
+    expect(DashboardData.fromJson({'pace': {'configured': false}}).fixedCosts.commitments, isEmpty);
+  });
+
   test('DashboardData copes with an older server', () {
     final data = DashboardData.fromJson({});
     expect(data.money.accounts, isEmpty);
@@ -165,6 +185,7 @@ void main() {
     expect(data.budget.configured, isFalse);
     expect(data.budget.pace, isNull);
     expect(data.wallet.isEmpty, isTrue);
+    expect(data.fixedCosts.configured, isFalse);
   });
 
   test('SavingsPlan reads rules and month', () {

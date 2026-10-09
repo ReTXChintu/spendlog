@@ -71,7 +71,6 @@ class TransactionsScreenState extends State<TransactionsScreen> {
   bool _error = false;
 
   List<CardStatus> _cards = [];
-  BudgetPace? _pace;
 
   /// The month on show against its budget, for the month bar. Null until
   /// it arrives, and for a month with no budget the bar simply says less.
@@ -330,19 +329,14 @@ class TransactionsScreenState extends State<TransactionsScreen> {
       // The ledger still works without the rollup and the chips.
     }
 
-    // Card cycles and the spending pace, for the strip above the list.
-    // Both advisory, so neither stops the ledger loading.
+    // Card cycles, for the strip above the list. Advisory, so it never
+    // stops the ledger loading. The pace in that strip comes with the
+    // month's budget instead.
     try {
-      final extras = await Future.wait([
-        ApiClient.instance.get('/cards'),
-        ApiClient.instance.get('/budget/pace'),
-      ]);
+      final cards = await ApiClient.instance.get('/cards') as List<dynamic>;
       if (!mounted) return;
       setState(() {
-        _cards = (extras[0] as List<dynamic>)
-            .map((c) => CardStatus.fromJson(c as Map<String, dynamic>))
-            .toList();
-        _pace = BudgetPace.fromJson(extras[1] as Map<String, dynamic>);
+        _cards = cards.map((c) => CardStatus.fromJson(c as Map<String, dynamic>)).toList();
       });
     } catch (_) {
       // Advisory only.
@@ -732,7 +726,7 @@ class TransactionsScreenState extends State<TransactionsScreen> {
           ),
           const SizedBox(height: 6),
           if (_accountId != null) _cycleBar(c),
-          CardStrip(cards: _cards, pace: _pace),
+          CardStrip(cards: _cards, pace: currentMonthPace(_budget)),
           Expanded(child: _buildBody(uncategorized)),
         ],
       ),

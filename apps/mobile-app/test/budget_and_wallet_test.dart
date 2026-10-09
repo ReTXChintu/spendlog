@@ -4,6 +4,7 @@ import 'package:spendlog/models/models.dart';
 import 'package:spendlog/screens/monthly_budget_screen.dart';
 import 'package:spendlog/services/vault_session.dart';
 import 'package:spendlog/theme.dart';
+import 'package:spendlog/widgets/card_strip.dart';
 import 'package:spendlog/widgets/home/card_face.dart';
 import 'package:spendlog/widgets/home/monthly_budget_card.dart';
 import 'package:spendlog/widgets/home/wallet.dart';
@@ -97,6 +98,37 @@ void main() {
       expect(card.network, 'VISA');
       expect(card.state, 'unset');
       expect(card.name, 'Card');
+    });
+  });
+
+  group('the pace strip over Transactions', () {
+    MonthlyBudgetStatus month({bool isCurrent = true, bool configured = true, String status = 'high'}) =>
+        MonthlyBudgetStatus.fromJson({
+          'configured': configured,
+          'budgetMinor': configured ? 2000000 : null,
+          'month': {'key': '2026-10', 'isCurrent': isCurrent},
+          'pace': {'status': status, 'safeDailyMinor': 30000, 'daysLeft': 6, 'remainingMinor': 234000},
+        });
+
+    test('takes the monthly budget pace, and only for the month running now', () {
+      expect(currentMonthPace(month())!.status, 'high');
+      expect(currentMonthPace(month(isCurrent: false)), isNull);
+      expect(currentMonthPace(month(configured: false)), isNull);
+      expect(currentMonthPace(null), isNull);
+    });
+
+    testWidgets("warns in the budget card's own words, and is quiet on track", (tester) async {
+      _phone(tester);
+      final high = currentMonthPace(month())!;
+      await tester.pumpWidget(_wrap(CardStrip(cards: const [], pace: high)));
+      expect(find.text(paceMessage(high)), findsOneWidget);
+      expect(find.textContaining('salary'), findsNothing);
+
+      await tester.pumpWidget(_wrap(CardStrip(cards: const [], pace: currentMonthPace(month(status: 'on_track')))));
+      expect(find.byType(Text), findsNothing);
+
+      await tester.pumpWidget(_wrap(CardStrip(cards: const [], pace: currentMonthPace(month(isCurrent: false)))));
+      expect(find.byType(Text), findsNothing);
     });
   });
 
@@ -371,9 +403,120 @@ void main() {
         'spendLimitMinor': 3000000,
         'state': 'over',
       });
-      expect(cardLimitLine(card), '₹40,000 used of ₹3,00,000 · ₹2,60,000 free');
+      expect(cardLimitLine(card), '₹40,000 of ₹3,00,000 credit used · ₹2,60,000 free');
       expect(cardSecondLine(card), '₹5,000 past your ₹30,000 limit this cycle');
+      // An own limit keeps the bar as it was: filled by the bank's limit,
+      // coloured by your own.
+      final bar = cardBar(card);
+      expect(bar.basis, CardBarBasis.ownLimit);
+      expect(bar.state, 'over');
       expect(cardBarFraction(card), closeTo(4000000 / 30000000, 1e-9));
+    });
+
+    test('with an own limit and no credit limit, the bar fills against your own', () {
+      final card = CardFace.fromJson({
+        'accountId': 'k1',
+        'cycleSpentMinor': 2400000,
+        'spendLimitMinor': 3000000,
+        'state': 'close',
+      });
+      final bar = cardBar(card);
+      expect(bar.basis, CardBarBasis.ownLimit);
+      expect(bar.fraction, closeTo(0.8, 1e-9));
+      expect(bar.state, 'close');
+      expect(cardLimitLine(card), '₹24,000 spent this cycle · no credit limit set');
+    });
+
+    test('credit utilisation turns close at 70% and over at 90%', () {
+      expect(creditUtilisationState(0, 100), 'ok');
+      expect(creditUtilisationState(69, 100), 'ok');
+      expect(creditUtilisationState(70, 100), 'close');
+      expect(creditUtilisationState(89, 100), 'close');
+      expect(creditUtilisationState(90, 100), 'over');
+      expect(creditUtilisationState(130, 100), 'over');
+      expect(creditUtilisationState(50, 0), 'unset');
+    });
+
+    test('with no limit of its own, a card is measured against its credit line', () {
+      CardFace card(int used) => CardFace.fromJson({
+            'accountId': 'k1',
+            'creditLimitMinor': 10000000,
+            'usedMinor': used,
+            'cycleSpentMinor': 500000,
+            'state': 'unset',
+          });
+
+      final nearlyMaxed = cardBar(card(9500000));
+      expect(nearlyMaxed.basis, CardBarBasis.creditLimit);
+      expect(nearlyMaxed.state, 'over');
+      expect(nearlyMaxed.fraction, closeTo(0.95, 1e-9));
+      expect(cardBar(card(7500000)).state, 'close');
+      expect(cardBar(card(2000000)).state, 'ok');
+      expect(cardBar(card(12000000)).fraction, 1.0);
+      expect(cardLimitLine(card(7500000)), '₹75,000 of ₹1,00,000 credit used · ₹25,000 free');
+
+      // No used figure, but an outstanding one: that is what has gone.
+      final fromOutstanding = cardBar(CardFace.fromJson({
+        'accountId': 'k1',
+        'creditLimitMinor': 10000000,
+        'outstandingMinor': 8000000,
+        'state': 'unset',
+      }));
+      expect(fromOutstanding.state, 'close');
+      expect(fromOutstanding.fraction, closeTo(0.8, 1e-9));
+    });
+
+    test('with neither limit, the bar is an empty track', () {
+      final card = CardFace.fromJson({'accountId': 'k1', 'cycleSpentMinor': 500000, 'state': 'unset'});
+      final bar = cardBar(card);
+      expect(bar.basis, CardBarBasis.none);
+      expect(bar.fraction, 0);
+      expect(bar.state, 'unset');
+      expect(cardLimitLine(card), '₹5,000 spent this cycle');
+    });
+
+    testWidgets('a card with no limit at all offers to set one, on its account', (tester) async {
+      _phone(tester);
+      String? edited;
+      String? opened;
+      await tester.pumpWidget(_wrap(WalletSection(
+        money: MoneyOnHand(),
+        wallet: Wallet.fromJson({
+          'cards': [
+            {'accountId': 'bare', 'name': 'Millennia', 'cycleSpentMinor': 500000, 'state': 'unset'},
+          ],
+        }),
+        onOpenCard: (_) {},
+        onOpenAccount: (id) => opened = id,
+        onEditAccount: (id) => edited = id,
+        onManage: () {},
+      )));
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('₹5,000 spent this cycle'), findsOneWidget);
+      await tester.tap(find.text('Set a credit limit'));
+      expect(edited, 'bare');
+      expect(opened, isNull);
+    });
+
+    testWidgets('a card near its credit line says so in colour, with no limit of its own', (tester) async {
+      _phone(tester);
+      await tester.pumpWidget(_wrap(WalletSection(
+        money: MoneyOnHand(),
+        wallet: Wallet.fromJson({
+          'cards': [
+            {'accountId': 'k1', 'name': 'Regalia', 'creditLimitMinor': 10000000, 'usedMinor': 9500000, 'state': 'unset'},
+          ],
+        }),
+        onOpenCard: (_) {},
+        onOpenAccount: (_) {},
+        onManage: () {},
+      )));
+
+      expect(find.text('Set a credit limit'), findsNothing);
+      final line = tester.widget<Text>(find.text('₹95,000 of ₹1,00,000 credit used · ₹5,000 free'));
+      final context = tester.element(find.byType(WalletSection));
+      expect(line.style?.color, context.c.debit);
     });
 
     for (final brightness in Brightness.values) {

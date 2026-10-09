@@ -250,9 +250,9 @@ class Transaction {
   /// until it is no longer waiting.
   final bool isEarmarked;
 
-  /// On a DEBIT, a one-off: out of the ordinary, and still counted against
-  /// the monthly budget like everything else. On a CREDIT: keep this money
-  /// out of the savings bucket.
+  /// On a CREDIT: keep this money out of the savings bucket. Means nothing
+  /// on a DEBIT any more - every payment counts against the monthly budget,
+  /// one-offs included - so the app never sets it on one.
   final bool isSpecial;
 
   /// Marked by hand: the credit that opens a spending period.
@@ -730,59 +730,26 @@ List<Category> categoriesFor(List<Category> categories, String type) {
   return categories.where((category) => category.direction != refused).toList();
 }
 
-/// How fast money is going out against how fast it can. A pace, not a
-/// judgement about whether a bill can be paid — SpendLog has never known
-/// an account balance.
-class BudgetPace {
+/// The fixed costs this month - rent, EMIs, SIPs - ticked off as they go
+/// out. Everything else the old salary pace said is now the monthly
+/// budget's to say; these still count against that budget like anything
+/// else, and the list is what the dashboard's tick boxes are drawn from.
+class FixedCosts {
+  /// Whether a salary is set, which is what the server needs to know which
+  /// month the ticks belong to.
   final bool configured;
-  final int daysLeft;
-  final int salaryMinor;
+
+  /// What is still to go out this month across them.
   final int commitmentsRemainingMinor;
-  final int spentMinor;
-  final int remainingMinor;
-  final int perDayMinor;
-  final int recentPerDayMinor;
-  /// "ok" | "watch" | "over"
-  final String state;
-
-  /// Whether salaryMinor is what actually landed, or the figure from the
-  /// profile. Worth saying out loud: the two differ in any month with
-  /// leave taken in it.
-  final bool salaryIsActual;
-
-  /// Set when a fixed cost went out for less than its usual amount.
-  final String? shortfallNote;
   final List<FixedCommitment> commitments;
 
-  BudgetPace({
-    required this.configured,
-    this.daysLeft = 0,
-    this.salaryMinor = 0,
-    this.commitmentsRemainingMinor = 0,
-    this.spentMinor = 0,
-    this.remainingMinor = 0,
-    this.perDayMinor = 0,
-    this.recentPerDayMinor = 0,
-    this.state = 'ok',
-    this.salaryIsActual = false,
-    this.shortfallNote,
-    this.commitments = const [],
-  });
+  const FixedCosts({required this.configured, this.commitmentsRemainingMinor = 0, this.commitments = const []});
 
-  factory BudgetPace.fromJson(Map<String, dynamic> json) {
-    if (json['configured'] != true) return BudgetPace(configured: false);
-    return BudgetPace(
+  factory FixedCosts.fromJson(Map<String, dynamic> json) {
+    if (json['configured'] != true) return const FixedCosts(configured: false);
+    return FixedCosts(
       configured: true,
-      daysLeft: json['daysLeft'] as int? ?? 0,
-      salaryMinor: json['salaryMinor'] as int? ?? 0,
       commitmentsRemainingMinor: json['commitmentsRemainingMinor'] as int? ?? 0,
-      spentMinor: json['spentMinor'] as int? ?? 0,
-      remainingMinor: json['remainingMinor'] as int? ?? 0,
-      perDayMinor: json['perDayMinor'] as int? ?? 0,
-      recentPerDayMinor: json['recentPerDayMinor'] as int? ?? 0,
-      state: json['state'] as String? ?? 'ok',
-      salaryIsActual: json['salaryIsActual'] as bool? ?? false,
-      shortfallNote: json['shortfallNote'] as String?,
       commitments: (json['commitments'] as List<dynamic>? ?? [])
           .map((c) => FixedCommitment.fromJson(c as Map<String, dynamic>))
           .toList(),
@@ -1425,7 +1392,9 @@ class UpcomingBill {
 
 /// Everything the landing screen needs, in one request.
 class DashboardData {
-  final BudgetPace pace;
+  /// The fixed costs and which have gone out, for the tick list. Sent as
+  /// `pace`, from when it came with the salary pace.
+  final FixedCosts fixedCosts;
 
   /// The month against its budget: spent, left, the pace, the category
   /// limits and the savings bucket.
@@ -1465,7 +1434,7 @@ class DashboardData {
   final List<PocketStatus> pocketMoney;
 
   DashboardData({
-    required this.pace,
+    required this.fixedCosts,
     MonthlyBudgetStatus? budget,
     Wallet? wallet,
     required this.cards,
@@ -1500,7 +1469,7 @@ class DashboardData {
     final statements = json['statements'] as Map<String, dynamic>? ?? {};
 
     return DashboardData(
-      pace: BudgetPace.fromJson(json['pace'] as Map<String, dynamic>? ?? {}),
+      fixedCosts: FixedCosts.fromJson(json['pace'] as Map<String, dynamic>? ?? {}),
       budget: MonthlyBudgetStatus.fromJson(json['budget'] as Map<String, dynamic>? ?? {}),
       wallet: Wallet.fromJson(json['wallet'] as Map<String, dynamic>?),
       cards: (json['cards'] as List<dynamic>? ?? [])

@@ -2,6 +2,15 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../theme.dart';
 import '../utils/format.dart';
+import 'home/monthly_budget_card.dart';
+
+/// The pace the strip can warn about: the monthly budget's, and only for
+/// the month running now. A month that is over has no pace left to keep
+/// to - its bar says how it went - and with no budget there is no pace.
+MonthPace? currentMonthPace(MonthlyBudgetStatus? budget) {
+  if (budget == null || !budget.configured || !budget.month.isCurrent) return null;
+  return budget.pace;
+}
 
 /// Anything that needs saying before the next payment rather than after it.
 ///
@@ -13,14 +22,18 @@ import '../utils/format.dart';
 /// screen stops being read, and then so does the real one.
 class CardStrip extends StatelessWidget {
   final List<CardStatus> cards;
-  final BudgetPace? pace;
+
+  /// The monthly budget's pace, for the month running now - the same pace,
+  /// in the same words, as the budget card on Home. Null for a past month
+  /// or with no budget set, and then there is nothing to warn about.
+  final MonthPace? pace;
 
   const CardStrip({super.key, required this.cards, this.pace});
 
   @override
   Widget build(BuildContext context) {
     final warnings = cards.where((c) => c.state == 'over' || c.state == 'close').toList();
-    final paceWarning = (pace?.configured ?? false) && pace!.state != 'ok' ? pace : null;
+    final paceWarning = pace != null && (pace!.isHigh || pace!.isOver) ? pace : null;
 
     if (warnings.isEmpty && paceWarning == null) {
       return const SizedBox.shrink();
@@ -43,14 +56,9 @@ class CardStrip extends StatelessWidget {
             ),
           if (paceWarning != null)
             _Row(
-              state: paceWarning.state == 'over' ? 'over' : 'close',
+              state: paceWarning.isOver ? 'over' : 'close',
               icon: Icons.trending_up,
-              text: paceWarning.state == 'over'
-                  ? "Past this period's salary by "
-                      '${formatMoney(-paceWarning.remainingMinor)}.'
-                  : '${formatMoney(paceWarning.perDayMinor)} a day left over '
-                      '${paceWarning.daysLeft} days — lately it has been '
-                      '${formatMoney(paceWarning.recentPerDayMinor)}.',
+              text: paceMessage(paceWarning),
             ),
         ],
       ),

@@ -287,8 +287,8 @@ class _MonthlyBudgetScreenState extends State<MonthlyBudgetScreen> {
         ),
         const SizedBox(height: 10),
         Text(
-          'Everything counts against this - rent, EMIs, SIPs and the day to day. Whatever is left when the '
-          'month ends goes into your savings bucket.',
+          'Everything counts against this - rent, EMIs, SIPs, one-off buys and the day to day. Whatever is '
+          'left when the month ends goes into your savings bucket.',
           style: TextStyle(fontSize: 12.5, height: 1.5, color: c.ink70),
         ),
         const SizedBox(height: 4),

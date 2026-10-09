@@ -20,11 +20,15 @@ import 'transactions_screen.dart';
 /// stands this cycle, when it bills, its stored details, and its
 /// statements.
 class AccountsScreen extends StatefulWidget {
-  const AccountsScreen({super.key, this.initialAccountId});
+  const AccountsScreen({super.key, this.initialAccountId, this.editOnOpen = false});
 
   /// The account to open on, when arriving from its face on Home - to add
   /// its card details, say - rather than on the first chip.
   final String? initialAccountId;
+
+  /// Straight into [initialAccountId]'s editor once it has loaded - to set
+  /// a card's credit limit from its face, say.
+  final bool editOnOpen;
 
   @override
   State<AccountsScreen> createState() => _AccountsScreenState();
@@ -121,6 +125,7 @@ class _Overview {
 class _AccountsScreenState extends State<AccountsScreen> {
   List<_Overview>? _accounts;
   late String? _selectedId = widget.initialAccountId;
+  late bool _editPending = widget.editOnOpen && widget.initialAccountId != null;
   bool _error = false;
   int _unfiled = 0;
   bool _reading = false;
@@ -160,6 +165,13 @@ class _AccountsScreenState extends State<AccountsScreen> {
           _selectedId = _accounts!.isEmpty ? null : _accounts!.first.account.id;
         }
       });
+
+      // Once only: the editor asked for on the way in, not after every reload.
+      if (_editPending) {
+        _editPending = false;
+        final wanted = _accounts!.where((row) => row.account.id == widget.initialAccountId);
+        if (wanted.isNotEmpty) await _open(account: wanted.first.account);
+      }
     } catch (_) {
       if (mounted) setState(() => _error = true);
     }

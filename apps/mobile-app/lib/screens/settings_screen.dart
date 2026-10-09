@@ -957,8 +957,9 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
   }
 
   /// What is already spoken for each month: pay in, and the fixed payments
-  /// out. Together these are what the dashboard paces a month against, and
-  /// they used to sit in the same drawer as the sign-out button.
+  /// out. The pay day sets where a month starts, and the fixed payments
+  /// count against the monthly budget; they used to sit in the same drawer
+  /// as the sign-out button.
   List<Widget> _budgetTab() => [
         _SettingsCard(
           icon: Icons.account_balance_wallet_outlined,
@@ -967,9 +968,9 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
               ? '${formatMoney(_salaryMinor!)} on the ${_salaryDay}th'
               : 'Not set',
           child: _CardBody(
-            text: 'With these, the dashboard can say how much a day is left before the next one '
-                'arrives. It is a pace, not a balance — SpendLog reads messages about transactions '
-                'and has never known what is actually in an account.',
+            text: 'The pay day sets where your month starts, so the monthly budget runs pay day to pay '
+                'day. Fixed costs - rent, EMIs, SIPs - count against that budget like everything else, '
+                'and the dashboard ticks them off as they go out.',
             actions: [
               OutlinedButton(onPressed: _editSalary, child: const Text('Set salary')),
               OutlinedButton(onPressed: () => _editCommitment(), child: const Text('Add a fixed cost')),
@@ -1030,7 +1031,8 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
                     ),
                   ),
                 Text(
-                  'Tick one off on the dashboard when it has actually gone out.',
+                  'Each one counts against your monthly budget. Tick one off on the dashboard when it has '
+                  'actually gone out.',
                   style: TextStyle(fontSize: 11.5, height: 1.45, color: context.c.mutedLight),
                 ),
               ],
@@ -1457,8 +1459,8 @@ class _ToggleRow extends StatelessWidget {
 
 /// What lands each month and when.
 ///
-/// Two numbers rather than a whole profile screen, because they are the
-/// only two the pace arithmetic needs.
+/// Two numbers rather than a whole profile screen, because they are all
+/// it takes to know where a month starts.
 class _SalaryDialog extends StatefulWidget {
   final int? amountMinor;
   final int? day;

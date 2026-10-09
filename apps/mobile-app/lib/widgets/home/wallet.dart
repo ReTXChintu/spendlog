@@ -21,6 +21,7 @@ class WalletSection extends StatelessWidget {
     required this.wallet,
     required this.onOpenCard,
     required this.onOpenAccount,
+    this.onEditAccount,
     required this.onManage,
   });
 
@@ -32,6 +33,10 @@ class WalletSection extends StatelessWidget {
 
   /// An account's own page - its balance, its stored details.
   final void Function(String accountId) onOpenAccount;
+
+  /// An account's editor - for a card with no limit of either kind, to
+  /// set one. Its page instead when not given.
+  final void Function(String accountId)? onEditAccount;
 
   /// Every account, for adding one.
   final VoidCallback onManage;
@@ -102,7 +107,12 @@ class WalletSection extends StatelessWidget {
         ],
         if (wallet.cards.isNotEmpty) ...[
           const SizedBox(height: 14),
-          CardPager(cards: wallet.cards, onOpenCard: onOpenCard, onAddDetails: onOpenAccount),
+          CardPager(
+            cards: wallet.cards,
+            onOpenCard: onOpenCard,
+            onAddDetails: onOpenAccount,
+            onSetLimit: onEditAccount ?? onOpenAccount,
+          ),
         ],
         if (wallet.banks.isNotEmpty) ...[
           const SizedBox(height: 14),
@@ -124,11 +134,21 @@ class WalletSection extends StatelessWidget {
 
 /// The credit cards, one face at a time, swiped sideways.
 class CardPager extends StatefulWidget {
-  const CardPager({super.key, required this.cards, required this.onOpenCard, required this.onAddDetails});
+  const CardPager({
+    super.key,
+    required this.cards,
+    required this.onOpenCard,
+    required this.onAddDetails,
+    this.onSetLimit,
+  });
 
   final List<CardFace> cards;
   final void Function(CardFace card) onOpenCard;
   final void Function(String accountId) onAddDetails;
+
+  /// Where a card with no limit of either kind gets one. The account's
+  /// page, like [onAddDetails], when not given.
+  final void Function(String accountId)? onSetLimit;
 
   @override
   State<CardPager> createState() => _CardPagerState();
@@ -201,7 +221,10 @@ class _CardPagerState extends State<CardPager> {
                         onAddDetails: () => widget.onAddDetails(card.accountId),
                       ),
                       const SizedBox(height: 10),
-                      _CardCaption(card: card),
+                      _CardCaption(
+                        card: card,
+                        onSetLimit: () => (widget.onSetLimit ?? widget.onAddDetails)(card.accountId),
+                      ),
                     ],
                   ),
                 );
@@ -233,14 +256,17 @@ class _CardPagerState extends State<CardPager> {
   }
 }
 
-/// The bank's limit in words, under the face.
+/// The bank's limit in words, under the face. With no limit of either kind
+/// it is only the cycle's spend: the caption offers to set one after it.
 String cardLimitLine(CardFace card) {
   final limit = card.creditLimitMinor;
   if (limit == null || limit <= 0) {
-    return '${formatMoneyShort(card.cycleSpentMinor)} spent this cycle · no credit limit set';
+    final spent = '${formatMoneyShort(card.cycleSpentMinor)} spent this cycle';
+    return cardBar(card).basis == CardBarBasis.none ? spent : '$spent · no credit limit set';
   }
-  final available = card.availableMinor ?? limit - card.usedMinor;
-  return '${formatMoneyShort(card.usedMinor)} used of ${formatMoneyShort(limit)} · '
+  final used = creditUsedMinor(card);
+  final available = card.availableMinor ?? limit - used;
+  return '${formatMoneyShort(used)} of ${formatMoneyShort(limit)} credit used · '
       '${formatMoneyShort(available)} free';
 }
 
@@ -264,32 +290,68 @@ String? cardSecondLine(CardFace card) {
   return null;
 }
 
+/// Two lines under a face. The line that matches the bar is the one
+/// coloured with it: your own limit's line when the bar measures that, the
+/// credit line's when it measures the bank's limit.
 class _CardCaption extends StatelessWidget {
-  const _CardCaption({required this.card});
+  const _CardCaption({required this.card, required this.onSetLimit});
 
   final CardFace card;
+
+  /// The card's account, to put a limit on it.
+  final VoidCallback onSetLimit;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
     final second = cardSecondLine(card);
-    final tint = switch (card.state) {
+    final bar = cardBar(card);
+    final warning = bar.state == 'over' || bar.state == 'close';
+    final tint = switch (bar.state) {
       'over' => c.debit,
       'close' => c.warn,
-      _ => c.muted,
+      _ => null,
     };
+    final onCredit = bar.basis == CardBarBasis.creditLimit;
+    final onOwn = bar.basis == CardBarBasis.ownLimit;
+
+    final first = Text(
+      cardLimitLine(card),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: kNum.copyWith(
+        fontSize: 12,
+        fontWeight: onCredit && warning ? FontWeight.w700 : FontWeight.w600,
+        color: (onCredit ? tint : null) ?? c.ink70,
+      ),
+    );
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            cardLimitLine(card),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: kNum.copyWith(fontSize: 12, fontWeight: FontWeight.w600, color: c.ink70),
-          ),
+          if (bar.basis == CardBarBasis.none)
+            Row(
+              children: [
+                Flexible(child: first),
+                Text(' · ', style: TextStyle(fontSize: 12, color: c.muted)),
+                Semantics(
+                  button: true,
+                  child: InkWell(
+                    onTap: onSetLimit,
+                    borderRadius: BorderRadius.circular(4),
+                    child: Text(
+                      'Set a credit limit',
+                      maxLines: 1,
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: c.brandDark),
+                    ),
+                  ),
+                ),
+              ],
+            )
+          else
+            first,
           if (second != null)
             Text(
               second,
@@ -297,8 +359,8 @@ class _CardCaption extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 11.5,
-                fontWeight: card.state == 'over' || card.state == 'close' ? FontWeight.w700 : FontWeight.w500,
-                color: tint,
+                fontWeight: onOwn && warning ? FontWeight.w700 : FontWeight.w500,
+                color: (onOwn ? tint : null) ?? c.muted,
               ),
             ),
         ],

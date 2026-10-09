@@ -24,8 +24,8 @@ bool looksLikeRawPayee(String merchant) {
 
 /// What the transaction is, beyond which way the money went. Exactly one
 /// at a time: each one changes what the money counts as, and two of them
-/// at once would contradict each other. Fixed cost, one-off and "keep out
-/// of savings" layer on top of any of these, so they are toggles instead.
+/// at once would contradict each other. Fixed cost and "keep out of
+/// savings" layer on top of any of these, so they are toggles instead.
 enum _Kind { normal, split, transfer, cardBill, loan, settlement, salary, refund, earmark }
 
 /// One person on a transaction, with their part as it is being typed.
@@ -103,9 +103,10 @@ class _EditSheetState extends State<_EditSheet> {
   String? _transferAccountId;
   late DateTime _occurredAt;
 
-  /// DEBIT: a one-off, still counted against the monthly budget. CREDIT:
-  /// kept out of the savings bucket. Same field on the server, read by
-  /// direction.
+  /// CREDIT only: kept out of the savings bucket. On a DEBIT it no longer
+  /// means anything - every payment counts against the monthly budget - so
+  /// it is never offered there and always saved as false, which also clears
+  /// one left over from when payments had a one-off toggle.
   late bool _isSpecial;
   late bool _isFixed;
   String? _cardPaymentFor;
@@ -436,8 +437,8 @@ class _EditSheetState extends State<_EditSheet> {
           (type == 'DEBIT' && creditOnly.contains(_kind))) {
         _kind = _Kind.normal;
       }
-      // One-off and "keep out of savings" are the same field meaning
-      // different things, so neither carries across.
+      // "Keep out of savings" is for money in only, so it never carries
+      // across to a payment.
       _isSpecial = false;
       _isFixed = false;
       _tripJustMine = type == 'DEBIT' && _tripJustMine;
@@ -779,7 +780,7 @@ class _EditSheetState extends State<_EditSheet> {
     // call straight after, or a card bill added by hand would quietly
     // forget which card it paid.
     final editOnly = <String, dynamic>{
-      'isSpecial': _isSpecial,
+      'isSpecial': !_isDebit && _isSpecial,
       'isSalary': !_isDebit && _kind == _Kind.salary,
       'cardPaymentFor': _isDebit && _kind == _Kind.cardBill ? _cardPaymentFor : null,
       'commitmentId': _isDebit && _isFixed ? _commitmentId : null,
@@ -1375,23 +1376,24 @@ class _EditSheetState extends State<_EditSheet> {
           ),
         ),
         // These sit on top of whatever kind it is - rent can be split and
-        // a fixed cost; a laptop can be a one-off on a card bill month.
-        const SizedBox(height: 6),
-        Wrap(
-          spacing: 6,
-          runSpacing: 4,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            Text('Also:', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: c.mutedLight)),
-            if (_isDebit && hasCommitments)
-              toggle('Fixed cost', Icons.event_repeat, _isFixed, (on) => setState(() => _isFixed = on)),
-            if (_isDebit)
-              toggle('One-off', Icons.star_outline, _isSpecial, (on) => setState(() => _isSpecial = on)),
-            if (!_isDebit)
-              toggle('Keep out of savings bucket', Icons.savings_outlined, _isSpecial,
-                  (on) => setState(() => _isSpecial = on)),
-          ],
-        ),
+        // a fixed cost. A payment has no one-off toggle: one-offs count
+        // against the monthly budget like everything else.
+        if (!_isDebit || hasCommitments) ...[
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text('Also:', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: c.mutedLight)),
+              if (_isDebit)
+                toggle('Fixed cost', Icons.event_repeat, _isFixed, (on) => setState(() => _isFixed = on))
+              else
+                toggle('Keep out of savings bucket', Icons.savings_outlined, _isSpecial,
+                    (on) => setState(() => _isSpecial = on)),
+            ],
+          ),
+        ],
       ],
     );
   }
@@ -1418,11 +1420,6 @@ class _EditSheetState extends State<_EditSheet> {
     final parts = <Widget>[
       if (main != null) main,
       if (_isDebit && _isFixed) _fixedPanel(),
-      if (_isDebit && _isSpecial)
-        const _Hint(
-          'One-off: marked as out of the ordinary. It still counts against your monthly budget, like '
-          'everything else.',
-        ),
       if (!_isDebit && _isSpecial)
         const _Hint("Kept out of your savings bucket - it won't be counted towards what you save."),
     ];
@@ -1731,8 +1728,8 @@ class _EditSheetState extends State<_EditSheet> {
           onChanged: _pickCommitment,
         ),
         const SizedBox(height: 6),
-        const _Hint('Still counts as spending. Sending less than usual is fine - the dashboard says what '
-            'went short rather than calling it unpaid.'),
+        const _Hint('Still counts as spending, against your monthly budget like everything else. Sending '
+            'less than usual is fine - the dashboard says what went short rather than calling it unpaid.'),
       ],
     );
   }
