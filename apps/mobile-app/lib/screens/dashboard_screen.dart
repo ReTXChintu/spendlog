@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../models/fund_models.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
@@ -9,6 +10,7 @@ import '../widgets/card_picker.dart';
 import '../widgets/commitment_amount.dart';
 import '../widgets/home/earmarks_tile.dart';
 import '../widgets/home/home_grid.dart';
+import '../widgets/home/investments_tile.dart';
 import '../widgets/home/monthly_budget_card.dart';
 import '../widgets/home/plan_warnings.dart';
 import '../widgets/home/wallet.dart';
@@ -16,6 +18,7 @@ import '../widgets/loan_dialog.dart';
 import '../widgets/pocket_money.dart';
 import '../widgets/state_block.dart';
 import 'accounts_screen.dart';
+import 'investments/investments_screen.dart';
 import 'monthly_budget_screen.dart';
 import 'people_screen.dart';
 import 'perks_screen.dart';
@@ -39,7 +42,16 @@ class DashboardScreen extends StatefulWidget {
   /// Opens the savings plan on the Analytics tab, from a plan warning.
   final VoidCallback? onOpenPlan;
 
-  const DashboardScreen({super.key, this.onOpenTransactions, this.onOpenSettings, this.onOpenPlan});
+  /// Settings, at the assistant's card - from Investments' advice tab.
+  final VoidCallback? onOpenAiSettings;
+
+  const DashboardScreen({
+    super.key,
+    this.onOpenTransactions,
+    this.onOpenSettings,
+    this.onOpenPlan,
+    this.onOpenAiSettings,
+  });
 
   @override
   State<DashboardScreen> createState() => DashboardScreenState();
@@ -53,6 +65,11 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
   /// on this screen, and a slow or failed answer should cost that tile and
   /// nothing else.
   ContactBalance? _people;
+
+  /// The mutual fund portfolio, also fetched on its own: NAVs come from a
+  /// third party, and a slow answer should cost the investments tile only.
+  FundPortfolio? _funds;
+  bool _fundsFailed = false;
 
   // Kept alive so swiping to Analytics and back does not refetch and lose
   // the scroll position.
@@ -80,6 +97,7 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
       // to refresh. Nothing waits on it.
       unawaited(ReminderService.instance.updateFollowUps(data.needsCategoryYesterday));
       unawaited(_loadPeople());
+      unawaited(_loadFunds());
     } catch (_) {
       if (mounted) setState(() => _failed = true);
     }
@@ -92,6 +110,27 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
     } catch (_) {
       // The tile falls back to the split-bill total from the dashboard.
     }
+  }
+
+  Future<void> _loadFunds() async {
+    try {
+      final json = await ApiClient.instance.get('/funds/portfolio') as Map<String, dynamic>;
+      if (mounted) {
+        setState(() {
+          _funds = FundPortfolio.fromJson(json);
+          _fundsFailed = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _fundsFailed = true);
+    }
+  }
+
+  Future<void> _openInvestments() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => InvestmentsScreen(onOpenAiSettings: widget.onOpenAiSettings)),
+    );
+    await _loadFunds();
   }
 
   Future<void> _openPeople() async {
@@ -207,6 +246,11 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
             onEditAccount: _editAccount,
             onManage: _openAccounts,
           ),
+
+          // What the money set aside is doing: the portfolio today, or the
+          // way to start tracking one.
+          const _Group('Investments'),
+          InvestmentsTile(portfolio: _funds, failed: _fundsFailed, onTap: _openInvestments),
 
           // Then two groups, in the order the questions come. Today: which
           // card and what is set aside. This month: how the rest of it is

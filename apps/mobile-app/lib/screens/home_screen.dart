@@ -75,6 +75,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 onOpenTransactions: widget.onOpenTransactions,
                 onOpenSettings: widget.onOpenSettings,
                 onOpenPlan: _openPlan,
+                onOpenAiSettings: widget.onOpenAiSettings,
               ),
               AnalyticsScreen(key: _analytics, onOpenSettings: widget.onOpenAiSettings),
             ],

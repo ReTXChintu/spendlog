@@ -101,12 +101,28 @@ class ApiClient {
       String message = res.reasonPhrase ?? 'Request failed';
       try {
         final body = jsonDecode(res.body);
-        message = body['error']?.toString() ?? message;
+        final error = body['error'];
+        message = (error is Map ? _validationMessage(error) : error?.toString()) ?? message;
       } catch (_) {}
       throw ApiException(res.statusCode, message);
     }
     if (res.body.isEmpty) return null;
     return jsonDecode(res.body);
+  }
+
+  /// The first sentence out of a rejected body's `{formErrors, fieldErrors}`
+  /// (zod's flattened shape), rather than the map printed as text.
+  static String? _validationMessage(Map error) {
+    final form = error['formErrors'];
+    if (form is List && form.isNotEmpty) return form.first.toString();
+    final fields = error['fieldErrors'];
+    if (fields is Map) {
+      for (final entry in fields.entries) {
+        final messages = entry.value;
+        if (messages is List && messages.isNotEmpty) return '${entry.key}: ${messages.first}';
+      }
+    }
+    return null;
   }
 
   Future<dynamic> get(String path) async {
