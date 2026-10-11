@@ -1841,3 +1841,32 @@ const savingsPlanSchema = new Schema<SavingsPlanDoc>(
 );
 
 export const SavingsPlan = model<SavingsPlanDoc>("SavingsPlan", savingsPlanSchema);
+
+/**
+ * The last IPO calendar fetched from IPO Guru, shared by every user.
+ *
+ * One document. Kept in the database rather than in memory because the
+ * free key allows ten calls a day, and a PM2 restart that forgot the last
+ * fetch would spend another one. Rows are stored as the server already
+ * shaped them (ipos.guru.ts), so nothing here knows IPO Guru's format.
+ */
+export interface IpoCacheDoc {
+  _id: Types.ObjectId;
+  key: string;
+  rows: unknown[];
+  /// When rows were last fetched successfully. Null before the first.
+  fetchedAt: Date | null;
+  /// The friendly message from the last failed fetch, cleared by a success.
+  lastError: string | null;
+  lastErrorAt: Date | null;
+}
+
+const ipoCacheSchema = new Schema<IpoCacheDoc>({
+  key: { type: String, required: true, unique: true },
+  rows: { type: [Schema.Types.Mixed], default: [] },
+  fetchedAt: { type: Date, default: null },
+  lastError: { type: String, default: null },
+  lastErrorAt: { type: Date, default: null },
+});
+
+export const IpoCache = model<IpoCacheDoc>("IpoCache", ipoCacheSchema);

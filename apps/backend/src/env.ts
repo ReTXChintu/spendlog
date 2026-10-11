@@ -51,4 +51,8 @@ export const env = {
   // Generous on purpose. A 3B model on CPU cores takes tens of seconds,
   // and the first request after a restart also loads the weights.
   visionTimeoutMs: Number(process.env.VISION_TIMEOUT_MS ?? 180_000),
+
+  // IPO Guru's API key, for the IPO calendar and grey market premium.
+  // Empty hides the IPOs screen rather than showing one that can't load.
+  ipoApiKey: process.env.IPO_API_KEY ?? "",
 };
