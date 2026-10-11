@@ -1,11 +1,13 @@
 import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
+import '../services/api_client.dart';
 import '../services/push_service.dart';
 import '../services/sms_service.dart';
 import '../theme.dart';
 import 'ask_screen.dart';
 import 'dashboard_screen.dart';
 import 'home_screen.dart';
+import 'ipos_screen.dart';
 import 'settings_screen.dart';
 import 'transactions_screen.dart';
 import 'trips_screen.dart';
@@ -31,6 +33,10 @@ class _HomeShellState extends State<HomeShell> {
   // So the Ask screen can send somebody straight to the assistant's card.
   final _settings = GlobalKey<SettingsScreenState>();
 
+  // Whether the server can show IPOs (it has an IPO Guru key). Asked once
+  // per start; until it says yes, the button stays hidden.
+  bool _iposAvailable = false;
+
   @override
   void initState() {
     super.initState();
@@ -38,6 +44,26 @@ class _HomeShellState extends State<HomeShell> {
     // Here rather than at sign-in: this screen opens for the owner both on
     // launch and right after signing in, and never for a kid.
     PushService.instance.registerIfOwner();
+    _checkIpos();
+  }
+
+  /// One call, and the server answers it from its cache. Any failure leaves
+  /// the button hidden until the next start.
+  Future<void> _checkIpos() async {
+    // A kid never reaches this shell, and the server refuses a kid's token
+    // here anyway; this just makes sure a kid's phone never asks.
+    if (await ApiClient.isKidSession()) return;
+    try {
+      final json = await ApiClient.instance.get('/ipos');
+      final available = json is Map && json['available'] == true;
+      if (available && mounted) setState(() => _iposAvailable = true);
+    } catch (_) {
+      // Hidden it stays.
+    }
+  }
+
+  Future<void> _openIpos() async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const IposScreen()));
   }
 
   /// The plugin only delivers a foreground SMS to a channel registered in
@@ -99,6 +125,12 @@ class _HomeShellState extends State<HomeShell> {
           ],
         ),
         actions: [
+          if (_index == 0 && _iposAvailable)
+            IconButton(
+              tooltip: 'IPOs',
+              onPressed: _openIpos,
+              icon: Icon(Icons.show_chart, color: context.c.brand),
+            ),
           if (_index == 0)
             Padding(
               padding: const EdgeInsets.only(right: 8),
