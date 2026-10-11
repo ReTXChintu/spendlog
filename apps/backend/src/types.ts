@@ -67,6 +67,14 @@ export type LoanInstalmentStatus = (typeof LOAN_INSTALMENT_STATUSES)[number];
 export const COMMITMENT_KINDS = ["RENT", "SIP", "INSURANCE", "LOAN", "OTHER"] as const;
 export type CommitmentKind = (typeof COMMITMENT_KINDS)[number];
 
+// Every line in a mutual fund holding's history. OPENING and
+// SIP_SCHEDULED are worked out from the holding itself and never stored;
+// the rest are things the user told us happened.
+export const FUND_TXN_KINDS = ["OPENING", "SIP_SCHEDULED", "LINKED", "MANUAL_BUY", "REDEEM"] as const;
+export type FundTxnKind = (typeof FUND_TXN_KINDS)[number];
+export const STORED_FUND_TXN_KINDS = ["LINKED", "MANUAL_BUY", "REDEEM"] as const;
+export type StoredFundTxnKind = (typeof STORED_FUND_TXN_KINDS)[number];
+
 // What a row on a credit card statement actually is. Only SPEND and FEE
 // may ever become a transaction; the rest exist so that the ones that must
 // not be added have somewhere to be put. See modules/statements/classify.ts.

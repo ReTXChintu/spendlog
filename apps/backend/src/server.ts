@@ -8,9 +8,15 @@ import { env } from "./env";
 import { runLendingBackfill } from "./modules/contacts/contacts.backfill";
 import { runSpendLimitBackfill } from "./modules/accounts/accounts.backfill";
 import { runCardBillAccountBackfill, runCardBillBackfill } from "./modules/cards/cards.billPayment.service";
+import { runDailyFundRefresh } from "./modules/funds/funds.cache";
 import { syncAllConnectedEmails } from "./modules/ingestion/gmail.service";
 
 const EMAIL_SYNC_INTERVAL_MS = 15 * 60 * 1000;
+
+// How often the daily fund refresh asks whether it is due. The guard in
+// Mongo (funds.cache.ts) makes it once a day, after NAVs are published,
+// however often it asks and however often the process restarts.
+const FUND_REFRESH_CHECK_MS = 30 * 60 * 1000;
 
 // Shared with the frontend's static server, which is plain JS outside this
 // TypeScript project — hence the runtime require rather than an import.
@@ -78,6 +84,13 @@ async function start() {
   setInterval(() => {
     syncAllConnectedEmails().catch((err) => console.error("Background Gmail sync failed:", err));
   }, EMAIL_SYNC_INTERVAL_MS);
+
+  // Mutual fund NAVs: at start-up when last night's are missing, then
+  // every half hour until tonight's are in.
+  const refreshFunds = () =>
+    runDailyFundRefresh().catch((err) => console.error("Daily fund refresh failed:", err));
+  refreshFunds();
+  setInterval(refreshFunds, FUND_REFRESH_CHECK_MS);
 }
 
 start().catch((err) => {

@@ -15,6 +15,7 @@ import {
   STATEMENT_LINE_KINDS,
   STATEMENT_LINE_RESOLUTIONS,
   STATEMENT_STATUSES,
+  STORED_FUND_TXN_KINDS,
   TRANSACTION_SOURCES,
   TRANSACTION_TYPES,
   AccountType,
@@ -32,6 +33,7 @@ import {
   StatementLineKind,
   StatementLineResolution,
   StatementStatus,
+  StoredFundTxnKind,
   TransactionSource,
   TransactionType,
 } from "../types";
@@ -1870,3 +1872,271 @@ const ipoCacheSchema = new Schema<IpoCacheDoc>({
 });
 
 export const IpoCache = model<IpoCacheDoc>("IpoCache", ipoCacheSchema);
+
+/** A monthly SIP as the user set it up with the fund house. */
+export interface FundSip {
+  amountMinor: number;
+  dayOfMonth: number;
+  /// YYYY-MM-DD, IST. The first instalment is the first SIP day on or after it.
+  startOn: string;
+  /// The last day an instalment can fall on, when it has stopped or will.
+  endOn?: string | null;
+  active: boolean;
+}
+
+/**
+ * What the user's app or statement said they held on a day: everything up
+ * to and including that day, in one figure. Instalments on or before it
+ * are inside it and never added again.
+ */
+export interface FundOpening {
+  units: number;
+  investedMinor: number;
+  asOf: string;
+  /// When they started investing, if they know. Only used to place the
+  /// invested amount in time for XIRR; see funds.math.ts.
+  firstOn?: string | null;
+}
+
+/**
+ * One mutual fund scheme the user holds, in one folio.
+ *
+ * Units are never stored here. They are worked out on every read from the
+ * opening snapshot, the SIP schedule and the linked debits (funds.math.ts),
+ * so changing a SIP's start date or linking a debit can't leave a stale
+ * total behind.
+ */
+export interface FundHoldingDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  /// AMFI's scheme code, the key mfapi.in and NAVAll.txt both use.
+  schemeCode: number;
+  schemeName: string;
+  fundHouse: string;
+  /// AMFI's own wording, e.g. "Equity Scheme - Flexi Cap Fund".
+  category: string;
+  isDirect: boolean;
+  isGrowth: boolean;
+  folio?: string | null;
+  sip?: FundSip | null;
+  opening?: FundOpening | null;
+  /// A fixed commitment of kind SIP whose matched debits count as this
+  /// holding's instalments - connected by the user, never guessed.
+  commitmentId?: Types.ObjectId | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const fundSipSchema = new Schema<FundSip>(
+  {
+    amountMinor: { type: Number, required: true, min: 1 },
+    dayOfMonth: { type: Number, required: true, min: 1, max: 31 },
+    startOn: { type: String, required: true },
+    endOn: { type: String, default: null },
+    active: { type: Boolean, default: true },
+  },
+  { _id: false }
+);
+
+const fundOpeningSchema = new Schema<FundOpening>(
+  {
+    units: { type: Number, required: true, min: 0 },
+    investedMinor: { type: Number, required: true, min: 0 },
+    asOf: { type: String, required: true },
+    firstOn: { type: String, default: null },
+  },
+  { _id: false }
+);
+
+const fundHoldingSchema = new Schema<FundHoldingDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    schemeCode: { type: Number, required: true },
+    schemeName: { type: String, required: true },
+    fundHouse: { type: String, default: "" },
+    category: { type: String, default: "" },
+    isDirect: { type: Boolean, default: false },
+    isGrowth: { type: Boolean, default: true },
+    folio: { type: String, default: null, trim: true },
+    sip: { type: fundSipSchema, default: null },
+    opening: { type: fundOpeningSchema, default: null },
+    commitmentId: { type: Schema.Types.ObjectId, ref: "FixedCommitment", default: null },
+  },
+  { timestamps: true, ...serialization }
+);
+fundHoldingSchema.index({ userId: 1, schemeCode: 1, folio: 1 }, { unique: true });
+
+export const FundHolding = model<FundHoldingDoc>("FundHolding", fundHoldingSchema);
+
+/**
+ * Something the user told us happened to a holding: a debit linked to it,
+ * a one-off purchase, or a redemption. Scheduled SIP instalments and the
+ * opening snapshot are not stored - they are worked out from the holding
+ * itself, which is how a linked debit can stand in for the instalment of
+ * the same month without anything having to be deleted.
+ */
+export interface FundTxnDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  holdingId: Types.ObjectId;
+  kind: StoredFundTxnKind;
+  /// YYYY-MM-DD, IST.
+  on: string;
+  amountMinor: number;
+  /// Given for a redemption, or a purchase whose units are known. Otherwise
+  /// worked out from the NAV on the day.
+  units?: number | null;
+  /// On LINKED: the debit. Its own date and amount are what count, so an
+  /// edit to the transaction flows through.
+  transactionId?: Types.ObjectId | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const fundTxnSchema = new Schema<FundTxnDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    holdingId: { type: Schema.Types.ObjectId, ref: "FundHolding", required: true, index: true },
+    kind: { type: String, enum: STORED_FUND_TXN_KINDS, required: true },
+    on: { type: String, required: true },
+    amountMinor: { type: Number, required: true, min: 0 },
+    units: { type: Number, default: null },
+    transactionId: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
+  },
+  { timestamps: true, ...serialization }
+);
+// A debit buys one thing: it can be linked to one holding, once.
+fundTxnSchema.index(
+  { userId: 1, transactionId: 1 },
+  { unique: true, partialFilterExpression: { transactionId: { $type: "objectId" } } }
+);
+
+export const FundTxn = model<FundTxnDoc>("FundTxn", fundTxnSchema);
+
+/**
+ * One scheme's NAV history from mfapi.in, shared by every user who holds
+ * it. Two parallel arrays, oldest first, because a fund can have twenty
+ * years of trading days and an array of objects is three times the size.
+ */
+export interface FundNavDoc {
+  _id: Types.ObjectId;
+  schemeCode: number;
+  schemeName: string;
+  fundHouse: string;
+  schemeType: string;
+  category: string;
+  isin: string | null;
+  /// YYYY-MM-DD, ascending.
+  days: string[];
+  navs: number[];
+  fetchedAt: Date | null;
+  lastError: string | null;
+  lastErrorAt: Date | null;
+}
+
+const fundNavSchema = new Schema<FundNavDoc>({
+  schemeCode: { type: Number, required: true, unique: true },
+  schemeName: { type: String, default: "" },
+  fundHouse: { type: String, default: "" },
+  schemeType: { type: String, default: "" },
+  category: { type: String, default: "" },
+  isin: { type: String, default: null },
+  days: { type: [String], default: [] },
+  navs: { type: [Number], default: [] },
+  fetchedAt: { type: Date, default: null },
+  lastError: { type: String, default: null },
+  lastErrorAt: { type: Date, default: null },
+});
+
+export const FundNav = model<FundNavDoc>("FundNav", fundNavSchema);
+
+/**
+ * Shared, server-wide fund data that isn't one scheme's: the category peer
+ * table built from AMFI's files ("peers"), and the daily refresh's guard
+ * ("daily"). Same shape as IpoCache, for the same reason - a restart must
+ * not forget that today's fetch already happened.
+ */
+export interface FundCacheDoc {
+  _id: Types.ObjectId;
+  key: string;
+  data: unknown;
+  fetchedAt: Date | null;
+  lastError: string | null;
+  lastErrorAt: Date | null;
+  /// Set by whichever process is running the job, so a second one (PM2
+  /// cluster, or a restart mid-run) leaves it alone.
+  claimedAt: Date | null;
+}
+
+const fundCacheSchema = new Schema<FundCacheDoc>({
+  key: { type: String, required: true, unique: true },
+  data: { type: Schema.Types.Mixed, default: null },
+  fetchedAt: { type: Date, default: null },
+  lastError: { type: String, default: null },
+  lastErrorAt: { type: Date, default: null },
+  claimedAt: { type: Date, default: null },
+});
+
+export const FundCache = model<FundCacheDoc>("FundCache", fundCacheSchema);
+
+/**
+ * Something to save up for: a target amount by a date, met by the holdings
+ * put towards it plus anything already saved elsewhere.
+ */
+export interface GoalDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  name: string;
+  targetMinor: number;
+  /// YYYY-MM-DD, IST.
+  targetOn: string;
+  holdingIds: Types.ObjectId[];
+  /// Money already put aside outside the linked holdings - a savings
+  /// account, an FD.
+  savedMinor: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const goalSchema = new Schema<GoalDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    name: { type: String, required: true, trim: true },
+    targetMinor: { type: Number, required: true, min: 1 },
+    targetOn: { type: String, required: true },
+    holdingIds: { type: [Schema.Types.ObjectId], default: [] },
+    savedMinor: { type: Number, default: 0, min: 0 },
+  },
+  { timestamps: true, ...serialization }
+);
+
+export const Goal = model<GoalDoc>("Goal", goalSchema);
+
+/**
+ * The assistant's read of the user's funds, kept for the day like
+ * AiInsight. Stored already validated: every fund in it is one the
+ * server offered.
+ */
+export interface FundAdviceDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  /// The IST day it was made for, YYYY-MM-DD.
+  day: string;
+  advice: unknown;
+  model: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const fundAdviceSchema = new Schema<FundAdviceDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    day: { type: String, required: true },
+    advice: { type: Schema.Types.Mixed, required: true },
+    model: { type: String, required: true },
+  },
+  { timestamps: true, ...serialization }
+);
+fundAdviceSchema.index({ userId: 1, day: -1 });
+
+export const FundAdvice = model<FundAdviceDoc>("FundAdvice", fundAdviceSchema);
