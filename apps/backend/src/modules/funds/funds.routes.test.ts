@@ -539,10 +539,21 @@ describe("the portfolio", () => {
     assert.deepEqual(response.body.flagRules.belowMedianPp, { "3y": 2, "1y": 3 });
     assert.equal(response.body.flagRules.liquidRatePercent, 6.5);
 
-    // The peer table was built once, from three AMFI files.
+    // The peer table was built once: today's NAVAll, then one history file
+    // per day tried. How many days that takes depends on the calendar - a
+    // year back can land on a weekend and step back to the Friday - so the
+    // count is not fixed, but no day is ever asked for twice.
     const amfi = requests.filter((r) => r.startsWith("amfi"));
     assert.equal(amfi[0], "amfi /spages/NAVAll.txt");
-    assert.equal(amfi.length, 3);
+    const history = amfi.slice(1);
+    assert.ok(history.length >= 2, `${amfi}`);
+    assert.equal(new Set(history).size, history.length, `${amfi}`);
+    assert.ok(history.every((r) => r.includes("DownloadNAVHistoryReport")), `${amfi}`);
+
+    // And a second look reads it from the store.
+    requests = [];
+    await call("/funds/portfolio", user.token);
+    assert.equal(requests.filter((r) => r.startsWith("amfi")).length, 0);
   });
 
   it("serves stored prices, marked stale, when mfapi is down, and waits before asking again", async () => {
