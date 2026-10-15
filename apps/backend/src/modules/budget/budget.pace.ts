@@ -1,12 +1,7 @@
 import { HydratedDocument, Types } from "mongoose";
 import { FixedCommitment, FixedCommitmentDoc, Transaction, User, commitmentAmountFor } from "../../models";
 import { isCardBillCommitment } from "../cards/cards.billPayment";
-
-/// How far back to look for the credit that opened this period. Wide
-/// enough for pay that came early or late, narrow enough that last
-/// month's is not found once this month's is overdue.
-const SALARY_LOOKBACK_DAYS = 45;
-import { BudgetPeriod, budgetPeriodFor, budgetPeriodFromSalary } from "./budget.period";
+import { BudgetPeriod, budgetPeriodFor } from "./budget.period";
 
 /**
  * The period a user's money is measured over, right now.
@@ -20,38 +15,23 @@ export async function currentBudgetPeriod(
   salaryDay: number,
   now: Date
 ): Promise<BudgetPeriod & { salaryPaidOn: Date | null }> {
-  // A credit marked as pay outranks the configured day, because the day is
-  // a prediction and the credit is what happened. Looked for in a window
-  // wide enough to cover a salary that came early or late, but not so wide
-  // that last month's would still be found once this month's is overdue.
-  const recentSalaries = await Transaction.find({
+  // The pay day in Settings alone decides the month, whenever the salary
+  // actually lands. Anchoring on the credit moved the month with every
+  // early or late payment - and a late one left today in no month at all.
+  const period = budgetPeriodFor(salaryDay, now);
+
+  // Still said when pay has landed in this month, so the screen can show
+  // "paid on the 16th"; it no longer moves where the month starts.
+  const paid = await Transaction.findOne({
     userId,
     isSalary: true,
     type: "CREDIT",
-    occurredAt: { $gte: new Date(now.getTime() - SALARY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000), $lte: now },
-  }).sort({ occurredAt: -1 });
+    occurredAt: { $gte: period.start, $lte: now },
+  })
+    .sort({ occurredAt: 1 })
+    .select("occurredAt");
 
-  // Pay that arrives in two parts - the salary, then arrears a few days
-  // later - is one payment for the purposes of a period. Anchoring on the
-  // most recent alone would start the period at the second part and leave
-  // the first outside it, which is how the amount came out short.
-  const lastSalary = clusterStart(recentSalaries);
-
-  const fromSalary = lastSalary ? budgetPeriodFromSalary(lastSalary, salaryDay, now) : null;
-
-  // Pay that is late leaves the month it opened already over: paid on 14
-  // September for the 15th, that month ended on 14 October, and on the
-  // 15th - salary not in yet - today belonged to no month at all, so it
-  // vanished from every screen. Past the end, the pay day takes over until
-  // the salary lands and opens the month on the day it does.
-  if (fromSalary && fromSalary.end.getTime() > now.getTime()) {
-    // The date carried alongside rather than derived back out of the period:
-    // a salary that landed a day late opens the period on the day it landed,
-    // and a caller wanting to say "paid on the 2nd" cannot tell that from a
-    // start date that would have been the 1st either way.
-    return { ...fromSalary, salaryPaidOn: lastSalary };
-  }
-  return { ...budgetPeriodFor(salaryDay, now), salaryPaidOn: null };
+  return { ...period, salaryPaidOn: paid?.occurredAt ?? null };
 }
 
 /**
@@ -307,28 +287,6 @@ export async function budgetPace(userId: Types.ObjectId, now = new Date()) {
     shortfallNote: shortfallNote(commitmentState, remainingMinor),
     configured: true as const,
   };
-}
-
-/**
- * The day the current run of pay began.
- *
- * Salary and any arrears land within a few days of each other and mean one
- * payment; two months apart they mean two. Walking back through the run
- * while each is close to the one after it finds where this month's pay
- * started, which is where the period starts.
- */
-function clusterStart(salaries: { occurredAt: Date }[]): Date | null {
-  if (salaries.length === 0) return null;
-
-  const CLUSTER_MS = 10 * 24 * 60 * 60 * 1000;
-  let earliest = salaries[0].occurredAt;
-
-  for (const salary of salaries.slice(1)) {
-    if (earliest.getTime() - salary.occurredAt.getTime() > CLUSTER_MS) break;
-    earliest = salary.occurredAt;
-  }
-
-  return earliest;
 }
 
 /**

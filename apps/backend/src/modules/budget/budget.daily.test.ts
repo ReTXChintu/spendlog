@@ -128,10 +128,9 @@ describe("the daily budget bucket", () => {
     assert.equal(result.resetsOnSalary, true);
   });
 
-  it("opens the period on the day pay actually landed", async () => {
-    // A salary that arrives two days late opens the period two days late,
-    // the same way the pace card sees it. Anything else would have the two
-    // cards measuring different months.
+  it("keeps to the pay day in Settings when the salary lands late", async () => {
+    // Pay two days late leaves the month where it was: only the pay day in
+    // Settings moves it, the same way the pace card sees it.
     await withUser({ dailyBudgetMinor: 1000_00, salaryDay: 25 });
     await Transaction.create({
       userId,
@@ -142,12 +141,13 @@ describe("the daily budget bucket", () => {
       source: "MANUAL",
       isSalary: true,
     });
-    await spend("2026-09-26", 5000); // before the money landed
+    await spend("2026-09-24", 5000); // the month before
+    await spend("2026-09-26", 300); // before the money landed, still this month
     await spend("2026-09-28", 400);
 
     const result = await bucket(on("2026-09-28"));
-    assert.equal(result.daysCounted, 2, "the 27th and the 28th");
-    assert.equal(result.spentMinor, 400_00);
+    assert.equal(result.daysCounted, 4, "the 25th to the 28th");
+    assert.equal(result.spentMinor, 700_00);
   });
 
   it("falls back to the calendar month with no pay day set", async () => {

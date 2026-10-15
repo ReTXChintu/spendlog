@@ -3,7 +3,6 @@ import { after, before, beforeEach, describe, it } from "node:test";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import mongoose, { Types } from "mongoose";
 import { istDayKey, istDayStart } from "../../time";
-import { budgetPeriodFromSalary } from "./budget.period";
 
 process.env.DATABASE_URL ??= "mongodb://127.0.0.1:27017/spendlog_unused";
 process.env.JWT_SECRET ??= "salary-test-secret";
@@ -70,40 +69,6 @@ async function spend(userId: Types.ObjectId, day: string, amountMinor: number) {
   });
 }
 
-describe("budgetPeriodFromSalary", () => {
-  it("starts the period on the day the money actually arrived", () => {
-    // Paid on the 14th against a configured day of the 15th. The old
-    // behaviour opened the period on the 15th, which counted the 14th
-    // against the previous month twice over.
-    const period = budgetPeriodFromSalary(istDayStart("2026-09-14"), 15, istDayStart("2026-09-20"));
-    assert.equal(istDayKey(period.start), "2026-09-14");
-    assert.equal(istDayKey(period.end), "2026-10-15", "and runs to the next one due");
-  });
-
-  it("closes on the following month when pay lands on the day itself", () => {
-    const period = budgetPeriodFromSalary(istDayStart("2026-09-15"), 15, istDayStart("2026-09-20"));
-    assert.equal(istDayKey(period.start), "2026-09-15");
-    assert.equal(istDayKey(period.end), "2026-10-15");
-  });
-
-  it("closes next month when pay lands after the day it was due", () => {
-    const period = budgetPeriodFromSalary(istDayStart("2026-09-17"), 15, istDayStart("2026-09-20"));
-    assert.equal(istDayKey(period.start), "2026-09-17");
-    assert.equal(istDayKey(period.end), "2026-10-15");
-  });
-
-  it("never reports less than a day left when the next salary is overdue", () => {
-    // What is left has to last until it arrives, and nobody knows when.
-    const period = budgetPeriodFromSalary(istDayStart("2026-08-14"), 15, istDayStart("2026-09-20"));
-    assert.equal(period.daysLeft, 1);
-  });
-
-  it("clamps a pay day past the end of a short month", () => {
-    const period = budgetPeriodFromSalary(istDayStart("2026-01-31"), 31, istDayStart("2026-02-10"));
-    assert.equal(istDayKey(period.end), "2026-02-28");
-  });
-});
-
 describe("the pace, once a salary is marked", () => {
   it("falls back to the configured day when nothing is marked", async () => {
     const userId = await paidOnThe15th();
@@ -116,15 +81,16 @@ describe("the pace, once a salary is marked", () => {
     assert.equal(pace.salaryIsActual, false);
   });
 
-  it("opens the period on the day pay landed, not the day it was due", async () => {
+  it("starts the period on the pay day in Settings, whenever pay lands", async () => {
     const userId = await paidOnThe15th();
-    await credit(userId, "2026-09-14", 9600000, true);
+    await credit(userId, "2026-09-16", 9600000, true);
 
     const pace = await budgetPace(userId, istDayStart("2026-09-20"));
     if (!pace.configured) return assert.fail("should be configured");
 
-    assert.equal(istDayKey(pace.periodStart), "2026-09-14");
+    assert.equal(istDayKey(pace.periodStart), "2026-09-15");
     assert.equal(pace.salaryIsActual, true);
+    assert.equal(istDayKey(pace.salaryPaidOn!), "2026-09-16");
   });
 
   it("uses what was actually paid, so a month with leave in it is smaller", async () => {
@@ -159,16 +125,16 @@ describe("the pace, once a salary is marked", () => {
     assert.equal(pace.salaryIsActual, false);
   });
 
-  it("counts spending from the day pay landed rather than the day after", async () => {
-    // The day between an early salary and the configured pay day used to
-    // fall into neither period.
+  it("leaves spending before the pay day in the month before, even with pay in early", async () => {
     const userId = await paidOnThe15th();
     await credit(userId, "2026-09-14", 10000000, true);
     await spend(userId, "2026-09-14", 250000);
+    await spend(userId, "2026-09-15", 100000);
 
     const pace = await budgetPace(userId, istDayStart("2026-09-20"));
     if (!pace.configured) return assert.fail("should be configured");
-    assert.equal(pace.spentMinor, 250000);
+    assert.equal(istDayKey(pace.periodStart), "2026-09-15");
+    assert.equal(pace.spentMinor, 100000);
   });
 
   it("does not reach back to last month's pay once it is stale", async () => {
@@ -227,9 +193,21 @@ describe("a fixed cost settled by a payment rather than a tick", () => {
     assert.equal(pace.commitmentsRemainingMinor, 0, "nothing left to hold back");
   });
 
-  it("lets it be paid early, on the day the money actually moved", async () => {
-    // The whole reason for marking a payment rather than ticking a due
-    // date: an early salary can be spent on early.
+  it("counts a payment made on the pay day towards that month", async () => {
+    const userId = await paidOnThe15th();
+    await credit(userId, "2026-09-15", 10000000, true);
+
+    const father = await commitment(userId, "Father", 1000000);
+    await payTowards(userId, father._id, "2026-09-15", 1000000);
+
+    const pace = await budgetPace(userId, istDayStart("2026-09-16"));
+    if (!pace.configured) return assert.fail("should be configured");
+    assert.equal(pace.commitments[0].isPaid, true);
+  });
+
+  it("leaves a payment made before the pay day in the month before", async () => {
+    // Only the pay day in Settings decides the month: an early salary
+    // spent early is spent in the month it was spent in.
     const userId = await paidOnThe15th();
     await credit(userId, "2026-09-14", 10000000, true);
 
@@ -238,7 +216,7 @@ describe("a fixed cost settled by a payment rather than a tick", () => {
 
     const pace = await budgetPace(userId, istDayStart("2026-09-16"));
     if (!pace.configured) return assert.fail("should be configured");
-    assert.equal(pace.commitments[0].isPaid, true);
+    assert.equal(pace.commitments[0].isPaid, false);
   });
 
   describe("changing the amount", () => {

@@ -195,7 +195,7 @@ describe("the assistant's months", () => {
     assert.deepEqual([recent[2].from, recent[2].to], ["2026-07-15", "2026-08-14"]);
   });
 
-  it("opens this month on the day pay actually landed", async () => {
+  it("keeps to the pay day in Settings when pay lands early", async () => {
     const user = await makeUser();
     await models.User.updateOne({ _id: user.id }, { salaryDay: 15 });
     await models.Transaction.create({
@@ -209,8 +209,8 @@ describe("the assistant's months", () => {
     });
 
     const { recent } = await periods.userMonths(user.id, now);
-    assert.equal(recent[0].from, "2026-09-13");
-    assert.deepEqual([recent[1].from, recent[1].to], ["2026-08-15", "2026-09-12"], "no gap, no overlap");
+    assert.equal(recent[0].from, "2026-09-15");
+    assert.deepEqual([recent[1].from, recent[1].to], ["2026-08-15", "2026-09-14"], "no gap, no overlap");
   });
 
   it("falls back to calendar months with no pay day", async () => {
