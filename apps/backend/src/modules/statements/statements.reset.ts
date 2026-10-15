@@ -1,5 +1,5 @@
 import { Types } from "mongoose";
-import { CardStatement, Transaction } from "../../models";
+import { BalanceCheckpoint, CardStatement, Transaction } from "../../models";
 import { deleteStatementFile } from "./statements.files";
 
 /**
@@ -125,6 +125,8 @@ export async function resetStatements(userId: Types.ObjectId): Promise<Statement
   // app can reach or remove.
   for (const id of ids) await deleteStatementFile(id);
   await CardStatement.deleteMany({ userId });
+  // And the closing balances they left in the passbooks.
+  await BalanceCheckpoint.deleteMany({ userId, statementId: { $in: ids } });
 
   return {
     statementsDeleted: ids.length,

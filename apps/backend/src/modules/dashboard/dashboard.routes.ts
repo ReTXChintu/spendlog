@@ -12,6 +12,7 @@ import { upcomingBills } from "../statements/statements.bills";
 import { loanProgress } from "../loans/loans.routes";
 import { planStatus } from "../ai/ai.coach";
 import { expectedBalances, tracksBalance } from "../accounts/accounts.balance";
+import { balanceTodos } from "../accounts/accounts.drift";
 import { PocketStatus, pocketStatuses } from "../accounts/accounts.pocket";
 import { outsideTransactionsMinor } from "../contacts/contacts.people";
 
@@ -44,7 +45,7 @@ dashboardRouter.get("/", async (req, res) => {
   // monthly figure in the app.
   const month = await userMonth(userId, undefined, now);
 
-  const [cards, pace, needsCategory, emis, loans, owed, perks, statements, monthSoFar, bills, budget, money, earmarks, plan, pocketMoney, banks] =
+  const [cards, pace, needsCategory, emis, loans, owed, perks, statements, monthSoFar, bills, budget, money, earmarks, plan, pocketMoney, banks, todos] =
     await Promise.all([
     cardStatuses(userId, now),
     budgetPace(userId, now),
@@ -62,6 +63,7 @@ dashboardRouter.get("/", async (req, res) => {
     planStatus(userId, now),
     pocketMoneyFor(userId, now),
     bankFaces(userId, now),
+    balanceTodos(userId),
   ]);
 
   // Only the ones close enough to act on. Settled: shown here, never as a
@@ -103,6 +105,10 @@ dashboardRouter.get("/", async (req, res) => {
     // dashboard is opened until they are not.
     planWarnings: plan?.warnings ?? [],
     pocketMoney,
+    // Things about the balances to act on: an account the bank disagrees
+    // with, a difference written in and not yet explained, payments no
+    // account could be placed for.
+    todos,
   });
 });
 
@@ -125,6 +131,8 @@ async function moneyOnHand(userId: Types.ObjectId) {
       accountType: account.accountType,
       isSavings: Boolean(account.isSavings),
       balanceMinor: balances.get(account._id.toString())?.expectedMinor ?? null,
+      /// How far that is from the bank's latest figure, when it is off.
+      drift: driftFace(balances.get(account._id.toString())?.drift),
     }))
     // Spendable money first, cash after the banks, the savings account last.
     .sort((a, b) => Number(a.isSavings) - Number(b.isSavings) || (a.accountType === "CASH" ? 1 : 0) - (b.accountType === "CASH" ? 1 : 0));
@@ -139,6 +147,11 @@ async function moneyOnHand(userId: Types.ObjectId) {
     /// Bank or cash accounts with no starting balance yet, so not counted.
     untracked: rows.filter((row) => row.balanceMinor === null).length,
   };
+}
+
+/** A drift as the tiles show it: the gap and since when, or nothing. */
+function driftFace(drift: { minor: number; since: Date } | null | undefined): { minor: number; since: Date } | null {
+  return drift ? { minor: drift.minor, since: drift.since } : null;
 }
 
 /** Whole days from the start of today, in IST, to a date. */
@@ -239,6 +252,10 @@ async function bankFaces(userId: Types.ObjectId, now: Date) {
         color: account.color ?? null,
         /// Null until a starting balance has been entered.
         balanceMinor: balances.get(id)?.expectedMinor ?? null,
+        /// The bank's latest figure less the app's, and since when, when
+        /// the two are further apart than rounding. Null when in step or
+        /// when the bank has never said.
+        drift: driftFace(balances.get(id)?.drift),
         isSavings: Boolean(account.isSavings),
         pocket,
         debitCards: accounts

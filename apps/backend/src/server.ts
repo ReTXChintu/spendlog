@@ -7,6 +7,8 @@ import { connectDatabase } from "./db";
 import { env } from "./env";
 import { runLendingBackfill } from "./modules/contacts/contacts.backfill";
 import { runSpendLimitBackfill } from "./modules/accounts/accounts.backfill";
+import { runNightlyDriftCheck } from "./modules/accounts/accounts.drift";
+import { runAccountUnknownBackfill, runStatedBalanceBackfill } from "./modules/accounts/accounts.statedBackfill";
 import { runCardBillAccountBackfill, runCardBillBackfill } from "./modules/cards/cards.billPayment.service";
 import { runDailyFundRefresh } from "./modules/funds/funds.cache";
 import { syncAllConnectedEmails } from "./modules/ingestion/gmail.service";
@@ -17,6 +19,10 @@ const EMAIL_SYNC_INTERVAL_MS = 15 * 60 * 1000;
 // Mongo (funds.cache.ts) makes it once a day, after NAVs are published,
 // however often it asks and however often the process restarts.
 const FUND_REFRESH_CHECK_MS = 30 * 60 * 1000;
+
+// The same, for the nightly check of every balance against the bank's
+// (accounts.drift.ts): due after half past ten at night, guarded in Mongo.
+const DRIFT_CHECK_MS = 30 * 60 * 1000;
 
 // Shared with the frontend's static server, which is plain JS outside this
 // TypeScript project — hence the runtime require rather than an import.
@@ -80,6 +86,10 @@ async function start() {
     .catch((err) => console.error("Card bill account backfill failed:", err))
     .then(() => runCardBillBackfill())
     .catch((err) => console.error("Card bill backfill failed:", err));
+  // The bank's balance read off every message already stored, and the
+  // payments that were guessed to be cash taken out of the cash balance.
+  runStatedBalanceBackfill().catch((err) => console.error("Stated balance backfill failed:", err));
+  runAccountUnknownBackfill().catch((err) => console.error("Account unknown backfill failed:", err));
 
   setInterval(() => {
     syncAllConnectedEmails().catch((err) => console.error("Background Gmail sync failed:", err));
@@ -91,6 +101,14 @@ async function start() {
     runDailyFundRefresh().catch((err) => console.error("Daily fund refresh failed:", err));
   refreshFunds();
   setInterval(refreshFunds, FUND_REFRESH_CHECK_MS);
+
+  // Every balance against the bank's latest figure for it, once a night:
+  // at start-up when last night's is missing, then every half hour until
+  // tonight's has run.
+  const checkDrift = () =>
+    runNightlyDriftCheck().catch((err) => console.error("Balance drift check failed:", err));
+  checkDrift();
+  setInterval(checkDrift, DRIFT_CHECK_MS);
 }
 
 start().catch((err) => {

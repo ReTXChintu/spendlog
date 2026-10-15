@@ -11,11 +11,15 @@ import { cycleDaysFor } from "../cards/cards.learn";
 import { istDayKey } from "../../time";
 import { upcomingBills } from "../statements/statements.bills";
 import { expectedBalances, tracksBalance } from "./accounts.balance";
+import { passbookRouter } from "./accounts.passbook.routes";
 import { pocketStatuses } from "./accounts.pocket";
 import { ACCOUNT_TYPES } from "../../types";
 
 export const accountsRouter = Router();
 accountsRouter.use(requireAuth);
+// The passbook, the reconciler and the drift alerts. Mounted first so
+// /accounts/alerts is never read as an account id by the routes below.
+accountsRouter.use(passbookRouter);
 
 // GET /accounts — the bank accounts and cards, whether detected from
 // messages or added by hand.

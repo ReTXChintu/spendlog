@@ -1,6 +1,7 @@
 import { Schema, Types, model } from "mongoose";
 import {
   ACCOUNT_TYPES,
+  BALANCE_CHECKPOINT_SOURCES,
   CATEGORY_DIRECTIONS,
   COMMITMENT_KINDS,
   COUNTED_REASONS,
@@ -19,6 +20,7 @@ import {
   TRANSACTION_SOURCES,
   TRANSACTION_TYPES,
   AccountType,
+  BalanceCheckpointSource,
   CategoryDirection,
   CommitmentKind,
   CountedReason,
@@ -623,6 +625,29 @@ export interface TransactionDoc {
   /// card bill should still fix a row whose category was corrected, and
   /// must never undo someone saying "no, that one was real spending".
   kindEditedAt?: Date | null;
+  /// What the bank said the account held after this transaction, where the
+  /// message said it ("Avl Bal Rs.12,345.67"). The one figure in the ledger
+  /// that comes from the bank rather than from adding up messages, and so
+  /// the thing the app's own running balance is checked against. Null when
+  /// the message had none, which many banks' messages do not.
+  statedBalanceMinor?: number | null;
+  /// On a credit card: what the issuer said was left of the limit after
+  /// this charge ("Avl Limit: INR 44,021.93"). Not a balance.
+  statedAvailableLimitMinor?: number | null;
+  /// A row that stands for a difference nobody could explain: the bank
+  /// showed one figure, the ledger another, and the gap was written in so
+  /// the balance is right again. Counts as spending or income like any
+  /// other row, on purpose - a missing three thousand rupees should stay
+  /// visible in the month, not be hidden to make a number tidy.
+  isAdjustment?: boolean;
+  /// Still waiting for the user to say what it was. Cleared when they give
+  /// it a category or a merchant, or clear it outright.
+  needsExplanation?: boolean;
+  /// The message named no account SpendLog could place. accountId is null,
+  /// but unlike a cash payment typed in by hand it is not cash: it moves no
+  /// balance, because which one it moved is the thing nobody knows. Still
+  /// spending, so it still counts in the month.
+  accountUnknown?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -722,6 +747,11 @@ const transactionSchema = new Schema<TransactionDoc>(
     occurredAt: { type: Date, required: true },
     editedAt: { type: Date, default: null },
     kindEditedAt: { type: Date, default: null },
+    statedBalanceMinor: { type: Number, default: null },
+    statedAvailableLimitMinor: { type: Number, default: null },
+    isAdjustment: { type: Boolean, default: false },
+    needsExplanation: { type: Boolean, default: false },
+    accountUnknown: { type: Boolean, default: false },
     sources: { type: [transactionSourceSchema], default: [] },
     mergedFrom: { type: [mergedSnapshotSchema], default: [] },
     countedAmountMinor: { type: Number, default: 0 },
@@ -1254,6 +1284,10 @@ export interface StatementLine {
   kind: StatementLineKind;
   resolution: StatementLineResolution;
   transactionId?: Types.ObjectId | null;
+  /// The running balance the statement prints after this row. Only a bank
+  /// statement has one; it is the bank's own figure, and the transaction
+  /// the line becomes carries it as statedBalanceMinor.
+  balanceMinor?: number | null;
 }
 
 const statementLineSchema = new Schema<StatementLine>({
@@ -1264,6 +1298,7 @@ const statementLineSchema = new Schema<StatementLine>({
   kind: { type: String, enum: STATEMENT_LINE_KINDS, required: true },
   resolution: { type: String, enum: STATEMENT_LINE_RESOLUTIONS, default: "SKIPPED" },
   transactionId: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
+  balanceMinor: { type: Number, default: null },
 });
 
 export interface CardStatementDoc {
@@ -2140,3 +2175,119 @@ const fundAdviceSchema = new Schema<FundAdviceDoc>(
 fundAdviceSchema.index({ userId: 1, day: -1 });
 
 export const FundAdvice = model<FundAdviceDoc>("FundAdvice", fundAdviceSchema);
+
+/**
+ * The bank's own figure for what an account held at a moment, from
+ * somewhere other than a transaction's SMS: a bank statement's closing
+ * balance, or a number typed in off the bank's app.
+ *
+ * Read by the passbook exactly as a stated balance on a transaction is -
+ * the app's running balance at that moment is compared with it, and a gap
+ * is a transaction SpendLog never saw. It has no amount of its own and
+ * moves nothing; it only says what was true.
+ */
+export interface BalanceCheckpointDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  accountId: Types.ObjectId;
+  /// The instant the balance was true at. Everything on or before it is
+  /// in the figure.
+  on: Date;
+  balanceMinor: number;
+  source: BalanceCheckpointSource;
+  /// The statement it was read off, so re-reading that statement updates
+  /// this rather than adding a second, and forgetting it takes this with it.
+  statementId?: Types.ObjectId | null;
+  note?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const balanceCheckpointSchema = new Schema<BalanceCheckpointDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    accountId: { type: Schema.Types.ObjectId, ref: "Account", required: true },
+    on: { type: Date, required: true },
+    balanceMinor: { type: Number, required: true },
+    source: { type: String, enum: BALANCE_CHECKPOINT_SOURCES, required: true },
+    statementId: { type: Schema.Types.ObjectId, ref: "CardStatement", default: null },
+    note: { type: String, default: null, maxlength: 120 },
+  },
+  { timestamps: true, ...serialization }
+);
+balanceCheckpointSchema.index({ userId: 1, accountId: 1, on: 1 });
+// One checkpoint per statement, however many times it is reconciled.
+balanceCheckpointSchema.index(
+  { userId: 1, statementId: 1 },
+  { unique: true, partialFilterExpression: { statementId: { $type: "objectId" } } }
+);
+
+export const BalanceCheckpoint = model<BalanceCheckpointDoc>("BalanceCheckpoint", balanceCheckpointSchema);
+
+/**
+ * The nightly check found an account's running balance off from the
+ * bank's latest figure for it, and said so.
+ *
+ * One alert per distinct gap: the same account, the same drift, measured at
+ * the same stated row, is one problem however many nights it is still
+ * there. A new stated balance or a different gap is a new alert.
+ */
+export interface BalanceAlertDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  accountId: Types.ObjectId;
+  /// The bank's figure less the app's, at the stated row. Negative when
+  /// the app shows more than the bank.
+  driftMinor: number;
+  statedMinor: number;
+  expectedMinor: number;
+  /// When the bank's figure was true.
+  statedAt: Date;
+  /// Where the drift was first seen to begin, where the passbook can say.
+  since?: Date | null;
+  seenAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const balanceAlertSchema = new Schema<BalanceAlertDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    accountId: { type: Schema.Types.ObjectId, ref: "Account", required: true },
+    driftMinor: { type: Number, required: true },
+    statedMinor: { type: Number, required: true },
+    expectedMinor: { type: Number, required: true },
+    statedAt: { type: Date, required: true },
+    since: { type: Date, default: null },
+    seenAt: { type: Date, default: null },
+  },
+  { timestamps: true, ...serialization }
+);
+balanceAlertSchema.index({ userId: 1, seenAt: 1, createdAt: -1 });
+balanceAlertSchema.index({ userId: 1, accountId: 1, statedAt: 1, driftMinor: 1 }, { unique: true });
+
+export const BalanceAlert = model<BalanceAlertDoc>("BalanceAlert", balanceAlertSchema);
+
+/**
+ * When a daily job last ran, and whether a process is running it now.
+ *
+ * The guard that makes a job once a day however often it is asked and
+ * however many times PM2 restarts the server: the same shape the fund
+ * refresh keeps for itself in FundCache, for jobs that have no cache of
+ * their own to keep it in.
+ */
+export interface JobRunDoc {
+  key: string;
+  ranAt?: Date | null;
+  claimedAt?: Date | null;
+  lastError?: string | null;
+}
+
+const jobRunSchema = new Schema<JobRunDoc>({
+  key: { type: String, required: true, unique: true },
+  ranAt: { type: Date, default: null },
+  claimedAt: { type: Date, default: null },
+  lastError: { type: String, default: null },
+});
+
+export const JobRun = model<JobRunDoc>("JobRun", jobRunSchema);

@@ -1,5 +1,6 @@
 import { HydratedDocument, Types } from "mongoose";
-import { Account, CardStatement, CardStatementDoc, Transaction, TransactionDoc } from "../../models";
+import { Account, BalanceCheckpoint, CardStatement, CardStatementDoc, Transaction, TransactionDoc } from "../../models";
+import { istDayEnd, istDayKey } from "../../time";
 import { StatementLineResolution } from "../../types";
 import { categorizeTransaction } from "../../parsing/categorizer";
 import { tripForOccurredAt } from "../trips/trips.service";
@@ -136,6 +137,10 @@ export async function reconcileStatement(
       // gaps are filled and only while nobody has corrected the row by
       // hand - the same rule the duplicate path in ingest.ts follows.
       if (!best.editedAt && !best.merchant) best.merchant = line.description;
+      // A bank statement prints the balance after every row. The SMS's
+      // figure, where there was one, is the same number from the same
+      // bank a month earlier, so it is only filled where it is missing.
+      if (best.statedBalanceMinor == null && line.balanceMinor != null) best.statedBalanceMinor = line.balanceMinor;
 
       await best.save();
       continue;
@@ -174,7 +179,49 @@ export async function reconcileStatement(
   statement.reconciledAt = new Date();
   await statement.save();
 
+  await recordClosingBalance(statement);
+
   return summary;
+}
+
+/** The last balance a bank statement prints, and the day it was true at the end of. */
+export function closingBalanceOf(
+  statement: Pick<CardStatementDoc, "kind" | "lines">
+): { balanceMinor: number; on: Date } | null {
+  if (statement.kind !== "BANK") return null;
+  const dated = [...statement.lines]
+    .filter((line) => line.balanceMinor != null)
+    .sort((a, b) => a.date.getTime() - b.date.getTime());
+  const last = dated[dated.length - 1];
+  if (!last) return null;
+  // The balance printed on a day's last row is what the account held once
+  // that day's payments were in, so it is true at the end of that day.
+  return { balanceMinor: last.balanceMinor!, on: istDayEnd(istDayKey(last.date)) };
+}
+
+/**
+ * A bank statement's closing balance, kept as a checkpoint for the
+ * account's passbook: the bank's own word for what the account held at
+ * the end of the period, to set the app's running figure against. One per
+ * statement, updated in place when the statement is read again.
+ */
+async function recordClosingBalance(statement: HydratedDocument<CardStatementDoc>): Promise<void> {
+  const closing = closingBalanceOf(statement);
+  if (!closing || !statement.accountId) return;
+
+  await BalanceCheckpoint.findOneAndUpdate(
+    { userId: statement.userId, statementId: statement._id },
+    {
+      $set: {
+        accountId: statement.accountId,
+        on: closing.on,
+        balanceMinor: closing.balanceMinor,
+        source: "STATEMENT",
+        note: statement.fileName ?? statement.subject ?? null,
+      },
+    },
+    { upsert: true, setDefaultsOnInsert: true }
+  );
 }
 
 /**
@@ -308,6 +355,8 @@ async function addFromLine(
     occurredAt: line.date,
     statementId: statement._id,
     statementLineId: line._id,
+    // The bank's balance after this row, where the statement prints one.
+    statedBalanceMinor: line.balanceMinor ?? null,
     sources: [
       {
         source: "STATEMENT",
@@ -351,6 +400,10 @@ export async function unpickStatement(userId: Types.ObjectId, statementId: Types
 
   statement.reconciledAt = null;
   await statement.save();
+
+  // The closing balance goes with the rows: a statement being taken back
+  // was read against the wrong account, and so was its balance.
+  await BalanceCheckpoint.deleteMany({ userId, statementId: statement._id });
 
   return added.length;
 }

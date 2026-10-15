@@ -26,6 +26,11 @@ const listQuerySchema = z.object({
   accountId: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
   type: z.enum(TRANSACTION_TYPES).optional(),
   q: z.string().optional(),
+  // "1": only the payments no account could be placed for - the ones that
+  // move no balance until somebody says which account they were on.
+  accountUnknown: z.enum(["1", "0"]).optional(),
+  // "1": only the unexplained differences still waiting for an answer.
+  needsExplanation: z.enum(["1", "0"]).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(200).default(50),
 });
@@ -60,6 +65,8 @@ async function buildFilter(
     filter.accountId = { $in: [new Types.ObjectId(filters.accountId), ...cards.map((card) => card._id)] };
   }
   if (filters.type) filter.type = filters.type;
+  if (filters.accountUnknown === "1") filter.accountUnknown = true;
+  if (filters.needsExplanation === "1") filter.needsExplanation = true;
 
   if (filters.from || filters.to) {
     filter.occurredAt = {
@@ -370,6 +377,12 @@ const updateTransactionSchema = z.object({
   transferAccountId: z.string().regex(OBJECT_ID).nullable().optional(),
   // Money in that is set aside for a purchase still to come.
   isEarmarked: z.boolean().optional(),
+  // false with no account says "this really was cash". Setting an account
+  // clears it on its own.
+  accountUnknown: z.boolean().optional(),
+  // false says an unexplained difference has been looked at. A category
+  // or a merchant given to it says the same.
+  needsExplanation: z.boolean().optional(),
 });
 
 /**
@@ -483,6 +496,16 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   const transferFields: Record<string, unknown> = willBeTransfer ? {} : { transferAccountId: null };
   // Only money in can be set aside; on a payment it would zero real spending.
   if ((parsed.data.type ?? existing.type) === "DEBIT") transferFields.isEarmarked = false;
+  // An account named is an account known.
+  if (parsed.data.accountId) transferFields.accountUnknown = false;
+  // An unexplained difference is explained once it is filed somewhere or
+  // called something.
+  if (
+    existing.needsExplanation &&
+    (parsed.data.categoryId || (parsed.data.merchant && parsed.data.merchant !== existing.merchant))
+  ) {
+    transferFields.needsExplanation = false;
+  }
 
   // Which loan a payment repays is not a plain field the way cardPaymentFor
   // is: picking one claims an instalment on it, and picking a different
@@ -693,6 +716,62 @@ transactionsRouter.get("/:id/refund-candidates", validObjectIdParam("id"), async
   res.json(ranked);
 });
 
+const pairSchema = z.object({
+  /** The other leg: the same money arriving where this one says it left. */
+  withId: z.string().regex(OBJECT_ID),
+});
+
+// POST /transactions/:id/pair — say that two rows are the two legs of one
+// transfer between the user's own accounts.
+//
+// Automatic pairing has a ten-minute window, and a transfer typed in by
+// hand on one account moves the other account by itself. When the other
+// account's own message then arrives as a row, that balance moves twice -
+// which is what the reconciler finds as a one-sided transfer, and this is
+// its fix. Both rows become a transfer, each naming the other's account,
+// and each knowing the other side has its own row.
+transactionsRouter.post("/:id/pair", validObjectIdParam("id"), async (req, res) => {
+  const parsed = pairSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  if (parsed.data.withId === req.params.id) {
+    return res.status(400).json({ error: "A transaction cannot be paired with itself" });
+  }
+
+  const userId = currentUserId(req);
+  const [first, second] = await Promise.all([
+    Transaction.findOne({ _id: req.params.id, userId }),
+    Transaction.findOne({ _id: parsed.data.withId, userId }),
+  ]);
+  if (!first || !second) return res.status(404).json({ error: "Not found" });
+
+  if (first.type === second.type) {
+    return res.status(400).json({ error: "The two legs of a transfer go opposite ways" });
+  }
+  if (first.amountMinor !== second.amountMinor) {
+    return res.status(400).json({ error: "The two legs of a transfer are the same amount" });
+  }
+  if (first.accountId && second.accountId && first.accountId.equals(second.accountId)) {
+    return res.status(400).json({ error: "A transfer goes between two different accounts" });
+  }
+
+  const now = new Date();
+  for (const [leg, other] of [
+    [first, second],
+    [second, first],
+  ] as const) {
+    leg.isTransfer = true;
+    leg.transferAccountId = other.accountId ?? null;
+    leg.transferPairId = other._id;
+    leg.kindEditedAt = now;
+    leg.editedAt = now;
+  }
+  // Saved rather than updated so the counted-amount hook zeroes both.
+  await Promise.all([first.save(), second.save()]);
+  await first.populate(["category", "account"]);
+
+  res.json(first);
+});
+
 const mergeSchema = z.object({
   /** The transactions to absorb. They stop existing on their own. */
   sourceIds: z.array(z.string().regex(OBJECT_ID)).min(1).max(10),
@@ -733,9 +812,19 @@ transactionsRouter.post("/:id/merge", validObjectIdParam("id"), async (req, res)
     // Gaps only. Whatever the surviving row already says is the answer,
     // and it can be corrected by hand afterwards either way.
     if (!target.merchant && source.merchant) target.merchant = source.merchant;
-    if (!target.accountId && source.accountId) target.accountId = source.accountId;
+    if (!target.accountId && source.accountId) {
+      target.accountId = source.accountId;
+      target.accountUnknown = false;
+    }
     if (!target.categoryId && source.categoryId) target.categoryId = source.categoryId;
     if (!target.note && source.note) target.note = source.note;
+    // The bank's figures: whichever message had them.
+    if (target.statedBalanceMinor == null && source.statedBalanceMinor != null) {
+      target.statedBalanceMinor = source.statedBalanceMinor;
+    }
+    if (target.statedAvailableLimitMinor == null && source.statedAvailableLimitMinor != null) {
+      target.statedAvailableLimitMinor = source.statedAvailableLimitMinor;
+    }
 
     // Verbatim, so unmerging restores the row rather than approximating it.
     target.mergedFrom.push(source.toObject() as unknown as Record<string, unknown>);

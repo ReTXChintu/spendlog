@@ -17,6 +17,7 @@ import {
 } from "./statements.reconcile";
 import { rereadStatement, statementText, syncStatements } from "./statements.service";
 import { upcomingBills } from "./statements.bills";
+import { compareStatement } from "./statements.compare";
 
 export const statementsRouter = Router();
 statementsRouter.use(requireAuth);
@@ -310,6 +311,16 @@ statementsRouter.post("/:id/reread", validObjectIdParam("id"), async (req, res) 
   }
 
   res.json(result);
+});
+
+// GET /statements/:id/compare - the statement beside the ledger, both ways,
+// without changing either. For a bank statement, the closing balance
+// against the app's running figure at the close as well.
+statementsRouter.get("/:id/compare", validObjectIdParam("id"), async (req, res) => {
+  const statement = await CardStatement.findOne({ _id: req.params.id, userId: currentUserId(req) });
+  if (!statement) return res.status(404).json({ error: "Not found" });
+
+  res.json(await compareStatement(statement));
 });
 
 // POST /statements/:id/reconcile — match again without re-downloading.

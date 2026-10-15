@@ -1,12 +1,13 @@
 import { HydratedDocument, Types } from "mongoose";
 import { Transaction, TransactionDoc } from "../models";
-import { TransactionSource } from "../types";
+import { AccountType, TransactionSource } from "../types";
 import { resolveAccount } from "./accounts";
 import { categorizeTransaction } from "./categorizer";
 import { matchEmiInstalment } from "../modules/emi/emi.matching";
 import { matchLoanInstalment } from "../modules/loans/loans.matching";
 import { tripForOccurredAt } from "../modules/trips/trips.service";
 import { findDuplicate, detectSelfTransfer } from "./dedupe";
+import { parseStatedFigures } from "./balance";
 import { parseTransactionText } from "./parser";
 import { horizonFor } from "../modules/ledger/ledger.horizon";
 import { cardBillAccount, cardBillContext, markCardBillPayment } from "../modules/cards/cards.billPayment.service";
@@ -23,6 +24,24 @@ function isSameMessage(
 ): boolean {
   if (a.sourceRef && b.sourceRef) return a.sourceRef === b.sourceRef;
   return a.source === b.source && a.receivedAt.getTime() === b.receivedAt.getTime();
+}
+
+/**
+ * The bank's figures a message states, sorted by what they are about. A
+ * balance is a bank account's; on a card the same words would mean what
+ * is owed, so it is not kept there. What is left of a limit is a card's,
+ * and nothing else has one.
+ */
+export function statedFiguresFor(
+  rawText: string,
+  accountType: AccountType | null
+): { balanceMinor: number | null; availableLimitMinor: number | null } {
+  const figures = parseStatedFigures(rawText);
+  const onCard = accountType === "CARD";
+  return {
+    balanceMinor: onCard ? null : figures.balanceMinor,
+    availableLimitMinor: onCard ? figures.availableLimitMinor : null,
+  };
 }
 
 /**
@@ -57,13 +76,20 @@ export async function ingestRawMessage(params: {
   // A card bill payment names two accounts, and the parser alone files it
   // under the wrong one: the bank's debit under the card it paid, the
   // card's "payment received" under a bank account. See cardBillAccount.
-  const billAccount = await cardBillAccount(
-    params.userId,
-    params.rawText,
-    parsed,
-    await cardBillContext(params.userId)
-  );
+  const context = await cardBillContext(params.userId);
+  const billAccount = await cardBillAccount(params.userId, params.rawText, parsed, context);
   const accountId = billAccount ? billAccount.accountId : await resolveAccount(params.userId, parsed.account);
+
+  // What the bank said was left, off the original text - the parser
+  // strips it before it looks for the amount. A balance belongs to a
+  // bank account; a card's message says what is left of its limit, and
+  // the one is never the other.
+  // The context was read before resolveAccount may have created the
+  // account, so a first message from a new card falls back to the parse.
+  const accountType = accountId
+    ? (context.accountTypeOf.get(accountId.toString()) ?? parsed.account?.accountType ?? null)
+    : null;
+  const stated = statedFiguresFor(params.rawText, accountType);
 
   const duplicate = await findDuplicate({
     userId: params.userId,
@@ -95,7 +121,11 @@ export async function ingestRawMessage(params: {
       // the one arriving now.
       if (!duplicate.editedAt) {
         if (!duplicate.merchant && parsed.merchant) duplicate.merchant = parsed.merchant;
-        if (!duplicate.accountId && accountId) duplicate.accountId = accountId;
+        if (!duplicate.accountId && accountId) {
+          duplicate.accountId = accountId;
+          // The second message said which account; nobody is guessing now.
+          duplicate.accountUnknown = false;
+        }
         if (!duplicate.categoryId) {
           duplicate.categoryId = await categorizeTransaction({
             userId: params.userId,
@@ -103,6 +133,16 @@ export async function ingestRawMessage(params: {
             rawText: params.rawText,
           });
         }
+      }
+
+      // The bank's figure is not something a person edits, so it fills in
+      // whenever a message carries it: an SMS often says the balance where
+      // the email for the same payment does not, and the other way round.
+      if (duplicate.statedBalanceMinor == null && stated.balanceMinor !== null) {
+        duplicate.statedBalanceMinor = stated.balanceMinor;
+      }
+      if (duplicate.statedAvailableLimitMinor == null && stated.availableLimitMinor !== null) {
+        duplicate.statedAvailableLimitMinor = stated.availableLimitMinor;
       }
 
       await duplicate.save();
@@ -140,6 +180,12 @@ export async function ingestRawMessage(params: {
     source: params.source,
     sourceRef: params.sourceRef,
     occurredAt,
+    statedBalanceMinor: stated.balanceMinor,
+    statedAvailableLimitMinor: stated.availableLimitMinor,
+    // No account could be placed: not cash, just not known. A payment
+    // typed in by hand with no account is cash; one a bank sent a message
+    // about never is, and guessing cash is how the cash balance drifts.
+    accountUnknown: accountId === null,
     sources: [
       {
         source: params.source,

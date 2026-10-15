@@ -110,6 +110,8 @@ describe("an account's expected balance", () => {
         expectedMinor: 53_800_00,
         transactionCount: 4,
         since: undefined,
+        // No message has said a balance yet, so there is nothing to be off from.
+        drift: null,
       }
     );
   });

@@ -52,6 +52,85 @@ export function pushAvailable(): boolean {
   return firebase() !== null;
 }
 
+/**
+ * Stands in for the service-account file, for the tests: a project id and
+ * a token to send, with no key to sign and no Google to ask. Null puts the
+ * file back.
+ */
+export function useFirebaseForTests(fake: { projectId: string; accessToken: string } | null): void {
+  cached =
+    fake === null
+      ? undefined
+      : {
+          account: { project_id: fake.projectId, client_email: "test@example.com", private_key: "" },
+          auth: { getAccessToken: async () => fake.accessToken } as unknown as GoogleAuth,
+        };
+}
+
+/**
+ * One message to every device of a user's, through Firebase. Devices
+ * Firebase says no longer exist are forgotten on the way. Returns how
+ * many took it.
+ */
+async function deliver(
+  config: { account: ServiceAccount; auth: GoogleAuth },
+  userId: Types.ObjectId,
+  tokens: string[],
+  message: Record<string, unknown>
+): Promise<number> {
+  const accessToken = await config.auth.getAccessToken();
+  const dead: string[] = [];
+  let sent = 0;
+
+  for (const token of tokens) {
+    const response = await fetch(
+      `https://fcm.googleapis.com/v1/projects/${config.account.project_id}/messages:send`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ message: { token, ...message } }),
+        signal: AbortSignal.timeout(15_000),
+      }
+    ).catch(() => null);
+
+    if (response?.ok) sent += 1;
+    else if (response && (response.status === 404 || response.status === 400)) dead.push(token);
+  }
+
+  if (dead.length > 0) {
+    await User.updateOne({ _id: userId }, { $pull: { fcmTokens: { token: { $in: dead } } } });
+  }
+  return sent;
+}
+
+export type NotifyResult =
+  | { sent: true; devices: number }
+  | { sent: false; reason: "not-configured" | "no-device" };
+
+/**
+ * Something the user should see: a notification with a title and a body,
+ * shown by the phone whether or not the app is open, unlike the silent
+ * ping above. `data` rides along for the app to open the right screen.
+ */
+export async function sendNotification(
+  userId: Types.ObjectId,
+  note: { title: string; body: string; data?: Record<string, string> }
+): Promise<NotifyResult> {
+  const config = firebase();
+  if (!config) return { sent: false, reason: "not-configured" };
+
+  const user = await User.findById(userId).select("fcmTokens");
+  const tokens = (user?.fcmTokens ?? []).map((entry) => entry.token);
+  if (tokens.length === 0) return { sent: false, reason: "no-device" };
+
+  const devices = await deliver(config, userId, tokens, {
+    notification: { title: note.title, body: note.body },
+    data: note.data ?? {},
+    android: { priority: "HIGH" },
+  });
+  return devices > 0 ? { sent: true, devices } : { sent: false, reason: "no-device" };
+}
+
 export type PingResult =
   | { pinged: true; devices: number }
   | { pinged: false; reason: "not-configured" | "no-device" | "too-soon"; nextAllowedAt?: Date };
@@ -87,35 +166,11 @@ export async function pingOwnerForSms(ownerId: Types.ObjectId, now = new Date())
   );
   if (claimed.modifiedCount === 0) return { pinged: false, reason: "too-soon" };
 
-  const accessToken = await config.auth.getAccessToken();
-  const dead: string[] = [];
-  let sent = 0;
-
-  for (const token of tokens) {
-    const response = await fetch(
-      `https://fcm.googleapis.com/v1/projects/${config.account.project_id}/messages:send`,
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: {
-            token,
-            // Data only: nothing is shown, the app just wakes and reads.
-            data: { type: "SMS_SYNC" },
-            android: { priority: "HIGH", ttl: "600s" },
-          },
-        }),
-        signal: AbortSignal.timeout(15_000),
-      }
-    ).catch(() => null);
-
-    if (response?.ok) sent += 1;
-    else if (response && (response.status === 404 || response.status === 400)) dead.push(token);
-  }
-
-  if (dead.length > 0) {
-    await User.updateOne({ _id: ownerId }, { $pull: { fcmTokens: { token: { $in: dead } } } });
-  }
+  const sent = await deliver(config, ownerId, tokens, {
+    // Data only: nothing is shown, the app just wakes and reads.
+    data: { type: "SMS_SYNC" },
+    android: { priority: "HIGH", ttl: "600s" },
+  });
 
   return sent > 0 ? { pinged: true, devices: sent } : { pinged: false, reason: "no-device" };
 }

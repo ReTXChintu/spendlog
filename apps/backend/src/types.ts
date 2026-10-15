@@ -113,6 +113,12 @@ export type StatementLineResolution = (typeof STATEMENT_LINE_RESOLUTIONS)[number
 export const STATEMENT_STATUSES = ["PARSED", "LOCKED", "UNIDENTIFIED", "UNREADABLE"] as const;
 export type StatementStatus = (typeof STATEMENT_STATUSES)[number];
 
+// Where a bank's own figure for an account's balance came from, when it was
+// not read off an SMS: the closing balance on a bank statement, or a number
+// typed in off the bank's app ("it shows 12,340 today").
+export const BALANCE_CHECKPOINT_SOURCES = ["STATEMENT", "MANUAL"] as const;
+export type BalanceCheckpointSource = (typeof BALANCE_CHECKPOINT_SOURCES)[number];
+
 // A card offer stands until the bank changes it; a coupon is spent once
 // and then gone. Both answer the same question at a till, which is why
 // they share a collection.
