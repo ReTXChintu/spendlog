@@ -564,6 +564,20 @@ export interface TransactionDoc {
   /// messages. Set, the other account's balance already has its own row;
   /// unset, this one row moves both balances.
   transferPairId?: Types.ObjectId | null;
+  /// A leg SpendLog wrote itself, because one side of a transfer was marked
+  /// and the other account's bank never sent a message for its side. True
+  /// only while nobody has vouched for it: a real message adopting it, or a
+  /// person editing it, turns it into an ordinary row. See
+  /// transactions.transfer.ts.
+  autoLeg?: boolean;
+  /// The transfer it was written for. Kept after it is confirmed, as a
+  /// record of where it came from.
+  autoLegOf?: Types.ObjectId | null;
+  /// Set on a transfer whose written-in leg was deleted by hand. The person
+  /// has said that leg was wrong, so it is not written again; the transfer
+  /// falls back to moving the other account by itself, as it did before
+  /// legs were written. Cleared when the transfer is pointed somewhere new.
+  legDeclined?: boolean;
   /// Money in that is already spoken for: sent for something that will be
   /// bought later (a father's 8,000 for next week's purchase). Not income,
   /// and not in the savings bucket; the purchase, once linked to it like a
@@ -734,6 +748,9 @@ const transactionSchema = new Schema<TransactionDoc>(
     isTransfer: { type: Boolean, default: false },
     transferAccountId: { type: Schema.Types.ObjectId, ref: "Account", default: null },
     transferPairId: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
+    autoLeg: { type: Boolean, default: false },
+    autoLegOf: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
+    legDeclined: { type: Boolean, default: false },
     isEarmarked: { type: Boolean, default: false },
     byKidId: { type: Schema.Types.ObjectId, ref: "User", default: null },
     byKidName: { type: String, default: null },

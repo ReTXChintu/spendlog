@@ -11,6 +11,7 @@ import { runNightlyDriftCheck } from "./modules/accounts/accounts.drift";
 import { runAccountUnknownBackfill, runStatedBalanceBackfill } from "./modules/accounts/accounts.statedBackfill";
 import { runCardBillAccountBackfill, runCardBillBackfill } from "./modules/cards/cards.billPayment.service";
 import { runDailyFundRefresh } from "./modules/funds/funds.cache";
+import { runTransferLegBackfill } from "./modules/transactions/transactions.transfer";
 import { syncAllConnectedEmails } from "./modules/ingestion/gmail.service";
 
 const EMAIL_SYNC_INTERVAL_MS = 15 * 60 * 1000;
@@ -81,11 +82,15 @@ async function start() {
   // are where they belong, card bills imported before they were
   // recognised, still counted as spending, and the card's "payment
   // received", still counted as income. In that order, so the second pairs
-  // legs that are already on the right accounts.
+  // legs that are already on the right accounts. Then every transfer still
+  // recorded as one row is given its other leg - after the card bills, so
+  // a bill's two sides are paired as a bill and not taken for a transfer.
   runCardBillAccountBackfill()
     .catch((err) => console.error("Card bill account backfill failed:", err))
     .then(() => runCardBillBackfill())
-    .catch((err) => console.error("Card bill backfill failed:", err));
+    .catch((err) => console.error("Card bill backfill failed:", err))
+    .then(() => runTransferLegBackfill())
+    .catch((err) => console.error("Transfer leg backfill failed:", err));
   // The bank's balance read off every message already stored, and the
   // payments that were guessed to be cash taken out of the cash balance.
   runStatedBalanceBackfill().catch((err) => console.error("Stated balance backfill failed:", err));

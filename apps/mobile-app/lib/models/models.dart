@@ -245,8 +245,13 @@ class Transaction {
   /// money from [account] to this one; a CREDIT brought it from this one.
   final String? transferAccountId;
 
-  /// Read-only: set when both legs of a transfer arrived as separate rows.
+  /// Read-only: set when both legs of a transfer are rows of their own.
   final String? transferPairId;
+
+  /// A leg SpendLog wrote in for a transfer because the other bank never
+  /// texted its side. Turns false once a message turns up for it, or the
+  /// user edits it.
+  final bool autoLeg;
 
   /// CREDIT only: money received for a purchase still to come. Not income
   /// until it is no longer waiting.
@@ -324,6 +329,7 @@ class Transaction {
     required this.isTransfer,
     this.transferAccountId,
     this.transferPairId,
+    this.autoLeg = false,
     this.isEarmarked = false,
     this.isSpecial = false,
     this.isSalary = false,
@@ -386,6 +392,7 @@ class Transaction {
         isTransfer: json['isTransfer'] as bool? ?? false,
         transferAccountId: json['transferAccountId'] is String ? json['transferAccountId'] as String : null,
         transferPairId: json['transferPairId'] is String ? json['transferPairId'] as String : null,
+        autoLeg: json['autoLeg'] == true,
         isEarmarked: json['isEarmarked'] == true,
         isSpecial: json['isSpecial'] as bool? ?? false,
         isSalary: json['isSalary'] as bool? ?? false,
@@ -414,6 +421,53 @@ class Transaction {
         needsExplanation: json['needsExplanation'] == true,
         accountUnknown: json['accountUnknown'] == true,
       );
+}
+
+/// What saving a transfer did to its other side, as the server's
+/// `transferLeg` says: paired with a row already on the other account, or
+/// a row written in there because that bank sent nothing.
+class TransferLeg {
+  /// paired | created
+  final String action;
+  final String transactionId;
+  final String accountName;
+
+  /// DEBIT | CREDIT - which way the money moved that account.
+  final String type;
+  final int amountMinor;
+
+  const TransferLeg({
+    required this.action,
+    required this.transactionId,
+    required this.accountName,
+    required this.type,
+    required this.amountMinor,
+  });
+
+  /// Null when the save did nothing to the other side.
+  static TransferLeg? maybe(Object? value) {
+    if (value is! Map<String, dynamic>) return null;
+    final action = value['action'];
+    final id = value['transactionId'];
+    if (action is! String || id is! String) return null;
+    return TransferLeg(
+      action: action,
+      transactionId: id,
+      accountName: value['accountName'] as String? ?? 'the other account',
+      type: value['type'] as String? ?? 'CREDIT',
+      amountMinor: (value['amountMinor'] as num?)?.round() ?? 0,
+    );
+  }
+
+  bool get created => action == 'created';
+
+  /// "Also recorded ₹3,000 into Federal Bank ••3295", for a snackbar.
+  String get message {
+    // Whole rupees without the paise, as a person would say it.
+    final money = amountMinor % 100 == 0 ? formatMoneyShort(amountMinor) : formatMoney(amountMinor);
+    final where = type == 'CREDIT' ? 'into $accountName' : 'out of $accountName';
+    return created ? 'Also recorded $money $where' : 'Matched with the $money already $where';
+  }
 }
 
 class DayGroup {

@@ -144,6 +144,7 @@ class TransactionTile extends StatelessWidget {
                   ],
                 ),
                 if (isTransfer ||
+                    transaction.autoLeg ||
                     pocket != null ||
                     transaction.accountUnknown ||
                     transaction.needsExplanation ||
@@ -166,6 +167,9 @@ class TransactionTile extends StatelessWidget {
                           background: context.c.chipNeutral,
                           foreground: context.c.transfer,
                         ),
+                      // SpendLog wrote this side of a transfer in itself;
+                      // no message from the bank stands behind it yet.
+                      if (transaction.autoLeg) const AutoLegChip(),
                       // The message named no account, so this is in no
                       // balance until someone says which it was on.
                       if (transaction.accountUnknown)
@@ -319,6 +323,33 @@ class _CategoryChip extends StatelessWidget {
           uncategorized ? Icons.add : categoryIcon(category.icon),
           size: 17,
           color: uncategorized ? context.c.mutedLight : Colors.white,
+        ),
+      ),
+    );
+  }
+}
+
+/// What the chip on a written-in transfer leg says when asked.
+const kAutoLegHint = "Your bank didn't text this one, so SpendLog added it to match the transfer. "
+    'It turns into the real thing if the message comes in later.';
+
+/// On a row SpendLog wrote in for the other side of a transfer, because
+/// that bank never sent a message for it. Tap or hold for why.
+class AutoLegChip extends StatelessWidget {
+  const AutoLegChip({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: kAutoLegHint,
+      triggerMode: TooltipTriggerMode.tap,
+      showDuration: const Duration(seconds: 5),
+      child: Semantics(
+        hint: kAutoLegHint,
+        child: _Badge(
+          label: 'Added for your transfer',
+          background: context.c.brand50,
+          foreground: context.c.brandDark,
         ),
       ),
     );

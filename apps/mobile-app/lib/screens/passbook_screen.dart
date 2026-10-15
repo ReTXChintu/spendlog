@@ -9,6 +9,7 @@ import '../utils/format.dart';
 import '../widgets/edit_transaction_sheet.dart';
 import '../widgets/reconcile_sheet.dart';
 import '../widgets/state_block.dart';
+import '../widgets/transaction_tile.dart' show AutoLegChip;
 
 /// An account's passbook: every row that moved it, newest first, with what
 /// SpendLog expected it to hold after each one beside what the bank said
@@ -814,6 +815,12 @@ class _PassbookRowTile extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11.5, color: c.muted)),
+                    // The far side of a transfer, written in because this
+                    // bank never texted it.
+                    if (row.autoLeg) ...[
+                      const SizedBox(height: 4),
+                      const AutoLegChip(),
+                    ],
                   ],
                 ),
               ),

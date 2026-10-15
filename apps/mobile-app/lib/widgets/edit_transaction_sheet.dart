@@ -835,10 +835,18 @@ class _EditSheetState extends State<_EditSheet> {
     };
 
     final navigator = Navigator.of(context);
+    // Captured now: the sheet is gone by the time there is anything to say.
+    final messenger = ScaffoldMessenger.of(context);
     try {
+      // What saving a transfer did on the other account - paired with the
+      // row already there, or one written in because that bank sent
+      // nothing. Said once the sheet is closed, since it is a change the
+      // user did not make with their own hands.
+      TransferLeg? transferLeg;
       if (_isNew) {
         final created = await ApiClient.instance.post('/transactions', {...body, 'currency': 'INR'})
             as Map<String, dynamic>;
+        transferLeg = TransferLeg.maybe(created['transferLeg']);
         final id = created['id'] as String;
         final needsEdit = editOnly.entries.any((e) => e.value != null && e.value != false);
         if (needsEdit) await ApiClient.instance.patch('/transactions/$id', editOnly);
@@ -848,9 +856,13 @@ class _EditSheetState extends State<_EditSheet> {
           await showRefundSheet(context, refund: Transaction.fromJson(created));
         }
       } else {
-        await ApiClient.instance.patch('/transactions/${widget.transaction!.id}', {...body, ...editOnly});
+        final updated = await ApiClient.instance.patch('/transactions/${widget.transaction!.id}', {...body, ...editOnly});
+        if (updated is Map<String, dynamic>) transferLeg = TransferLeg.maybe(updated['transferLeg']);
       }
       navigator.pop(true);
+      if (transferLeg != null) {
+        messenger.showSnackBar(SnackBar(content: Text(transferLeg.message)));
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {

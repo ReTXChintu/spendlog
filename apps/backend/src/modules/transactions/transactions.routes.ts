@@ -9,6 +9,13 @@ import { checkPeople, shareablePart } from "../contacts/contacts.people";
 import { attachToLoan } from "../loans/loans.matching";
 import { reopenLoanIfNeeded } from "../loans/loans.routes";
 import { tripForOccurredAt } from "../trips/trips.service";
+import {
+  ensureTransferLegs,
+  handOverLegs,
+  releaseForRepair,
+  releaseLegs,
+  syncTransferLegs,
+} from "./transactions.transfer";
 import { IST_OFFSET, istDayEnd, istDayKey, istDayStart } from "../../time";
 import { TRANSACTION_TYPES } from "../../types";
 
@@ -325,8 +332,13 @@ transactionsRouter.post("/", async (req, res) => {
     }
   }
 
+  // The other account's side, found or written in, so a transfer typed in
+  // by hand shows on both accounts. Said in the response, so the app can
+  // tell the user what else just appeared.
+  const transferLeg = await ensureTransferLegs(created);
+
   const tx = await Transaction.findById(created._id).populate("category").populate("account").populate("trip");
-  res.status(201).json(tx);
+  res.status(201).json({ ...tx!.toJSON(), transferLeg });
 });
 
 // Every field a person might need to correct. Automatic parsing gets a
@@ -498,6 +510,10 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   if ((parsed.data.type ?? existing.type) === "DEBIT") transferFields.isEarmarked = false;
   // An account named is an account known.
   if (parsed.data.accountId) transferFields.accountUnknown = false;
+  // A leg SpendLog wrote in for a transfer is the user's own row once they
+  // have touched it: kept in step with the transfer no longer, and never
+  // deleted along with it.
+  if (existing.autoLeg) transferFields.autoLeg = false;
   // An unexplained difference is explained once it is filed somewhere or
   // called something.
   if (
@@ -546,13 +562,22 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
     .populate("account").populate("trip");
   if (!updated) return res.status(404).json({ error: "Not found" });
 
-  res.json(updated);
+  // The other leg of the transfer, moved, taken away or given, to match
+  // what this edit said - and in the response, so the app can say what
+  // else changed.
+  const transferLeg = await syncTransferLegs(updated, existing);
+
+  res.json({ ...updated.toJSON(), transferLeg });
 });
 
 transactionsRouter.delete("/:id", validObjectIdParam("id"), async (req, res) => {
   const userId = currentUserId(req);
   const deleted = await Transaction.findOneAndDelete({ _id: req.params.id, userId });
   if (!deleted) return res.status(404).json({ error: "Not found" });
+
+  // The other leg of a transfer: gone with it if SpendLog wrote it in,
+  // otherwise unpaired. See releaseLegs.
+  await releaseLegs(deleted);
 
   // Deleting a refund puts the purchases it covered back to costing what
   // they did; deleting a purchase releases the refunds pointing at it
@@ -754,6 +779,10 @@ transactionsRouter.post("/:id/pair", validObjectIdParam("id"), async (req, res) 
     return res.status(400).json({ error: "A transfer goes between two different accounts" });
   }
 
+  // Whatever either was paired with until now: a leg written in for it
+  // goes, a real row is let go to find a leg of its own below.
+  const leftovers = [await releaseForRepair(first, second), await releaseForRepair(second, first)];
+
   const now = new Date();
   for (const [leg, other] of [
     [first, second],
@@ -764,9 +793,14 @@ transactionsRouter.post("/:id/pair", validObjectIdParam("id"), async (req, res) 
     leg.transferPairId = other._id;
     leg.kindEditedAt = now;
     leg.editedAt = now;
+    // Paired by a person: theirs now, written in or not.
+    leg.autoLeg = false;
   }
   // Saved rather than updated so the counted-amount hook zeroes both.
   await Promise.all([first.save(), second.save()]);
+  for (const leftover of leftovers) {
+    if (leftover) await ensureTransferLegs(leftover);
+  }
   await first.populate(["category", "account"]);
 
   res.json(first);
@@ -825,6 +859,10 @@ transactionsRouter.post("/:id/merge", validObjectIdParam("id"), async (req, res)
     if (target.statedAvailableLimitMinor == null && source.statedAvailableLimitMinor != null) {
       target.statedAvailableLimitMinor = source.statedAvailableLimitMinor;
     }
+
+    // A leg of a transfer is still one once merged: the pairing moves to
+    // the row that survives.
+    await handOverLegs(source, target);
 
     // Verbatim, so unmerging restores the row rather than approximating it.
     target.mergedFrom.push(source.toObject() as unknown as Record<string, unknown>);

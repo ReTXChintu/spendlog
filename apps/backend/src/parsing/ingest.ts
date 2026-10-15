@@ -1,5 +1,5 @@
 import { HydratedDocument, Types } from "mongoose";
-import { Transaction, TransactionDoc } from "../models";
+import { Transaction, TransactionDoc, TransactionSourceEntry } from "../models";
 import { AccountType, TransactionSource } from "../types";
 import { resolveAccount } from "./accounts";
 import { categorizeTransaction } from "./categorizer";
@@ -11,6 +11,12 @@ import { parseStatedFigures } from "./balance";
 import { parseTransactionText } from "./parser";
 import { horizonFor } from "../modules/ledger/ledger.horizon";
 import { cardBillAccount, cardBillContext, markCardBillPayment } from "../modules/cards/cards.billPayment.service";
+import {
+  adoptAutoLeg,
+  couldBeSameAccount,
+  ensureTransferLegs,
+  findAutoLeg,
+} from "../modules/transactions/transactions.transfer";
 
 export interface IngestResult {
   status: "created" | "duplicate" | "ignored";
@@ -91,67 +97,43 @@ export async function ingestRawMessage(params: {
     : null;
   const stated = statedFiguresFor(params.rawText, accountType);
 
-  const duplicate = await findDuplicate({
-    userId: params.userId,
-    amountMinor: parsed.amountMinor,
-    type: parsed.type,
-    accountId,
-    occurredAt,
+  const entry = {
+    source: params.source,
     sourceRef: params.sourceRef,
-  });
+    rawText: params.rawText,
+    receivedAt: params.receivedAt,
+  };
+  const found = { userId: params.userId, amountMinor: parsed.amountMinor, type: parsed.type, accountId, occurredAt };
+
+  let duplicate = await findDuplicate({ ...found, sourceRef: params.sourceRef });
+  // A leg SpendLog wrote in is not a message, so the time window alone
+  // does not make it this one: only on the account this message names.
+  if (duplicate?.autoLeg && !(await couldBeSameAccount(params.userId, duplicate.accountId, accountId))) {
+    duplicate = null;
+  }
+
+  // The other account's side of a transfer, written in because its bank
+  // sent nothing - until now. The message becomes that row rather than a
+  // second one beside it, and the pairing stays.
+  const autoLeg = duplicate ? (duplicate.autoLeg ? duplicate : null) : await findAutoLeg(found);
+  if (autoLeg) {
+    await absorbMessage(autoLeg, { userId: params.userId, entry, parsed, accountId, stated }, () =>
+      adoptAutoLeg(autoLeg, occurredAt)
+    );
+    return { status: "duplicate", transaction: autoLeg };
+  }
+
   if (duplicate) {
     // The second message is kept rather than thrown away. It is evidence
     // the transaction really happened, it is what lets the row show it was
     // seen twice, and a bank email routinely names the merchant better
     // than the SMS that arrived first.
-    const entry = {
-      source: params.source,
-      sourceRef: params.sourceRef,
-      rawText: params.rawText,
-      receivedAt: params.receivedAt,
-    };
+    const added = await absorbMessage(duplicate, { userId: params.userId, entry, parsed, accountId, stated });
 
-    const alreadyKnown = duplicate.sources.some((existing) => isSameMessage(existing, entry));
-    if (!alreadyKnown) {
-      duplicate.sources.push(entry);
-
-      // Only ever fills gaps, and only while nobody has corrected the row
-      // by hand. A person's answer outranks a second parse of the same
-      // event, and a value already parsed is not necessarily worse than
-      // the one arriving now.
-      if (!duplicate.editedAt) {
-        if (!duplicate.merchant && parsed.merchant) duplicate.merchant = parsed.merchant;
-        if (!duplicate.accountId && accountId) {
-          duplicate.accountId = accountId;
-          // The second message said which account; nobody is guessing now.
-          duplicate.accountUnknown = false;
-        }
-        if (!duplicate.categoryId) {
-          duplicate.categoryId = await categorizeTransaction({
-            userId: params.userId,
-            merchant: duplicate.merchant ?? null,
-            rawText: params.rawText,
-          });
-        }
-      }
-
-      // The bank's figure is not something a person edits, so it fills in
-      // whenever a message carries it: an SMS often says the balance where
-      // the email for the same payment does not, and the other way round.
-      if (duplicate.statedBalanceMinor == null && stated.balanceMinor !== null) {
-        duplicate.statedBalanceMinor = stated.balanceMinor;
-      }
-      if (duplicate.statedAvailableLimitMinor == null && stated.availableLimitMinor !== null) {
-        duplicate.statedAvailableLimitMinor = stated.availableLimitMinor;
-      }
-
-      await duplicate.save();
-
-      // The second message may be the one that says what this was: a
-      // bank's email often names the card a bill went to where its SMS
-      // gave only an amount.
-      if (!duplicate.editedAt) await markCardBillPayment(duplicate);
-    }
+    // The second message may be the one that says what this was: a
+    // bank's email often names the card a bill went to where its SMS
+    // gave only an amount.
+    if (added && !duplicate.editedAt) await markCardBillPayment(duplicate);
 
     return { status: "duplicate", transaction: duplicate };
   }
@@ -211,6 +193,68 @@ export async function ingestRawMessage(params: {
     // Same reasoning, for a loan taken outside a card.
     await matchLoanInstalment(transaction);
   }
+  // detectSelfTransfer pairs both legs it finds, and a card bill is paired
+  // by its own rules, so this has nothing to do today. Called all the same:
+  // any transfer that leaves ingest naming another account has both legs.
+  await ensureTransferLegs(transaction);
 
   return { status: "created", transaction };
+}
+
+/**
+ * Adds a message to a row that already stands for the same money: a
+ * second report of a payment, or the bank's own message for a leg
+ * SpendLog wrote in. Returns false when the row already had this message.
+ *
+ * `beforeSave` is for what a particular caller changes on top, in the
+ * same write.
+ */
+async function absorbMessage(
+  row: HydratedDocument<TransactionDoc>,
+  message: {
+    userId: Types.ObjectId;
+    entry: TransactionSourceEntry;
+    parsed: { merchant: string | null };
+    accountId: Types.ObjectId | null;
+    stated: { balanceMinor: number | null; availableLimitMinor: number | null };
+  },
+  beforeSave?: () => void
+): Promise<boolean> {
+  const { entry, parsed, accountId, stated } = message;
+  if (row.sources.some((existing) => isSameMessage(existing, entry))) return false;
+  row.sources.push(entry);
+
+  // Only ever fills gaps, and only while nobody has corrected the row by
+  // hand. A person's answer outranks a second parse of the same event,
+  // and a value already parsed is not necessarily worse than the one
+  // arriving now.
+  if (!row.editedAt) {
+    if (!row.merchant && parsed.merchant) row.merchant = parsed.merchant;
+    if (!row.accountId && accountId) {
+      row.accountId = accountId;
+      // The second message said which account; nobody is guessing now.
+      row.accountUnknown = false;
+    }
+    if (!row.categoryId) {
+      row.categoryId = await categorizeTransaction({
+        userId: message.userId,
+        merchant: row.merchant ?? null,
+        rawText: entry.rawText ?? "",
+      });
+    }
+  }
+
+  // The bank's figure is not something a person edits, so it fills in
+  // whenever a message carries it: an SMS often says the balance where the
+  // email for the same payment does not, and the other way round.
+  if (row.statedBalanceMinor == null && stated.balanceMinor !== null) {
+    row.statedBalanceMinor = stated.balanceMinor;
+  }
+  if (row.statedAvailableLimitMinor == null && stated.availableLimitMinor !== null) {
+    row.statedAvailableLimitMinor = stated.availableLimitMinor;
+  }
+
+  beforeSave?.();
+  await row.save();
+  return true;
 }

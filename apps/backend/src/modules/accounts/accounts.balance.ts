@@ -70,6 +70,9 @@ export interface LedgerEntry {
   transferAccountId: string | null;
   accountUnknown: boolean;
   needsExplanation: boolean;
+  /// A leg SpendLog wrote in for a transfer whose bank sent no message for
+  /// this side, not yet confirmed by one.
+  autoLeg: boolean;
   note: string | null;
 }
 
@@ -127,6 +130,7 @@ export type LedgerRow = {
   accountUnknown?: boolean;
   isAdjustment?: boolean;
   needsExplanation?: boolean;
+  autoLeg?: boolean;
 };
 
 export type LedgerCheckpoint = {
@@ -194,7 +198,11 @@ export interface LedgerMove {
  *     (accountUnknown), in which case it moves nothing: a guess at cash is
  *     exactly the kind of error this exists to find;
  *   - a transfer recorded as one row moves the other account too, unless
- *     the other side arrived as a row of its own (transferPairId);
+ *     the other side has a row of its own (transferPairId) - one that
+ *     arrived as a message, or one written in for it (autoLeg). Since
+ *     transfers are given both legs (transactions.transfer.ts), the one-row
+ *     case is what is left: a leg deleted by hand, or no account to put
+ *     one on;
  *   - nothing moves before the moment the opening balance was read. A
  *     payment in the same minute was already in the figure typed in.
  */
@@ -317,6 +325,7 @@ export function buildLedger(params: {
       transferAccountId: null,
       accountUnknown: false,
       needsExplanation: false,
+      autoLeg: false,
       note: null,
     },
   ];
@@ -355,6 +364,7 @@ export function buildLedger(params: {
         transferAccountId: null,
         accountUnknown: false,
         needsExplanation: false,
+        autoLeg: false,
         note: item.checkpoint.note ?? null,
       };
     } else {
@@ -390,6 +400,7 @@ export function buildLedger(params: {
         transferAccountId: move.transferAccountId,
         accountUnknown: Boolean(row.accountUnknown),
         needsExplanation: Boolean(row.needsExplanation),
+        autoLeg: Boolean(row.autoLeg),
         note: null,
       };
     }
@@ -434,7 +445,7 @@ export function buildLedger(params: {
 
 const ROW_FIELDS =
   "accountId type amountMinor occurredAt isTransfer transferAccountId transferPairId merchant countedReason source " +
-  "statedBalanceMinor accountUnknown isAdjustment needsExplanation";
+  "statedBalanceMinor accountUnknown isAdjustment needsExplanation autoLeg";
 
 /**
  * The passbook of every tracked account among these - or of the ones

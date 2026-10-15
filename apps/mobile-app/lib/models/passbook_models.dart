@@ -180,6 +180,10 @@ class PassbookRow {
   final String? transferAccountId;
   final bool accountUnknown;
   final bool needsExplanation;
+
+  /// Written in by SpendLog for a transfer whose bank never texted this
+  /// side, and not yet confirmed by a message.
+  final bool autoLeg;
   final String? note;
 
   const PassbookRow({
@@ -200,6 +204,7 @@ class PassbookRow {
     this.transferAccountId,
     this.accountUnknown = false,
     this.needsExplanation = false,
+    this.autoLeg = false,
     this.note,
   });
 
@@ -233,6 +238,7 @@ class PassbookRow {
         transferAccountId: _str(json['transferAccountId']),
         accountUnknown: _bool(json['accountUnknown']),
         needsExplanation: _bool(json['needsExplanation']),
+        autoLeg: _bool(json['autoLeg']),
         note: _str(json['note']),
       );
 }
