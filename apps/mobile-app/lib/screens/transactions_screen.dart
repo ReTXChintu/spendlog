@@ -26,12 +26,23 @@ class TransactionsScreen extends StatefulWidget {
   /// since it is then a pushed page rather than a tab.
   final String? initialAccountId;
 
+  /// Set from the dashboard's to-dos: only the payments no account could
+  /// be placed for, or only the unexplained differences. Pushed pages,
+  /// like [initialAccountId].
+  final bool initialAccountUnknown;
+  final bool initialNeedsExplanation;
+
   const TransactionsScreen({
     super.key,
     this.startUncategorized = false,
     this.onOpenSettings,
     this.initialAccountId,
+    this.initialAccountUnknown = false,
+    this.initialNeedsExplanation = false,
   });
+
+  /// Whether this is a page pushed over the tabs rather than a tab.
+  bool get isPushed => initialAccountId != null || initialAccountUnknown || initialNeedsExplanation;
 
   @override
   State<TransactionsScreen> createState() => TransactionsScreenState();
@@ -88,6 +99,12 @@ class TransactionsScreenState extends State<TransactionsScreen> {
   AccountCycle? _cycle;
   bool _loadingCycles = false;
 
+  /// Only the payments with no account; only the unexplained differences.
+  /// Either one is a question about the whole ledger, so it drops the
+  /// month and shows all time.
+  late bool _accountUnknown = widget.initialAccountUnknown;
+  late bool _needsExplanation = widget.initialNeedsExplanation;
+
   /// Rows picked for merging. Entered by long-pressing a row.
   bool _selecting = false;
   final List<String> _selectedIds = [];
@@ -132,8 +149,8 @@ class TransactionsScreenState extends State<TransactionsScreen> {
   bool get _onCurrentMonth => _monthIndex == _currentMonthIndex;
 
   /// An account brings its own dates (a statement cycle, or all time),
-  /// which stand in for the month.
-  bool get _ownRange => _accountId != null;
+  /// which stand in for the month. So do the two whole-ledger questions.
+  bool get _ownRange => _accountId != null || _accountUnknown || _needsExplanation;
 
   String _rangeLabel(String from, String to) => '${formatIsoShortDate(from)} – ${formatIsoShortDate(to)}';
 
@@ -180,6 +197,8 @@ class TransactionsScreenState extends State<TransactionsScreen> {
         _cycles = null;
         _cycle = null;
         _loadingCycles = false;
+        _accountUnknown = false;
+        _needsExplanation = false;
       });
 
   String _filterQuery() {
@@ -191,6 +210,8 @@ class TransactionsScreenState extends State<TransactionsScreen> {
       if (_categoryId != null) 'categoryId': _categoryId!,
       if (_direction.isNotEmpty) 'type': _direction,
       if (_accountId != null) 'accountId': _accountId!,
+      if (_accountUnknown) 'accountUnknown': '1',
+      if (_needsExplanation) 'needsExplanation': '1',
       if (_ownRange && cycle != null) ...{'from': cycle.from, 'to': cycle.to},
       if (!_ownRange && month != null && month.from.isNotEmpty && month.to.isNotEmpty) ...{
         'from': month.from,
@@ -583,7 +604,12 @@ class TransactionsScreenState extends State<TransactionsScreen> {
   }
 
   bool get _filtersActive =>
-      _query.isNotEmpty || _categoryId != null || _direction.isNotEmpty || _accountId != null;
+      _query.isNotEmpty ||
+      _categoryId != null ||
+      _direction.isNotEmpty ||
+      _accountId != null ||
+      _accountUnknown ||
+      _needsExplanation;
 
   void _clearFilters() => _setFilter(() {
         _query = '';
@@ -594,6 +620,8 @@ class TransactionsScreenState extends State<TransactionsScreen> {
         _cycles = null;
         _cycle = null;
         _loadingCycles = false;
+        _accountUnknown = false;
+        _needsExplanation = false;
       });
 
   Widget _searchField(SpendColors c) => TextField(
@@ -626,7 +654,7 @@ class TransactionsScreenState extends State<TransactionsScreen> {
     return Scaffold(
       backgroundColor: c.paper,
       // Only as a pushed page; as a tab the shell's own chrome is enough.
-      appBar: widget.initialAccountId != null
+      appBar: widget.isPushed
           ? AppBar(
               title: Text('Transactions', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: c.ink)),
               shape: Border(bottom: BorderSide(color: c.line)),
@@ -704,6 +732,20 @@ class TransactionsScreenState extends State<TransactionsScreen> {
                   on: _categoryId == 'none',
                   onTap: () => _setFilter(() => _categoryId = _categoryId == 'none' ? null : 'none'),
                 ),
+                // The payments no account could be placed for: in no
+                // balance until someone says which account each was on.
+                _FilterChip(
+                  label: 'No account',
+                  on: _accountUnknown,
+                  onTap: () => _setFilter(() => _accountUnknown = !_accountUnknown),
+                ),
+                // Differences written in to match the bank, still waiting
+                // to be told what they were.
+                _FilterChip(
+                  label: 'Unexplained',
+                  on: _needsExplanation,
+                  onTap: () => _setFilter(() => _needsExplanation = !_needsExplanation),
+                ),
                 _FilterChip(
                   label: 'Debit',
                   on: _direction == 'DEBIT',
@@ -748,7 +790,13 @@ class TransactionsScreenState extends State<TransactionsScreen> {
       } else {
         title = _rangeLabel(cycle.from, cycle.to);
       }
-      note = 'your own range';
+      note = _accountId != null
+          ? 'your own range'
+          : _accountUnknown && _needsExplanation
+              ? 'no account, unexplained'
+              : _accountUnknown
+                  ? 'payments with no account'
+                  : 'unexplained differences';
     } else {
       // The months could not be loaded: nothing to step through.
       if (_month == null) return const SizedBox.shrink();

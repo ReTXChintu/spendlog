@@ -8,6 +8,7 @@ import '../widgets/card_vault_panel.dart';
 import '../widgets/edit_account_sheet.dart';
 import '../widgets/pocket_money.dart';
 import '../widgets/state_block.dart';
+import 'passbook_screen.dart';
 import 'statements_screen.dart';
 import 'transactions_screen.dart';
 
@@ -687,6 +688,29 @@ class _AccountsScreenState extends State<AccountsScreen> {
               onChanged: _load,
             ),
 
+          // Row by row, the app's figure beside the bank's - and where
+          // the two parted, when they have.
+          if (row.tracksBalance && row.balance != null) ...[
+            _row(
+              Icons.menu_book_outlined,
+              'Passbook',
+              row.balance!.drift == null
+                  ? 'Every row, with the running balance'
+                  : '${formatMoneyShort(row.balance!.drift!.minor.abs())} off from the bank'
+                      '${row.balance!.drift!.since == null ? '' : ' since ${formatShortDate(row.balance!.drift!.since!)}'}',
+              on: true,
+              warn: row.balance!.drift != null,
+              action: TextButton(
+                onPressed: () async {
+                  await PassbookScreen.open(context, accountId: account.id);
+                  await _load();
+                },
+                child: const Text('Open'),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+
           // The emergency pot: still tracked here, but left out of the
           // money-on-hand total on Home so it never looks spendable.
           if (isBank)
@@ -1144,7 +1168,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
     );
   }
 
-  Widget _row(IconData icon, String label, String value, {required bool on, required Widget action}) {
+  Widget _row(IconData icon, String label, String value, {required bool on, bool warn = false, required Widget action}) {
     final c = context.c;
 
     return Container(
@@ -1165,7 +1189,11 @@ class _AccountsScreenState extends State<AccountsScreen> {
               children: [
                 Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                 Text(value,
-                    style: TextStyle(fontSize: 11.5, color: on ? c.credit : c.muted)),
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: warn ? FontWeight.w700 : FontWeight.w400,
+                      color: warn ? c.debit : (on ? c.credit : c.muted),
+                    )),
               ],
             ),
           ),

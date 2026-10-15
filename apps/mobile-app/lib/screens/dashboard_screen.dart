@@ -8,6 +8,7 @@ import '../utils/format.dart';
 import '../services/reminder_service.dart';
 import '../widgets/card_picker.dart';
 import '../widgets/commitment_amount.dart';
+import '../widgets/edit_transaction_sheet.dart';
 import '../widgets/home/earmarks_tile.dart';
 import '../widgets/home/home_grid.dart';
 import '../widgets/home/investments_tile.dart';
@@ -20,6 +21,7 @@ import '../widgets/state_block.dart';
 import 'accounts_screen.dart';
 import 'investments/investments_screen.dart';
 import 'monthly_budget_screen.dart';
+import 'passbook_screen.dart';
 import 'people_screen.dart';
 import 'perks_screen.dart';
 import 'transactions_screen.dart';
@@ -156,6 +158,30 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
     await load();
   }
 
+  /// An account's passbook - from its tile, or from a drift alert, which
+  /// is then marked seen and opens straight onto finding the cause.
+  Future<void> _openPassbook(String accountId, {String? alertId, bool reconcile = false}) async {
+    await PassbookScreen.open(context, accountId: accountId, alertId: alertId, openReconcile: reconcile);
+    await load();
+  }
+
+  /// An "Unexplained difference" written in to match the bank: its editor,
+  /// to say what it was.
+  Future<void> _openUnexplained(String transactionId) async {
+    await showEditTransactionById(context, transactionId);
+    await load();
+  }
+
+  /// The payments no account could be placed for, on their own.
+  Future<void> _openUnknownAccount() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => TransactionsScreen(initialAccountUnknown: true, onOpenSettings: widget.onOpenSettings),
+      ),
+    );
+    await load();
+  }
+
   /// A card's own transactions, starting on the statement cycle running now.
   Future<void> _openCard(CardFace card) async {
     await Navigator.of(context).push(
@@ -225,6 +251,9 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
             onOpenSettings: widget.onOpenSettings,
             onOpenPerks: _openPerks,
             onOpenAccounts: _openAccounts,
+            onOpenPassbook: _openPassbook,
+            onOpenUnexplained: _openUnexplained,
+            onOpenUnknownAccount: _openUnknownAccount,
           ),
 
           // Above the money, because a broken rule is the one thing here
@@ -244,6 +273,7 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
             onOpenCard: _openCard,
             onOpenAccount: _openAccounts,
             onEditAccount: _editAccount,
+            onOpenPassbook: _openPassbook,
             onManage: _openAccounts,
           ),
 
@@ -402,17 +432,57 @@ class _Todos extends StatelessWidget {
   final VoidCallback onOpenPerks;
   final VoidCallback onOpenAccounts;
 
+  /// A drift alert: the account's passbook, the alert marked seen, and
+  /// the reconcile sheet offered on top.
+  final Future<void> Function(String accountId, {String? alertId, bool reconcile}) onOpenPassbook;
+
+  /// An unexplained difference: that row's editor.
+  final Future<void> Function(String transactionId) onOpenUnexplained;
+
+  /// The payments with no account: the ledger narrowed to them.
+  final VoidCallback onOpenUnknownAccount;
+
   const _Todos({
     required this.data,
     this.onOpenTransactions,
     this.onOpenSettings,
     required this.onOpenPerks,
     required this.onOpenAccounts,
+    required this.onOpenPassbook,
+    required this.onOpenUnexplained,
+    required this.onOpenUnknownAccount,
   });
 
   @override
   Widget build(BuildContext context) {
     final jobs = <({IconData icon, String text, bool urgent, VoidCallback? onTap})>[];
+
+    // Money the app and the bank disagree about comes first: everything
+    // else on this screen is built on the balances being right.
+    for (final todo in data.todos) {
+      if (todo.isAlert && todo.accountId != null) {
+        jobs.add((
+          icon: Icons.call_split,
+          text: todo.title,
+          urgent: true,
+          onTap: () => onOpenPassbook(todo.accountId!, alertId: todo.alertId, reconcile: true),
+        ));
+      } else if (todo.isUnexplained && todo.transactionId != null) {
+        jobs.add((
+          icon: Icons.help_outline,
+          text: todo.title,
+          urgent: false,
+          onTap: () => onOpenUnexplained(todo.transactionId!),
+        ));
+      } else if (todo.isUnknownAccount) {
+        jobs.add((
+          icon: Icons.account_balance_wallet_outlined,
+          text: todo.title,
+          urgent: false,
+          onTap: onOpenUnknownAccount,
+        ));
+      }
+    }
 
     if (data.needsCategoryYesterday > 0) {
       final count = data.needsCategoryYesterday;

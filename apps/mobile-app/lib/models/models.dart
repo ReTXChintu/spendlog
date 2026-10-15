@@ -1,9 +1,11 @@
 import '../utils/format.dart';
 import 'budget_models.dart';
 import 'home_models.dart';
+import 'passbook_models.dart';
 
 export 'budget_models.dart';
 export 'home_models.dart';
+export 'passbook_models.dart';
 
 class Category {
   final String id;
@@ -288,6 +290,20 @@ class Transaction {
   final String? byKidId;
   final String? byKidName;
 
+  /// The balance the bank's own message said the account held after this,
+  /// when the bank includes one. Many do not, and that is normal.
+  final int? statedBalanceMinor;
+
+  /// Written in to match the bank: an "Unexplained difference".
+  final bool isAdjustment;
+
+  /// An adjustment nobody has yet said the cause of. Stays in the to-dos.
+  final bool needsExplanation;
+
+  /// The message named no account, so this moves no balance until someone
+  /// says which it was on - or that it really was cash.
+  final bool accountUnknown;
+
   Transaction({
     required this.id,
     required this.amountMinor,
@@ -325,6 +341,10 @@ class Transaction {
     this.account,
     this.byKidId,
     this.byKidName,
+    this.statedBalanceMinor,
+    this.isAdjustment = false,
+    this.needsExplanation = false,
+    this.accountUnknown = false,
   });
 
   /// The distinct kinds of message behind this row. Older rows predate the
@@ -389,6 +409,10 @@ class Transaction {
         account: json['account'] != null ? Account.fromJson(json['account'] as Map<String, dynamic>) : null,
         byKidId: json['byKidId'] is String ? json['byKidId'] as String : null,
         byKidName: json['byKidName'] as String?,
+        statedBalanceMinor: json['statedBalanceMinor'] is num ? (json['statedBalanceMinor'] as num).round() : null,
+        isAdjustment: json['isAdjustment'] == true,
+        needsExplanation: json['needsExplanation'] == true,
+        accountUnknown: json['accountUnknown'] == true,
       );
 }
 
@@ -1437,6 +1461,11 @@ class DashboardData {
   /// Each pocket-money account and where it stands this month.
   final List<PocketStatus> pocketMoney;
 
+  /// Things about the balances to act on: an account the bank disagrees
+  /// with, a difference written in and not yet explained, payments no
+  /// account could be placed for. Only the kinds this build can open.
+  final List<BalanceTodo> todos;
+
   DashboardData({
     required this.fixedCosts,
     MonthlyBudgetStatus? budget,
@@ -1461,6 +1490,7 @@ class DashboardData {
     Earmarks? earmarks,
     this.planWarnings = const [],
     this.pocketMoney = const [],
+    this.todos = const [],
   })  : budget = budget ?? const MonthlyBudgetStatus(),
         wallet = wallet ?? const Wallet(),
         money = money ?? MoneyOnHand(),
@@ -1509,6 +1539,11 @@ class DashboardData {
           .toList(),
       pocketMoney: (json['pocketMoney'] as List<dynamic>? ?? [])
           .map((p) => PocketStatus.fromJson(p as Map<String, dynamic>))
+          .toList(),
+      todos: (json['todos'] as List<dynamic>? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map(BalanceTodo.fromJson)
+          .where((todo) => todo.isKnown)
           .toList(),
     );
   }
@@ -1744,6 +1779,10 @@ class ExpectedBalance {
   final int expectedMinor;
   final int transactionCount;
 
+  /// How far this is from the bank's latest figure, when it is off by more
+  /// than rounding. Null when in step, or when the bank has never said.
+  final BalanceDrift? drift;
+
   ExpectedBalance({
     required this.openingMinor,
     required this.since,
@@ -1751,6 +1790,7 @@ class ExpectedBalance {
     this.outMinor = 0,
     required this.expectedMinor,
     this.transactionCount = 0,
+    this.drift,
   });
 
   factory ExpectedBalance.fromJson(Map<String, dynamic> json) => ExpectedBalance(
@@ -1760,6 +1800,7 @@ class ExpectedBalance {
         outMinor: json['outMinor'] as int? ?? 0,
         expectedMinor: json['expectedMinor'] as int? ?? 0,
         transactionCount: json['transactionCount'] as int? ?? 0,
+        drift: BalanceDrift.maybe(json['drift']),
       );
 }
 

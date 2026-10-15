@@ -2,18 +2,24 @@ import 'dart:async';
 import 'dart:io' show Platform;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../screens/passbook_screen.dart';
 import 'api_client.dart';
+import 'perk_import_watcher.dart' show appNavigatorKey;
 import 'sms_service.dart';
 
 /// The FCM token this phone last gave the server, so sign-out can remove
 /// the same one even if Firebase has since handed out a new one.
 const String _registeredTokenKey = 'spendlog_push_token';
 
-/// The only push the server sends: a kid pulled to refresh, so read any
-/// new bank SMS on this (the owner's) phone and upload them.
+/// A data-only push: a kid pulled to refresh, so read any new bank SMS on
+/// this (the owner's) phone and upload them.
 const String _smsSyncType = 'SMS_SYNC';
+
+/// A visible push: the nightly check found an account off from the bank.
+/// Tapping it opens that account's passbook.
+const String _balanceDriftType = 'BALANCE_DRIFT';
 
 /// Whether this phone is signed in as the owner. A kid's phone must never
 /// register for pushes or read SMS, and a signed-out one has no one to
@@ -78,9 +84,41 @@ class PushService {
       FirebaseMessaging.instance.onTokenRefresh.listen((token) {
         _register(token).catchError((_) {});
       });
+      // A tap on a notification: one that woke the app from nothing, and
+      // any later one while it is in the background.
+      FirebaseMessaging.instance.getInitialMessage().then((message) {
+        if (message != null) _openFromTap(message);
+      }).catchError((_) {});
+      FirebaseMessaging.onMessageOpenedApp.listen(_openFromTap);
       return true;
     } catch (_) {
       return false;
+    }
+  }
+
+  /// Routes a tapped notification. Only the owner's phone gets these, and
+  /// a kid's session must never be sent to an owner's passbook, so the
+  /// role is checked here as well as at registration.
+  Future<void> _openFromTap(RemoteMessage message) async {
+    if (message.data['type'] != _balanceDriftType) return;
+    final accountId = message.data['accountId'];
+    if (accountId is! String || accountId.isEmpty) return;
+    if (!await _isOwner()) return;
+    final alertId = message.data['alertId'];
+
+    void open() => appNavigatorKey.currentState?.push(
+          MaterialPageRoute(
+            builder: (_) => PassbookScreen(
+              accountId: accountId,
+              alertId: alertId is String && alertId.isNotEmpty ? alertId : null,
+            ),
+          ),
+        );
+    // On a cold start there is no navigator until the first frame.
+    if (appNavigatorKey.currentState != null) {
+      open();
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) => open());
     }
   }
 

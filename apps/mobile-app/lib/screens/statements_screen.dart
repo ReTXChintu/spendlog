@@ -5,6 +5,7 @@ import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/format.dart';
 import '../widgets/state_block.dart';
+import 'statement_compare_screen.dart';
 import 'statement_detail_screen.dart';
 
 /// Every statement the mailbox has offered, and what became of it.
@@ -504,6 +505,19 @@ class _StatementsScreenState extends State<StatementsScreen> {
     await _load();
   }
 
+  Future<void> _compare(_Statement statement) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => StatementCompareScreen(
+          statementId: statement.id,
+          title: statement.subject ?? statement.fileName ?? 'Statement',
+        ),
+      ),
+    );
+    // A row opened and changed from there moves this list's counts.
+    await _load();
+  }
+
   Widget _row(_Statement statement) {
     final c = context.c;
     final (pillBg, pillFg) = switch (statement.status) {
@@ -556,12 +570,24 @@ class _StatementsScreenState extends State<StatementsScreen> {
             style: TextStyle(fontSize: 12.3, height: 1.45, color: c.muted),
           ),
           const SizedBox(height: 8),
-          Row(
+          // Wrapped rather than in a row: a read statement has three
+          // buttons and the bin, which is more than a phone's width.
+          Wrap(
+            spacing: 8,
+            runSpacing: 2,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               if (statement.isRead)
                 OutlinedButton(
                   onPressed: () => _open(statement),
                   child: const Text('Open'),
+                ),
+              // The statement beside the ledger, both ways - and for a
+              // bank statement, its close against the app's figure.
+              if (statement.isRead)
+                OutlinedButton(
+                  onPressed: () => _compare(statement),
+                  child: const Text('Compare with app'),
                 ),
               if (statement.status == 'UNIDENTIFIED' && _cards.isNotEmpty)
                 OutlinedButton(
@@ -570,8 +596,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
                 ),
               // Also once whatever a read added has been undone - which is how a
               // statement read wrongly gets read again.
-              if (!statement.isRead || statement.added == 0) ...[
-                const SizedBox(width: 8),
+              if (!statement.isRead || statement.added == 0)
                 OutlinedButton(
                   onPressed: _busy == statement.id
                       ? null
@@ -580,7 +605,6 @@ class _StatementsScreenState extends State<StatementsScreen> {
                           }),
                   child: const Text('Read again'),
                 ),
-              ],
               if (statement.isRead && statement.added > 0)
                 TextButton(
                   onPressed: _busy == statement.id
@@ -590,7 +614,6 @@ class _StatementsScreenState extends State<StatementsScreen> {
                           }),
                   child: Text('Undo ${statement.added}'),
                 ),
-              const Spacer(),
               // Forgetting one takes back what it added on the way out, or
               // the ledger keeps rows pointing at something that no longer
               // exists.

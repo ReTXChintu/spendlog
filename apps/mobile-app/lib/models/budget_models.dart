@@ -13,6 +13,7 @@
 library;
 
 import 'home_models.dart';
+import 'passbook_models.dart';
 
 int _int(Object? value) => value is int ? value : (value is num ? value.round() : 0);
 int? _intOrNull(Object? value) => value is int ? value : (value is num ? value.round() : null);
@@ -542,6 +543,10 @@ class BankFace {
   final List<DebitCardFace> debitCards;
   final bool hasCardDetails;
 
+  /// The bank's latest figure less the app's, and since when, when the two
+  /// are further apart than rounding. Null when in step or never stated.
+  final BalanceDrift? drift;
+
   const BankFace({
     required this.accountId,
     required this.name,
@@ -554,6 +559,7 @@ class BankFace {
     this.pocket,
     this.debitCards = const [],
     this.hasCardDetails = false,
+    this.drift,
   });
 
   bool get isCash => accountType == 'CASH';
@@ -572,6 +578,7 @@ class BankFace {
       pocket: pocket == null ? null : PocketStatus.fromJson(pocket),
       debitCards: _maps(json['debitCards']).map(DebitCardFace.fromJson).toList(),
       hasCardDetails: _bool(json['hasCardDetails']),
+      drift: BalanceDrift.maybe(json['drift']),
     );
   }
 }

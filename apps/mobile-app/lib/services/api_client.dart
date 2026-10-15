@@ -9,7 +9,12 @@ const String _tokenKey = tokenStorageKey;
 class ApiException implements Exception {
   final int statusCode;
   final String message;
-  ApiException(this.statusCode, this.message);
+
+  /// The decoded error body, when there was one, for the few replies that
+  /// say more than a sentence - a debit card's passbook refusal names the
+  /// bank account to open instead.
+  final Object? body;
+  ApiException(this.statusCode, this.message, [this.body]);
 
   @override
   String toString() => 'ApiException($statusCode): $message';
@@ -99,12 +104,13 @@ class ApiClient {
     }
     if (res.statusCode >= 400) {
       String message = res.reasonPhrase ?? 'Request failed';
+      Object? body;
       try {
-        final body = jsonDecode(res.body);
-        final error = body['error'];
+        body = jsonDecode(res.body);
+        final error = (body as Map)['error'];
         message = (error is Map ? _validationMessage(error) : error?.toString()) ?? message;
       } catch (_) {}
-      throw ApiException(res.statusCode, message);
+      throw ApiException(res.statusCode, message, body);
     }
     if (res.body.isEmpty) return null;
     return jsonDecode(res.body);

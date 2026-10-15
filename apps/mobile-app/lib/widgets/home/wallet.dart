@@ -23,6 +23,7 @@ class WalletSection extends StatelessWidget {
     required this.onOpenCard,
     required this.onOpenAccount,
     this.onEditAccount,
+    this.onOpenPassbook,
     required this.onManage,
   });
 
@@ -34,6 +35,11 @@ class WalletSection extends StatelessWidget {
 
   /// An account's own page - its balance, its stored details.
   final void Function(String accountId) onOpenAccount;
+
+  /// An account's passbook: its running balance beside the bank's, row by
+  /// row. From the drift chip on a tile that is off, and the link on one
+  /// that is not.
+  final void Function(String accountId)? onOpenPassbook;
 
   /// An account's editor - for a card with no billing date or no credit
   /// limit, to set it. Its page instead when not given.
@@ -122,7 +128,11 @@ class WalletSection extends StatelessWidget {
             items: [
               for (final bank in wallet.banks)
                 GridItem(
-                  BankTile(bank: bank, onOpen: () => onOpenAccount(bank.accountId)),
+                  BankTile(
+                    bank: bank,
+                    onOpen: () => onOpenAccount(bank.accountId),
+                    onOpenPassbook: onOpenPassbook == null ? null : () => onOpenPassbook!(bank.accountId),
+                  ),
                   span: bank.pocket != null ? 2 : 1,
                 ),
             ],
@@ -408,10 +418,13 @@ class _CardCaption extends StatelessWidget {
 /// A bank account, or cash, as a tile: what it holds, its debit cards,
 /// and its pocket money when it is that.
 class BankTile extends StatefulWidget {
-  const BankTile({super.key, required this.bank, required this.onOpen});
+  const BankTile({super.key, required this.bank, required this.onOpen, this.onOpenPassbook});
 
   final BankFace bank;
   final VoidCallback onOpen;
+
+  /// The passbook, from the drift chip or the link under the balance.
+  final VoidCallback? onOpenPassbook;
 
   @override
   State<BankTile> createState() => _BankTileState();
@@ -429,6 +442,7 @@ class _BankTileState extends State<BankTile> {
     final savings = bank.isSavings;
     final gradient = cardGradient(color: bank.color, bankName: bank.bankName);
     final balance = bank.balanceMinor;
+    final drift = bank.drift;
 
     return Material(
       color: Colors.transparent,
@@ -491,6 +505,10 @@ class _BankTileState extends State<BankTile> {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 11, color: c.mutedLight),
                 ),
+                if (_shown && drift != null) ...[
+                  const SizedBox(height: 6),
+                  _DriftChip(drift: drift, onTap: widget.onOpenPassbook),
+                ],
               ] else if (balance == null) ...[
                 Text('No starting balance', style: TextStyle(fontSize: 11.5, color: c.muted)),
                 const SizedBox(height: 2),
@@ -505,7 +523,31 @@ class _BankTileState extends State<BankTile> {
                   ),
                 ),
                 const SizedBox(height: 2),
-                Text(bank.isCash ? 'in hand' : 'balance', style: TextStyle(fontSize: 11.5, color: c.muted)),
+                // Off from the bank: the gap, red, and the way to the
+                // passbook that says where. In step: a quiet link to it.
+                if (drift != null)
+                  _DriftChip(drift: drift, onTap: widget.onOpenPassbook)
+                else
+                  Row(
+                    children: [
+                      Text(bank.isCash ? 'in hand' : 'balance', style: TextStyle(fontSize: 11.5, color: c.muted)),
+                      if (widget.onOpenPassbook != null) ...[
+                        Text(' · ', style: TextStyle(fontSize: 11.5, color: c.mutedLight)),
+                        Flexible(
+                          child: InkWell(
+                            onTap: widget.onOpenPassbook,
+                            borderRadius: BorderRadius.circular(4),
+                            child: Text(
+                              'Passbook ›',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: c.brandDark),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
               ],
               if (bank.debitCards.isNotEmpty) ...[
                 const SizedBox(height: 10),
@@ -520,6 +562,48 @@ class _BankTileState extends State<BankTile> {
                 _PocketStrip(pocket: bank.pocket!),
               ],
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// How far the tile's figure is from the bank's: "₹3,000 off", red, and
+/// the way into the passbook that says where it went wrong.
+class _DriftChip extends StatelessWidget {
+  const _DriftChip({required this.drift, this.onTap});
+
+  final BalanceDrift drift;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Semantics(
+        button: onTap != null,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(100),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(8, 3, 6, 3),
+            decoration: BoxDecoration(color: c.debit50, borderRadius: BorderRadius.circular(100)),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    '${formatMoneyShort(drift.minor.abs())} off',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: kNum.copyWith(fontSize: 11, fontWeight: FontWeight.w800, color: c.debit),
+                  ),
+                ),
+                if (onTap != null) Icon(Icons.chevron_right, size: 14, color: c.debit),
+              ],
+            ),
           ),
         ),
       ),

@@ -145,6 +145,9 @@ class TransactionTile extends StatelessWidget {
                 ),
                 if (isTransfer ||
                     pocket != null ||
+                    transaction.accountUnknown ||
+                    transaction.needsExplanation ||
+                    transaction.isAdjustment ||
                     transaction.tripName != null ||
                     transaction.refundOf.isNotEmpty ||
                     transaction.refundedMinor > 0 ||
@@ -162,6 +165,28 @@ class TransactionTile extends StatelessWidget {
                           label: 'Not counted',
                           background: context.c.chipNeutral,
                           foreground: context.c.transfer,
+                        ),
+                      // The message named no account, so this is in no
+                      // balance until someone says which it was on.
+                      if (transaction.accountUnknown)
+                        _Badge(
+                          label: 'No account',
+                          background: context.c.brand50,
+                          foreground: context.c.brandDark,
+                        ),
+                      // Written in to match the bank, and still waiting
+                      // to be told what it was.
+                      if (transaction.needsExplanation)
+                        _Badge(
+                          label: 'Unexplained',
+                          background: context.c.warnBg,
+                          foreground: context.c.warn,
+                        )
+                      else if (transaction.isAdjustment)
+                        _Badge(
+                          label: 'Written in to match the bank',
+                          background: context.c.chipNeutral,
+                          foreground: context.c.muted,
                         ),
                       // Marked from the account rather than stored on the
                       // row, so every payment from it - old ones included -

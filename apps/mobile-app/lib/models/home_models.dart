@@ -5,6 +5,8 @@
 /// here; models.dart re-exports this one, so screens import one file.
 library;
 
+import 'passbook_models.dart';
+
 int _int(Object? value) => value is int ? value : (value is num ? value.round() : 0);
 int? _intOrNull(Object? value) => value is int ? value : (value is num ? value.round() : null);
 DateTime? _date(Object? value) => value is String && value.isNotEmpty ? DateTime.tryParse(value) : null;
@@ -22,6 +24,9 @@ class MoneyAccount {
   /// Null until a starting balance has been given - not the same as zero.
   final int? balanceMinor;
 
+  /// How far that is from the bank's latest figure, when it is off.
+  final BalanceDrift? drift;
+
   MoneyAccount({
     required this.id,
     required this.name,
@@ -29,6 +34,7 @@ class MoneyAccount {
     required this.accountType,
     this.isSavings = false,
     this.balanceMinor,
+    this.drift,
   });
 
   factory MoneyAccount.fromJson(Map<String, dynamic> json) => MoneyAccount(
@@ -38,6 +44,7 @@ class MoneyAccount {
         accountType: json['accountType'] as String? ?? 'BANK',
         isSavings: json['isSavings'] as bool? ?? false,
         balanceMinor: _intOrNull(json['balanceMinor']),
+        drift: BalanceDrift.maybe(json['drift']),
       );
 }
 

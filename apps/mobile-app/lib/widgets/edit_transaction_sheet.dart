@@ -71,6 +71,34 @@ Future<bool?> showEditTransactionSheet(
   );
 }
 
+/// The same sheet for a row known only by its id - from the passbook, a
+/// statement comparison or a to-do, none of which has the row, the
+/// categories or the accounts to hand. Fetches the three, then opens.
+/// Returns what the sheet returns; null when the row could not be fetched,
+/// after saying so.
+Future<bool?> showEditTransactionById(BuildContext context, String transactionId) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    final results = await Future.wait([
+      ApiClient.instance.get('/transactions/$transactionId'),
+      ApiClient.instance.get('/categories'),
+      ApiClient.instance.get('/accounts'),
+    ]);
+    if (!context.mounted) return null;
+    return await showEditTransactionSheet(
+      context,
+      transaction: Transaction.fromJson(results[0] as Map<String, dynamic>),
+      categories: (results[1] as List<dynamic>).map((c) => Category.fromJson(c as Map<String, dynamic>)).toList(),
+      accounts: (results[2] as List<dynamic>).map((a) => Account.fromJson(a as Map<String, dynamic>)).toList(),
+    );
+  } catch (e) {
+    messenger.showSnackBar(
+      SnackBar(content: Text(e is ApiException ? e.message : "Couldn't open that transaction.")),
+    );
+    return null;
+  }
+}
+
 class _EditSheet extends StatefulWidget {
   final Transaction? transaction;
   final List<Category> categories;
@@ -138,6 +166,17 @@ class _EditSheetState extends State<_EditSheet> {
   /// The last "Transfer to …" this sheet wrote, so changing the account
   /// can rewrite its own suggestion without touching anything else.
   String? _autoMerchant;
+
+  /// Whether the user has chosen an account in this sheet. On a row whose
+  /// message named no account, only an actual choice - an account, or
+  /// "It was cash" - may say the account is now known; saving an edit to
+  /// the merchant must not quietly file it under cash.
+  bool _accountPicked = false;
+
+  bool get _unknownAccount => widget.transaction?.accountUnknown == true;
+
+  /// The picker's "nothing chosen yet" on such a row. Never an account id.
+  static const _unplacedValue = '__no_account_yet__';
 
   /// Fetched here rather than threaded through as a prop, because this
   /// sheet opens from several places and only one of them would have
@@ -776,6 +815,10 @@ class _EditSheetState extends State<_EditSheet> {
       'split': split,
       // An empty list clears whoever was on it before.
       'people': people,
+      // The account is known now: the one picked, or - with none - that
+      // it really was cash. The server clears this on its own when an
+      // account is set; sending it covers the cash case too.
+      if (_unknownAccount && _accountPicked) 'accountUnknown': false,
     };
     // Fields only the edit route takes. On a new row they go in a second
     // call straight after, or a card bill added by hand would quietly
@@ -965,6 +1008,14 @@ class _EditSheetState extends State<_EditSheet> {
                 value: _accountId,
                 onChanged: (id) => setState(() => _accountId = id),
                 rowSide: true,
+              ),
+            if (_unknownAccount && !_accountPicked)
+              const Padding(
+                padding: EdgeInsets.only(top: 6),
+                child: _Hint(
+                  'The message named no account, so this is not in any balance yet. Pick the account it '
+                  'was on, or say it was cash.',
+                ),
               ),
             const SizedBox(height: 10),
 
@@ -1183,7 +1234,12 @@ class _EditSheetState extends State<_EditSheet> {
   }) {
     final c = context.c;
     final choices = _accountChoices.where((choice) => rowSide || choice.$1 != null).toList();
-    final shown = rowSide ? (value ?? _cashId) : value;
+    // A row with no known account shows none until one is chosen - Cash
+    // would be a guess, and a guess at cash is what accountUnknown exists
+    // to avoid. Shown as a value of its own that cannot be picked, since
+    // "Cash" may itself be the null value when there is no cash account.
+    final unplaced = rowSide && _unknownAccount && !_accountPicked;
+    final shown = unplaced ? _unplacedValue : (rowSide ? (value ?? _cashId) : value);
     return DropdownButtonFormField<String?>(
       key: ValueKey('$label-$shown-$_type-$_kind'),
       initialValue: shown,
@@ -1193,6 +1249,18 @@ class _EditSheetState extends State<_EditSheet> {
       dropdownColor: c.surface,
       style: TextStyle(fontSize: 14, color: c.ink),
       items: [
+        if (unplaced)
+          DropdownMenuItem<String?>(
+            value: _unplacedValue,
+            enabled: false,
+            child: Row(
+              children: [
+                Icon(Icons.help_outline, size: 16, color: c.muted),
+                const SizedBox(width: 8),
+                Expanded(child: Text('No account yet', style: TextStyle(color: c.mutedLight))),
+              ],
+            ),
+          ),
         for (final (id, name) in choices)
           DropdownMenuItem<String?>(
             value: id,
@@ -1204,12 +1272,23 @@ class _EditSheetState extends State<_EditSheet> {
                   color: c.muted,
                 ),
                 const SizedBox(width: 8),
-                Expanded(child: Text(name, overflow: TextOverflow.ellipsis)),
+                Expanded(
+                  child: Text(
+                    // On the row's own side of a placeless payment, Cash is
+                    // an answer rather than a default, and says so.
+                    rowSide && _unknownAccount && name == 'Cash' ? 'It was cash' : name,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ],
             ),
           ),
       ],
-      onChanged: onChanged,
+      onChanged: (id) {
+        if (id == _unplacedValue) return;
+        _accountPicked = true;
+        onChanged(id);
+      },
     );
   }
 
