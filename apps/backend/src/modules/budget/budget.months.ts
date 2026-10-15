@@ -62,6 +62,36 @@ function payDayKey(start: Date, salaryDay: number): string {
   return istMonthKey(nearest);
 }
 
+/** Under this, a "month" is a pay day that came late, not a month. */
+const SHORTEST_MONTH_MS = 20 * DAY;
+/** How far from its pay day a salary can land and still be that pay day's. */
+const SALARY_SLACK_MS = 10 * DAY;
+
+/**
+ * The IST day each salary landed, newest first. Pay in two parts - salary,
+ * then arrears days later - is one payment, opened by the first part, the
+ * same way the current month's is.
+ */
+async function salaryDays(userId: Types.ObjectId, now: Date): Promise<Date[]> {
+  const credits = await Transaction.find({ userId, isSalary: true, type: "CREDIT", occurredAt: { $lte: now } })
+    .select("occurredAt")
+    .sort({ occurredAt: -1 })
+    .limit(120);
+
+  const days: Date[] = [];
+  let clusterEarliest: Date | null = null;
+  for (const { occurredAt } of credits) {
+    if (clusterEarliest && clusterEarliest.getTime() - occurredAt.getTime() <= SALARY_SLACK_MS) {
+      clusterEarliest = occurredAt;
+      continue;
+    }
+    if (clusterEarliest) days.push(clusterEarliest);
+    clusterEarliest = occurredAt;
+  }
+  if (clusterEarliest) days.push(clusterEarliest);
+  return days.map((day) => new Date(Date.parse(`${istDayKey(day)}T00:00:00.000+05:30`)));
+}
+
 function make(key: string, start: Date, end: Date): UserMonth {
   return { key, from: istDayKey(start), to: istDayKey(new Date(end.getTime() - 1)), start, end };
 }
@@ -83,14 +113,27 @@ export async function userMonths(userId: Types.ObjectId, now = new Date(), count
   const current = await currentBudgetPeriod(userId, salaryDay, now);
   recent.push(make(payDayKey(current.start, salaryDay), current.start, current.end));
 
+  const landed = await salaryDays(userId, now);
+
   let nextStart = current.start;
   for (let i = 1; i < count; i += 1) {
-    const earlier = budgetPeriodFor(salaryDay, new Date(nextStart.getTime() - 1));
-    // A month can never be empty or overlap the one after it, whatever a
-    // salary landing early did to the one after it.
-    const start = earlier.start.getTime() < nextStart.getTime() ? earlier.start : new Date(nextStart.getTime() - DAY);
-    recent.push(make(payDayKey(start, salaryDay), start, nextStart));
-    nextStart = start;
+    let payDay = budgetPeriodFor(salaryDay, new Date(nextStart.getTime() - 1)).start;
+    // Pay that came late opened the month after this one a day or two past
+    // its pay day, and the pay day before that start is that same pay day:
+    // a month a day long. The one this month was opened by is a cycle back.
+    if (nextStart.getTime() - payDay.getTime() < SHORTEST_MONTH_MS) {
+      payDay = budgetPeriodFor(salaryDay, new Date(payDay.getTime() - 1)).start;
+    }
+    // And the salary that actually landed for that pay day, early or late,
+    // opens it on the day it did - as it does for the current month.
+    const paidOn = landed.find(
+      (day) => Math.abs(day.getTime() - payDay.getTime()) <= SALARY_SLACK_MS && day.getTime() < nextStart.getTime()
+    );
+    const start = paidOn ?? payDay;
+    // A month can never be empty or overlap the one after it.
+    const safeStart = start.getTime() < nextStart.getTime() ? start : new Date(nextStart.getTime() - DAY);
+    recent.push(make(payDayKey(safeStart, salaryDay), safeStart, nextStart));
+    nextStart = safeStart;
   }
 
   return { bySalary: true, salaryDay, recent };

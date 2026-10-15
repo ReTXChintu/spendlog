@@ -37,15 +37,21 @@ export async function currentBudgetPeriod(
   // the first outside it, which is how the amount came out short.
   const lastSalary = clusterStart(recentSalaries);
 
-  const period = lastSalary
-    ? budgetPeriodFromSalary(lastSalary, salaryDay, now)
-    : budgetPeriodFor(salaryDay, now);
+  const fromSalary = lastSalary ? budgetPeriodFromSalary(lastSalary, salaryDay, now) : null;
 
-  // The date carried alongside rather than derived back out of the period:
-  // a salary that landed a day late opens the period on the day it landed,
-  // and a caller wanting to say "paid on the 2nd" cannot tell that from a
-  // start date that would have been the 1st either way.
-  return { ...period, salaryPaidOn: lastSalary };
+  // Pay that is late leaves the month it opened already over: paid on 14
+  // September for the 15th, that month ended on 14 October, and on the
+  // 15th - salary not in yet - today belonged to no month at all, so it
+  // vanished from every screen. Past the end, the pay day takes over until
+  // the salary lands and opens the month on the day it does.
+  if (fromSalary && fromSalary.end.getTime() > now.getTime()) {
+    // The date carried alongside rather than derived back out of the period:
+    // a salary that landed a day late opens the period on the day it landed,
+    // and a caller wanting to say "paid on the 2nd" cannot tell that from a
+    // start date that would have been the 1st either way.
+    return { ...fromSalary, salaryPaidOn: lastSalary };
+  }
+  return { ...budgetPeriodFor(salaryDay, now), salaryPaidOn: null };
 }
 
 /**

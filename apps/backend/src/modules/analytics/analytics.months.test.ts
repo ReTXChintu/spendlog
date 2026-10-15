@@ -95,6 +95,38 @@ describe("the user's months", () => {
     assert.equal(recent[1].key, "2026-09");
   });
 
+  it("starts the next month on the pay day when this month's pay is late", async () => {
+    // Paid on 14 September for the 15th; on 15 October nothing has landed.
+    // That month ended last night, so today must be in a new one - not in
+    // none, which hid it from every screen and left nothing to step to.
+    await user({ salaryDay: 15 });
+    await move("CREDIT", 80_000, "2026-09-14", { isSalary: true });
+    const { recent } = await months.userMonths(userId, new Date("2026-10-15T12:00:00+05:30"), 3);
+    assert.deepEqual(
+      recent.map((month) => [month.key, month.from, month.to]),
+      [
+        ["2026-10", "2026-10-15", "2026-11-14"],
+        ["2026-09", "2026-09-14", "2026-10-14"],
+        ["2026-08", "2026-08-15", "2026-09-13"],
+      ]
+    );
+  });
+
+  it("opens the month on the day late pay landed, and leaves the one before it whole", async () => {
+    await user({ salaryDay: 15 });
+    await move("CREDIT", 80_000, "2026-09-14", { isSalary: true });
+    await move("CREDIT", 80_000, "2026-10-16", { isSalary: true });
+    const { recent } = await months.userMonths(userId, new Date("2026-10-17T12:00:00+05:30"), 3);
+    assert.deepEqual(
+      recent.map((month) => [month.key, month.from, month.to]),
+      [
+        ["2026-10", "2026-10-16", "2026-11-14"],
+        ["2026-09", "2026-09-14", "2026-10-15"],
+        ["2026-08", "2026-08-15", "2026-09-13"],
+      ]
+    );
+  });
+
   it("lays out an old month from the pay day alone", async () => {
     await user({ salaryDay: 5 });
     const month = await months.userMonth(userId, "2023-02", new Date("2026-10-02T12:00:00+05:30"));
