@@ -296,6 +296,36 @@ describe("joining with a code", () => {
     assert.equal(summary.totalMinor, 50000);
   });
 
+  it("keeps a payment taken off the trip off it, through a re-scan", async () => {
+    const owner = await makeUser();
+    const trip = await makeTrip(owner.id);
+    const [kept, taken] = await Promise.all(
+      [30000, 12000].map((amountMinor) =>
+        Transaction.create({
+          userId: owner.id,
+          amountMinor,
+          currency: "INR",
+          type: "DEBIT",
+          source: "MANUAL",
+          occurredAt: new Date("2026-10-02T12:00:00Z"),
+          tripId: trip._id,
+        })
+      )
+    );
+
+    const patched = await call(`/transactions/${taken.id}`, owner.token, {
+      method: "PATCH",
+      body: JSON.stringify({ tripId: null }),
+    });
+    assert.equal(patched.status, 200);
+    await call(`/trips/${trip.id}/rescan`, owner.token, { method: "POST" });
+
+    assert.equal((await Transaction.findById(taken._id))?.tripId, null);
+    assert.equal((await Transaction.findById(kept._id))?.tripId?.toString(), trip.id);
+    const summary = await json<{ totalMinor: number }>(await call(`/trips/${trip.id}/summary`, owner.token));
+    assert.equal(summary.totalMinor, 30000);
+  });
+
   it("only ever claims the caller's own payments on a re-scan", async () => {
     // The owner sweeping the window must not reach into a member's ledger.
     const [owner, friend] = await Promise.all([makeUser(), makeUser()]);

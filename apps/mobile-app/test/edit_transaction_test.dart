@@ -96,4 +96,62 @@ void main() {
       expect(patches.single['isSpecial'], isTrue);
     });
   });
+
+  group('taking a payment off a trip', () {
+    Transaction onTrip() => Transaction.fromJson({
+          'id': 't2',
+          'amountMinor': 120000,
+          'type': 'DEBIT',
+          'merchant': 'Pharmacy',
+          'source': 'SMS',
+          'occurredAt': '2026-10-08T10:00:00.000Z',
+          'tripId': 'trip1',
+          'trip': {'name': 'Goa'},
+        });
+
+    Future<void> openMore(WidgetTester tester) async {
+      await tester.ensureVisible(find.text('More'));
+      await tester.tap(find.text('More'));
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> save(WidgetTester tester) async {
+      await tester.ensureVisible(find.text('Save'));
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('switching the trip off sends it off the trip', (tester) async {
+      final patches = <Map<String, dynamic>>[];
+      await http.runWithClient(() async {
+        await _open(tester, onTrip());
+        await openMore(tester);
+
+        expect(find.text('On Goa'), findsOneWidget);
+        expect(find.text('Just mine on Goa'), findsOneWidget);
+        await tester.tap(find.text('On Goa'));
+        await tester.pumpAndSettle();
+        // Nothing to narrow once it is off the trip.
+        expect(find.text('Just mine on Goa'), findsNothing);
+        expect(find.textContaining('stays off'), findsOneWidget);
+
+        await save(tester);
+      }, () => _server(patches));
+
+      expect(patches.single.containsKey('tripId'), isTrue);
+      expect(patches.single['tripId'], isNull);
+      expect(patches.single.containsKey('tripShareWith'), isFalse);
+    });
+
+    testWidgets('left on, the trip is not touched', (tester) async {
+      final patches = <Map<String, dynamic>>[];
+      await http.runWithClient(() async {
+        await _open(tester, onTrip());
+        await save(tester);
+      }, () => _server(patches));
+
+      expect(patches.single.containsKey('tripId'), isFalse);
+      expect(patches.single['tripShareWith'], isNull);
+    });
+  });
 }

@@ -155,6 +155,11 @@ class _EditSheetState extends State<_EditSheet> {
   /// narrowing worth a control is "this one was just mine".
   late bool _tripJustMine;
 
+  /// Whether it stays on the trip it was filed under. Everything inside a
+  /// trip's dates goes on it; switched off, this one comes off for good -
+  /// the trip's re-scan leaves anything edited by hand alone.
+  late bool _onTrip;
+
   /// Who else it was for or from - shared by split and settling up, so
   /// switching between the two keeps the people already picked.
   final List<_Person> _people = [];
@@ -220,6 +225,7 @@ class _EditSheetState extends State<_EditSheet> {
     _isFixed = _commitmentId != null;
     _loanId = t?.loanId;
     _tripJustMine = t?.tripShareWith?.isNotEmpty ?? false;
+    _onTrip = t?.tripId != null;
     _showMore = _tripJustMine;
 
     // One kind wins, in the order the server itself would weigh them.
@@ -829,8 +835,10 @@ class _EditSheetState extends State<_EditSheet> {
       'cardPaymentFor': _isDebit && _kind == _Kind.cardBill ? _cardPaymentFor : null,
       'commitmentId': _isDebit && _isFixed ? _commitmentId : null,
       'loanId': _isDebit && _kind == _Kind.loan ? _loanId : null,
-      // Narrowed to the payer alone, or widened back to everyone on the trip.
-      if (widget.transaction?.tripId != null)
+      // Taken off the trip, or narrowed to the payer alone, or widened back
+      // to everyone on it.
+      if (widget.transaction?.tripId != null && !_onTrip) 'tripId': null,
+      if (widget.transaction?.tripId != null && _onTrip)
         'tripShareWith': _tripJustMine ? [widget.transaction!.userId] : null,
     };
 
@@ -1905,7 +1913,21 @@ class _EditSheetState extends State<_EditSheet> {
     final c = context.c;
     final t = widget.transaction;
     final items = <Widget>[
-      if (t?.tripName != null && _isDebit)
+      if (t?.tripName != null)
+        SwitchListTile(
+          value: _onTrip,
+          onChanged: (on) => setState(() => _onTrip = on),
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: Text('On ${t!.tripName}', style: TextStyle(fontSize: 13, color: c.ink)),
+          subtitle: Text(
+            _onTrip
+                ? 'Switch off to take it off the trip. It stays off, even when the trip re-scans.'
+                : 'Comes off the trip when you save, and stays off.',
+            style: TextStyle(fontSize: 11.5, color: c.muted),
+          ),
+        ),
+      if (t?.tripName != null && _isDebit && _onTrip)
         SwitchListTile(
           value: _tripJustMine,
           onChanged: (on) => setState(() => _tripJustMine = on),
