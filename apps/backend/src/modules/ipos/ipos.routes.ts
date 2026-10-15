@@ -64,6 +64,12 @@ function refresh(): Promise<void> {
     calendarReady = new Promise((resolve) => (ready = resolve));
     refreshing = (async () => {
       try {
+        // A request that read the cache just before the last refresh saved
+        // can arrive here just after it finished. Asking again then would
+        // spend a second of the ten calls a day on the same answer.
+        const latest = await IpoCache.findOne({ key: CACHE_KEY }).lean<IpoCacheDoc>();
+        if (isFresh(latest, Date.now()) || backingOff(latest, Date.now())) return;
+
         const rows = await fetchIpos(env.ipoApiKey, {
           sleep,
           onCalendar: async (calendar) => {
