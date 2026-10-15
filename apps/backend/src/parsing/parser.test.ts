@@ -70,6 +70,21 @@ describe("real-world SMS formats", () => {
   });
 });
 
+describe("amounts that aren't there", () => {
+  it("skips an empty amount cell rather than reading a bare comma as NaN", () => {
+    assert.equal(parseTransactionText("Amount debited: Rs. , from your A/c XX1234 on 12-10-26"), null);
+  });
+
+  it("reads past an empty amount to the real one", () => {
+    const result = parseTransactionText("Charges Rs. , · Rs.2,500.00 debited from A/c XX1234");
+    assert.equal(result?.amountMinor, 250_000);
+  });
+
+  it("skips a zero amount", () => {
+    assert.equal(parseTransactionText("Rs. ,00 debited from your A/c XX1234"), null);
+  });
+});
+
 describe("other common formats", () => {
   it("parses a UPI debit and strips trailing punctuation from the VPA", () => {
     const result = parseTransactionText(

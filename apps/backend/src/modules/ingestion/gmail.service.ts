@@ -231,14 +231,21 @@ async function syncConnection(
       const bodyText = extractPlainText(message.data.payload) ?? message.data.snippet ?? "";
       const receivedAt = message.data.internalDate ? new Date(Number(message.data.internalDate)) : new Date();
 
-      const result = await ingestRawMessage({
-        userId: connection.userId,
-        rawText: bodyText,
-        source: "EMAIL",
-        sourceRef: ref.id,
-        receivedAt,
-      });
-      if (result.status === "created") created += 1;
+      // One email that can't be read must not stop the rest: thrown, it
+      // would end the sync before lastSyncedAt moved, and every sync after
+      // would trip on the same message.
+      try {
+        const result = await ingestRawMessage({
+          userId: connection.userId,
+          rawText: bodyText,
+          source: "EMAIL",
+          sourceRef: ref.id,
+          receivedAt,
+        });
+        if (result.status === "created") created += 1;
+      } catch (error) {
+        console.error(`Gmail sync: skipped message ${ref.id}:`, error);
+      }
     }
 
     pageToken = list.data.nextPageToken ?? undefined;

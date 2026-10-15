@@ -13,7 +13,9 @@ export interface ParsedTransaction {
   occurredAt: Date | null; // null = caller should fall back to message timestamp
 }
 
-const AMOUNT_RE = /(?:rs\.?|inr|₹)\s?([\d,]+(?:\.\d{1,2})?)/i;
+// At least one digit: statement emails print "Rs. ," or "INR ,00" in empty
+// table cells, and a bare comma parsed as NaN.
+const AMOUNT_RE = /(?:rs\.?|inr|₹)\s?(,*\d[\d,]*(?:\.\d{1,2})?)/i;
 
 // Phrases that mean "this is not a completed transaction" — OTPs, bill
 // reminders, autopay pre-notifications, balance enquiries. Checked before
@@ -278,8 +280,11 @@ export function parseTransactionText(text: string): ParsedTransaction | null {
     }
   }
 
+  const amountMinor = parseAmountToMinor(amountMatch[1]);
+  if (!Number.isFinite(amountMinor) || amountMinor <= 0) return null;
+
   return {
-    amountMinor: parseAmountToMinor(amountMatch[1]),
+    amountMinor,
     currency: "INR",
     type,
     merchant,
