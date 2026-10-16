@@ -10,6 +10,8 @@ import '../widgets/edit_transaction_sheet.dart';
 import '../widgets/reconcile_sheet.dart';
 import '../widgets/state_block.dart';
 import '../widgets/transaction_tile.dart' show AutoLegChip;
+import '../widgets/what_came_in_sheet.dart';
+import 'start_fresh_screen.dart';
 
 /// An account's passbook: every row that moved it, newest first, with what
 /// SpendLog expected it to hold after each one beside what the bank said
@@ -261,6 +263,12 @@ class PassbookScreenState extends State<PassbookScreen> {
   }
 
   Future<void> _openRow(PassbookRow row) async {
+    final creditId = row.missingCreditId;
+    if (row.isMissingCredit && creditId != null) {
+      final changed = await showWhatCameInById(context, creditId);
+      if (changed == true && mounted) await _load(keepVisible: true);
+      return;
+    }
     final id = row.transactionId;
     if (id == null) return;
     final changed = await showEditTransactionById(context, id);
@@ -282,6 +290,57 @@ class PassbookScreenState extends State<PassbookScreen> {
       messenger.showSnackBar(
         SnackBar(content: Text(e is ApiException ? e.message : "Couldn't save that checkpoint.")),
       );
+    }
+  }
+
+  /// This account alone, started again from what the bank shows now.
+  Future<void> _startFresh() async {
+    final page = _page;
+    if (page == null) return;
+    final stated = page.lastStated;
+    final today = stated != null && formatShortDate(stated.at) == formatShortDate(DateTime.now()) ? stated.minor : null;
+    final minor = await showDialog<int>(
+      context: context,
+      builder: (_) => _FreshStartDialog(isCash: page.account.isCash, initialMinor: today),
+    );
+    if (minor == null || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final result = await ApiClient.instance.post('$_base/start-fresh', {'balanceMinor': minor}) as Map<String, dynamic>?;
+      final note = result?['note'];
+      messenger.showSnackBar(SnackBar(
+        content: Text(['Started fresh from ${formatMoney(minor)}.', if (note is String) note].join(' ')),
+      ));
+      await _load();
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e is ApiException ? e.message : "Couldn't start fresh just now.")));
+    }
+  }
+
+  Future<void> _startFreshEverywhere() async {
+    final changed = await StartFreshScreen.open(context);
+    if (changed == true && mounted) await _load();
+  }
+
+  Future<void> _undoFreshStart() async {
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Undo the fresh start?'),
+        content: const Text('The starting balance before it comes back, with the alerts and to-dos it cleared.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Keep it')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Undo')),
+        ],
+      ),
+    );
+    if (sure != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ApiClient.instance.post('$_base/start-fresh/undo');
+      await _load();
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e is ApiException ? e.message : "Couldn't undo that.")));
     }
   }
 
@@ -357,6 +416,21 @@ class PassbookScreenState extends State<PassbookScreen> {
                 label: const Text('Add checkpoint'),
               ),
             ),
+          if (page != null)
+            PopupMenuButton<String>(
+              key: const ValueKey('passbook-menu'),
+              tooltip: 'More',
+              onSelected: (value) {
+                if (value == 'fresh') _startFresh();
+                if (value == 'fresh-all') _startFreshEverywhere();
+                if (value == 'undo') _undoFreshStart();
+              },
+              itemBuilder: (_) => [
+                const PopupMenuItem(value: 'fresh', child: Text('Start fresh from today')),
+                const PopupMenuItem(value: 'fresh-all', child: Text('Start fresh for every account…')),
+                if (page.account.canUndoFreshStart) const PopupMenuItem(value: 'undo', child: Text('Undo fresh start')),
+              ],
+            ),
         ],
       ),
       body: _body(),
@@ -430,8 +504,9 @@ class PassbookScreenState extends State<PassbookScreen> {
                   key: highlighted ? _highlightKey : ValueKey('row-${row.seq}'),
                   row: row,
                   isCash: page.account.isCash,
+                  startedFresh: page.account.canUndoFreshStart,
                   highlighted: highlighted,
-                  onTap: row.isTransaction ? () => _openRow(row) : null,
+                  onTap: row.isTransaction || row.isMissingCredit ? () => _openRow(row) : null,
                   onLongPress: row.isCheckpoint ? () => _deleteCheckpoint(row) : null,
                 );
               },
@@ -514,6 +589,13 @@ class _Header extends StatelessWidget {
               ),
             ),
           ),
+          if (page.provisionalMinor > 0) ...[
+            const SizedBox(height: 2),
+            Text(
+              'Includes ${formatMoney(page.provisionalMinor)} not yet explained',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.warn),
+            ),
+          ],
           const SizedBox(height: 10),
           if (stated == null) ...[
             Row(
@@ -725,6 +807,7 @@ class _PassbookRowTile extends StatelessWidget {
     super.key,
     required this.row,
     required this.isCash,
+    this.startedFresh = false,
     this.highlighted = false,
     this.onTap,
     this.onLongPress,
@@ -732,6 +815,9 @@ class _PassbookRowTile extends StatelessWidget {
 
   final PassbookRow row;
   final bool isCash;
+
+  /// The opening row is a fresh start's, and says so.
+  final bool startedFresh;
   final bool highlighted;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
@@ -745,6 +831,7 @@ class _PassbookRowTile extends StatelessWidget {
     final (IconData icon, Color iconBg, Color iconFg) = switch (row.kind) {
       'opening' => (Icons.play_arrow_rounded, c.brand50, c.brandDark),
       'checkpoint' => (Icons.flag_outlined, c.brand50, c.brandDark),
+      'missing_credit' => (Icons.help_outline, c.warnBg, c.warn),
       'adjustment' => (Icons.help_outline, row.needsExplanation ? c.warnBg : c.chipNeutral, row.needsExplanation ? c.warn : c.muted),
       _ => row.isTransfer
           ? (Icons.swap_horiz, c.chipNeutral, c.transfer)
@@ -757,8 +844,17 @@ class _PassbookRowTile extends StatelessWidget {
     final String subtitle;
     switch (row.kind) {
       case 'opening':
-        title = 'Starting balance';
+        title = startedFresh ? 'Started fresh on ${formatShortDate(row.on)}' : 'Starting balance';
         subtitle = formatTime(row.on);
+      case 'missing_credit':
+        // Provisional: in the running balance so it matches the bank, and
+        // nowhere else until the user says what it was.
+        title = 'Came in without a text';
+        final from = row.windowStart;
+        final window = from == null || formatShortDate(from) == formatShortDate(row.on)
+            ? 'on ${formatShortDate(row.on)}'
+            : 'between ${formatShortDate(from)} and ${formatShortDate(row.on)}';
+        subtitle = '$window · not counted yet · tap to say what it was';
       case 'checkpoint':
         title = '${isCash ? 'Counted' : 'Bank app said'} ${formatMoney(stated ?? 0)}';
         subtitle = [formatTime(row.on), if (row.note != null) row.note!, 'hold to remove'].join(' · ');
@@ -774,8 +870,10 @@ class _PassbookRowTile extends StatelessWidget {
         ].join(' · ');
     }
 
-    final amountColor = row.isTransfer ? c.transfer : (row.isDebit ? c.debit : c.credit);
-    final isAdjustmentOpen = row.isAdjustment && row.needsExplanation;
+    final amountColor = row.isMissingCredit
+        ? c.warn
+        : (row.isTransfer ? c.transfer : (row.isDebit ? c.debit : c.credit));
+    final isAdjustmentOpen = (row.isAdjustment && row.needsExplanation) || row.isMissingCredit;
 
     return Material(
       color: highlighted ? c.brand50 : Colors.transparent,
@@ -953,6 +1051,70 @@ class _EndRow extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// "Start fresh from today" for this account: what the bank shows now.
+class _FreshStartDialog extends StatefulWidget {
+  const _FreshStartDialog({this.isCash = false, this.initialMinor});
+
+  final bool isCash;
+  final int? initialMinor;
+
+  @override
+  State<_FreshStartDialog> createState() => _FreshStartDialogState();
+}
+
+class _FreshStartDialogState extends State<_FreshStartDialog> {
+  late final _amount = TextEditingController(
+    text: widget.initialMinor == null ? '' : (widget.initialMinor! / 100).toStringAsFixed(2),
+  );
+
+  @override
+  void dispose() {
+    _amount.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final minor = parseRupees(_amount.text, allowNegative: true);
+    return AlertDialog(
+      title: const Text('Start fresh from today'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Your transactions and spending stay as they are. Only this balance starts again from the figure '
+            'below, as of now.',
+            style: TextStyle(fontSize: 13, height: 1.45, color: c.ink70),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _amount,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+            inputFormatters: [_signedAmount],
+            style: kNum.copyWith(fontSize: 18, fontWeight: FontWeight.w700, color: c.ink),
+            decoration: InputDecoration(
+              labelText: widget.isCash ? 'What your wallet holds now' : 'What your bank shows now',
+              prefixText: '₹ ',
+              border: const OutlineInputBorder(),
+            ),
+            onChanged: (_) => setState(() {}),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: minor == null ? null : () => Navigator.of(context).pop(minor),
+          child: const Text('Start fresh'),
+        ),
+      ],
     );
   }
 }

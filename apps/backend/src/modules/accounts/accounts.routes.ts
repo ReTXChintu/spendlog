@@ -11,15 +11,22 @@ import { cycleDaysFor } from "../cards/cards.learn";
 import { istDayKey } from "../../time";
 import { upcomingBills } from "../statements/statements.bills";
 import { expectedBalances, tracksBalance } from "./accounts.balance";
+import { freshStartRouter } from "./accounts.freshStart";
+import { settleMissingCredits, suggestsNoCreditAlerts, textCountsFor } from "./accounts.missingCredits";
+import { missingCreditsRouter } from "./accounts.missingCredits.routes";
 import { passbookRouter } from "./accounts.passbook.routes";
 import { pocketStatuses } from "./accounts.pocket";
 import { ACCOUNT_TYPES } from "../../types";
 
 export const accountsRouter = Router();
 accountsRouter.use(requireAuth);
-// The passbook, the reconciler and the drift alerts. Mounted first so
-// /accounts/alerts is never read as an account id by the routes below.
+// The passbook, the reconciler and the drift alerts, money that came in
+// without a message, and starting the balances fresh. Mounted first so
+// /accounts/alerts, /accounts/missing-credits and /accounts/start-fresh
+// are never read as an account id by the routes below.
 accountsRouter.use(passbookRouter);
+accountsRouter.use(missingCreditsRouter);
+accountsRouter.use(freshStartRouter);
 
 // GET /accounts — the bank accounts and cards, whether detected from
 // messages or added by hand.
@@ -47,6 +54,9 @@ accountsRouter.get("/overview", async (req, res) => {
 
   const now = new Date();
 
+  // Missing credits the rows now explain are closed before the balances
+  // count the open ones in.
+  await settleMissingCredits(userId);
   const [accounts, statuses, vaults, bills, monthSpend] = await Promise.all([
     Account.find({ userId }).sort({ isActive: -1, accountType: 1, bankName: 1, last4: 1 }),
     cardStatuses(userId, now),
@@ -54,9 +64,10 @@ accountsRouter.get("/overview", async (req, res) => {
     upcomingBills(userId),
     spentThisMonth(userId, now),
   ]);
-  const [balances, pockets] = await Promise.all([
+  const [balances, pockets, texted] = await Promise.all([
     expectedBalances(userId, accounts),
     pocketStatuses(userId, accounts, now),
+    textCountsFor(userId, accounts, now),
   ]);
 
   const statusFor = new Map(statuses.map((status) => [status.accountId, status]));
@@ -120,6 +131,12 @@ accountsRouter.get("/overview", async (req, res) => {
         /// what it should hold now if it has one.
         tracksBalance: tracksBalance(account),
         balance: balances.get(id) ?? null,
+        /// For a bank account: how many debits and credits it was texted
+        /// about lately, and whether that looks like a bank that never
+        /// texts money in. Only ever a suggestion - noCreditAlerts is the
+        /// user's to set.
+        textMessages: account.accountType === "BANK" ? (texted.get(id) ?? { debits: 0, credits: 0, days: 90 }) : null,
+        suggestNoCreditAlerts: suggestsNoCreditAlerts(account, texted.get(id)),
         /// Spent and left this month, for a pocket-money account.
         pocket: pockets.get(id) ?? null,
         /// What a debit card draws on, named rather than referenced - the
@@ -193,6 +210,8 @@ const accountFields = {
   openingBalanceAt: z.coerce.date().nullable().optional(),
   /// The emergency fund: kept out of the money on hand. One at a time.
   isSavings: z.boolean().optional(),
+  /// This bank texts money out and never money in.
+  noCreditAlerts: z.boolean().optional(),
   /// Pocket money for someone who spends from this account. null stops it.
   pocketMoney: z
     .object({

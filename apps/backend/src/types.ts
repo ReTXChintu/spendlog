@@ -119,6 +119,18 @@ export type StatementStatus = (typeof STATEMENT_STATUSES)[number];
 export const BALANCE_CHECKPOINT_SOURCES = ["STATEMENT", "MANUAL"] as const;
 export type BalanceCheckpointSource = (typeof BALANCE_CHECKPOINT_SOURCES)[number];
 
+// Money the bank's own figures say came into an account, and no message
+// ever did. Open until the user says what it was (resolved) or says they
+// cannot (dismissed); a gap that closes on its own is resolved too.
+export const MISSING_CREDIT_STATUSES = ["open", "resolved", "dismissed"] as const;
+export type MissingCreditStatus = (typeof MISSING_CREDIT_STATUSES)[number];
+
+// The one-tap answers to "what came in?", and how a gap was otherwise
+// closed: rows added by hand that explain it (gap_closed).
+export const MISSING_CREDIT_ANSWERS = ["transfer", "salary", "refund", "paid_back", "income"] as const;
+export type MissingCreditAnswer = (typeof MISSING_CREDIT_ANSWERS)[number];
+export type MissingCreditResolution = MissingCreditAnswer | "gap_closed";
+
 // A card offer stands until the bank changes it; a coupon is spent once
 // and then gone. Both answer the same question at a till, which is why
 // they share a collection.

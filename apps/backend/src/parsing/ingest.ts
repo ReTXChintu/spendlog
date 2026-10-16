@@ -11,6 +11,7 @@ import { parseStatedFigures } from "./balance";
 import { parseTransactionText } from "./parser";
 import { horizonFor } from "../modules/ledger/ledger.horizon";
 import { cardBillAccount, cardBillContext, markCardBillPayment } from "../modules/cards/cards.billPayment.service";
+import { detectAfterStatedBalance } from "../modules/accounts/accounts.missingCredits";
 import {
   adoptAutoLeg,
   couldBeSameAccount,
@@ -120,6 +121,7 @@ export async function ingestRawMessage(params: {
     await absorbMessage(autoLeg, { userId: params.userId, entry, parsed, accountId, stated }, () =>
       adoptAutoLeg(autoLeg, occurredAt)
     );
+    if (stated.balanceMinor !== null) await detectAfterStatedBalance(autoLeg);
     return { status: "duplicate", transaction: autoLeg };
   }
 
@@ -134,6 +136,8 @@ export async function ingestRawMessage(params: {
     // bank's email often names the card a bill went to where its SMS
     // gave only an amount.
     if (added && !duplicate.editedAt) await markCardBillPayment(duplicate);
+    // A balance the first message lacked is a new figure to measure from.
+    if (added && stated.balanceMinor !== null) await detectAfterStatedBalance(duplicate);
 
     return { status: "duplicate", transaction: duplicate };
   }
@@ -197,6 +201,9 @@ export async function ingestRawMessage(params: {
   // by its own rules, so this has nothing to do today. Called all the same:
   // any transfer that leaves ingest naming another account has both legs.
   await ensureTransferLegs(transaction);
+  // A balance stated: the gaps either side of it may be money that came
+  // in without a message (accounts.missingCredits).
+  await detectAfterStatedBalance(transaction);
 
   return { status: "created", transaction };
 }

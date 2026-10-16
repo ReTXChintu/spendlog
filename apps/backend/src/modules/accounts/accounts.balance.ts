@@ -1,5 +1,5 @@
 import { Types } from "mongoose";
-import { AccountDoc, BalanceCheckpoint, Transaction } from "../../models";
+import { AccountDoc, BalanceCheckpoint, MissingCredit, Transaction } from "../../models";
 import { BalanceCheckpointSource, CountedReason, TransactionSource, TransactionType } from "../../types";
 
 /**
@@ -33,6 +33,12 @@ export interface ExpectedBalance {
   outMinor: number;
   expectedMinor: number;
   transactionCount: number;
+  /// Money the bank's figures say came in and nobody has explained yet
+  /// (open missing credits), already inside expectedMinor. Not in inMinor:
+  /// it is not a transaction, and it counts as nothing until answered.
+  provisionalMinor: number;
+  /// The bank's latest figure for the account, whatever the gap.
+  lastStated: { minor: number; at: Date } | null;
   /// How far the app is from the bank's latest figure for this account,
   /// when it is further than rounding. The bank's figure less the app's:
   /// negative means the app shows more than the bank does. `since` is
@@ -41,7 +47,7 @@ export interface ExpectedBalance {
   drift: { minor: number; since: Date; statedAt: Date } | null;
 }
 
-export type LedgerEntryKind = "opening" | "txn" | "adjustment" | "checkpoint";
+export type LedgerEntryKind = "opening" | "txn" | "adjustment" | "checkpoint" | "missing_credit";
 
 /** One line of an account's passbook. */
 export interface LedgerEntry {
@@ -74,6 +80,11 @@ export interface LedgerEntry {
   /// this side, not yet confirmed by one.
   autoLeg: boolean;
   note: string | null;
+  /// On a missing_credit row: which one, and when its window opened. The
+  /// row stands at the end of the window, just before the figure that
+  /// showed the money had arrived.
+  missingCreditId: string | null;
+  windowStart: Date | null;
 }
 
 /** A moment the bank's figure and the app's were both known. */
@@ -96,6 +107,8 @@ export interface AccountLedger {
   outMinor: number;
   transactionCount: number;
   expectedNowMinor: number;
+  /// Open missing credits counted in, provisionally. See buildLedger.
+  provisionalMinor: number;
   /// The latest figure the bank gave, and how the app stood beside it.
   lastStated: StatedPoint | null;
   /// The earliest stated figure the app was off from, when the one before
@@ -261,7 +274,23 @@ export function ledgerFilter(userId: Types.ObjectId, context: LedgerContext, own
   };
 }
 
-const KIND_ORDER: Record<LedgerEntryKind, number> = { opening: 0, txn: 1, adjustment: 1, checkpoint: 2 };
+const KIND_ORDER: Record<LedgerEntryKind, number> = {
+  opening: 0,
+  txn: 1,
+  adjustment: 1,
+  missing_credit: 1,
+  checkpoint: 2,
+};
+
+/** An open missing credit, as much of it as the walk reads. */
+export type LedgerMissingCredit = {
+  _id: Types.ObjectId;
+  amountMinor: number;
+  after: Date;
+  before: Date;
+  beforeTransactionId?: Types.ObjectId | null;
+  beforeCheckpointId?: Types.ObjectId | null;
+};
 
 /**
  * One account's passbook, from its opening balance, every row that moved
@@ -273,6 +302,15 @@ const KIND_ORDER: Record<LedgerEntryKind, number> = { opening: 0, txn: 1, adjust
  * in. The drift at each stated figure is the bank's less the app's, and
  * the first drift is the earliest one the app was off at when the stated
  * figure before it agreed - that is where the two parted.
+ *
+ * Open missing credits, when handed in, are walked as provisional money
+ * in: each just before the stated figure that showed it had arrived, so
+ * that figure agrees with the running balance and the passbook's column
+ * matches the bank's from there on. They move expectedNowMinor and
+ * provisionalMinor and nothing else - not inMinor, not the count - since
+ * they are not transactions. Finding missing credits walks without them
+ * (accountLedgers' provisional: false): with them in, the gap they stand
+ * for would already be closed.
  */
 export function buildLedger(params: {
   accountId: string;
@@ -280,10 +318,12 @@ export function buildLedger(params: {
   openingAt: Date;
   moves: { row: LedgerRow; move: LedgerMove }[];
   checkpoints: LedgerCheckpoint[];
+  missingCredits?: LedgerMissingCredit[];
 }): AccountLedger {
   type Pending =
     | { kind: "txn" | "adjustment"; at: Date; id: string; row: LedgerRow; move: LedgerMove }
-    | { kind: "checkpoint"; at: Date; id: string; checkpoint: LedgerCheckpoint };
+    | { kind: "checkpoint"; at: Date; id: string; checkpoint: LedgerCheckpoint }
+    | { kind: "missing_credit"; at: Date; id: string; credit: LedgerMissingCredit };
 
   const pending: Pending[] = [
     ...params.moves.map(({ row, move }) => ({
@@ -306,6 +346,21 @@ export function buildLedger(params: {
       a.at.getTime() - b.at.getTime() || KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.id.localeCompare(b.id)
   );
 
+  // Each missing credit just before the figure that revealed it. Where
+  // that figure has gone - a row deleted since - at the end of its window,
+  // which is as near as anything can say.
+  for (const credit of params.missingCredits ?? []) {
+    if (credit.before <= params.openingAt) continue;
+    const item = { kind: "missing_credit" as const, at: credit.before, id: credit._id.toString(), credit };
+    const pointId = credit.beforeTransactionId?.toString() ?? credit.beforeCheckpointId?.toString() ?? null;
+    let index = pointId ? pending.findIndex((other) => other.kind !== "missing_credit" && other.id === pointId) : -1;
+    if (index < 0) {
+      index = pending.findIndex((other) => other.at > credit.before);
+      if (index < 0) index = pending.length;
+    }
+    pending.splice(index, 0, item);
+  }
+
   const entries: LedgerEntry[] = [
     {
       seq: 0,
@@ -327,10 +382,13 @@ export function buildLedger(params: {
       needsExplanation: false,
       autoLeg: false,
       note: null,
+      missingCreditId: null,
+      windowStart: null,
     },
   ];
 
   let running = params.openingMinor;
+  let provisionalMinor = 0;
   let inMinor = 0;
   let outMinor = 0;
   let transactionCount = 0;
@@ -345,7 +403,33 @@ export function buildLedger(params: {
     const seq = entries.length;
     let entry: LedgerEntry;
 
-    if (item.kind === "checkpoint") {
+    if (item.kind === "missing_credit") {
+      running += item.credit.amountMinor;
+      provisionalMinor += item.credit.amountMinor;
+      entry = {
+        seq,
+        kind: "missing_credit",
+        at: item.at,
+        transactionId: null,
+        checkpointId: null,
+        merchant: null,
+        type: "CREDIT",
+        amountMinor: item.credit.amountMinor,
+        runningMinor: running,
+        statedMinor: null,
+        driftMinor: null,
+        countedReason: null,
+        source: null,
+        isTransfer: false,
+        transferAccountId: null,
+        accountUnknown: false,
+        needsExplanation: true,
+        autoLeg: false,
+        note: null,
+        missingCreditId: item.id,
+        windowStart: item.credit.after,
+      };
+    } else if (item.kind === "checkpoint") {
       entry = {
         seq,
         kind: "checkpoint",
@@ -366,6 +450,8 @@ export function buildLedger(params: {
         needsExplanation: false,
         autoLeg: false,
         note: item.checkpoint.note ?? null,
+        missingCreditId: null,
+        windowStart: null,
       };
     } else {
       const { row, move } = item;
@@ -402,6 +488,8 @@ export function buildLedger(params: {
         needsExplanation: Boolean(row.needsExplanation),
         autoLeg: Boolean(row.autoLeg),
         note: null,
+        missingCreditId: null,
+        windowStart: null,
       };
     }
 
@@ -437,6 +525,7 @@ export function buildLedger(params: {
     outMinor,
     transactionCount,
     expectedNowMinor: running,
+    provisionalMinor,
     lastStated,
     firstDrift,
     cleanBefore,
@@ -455,7 +544,8 @@ const ROW_FIELDS =
 export async function accountLedgers(
   userId: Types.ObjectId,
   accounts: AccountLike[],
-  only?: string[]
+  only?: string[],
+  options: { provisional?: boolean } = {}
 ): Promise<Map<string, AccountLedger>> {
   const context = ledgerContext(accounts);
   const owners = context.tracked
@@ -464,11 +554,15 @@ export async function accountLedgers(
   const result = new Map<string, AccountLedger>();
   if (owners.length === 0) return result;
 
-  const [rows, checkpoints] = await Promise.all([
+  const ownerIds = owners.map((id) => new Types.ObjectId(id));
+  const [rows, checkpoints, credits] = await Promise.all([
     Transaction.find(ledgerFilter(userId, context, owners)).select(ROW_FIELDS).lean<LedgerRow[]>(),
-    BalanceCheckpoint.find({ userId, accountId: { $in: owners.map((id) => new Types.ObjectId(id)) } }).lean<
-      LedgerCheckpoint[]
-    >(),
+    BalanceCheckpoint.find({ userId, accountId: { $in: ownerIds } }).lean<LedgerCheckpoint[]>(),
+    options.provisional === false
+      ? Promise.resolve([] as (LedgerMissingCredit & { accountId: Types.ObjectId })[])
+      : MissingCredit.find({ userId, accountId: { $in: ownerIds }, status: "open" })
+          .select("accountId amountMinor after before beforeTransactionId beforeCheckpointId")
+          .lean<(LedgerMissingCredit & { accountId: Types.ObjectId })[]>(),
   ]);
 
   const movesFor = new Map<string, { row: LedgerRow; move: LedgerMove }[]>(owners.map((id) => [id, []]));
@@ -488,6 +582,7 @@ export async function accountLedgers(
         openingAt: context.sinceFor.get(owner)!,
         moves: movesFor.get(owner)!,
         checkpoints: checkpoints.filter((checkpoint) => checkpoint.accountId.toString() === owner),
+        missingCredits: credits.filter((credit) => credit.accountId.toString() === owner),
       })
     );
   }
@@ -519,6 +614,8 @@ export async function expectedBalances(
       outMinor: ledger.outMinor,
       expectedMinor: ledger.expectedNowMinor,
       transactionCount: ledger.transactionCount,
+      provisionalMinor: ledger.provisionalMinor,
+      lastStated: ledger.lastStated ? { minor: ledger.lastStated.minor, at: ledger.lastStated.at } : null,
       drift: driftOf(ledger),
     });
   }

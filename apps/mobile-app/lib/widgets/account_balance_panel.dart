@@ -145,6 +145,13 @@ class _AccountBalancePanelState extends State<AccountBalancePanel> {
             color: balance.expectedMinor < 0 ? c.debit : c.ink,
           ),
         ),
+        if (balance.provisionalMinor > 0) ...[
+          const SizedBox(height: 2),
+          Text(
+            'Includes ${formatMoney(balance.provisionalMinor)} not yet explained',
+            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: c.warn),
+          ),
+        ],
         const SizedBox(height: 4),
         Text(
           [

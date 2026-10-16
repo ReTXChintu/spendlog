@@ -13,6 +13,7 @@ import { loanProgress } from "../loans/loans.routes";
 import { planStatus } from "../ai/ai.coach";
 import { expectedBalances, tracksBalance } from "../accounts/accounts.balance";
 import { balanceTodos } from "../accounts/accounts.drift";
+import { settleMissingCredits } from "../accounts/accounts.missingCredits";
 import { PocketStatus, pocketStatuses } from "../accounts/accounts.pocket";
 import { outsideTransactionsMinor } from "../contacts/contacts.people";
 
@@ -44,6 +45,9 @@ dashboardRouter.get("/", async (req, res) => {
   // The user's own month - salary day to salary day - like every other
   // monthly figure in the app.
   const month = await userMonth(userId, undefined, now);
+  // Missing credits the rows now explain are closed first, so the balances
+  // and the to-dos below agree about which are still open.
+  await settleMissingCredits(userId);
 
   const [cards, pace, needsCategory, emis, loans, owed, perks, statements, monthSoFar, bills, budget, money, earmarks, plan, pocketMoney, banks, todos] =
     await Promise.all([
@@ -63,7 +67,7 @@ dashboardRouter.get("/", async (req, res) => {
     planStatus(userId, now),
     pocketMoneyFor(userId, now),
     bankFaces(userId, now),
-    balanceTodos(userId),
+    balanceTodos(userId, now, { settle: false }),
   ]);
 
   // Only the ones close enough to act on. Settled: shown here, never as a
@@ -131,6 +135,8 @@ async function moneyOnHand(userId: Types.ObjectId) {
       accountType: account.accountType,
       isSavings: Boolean(account.isSavings),
       balanceMinor: balances.get(account._id.toString())?.expectedMinor ?? null,
+      /// Money in nobody has explained yet, already in balanceMinor.
+      provisionalMinor: balances.get(account._id.toString())?.provisionalMinor ?? 0,
       /// How far that is from the bank's latest figure, when it is off.
       drift: driftFace(balances.get(account._id.toString())?.drift),
     }))
@@ -252,6 +258,9 @@ async function bankFaces(userId: Types.ObjectId, now: Date) {
         color: account.color ?? null,
         /// Null until a starting balance has been entered.
         balanceMinor: balances.get(id)?.expectedMinor ?? null,
+        /// Of which, money in nobody has explained yet: "includes ₹5,000
+        /// not yet explained".
+        provisionalMinor: balances.get(id)?.provisionalMinor ?? 0,
         /// The bank's latest figure less the app's, and since when, when
         /// the two are further apart than rounding. Null when in step or
         /// when the bank has never said.

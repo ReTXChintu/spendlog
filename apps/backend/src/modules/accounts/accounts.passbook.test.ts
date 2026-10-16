@@ -199,7 +199,16 @@ describe("the passbook", () => {
     const { zepto, swiggy } = await threeMessages();
     const page = await json(await call(`/accounts/${bankId}/passbook`));
 
-    assert.deepEqual(page.account, { id: bankId.toString(), name: "HDFC Bank", bankName: "HDFC Bank", last4: "4821", accountType: "BANK" });
+    assert.deepEqual(page.account, {
+      id: bankId.toString(),
+      name: "HDFC Bank",
+      bankName: "HDFC Bank",
+      last4: "4821",
+      accountType: "BANK",
+      isSavings: false,
+      noCreditAlerts: false,
+      canUndoFreshStart: false,
+    });
     assert.equal(page.openingMinor, 10_000_00);
     assert.equal(page.expectedNowMinor, 9_300_00);
     assert.deepEqual(

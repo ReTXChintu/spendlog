@@ -6,6 +6,7 @@ import { validObjectIdParam } from "../../middleware/validate";
 import { Account, AccountDoc, BalanceAlert, BalanceCheckpoint, Transaction } from "../../models";
 import { AccountLedger, LedgerEntry, accountLedgers, tracksBalance } from "./accounts.balance";
 import { describeAlerts } from "./accounts.drift";
+import { settleMissingCredits } from "./accounts.missingCredits";
 import { suspectsFor } from "./accounts.suspects";
 
 /**
@@ -26,6 +27,11 @@ function describeAccount(account: AccountDoc) {
     bankName: account.bankName,
     last4: account.last4 ?? null,
     accountType: account.accountType,
+    isSavings: Boolean(account.isSavings),
+    noCreditAlerts: Boolean(account.noCreditAlerts),
+    /// The starting balance came from a fresh start, and the one before it
+    /// can be put back.
+    canUndoFreshStart: (account.openingHistory ?? []).length > 0,
   };
 }
 
@@ -55,6 +61,9 @@ async function ledgerFor(
     return { status: 400, error: "Set a starting balance on this account first." };
   }
 
+  // A missing credit the rows now explain goes before the passbook is
+  // drawn, rather than standing beside the row that explains it.
+  await settleMissingCredits(userId, [accountId]);
   const ledger = (await accountLedgers(userId, accounts, [accountId])).get(accountId);
   if (!ledger) return { status: 400, error: "Set a starting balance on this account first." };
   return { account, ledger };
@@ -121,6 +130,9 @@ passbookRouter.get("/:id/passbook", validObjectIdParam("id"), async (req, res) =
     openingMinor: ledger.openingMinor,
     openingAt: ledger.openingAt,
     expectedNowMinor: ledger.expectedNowMinor,
+    /// Money in nobody has explained yet, counted into expectedNowMinor
+    /// provisionally: the amber rows.
+    provisionalMinor: ledger.provisionalMinor,
     lastStated: ledger.lastStated,
     firstDrift: firstDriftOf(ledger),
     rows: page.map(passbookRow),
@@ -151,7 +163,7 @@ passbookRouter.get("/:id/reconcile", validObjectIdParam("id"), async (req, res) 
   if ("error" in found) return res.status(found.status).json({ error: found.error, ...found.hint });
   const { account, ledger } = found;
 
-  const suspects = await suspectsFor(userId, ledger);
+  const suspects = await suspectsFor(userId, ledger, account);
   res.json({
     account: describeAccount(account),
     expectedMinor: ledger.expectedNowMinor,

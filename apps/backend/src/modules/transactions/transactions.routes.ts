@@ -598,7 +598,7 @@ transactionsRouter.delete("/:id", validObjectIdParam("id"), async (req, res) => 
  * counted-amount hook runs: the purchase then costs what was paid less
  * what was refunded.
  */
-async function syncRefundTotal(purchaseId: unknown, userId: unknown): Promise<void> {
+export async function syncRefundTotal(purchaseId: unknown, userId: unknown): Promise<void> {
   const purchase = await Transaction.findOne({ _id: purchaseId, userId });
   if (!purchase) return;
 

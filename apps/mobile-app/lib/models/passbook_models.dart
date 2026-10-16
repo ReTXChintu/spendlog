@@ -56,12 +56,25 @@ class PassbookAccount {
   /// BANK | CASH
   final String accountType;
 
+  /// The emergency fund, kept hidden behind a tap.
+  final bool isSavings;
+
+  /// This bank texts money out and never money in.
+  final bool noCreditAlerts;
+
+  /// The starting balance came from a fresh start, and the one before it
+  /// can be put back.
+  final bool canUndoFreshStart;
+
   const PassbookAccount({
     required this.id,
     required this.name,
     this.bankName = '',
     this.last4,
     this.accountType = 'BANK',
+    this.isSavings = false,
+    this.noCreditAlerts = false,
+    this.canUndoFreshStart = false,
   });
 
   bool get isCash => accountType == 'CASH';
@@ -75,6 +88,9 @@ class PassbookAccount {
         bankName: _str(json?['bankName']) ?? '',
         last4: _str(json?['last4']),
         accountType: _str(json?['accountType']) ?? 'BANK',
+        isSavings: _bool(json?['isSavings']),
+        noCreditAlerts: _bool(json?['noCreditAlerts']),
+        canUndoFreshStart: _bool(json?['canUndoFreshStart']),
       );
 }
 
@@ -154,7 +170,7 @@ class PassbookRow {
   /// Position in the account's history, oldest first; the opening row is 0.
   final int seq;
 
-  /// txn | opening | adjustment | checkpoint
+  /// txn | opening | adjustment | checkpoint | missing_credit
   final String kind;
   final DateTime on;
   final String? transactionId;
@@ -186,6 +202,11 @@ class PassbookRow {
   final bool autoLeg;
   final String? note;
 
+  /// On a missing_credit row: which one, and when its window opened. The
+  /// row stands at the end of the window.
+  final String? missingCreditId;
+  final DateTime? windowStart;
+
   const PassbookRow({
     required this.seq,
     required this.kind,
@@ -206,12 +227,18 @@ class PassbookRow {
     this.needsExplanation = false,
     this.autoLeg = false,
     this.note,
+    this.missingCreditId,
+    this.windowStart,
   });
 
   bool get isOpening => kind == 'opening';
   bool get isCheckpoint => kind == 'checkpoint';
   bool get isAdjustment => kind == 'adjustment';
   bool get isTransaction => kind == 'txn' || kind == 'adjustment';
+
+  /// Money the bank's figures say came in, not yet explained: provisional,
+  /// counted in the running balance and nowhere else.
+  bool get isMissingCredit => kind == 'missing_credit';
   bool get isDebit => type == 'DEBIT';
 
   /// A figure from the bank, and the app disagrees with it.
@@ -240,6 +267,8 @@ class PassbookRow {
         needsExplanation: _bool(json['needsExplanation']),
         autoLeg: _bool(json['autoLeg']),
         note: _str(json['note']),
+        missingCreditId: _str(json['missingCreditId']),
+        windowStart: _date(json['windowStart']),
       );
 }
 
@@ -249,6 +278,9 @@ class PassbookPage {
   final int openingMinor;
   final DateTime? openingAt;
   final int expectedNowMinor;
+
+  /// Of [expectedNowMinor], money in nobody has explained yet.
+  final int provisionalMinor;
 
   /// The bank's latest figure and how the app stood beside it. Null when
   /// the bank has never said one.
@@ -266,6 +298,7 @@ class PassbookPage {
     this.openingMinor = 0,
     this.openingAt,
     this.expectedNowMinor = 0,
+    this.provisionalMinor = 0,
     this.lastStated,
     this.firstDrift,
     this.total = 0,
@@ -283,6 +316,7 @@ class PassbookPage {
         openingMinor: _int(json['openingMinor']),
         openingAt: _date(json['openingAt']),
         expectedNowMinor: _int(json['expectedNowMinor']),
+        provisionalMinor: _int(json['provisionalMinor']),
         lastStated: StatedPoint.maybe(json['lastStated']),
         firstDrift: FirstDrift.maybe(json['firstDrift']),
         total: _int(json['total']),
@@ -334,7 +368,7 @@ class SuspectFix {
 /// Something near the drift that could account for it.
 class Suspect {
   /// unknown_account | duplicate | one_sided_transfer | card_bill_on_card |
-  /// missing_days | exact_match
+  /// missing_days | exact_match | missing_credit
   final String kind;
   final List<String> transactionIds;
 
@@ -363,6 +397,7 @@ class Suspect {
         'card_bill_on_card' => 'A card bill filed under the card',
         'missing_days' => 'Days with something missing',
         'exact_match' => 'One row that is exactly the gap',
+        'missing_credit' => 'Money in without a text',
         _ => 'Worth a look',
       };
 
@@ -371,6 +406,7 @@ class Suspect {
         'missing_days' => 'Open the bank app and look at these days. Add whatever SpendLog does not have by hand.',
         'exact_match' => 'Check whether the bank shows this on the account. If not, delete it or move it to the right account.',
         'unknown_account' => 'Open each payment and set its account, or say it was cash.',
+        'missing_credit' => "Add the credit by hand, or let the bank's statement for those days fill it in.",
         _ => 'Check the bank app for these days.',
       };
 
@@ -484,13 +520,15 @@ class BalanceAlert {
 
 /// Something about the balances to do, from the dashboard's `todos`.
 ///
-/// Three kinds, each carrying what its tap needs: an alert opens the
-/// account's passbook, an unexplained difference opens that row, and the
-/// payments with no account open the ledger narrowed to them. One class
-/// rather than three so the dashboard can list them in one loop; the
-/// fields a kind does not use are null.
+/// Five kinds, each carrying what its tap needs: an alert opens the
+/// account's passbook, money that came in without a text opens "What came
+/// in?", an unexplained difference opens that row, the payments with no
+/// account open the ledger narrowed to them, and a statement due opens
+/// that account's statements. One class rather than five so the dashboard
+/// can list them in one loop; the fields a kind does not use are null.
 class BalanceTodo {
-  /// balance_alert | unexplained_difference | unknown_account
+  /// balance_alert | missing_credit | unexplained_difference |
+  /// unknown_account | statement_due
   final String kind;
   final String title;
   final String body;
@@ -509,6 +547,15 @@ class BalanceTodo {
   /// unknown_account
   final int count;
 
+  /// missing_credit: which one, its window and its likely answers.
+  final String? missingCreditId;
+  final DateTime? after;
+  final DateTime? before;
+  final List<MissingCreditSuggestion> suggestions;
+
+  /// statement_due: the month whose statement is wanted, YYYY-MM.
+  final String? month;
+
   const BalanceTodo({
     required this.kind,
     required this.title,
@@ -521,15 +568,36 @@ class BalanceTodo {
     this.amountMinor,
     this.on,
     this.count = 0,
+    this.missingCreditId,
+    this.after,
+    this.before,
+    this.suggestions = const [],
+    this.month,
   });
 
   bool get isAlert => kind == 'balance_alert';
   bool get isUnexplained => kind == 'unexplained_difference';
   bool get isUnknownAccount => kind == 'unknown_account';
+  bool get isMissingCredit => kind == 'missing_credit' && missingCreditId != null;
+  bool get isStatementDue => kind == 'statement_due' && accountId != null && month != null;
 
   /// A kind this build knows how to open. Anything else is left off the
   /// list rather than shown as a row that does nothing.
-  bool get isKnown => isAlert || isUnexplained || isUnknownAccount;
+  bool get isKnown => isAlert || isUnexplained || isUnknownAccount || isMissingCredit || isStatementDue;
+
+  /// The missing credit this stands for, enough for "What came in?" to
+  /// open without asking the server again.
+  MissingCredit? get missingCredit => isMissingCredit
+      ? MissingCredit(
+          id: missingCreditId!,
+          accountId: accountId ?? '',
+          amountMinor: amountMinor ?? 0,
+          after: after,
+          before: before,
+          title: title,
+          suggestions: suggestions,
+        )
+      : null;
 
   factory BalanceTodo.fromJson(Map<String, dynamic> json) => BalanceTodo(
         kind: _str(json['kind']) ?? '',
@@ -543,7 +611,155 @@ class BalanceTodo {
         amountMinor: _intOrNull(json['amountMinor']),
         on: _date(json['on']),
         count: _int(json['count']),
+        missingCreditId: _str(json['missingCreditId']),
+        after: _date(json['after']),
+        before: _date(json['before']),
+        suggestions: _maps(json['suggestions']).map(MissingCreditSuggestion.fromJson).toList(),
+        month: _str(json['month']),
       );
+}
+
+/// A likely answer to "what came in?", ready to send as it is.
+class MissingCreditSuggestion {
+  /// transfer | salary | refund | paid_back | income
+  final String as;
+  final String label;
+  final String? fromAccountId;
+
+  /// The row on the other account a transfer would pair with.
+  final String? transactionId;
+  final String? contactId;
+
+  const MissingCreditSuggestion({
+    required this.as,
+    required this.label,
+    this.fromAccountId,
+    this.transactionId,
+    this.contactId,
+  });
+
+  /// The body of `POST /accounts/missing-credits/:id/resolve`.
+  Map<String, dynamic> toBody() => {
+        'as': as,
+        if (fromAccountId != null) 'fromAccountId': fromAccountId,
+        if (contactId != null) 'contactId': contactId,
+      };
+
+  factory MissingCreditSuggestion.fromJson(Map<String, dynamic> json) => MissingCreditSuggestion(
+        as: _str(json['as']) ?? 'income',
+        label: _str(json['label']) ?? '',
+        fromAccountId: _str(json['fromAccountId']),
+        transactionId: _str(json['transactionId']),
+        contactId: _str(json['contactId']),
+      );
+}
+
+/// Money the bank's own figures say came into an account, with no message
+/// saying so: `GET /accounts/missing-credits`. Not a transaction until the
+/// user says what it was.
+class MissingCredit {
+  final String id;
+  final String accountId;
+  final PassbookAccount? account;
+  final int amountMinor;
+
+  /// The window it arrived in: after the first figure, by the second.
+  final DateTime? after;
+  final DateTime? before;
+
+  /// open | resolved | dismissed
+  final String status;
+  final String title;
+  final List<MissingCreditSuggestion> suggestions;
+
+  const MissingCredit({
+    required this.id,
+    required this.accountId,
+    this.account,
+    required this.amountMinor,
+    this.after,
+    this.before,
+    this.status = 'open',
+    this.title = '',
+    this.suggestions = const [],
+  });
+
+  bool get isOpen => status == 'open';
+
+  factory MissingCredit.fromJson(Map<String, dynamic> json) {
+    final account = _mapOrNull(json['account']);
+    return MissingCredit(
+      id: _str(json['id']) ?? '',
+      accountId: _str(json['accountId']) ?? '',
+      account: account == null ? null : PassbookAccount.fromJson({...account, 'id': json['accountId']}),
+      amountMinor: _int(json['amountMinor']),
+      after: _date(json['after']),
+      before: _date(json['before']),
+      status: _str(json['status']) ?? 'open',
+      title: _str(json['title']) ?? '',
+      suggestions: _maps(json['suggestions']).map(MissingCreditSuggestion.fromJson).toList(),
+    );
+  }
+}
+
+/// One account on the "Start fresh from today" screen: `GET
+/// /accounts/start-fresh`.
+class FreshStartAccount {
+  final String accountId;
+  final String name;
+  final String? last4;
+
+  /// BANK | CASH
+  final String accountType;
+  final bool isSavings;
+
+  /// What SpendLog makes it now; null when it has no starting balance yet.
+  final int? expectedMinor;
+  final int provisionalMinor;
+
+  /// The bank's latest figure, and whether it is from today - in which
+  /// case it is what the bank shows now, and the screen fills it in.
+  final int? lastStatedMinor;
+  final DateTime? lastStatedAt;
+  final bool statedToday;
+  final bool canUndo;
+
+  const FreshStartAccount({
+    required this.accountId,
+    required this.name,
+    this.last4,
+    this.accountType = 'BANK',
+    this.isSavings = false,
+    this.expectedMinor,
+    this.provisionalMinor = 0,
+    this.lastStatedMinor,
+    this.lastStatedAt,
+    this.statedToday = false,
+    this.canUndo = false,
+  });
+
+  bool get isCash => accountType == 'CASH';
+  String get label => last4 == null ? name : '$name ••$last4';
+
+  /// The figure to start the input with: the bank's own, when it is today's.
+  int? get prefillMinor => statedToday ? lastStatedMinor : null;
+
+  factory FreshStartAccount.fromJson(Map<String, dynamic> json) {
+    final stated = _mapOrNull(json['lastStated']);
+    return FreshStartAccount(
+      accountId: _str(json['accountId']) ?? '',
+      name: _str(json['name']) ?? 'Account',
+      last4: _str(json['last4']),
+      accountType: _str(json['accountType']) ?? 'BANK',
+      isSavings: _bool(json['isSavings']),
+      expectedMinor: _intOrNull(json['expectedMinor']),
+      provisionalMinor: _int(json['provisionalMinor']),
+      lastStatedMinor: stated == null ? null : _intOrNull(stated['minor']),
+      lastStatedAt: stated == null ? null : _date(stated['at']),
+      statedToday: _bool(json['statedToday']),
+      canUndo: _bool(json['canUndo']),
+    );
+  }
 }
 
 /// A statement line the app has no row for.

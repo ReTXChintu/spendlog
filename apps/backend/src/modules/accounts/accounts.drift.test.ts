@@ -147,14 +147,14 @@ describe("the nightly drift check", () => {
   it("runs once a night however often it is asked", async () => {
     await driftingRow();
     const run = await drift.runNightlyDriftCheck(TONIGHT);
-    assert.deepEqual(run, { ran: true, users: 1, alerts: 1 });
+    assert.deepEqual(run, { ran: true, users: 1, alerts: 1, missingCredits: 0 });
 
     const again = await drift.runNightlyDriftCheck(new Date(TONIGHT.getTime() + 30 * 60 * 1000));
     assert.equal(again.ran, false);
 
     // Tomorrow night it is due again - and finds nothing new to say.
     const tomorrow = await drift.runNightlyDriftCheck(new Date(TONIGHT.getTime() + 24 * 60 * 60 * 1000));
-    assert.deepEqual(tomorrow, { ran: true, users: 1, alerts: 0 });
+    assert.deepEqual(tomorrow, { ran: true, users: 1, alerts: 0, missingCredits: 0 });
   });
 
   it("is due after half past ten at night, IST", () => {

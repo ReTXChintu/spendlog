@@ -95,6 +95,23 @@ class Account {
   /// Set when someone else spends from this account on a monthly limit.
   final PocketMoney? pocketMoney;
 
+  /// This bank texts money out and never money in, so a gap is read as
+  /// money in first and its statement is asked for monthly.
+  final bool noCreditAlerts;
+
+  /// From the overview: the texts look like a bank that never sends one
+  /// for money in. Only a suggestion; [noCreditAlerts] is the user's call.
+  final bool suggestNoCreditAlerts;
+
+  /// From the overview, for a bank account: how many debits and credits it
+  /// was texted about in the last [textDays] days.
+  final int? textDebits;
+  final int? textCredits;
+  final int textDays;
+
+  /// How many starting balances a fresh start has replaced and can undo.
+  final int openingHistoryCount;
+
   Account({
     required this.id,
     required this.bankName,
@@ -113,6 +130,12 @@ class Account {
     this.hasStatementPassword = false,
     this.isSavings = false,
     this.pocketMoney,
+    this.noCreditAlerts = false,
+    this.suggestNoCreditAlerts = false,
+    this.textDebits,
+    this.textCredits,
+    this.textDays = 90,
+    this.openingHistoryCount = 0,
   });
 
   /// What to call it on screen: the name given to it, else the bank's own.
@@ -141,6 +164,12 @@ class Account {
         hasStatementPassword: json['hasStatementPassword'] as bool? ?? false,
         isSavings: json['isSavings'] as bool? ?? false,
         pocketMoney: PocketMoney.maybe(json['pocketMoney']),
+        noCreditAlerts: json['noCreditAlerts'] as bool? ?? false,
+        suggestNoCreditAlerts: json['suggestNoCreditAlerts'] as bool? ?? false,
+        textDebits: (json['textMessages'] as Map<String, dynamic>?)?['debits'] as int?,
+        textCredits: (json['textMessages'] as Map<String, dynamic>?)?['credits'] as int?,
+        textDays: (json['textMessages'] as Map<String, dynamic>?)?['days'] as int? ?? 90,
+        openingHistoryCount: (json['openingHistory'] as List<dynamic>? ?? const []).length,
       );
 }
 
@@ -1833,6 +1862,10 @@ class ExpectedBalance {
   final int expectedMinor;
   final int transactionCount;
 
+  /// Of [expectedMinor], money the bank's figures say came in that nobody
+  /// has explained yet - counted in provisionally, not as income.
+  final int provisionalMinor;
+
   /// How far this is from the bank's latest figure, when it is off by more
   /// than rounding. Null when in step, or when the bank has never said.
   final BalanceDrift? drift;
@@ -1844,6 +1877,7 @@ class ExpectedBalance {
     this.outMinor = 0,
     required this.expectedMinor,
     this.transactionCount = 0,
+    this.provisionalMinor = 0,
     this.drift,
   });
 
@@ -1854,6 +1888,7 @@ class ExpectedBalance {
         outMinor: json['outMinor'] as int? ?? 0,
         expectedMinor: json['expectedMinor'] as int? ?? 0,
         transactionCount: json['transactionCount'] as int? ?? 0,
+        provisionalMinor: json['provisionalMinor'] as int? ?? 0,
         drift: BalanceDrift.maybe(json['drift']),
       );
 }

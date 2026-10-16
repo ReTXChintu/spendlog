@@ -527,6 +527,19 @@ class _BankTileState extends State<BankTile> {
                 // passbook that says where. In step: a quiet link to it.
                 if (drift != null)
                   _DriftChip(drift: drift, onTap: widget.onOpenPassbook)
+                // In step with the bank only because money nobody has
+                // explained is counted in: say so, amber, into the passbook.
+                else if (bank.provisionalMinor > 0)
+                  InkWell(
+                    onTap: widget.onOpenPassbook,
+                    borderRadius: BorderRadius.circular(4),
+                    child: Text(
+                      'incl. ${formatMoneyShort(bank.provisionalMinor)} unexplained ›',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: c.warn),
+                    ),
+                  )
                 else
                   Row(
                     children: [

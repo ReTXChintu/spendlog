@@ -21,6 +21,7 @@ import 'monthly_budget_screen.dart';
 import 'statements_screen.dart';
 import 'login_screen.dart';
 import 'permission_screen.dart';
+import 'start_fresh_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -865,6 +866,12 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
                 'and add anything that never sends a message.',
             actions: [
               OutlinedButton(onPressed: _openAccounts, child: const Text('Manage accounts')),
+              // Stop chasing old mismatches: every balance starts again
+              // from what the banks show today.
+              OutlinedButton(
+                onPressed: () => StartFreshScreen.open(context),
+                child: const Text('Start fresh from today'),
+              ),
             ],
           ),
         ),
@@ -1381,7 +1388,7 @@ class _CardBody extends StatelessWidget {
         Text(text, style: TextStyle(fontSize: 13, height: 1.5, color: context.c.ink70)),
         if (actions != null) ...[
           const SizedBox(height: 14),
-          Row(children: [for (final action in actions!) Padding(padding: const EdgeInsets.only(right: 8), child: action)]),
+          Wrap(spacing: 8, runSpacing: 6, children: [for (final action in actions!) action]),
         ],
       ],
     );

@@ -30,7 +30,8 @@ export type SuspectKind =
   | "one_sided_transfer"
   | "card_bill_on_card"
   | "missing_days"
-  | "exact_match";
+  | "exact_match"
+  | "missing_credit";
 
 /** The one request that would put a suspect right, ready to send. */
 export interface SuspectFix {
@@ -386,6 +387,34 @@ export function exactMatchSuspects(rows: SuspectRow[], gapMinor: number | null, 
     }));
 }
 
+/**
+ * Money in the bank never texted about. On an account whose bank sends no
+ * message for money coming in (noCreditAlerts), a gap the bank's way -
+ * the bank showing more than SpendLog - is that before it is anything
+ * else, so it is said first. There is no one-tap fix: what the money was
+ * is the user's to say, or the statement's.
+ */
+export function missingCreditSuspects(
+  account: { noCreditAlerts?: boolean } | null | undefined,
+  ledger: AccountLedger,
+  gapMinor: number | null
+): Suspect[] {
+  if (!account?.noCreditAlerts || gapMinor === null || gapMinor <= DRIFT_TOLERANCE_MINOR) return [];
+  const window = suspectWindow(ledger);
+  const until = ledger.lastStated?.at ?? null;
+  return [
+    {
+      kind: "missing_credit",
+      transactionIds: [],
+      amountMinor: gapMinor,
+      explanation: `This bank doesn't text you about money coming in, so the ${rupees(gapMinor)} it shows over SpendLog is most likely a credit that arrived without a message${until ? ` before ${day(until)}` : ""}. Add it, or read the statement for those days.`,
+      on: window.from,
+      until,
+      score: 10,
+    },
+  ];
+}
+
 /** Likeliest first, then earliest. */
 export function rankSuspects(suspects: Suspect[]): Suspect[] {
   return [...suspects].sort(
@@ -450,7 +479,11 @@ export function suspectWindow(ledger: AccountLedger): { from: Date; fromSeq: num
  * when the bank has never given one, in which case the detectors that
  * need a figure to fit are quiet and the structural ones speak.
  */
-export async function suspectsFor(userId: Types.ObjectId, ledger: AccountLedger): Promise<Suspect[]> {
+export async function suspectsFor(
+  userId: Types.ObjectId,
+  ledger: AccountLedger,
+  account?: { noCreditAlerts?: boolean } | null
+): Promise<Suspect[]> {
   const accountId = ledger.accountId;
   const gapMinor = ledger.lastStated?.driftMinor ?? null;
   const window = suspectWindow(ledger);
@@ -474,6 +507,7 @@ export async function suspectsFor(userId: Types.ObjectId, ledger: AccountLedger)
   const unknown = rows.filter((row) => !row.accountId && row.accountUnknown).map(toSuspectRow);
 
   const suspects: Suspect[] = [
+    ...missingCreditSuspects(account, ledger, gapMinor),
     ...unknownAccountSuspects(unknown, gapMinor, accountId),
     ...duplicateSuspects(here, gapMinor),
     ...oneSidedTransferSuspects(here, elsewhere, gapMinor, accountId),

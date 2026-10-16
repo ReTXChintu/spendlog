@@ -63,6 +63,10 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
   String? _linkedAccountId;
   String? _sharesLimitWith;
   late bool _isActive;
+  late bool _noCreditAlerts;
+
+  /// Whether the statement password is shown as typed.
+  bool _showPassword = false;
   String? _mergeInto;
 
   bool _saving = false;
@@ -88,6 +92,7 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
     _linkedAccountId = a?.linkedAccountId;
     _sharesLimitWith = a?.sharesLimitWith;
     _isActive = a?.isActive ?? true;
+    _noCreditAlerts = a?.noCreditAlerts ?? false;
   }
 
   @override
@@ -158,6 +163,8 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
       'statementDay': _intOrNull(_statementDay),
       'dueDay': _intOrNull(_dueDay),
       'isActive': _isActive,
+      // Only a bank account has messages about money coming in or not.
+      'noCreditAlerts': _type == 'BANK' && _noCreditAlerts,
     };
 
     try {
@@ -375,7 +382,7 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
               // one is often enough for all of them.
               TextField(
                 controller: _statementPassword,
-                obscureText: true,
+                obscureText: !_showPassword,
                 autocorrect: false,
                 enableSuggestions: false,
                 style: TextStyle(color: context.c.ink),
@@ -388,8 +395,44 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
                       'from a date of birth, so it usually opens more than this one card.',
                   helperMaxLines: 4,
                   isDense: true,
+                  suffixIcon: IconButton(
+                    tooltip: _showPassword ? 'Hide password' : 'Show password',
+                    icon: Icon(_showPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 19),
+                    onPressed: () => setState(() => _showPassword = !_showPassword),
+                  ),
                 ),
               ),
+            ],
+
+            // Some banks text every payment out and none in. Said once
+            // here, a gap on the account is read as money in first, and
+            // its statement is asked for every month to catch the rest.
+            if (_type == 'BANK') ...[
+              const SizedBox(height: 10),
+              SwitchListTile(
+                key: const ValueKey('no-credit-alerts'),
+                value: _noCreditAlerts,
+                onChanged: (value) => setState(() => _noCreditAlerts = value),
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  "This bank doesn't text me about money coming in",
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.ink),
+                ),
+                subtitle: Text(
+                  'SpendLog then reads a gap as a credit it missed, and asks for the statement monthly.',
+                  style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
+                ),
+              ),
+              if (!_noCreditAlerts && widget.account?.suggestNoCreditAlerts == true)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(color: c.warnBg, borderRadius: BorderRadius.circular(T.rSm)),
+                  child: Text(
+                    _suggestionText(widget.account!),
+                    style: TextStyle(fontSize: 12, height: 1.4, color: c.warn, fontWeight: FontWeight.w600),
+                  ),
+                ),
             ],
 
             const SizedBox(height: 6),
@@ -485,6 +528,15 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
       ),
     );
   }
+}
+
+/// "We've seen 28 debits and 1 credit by text in 90 days — turn this on?"
+String _suggestionText(Account account) {
+  final debits = account.textDebits ?? 0;
+  final credits = account.textCredits ?? 0;
+  String count(int n, String one) => '$n $one${n == 1 ? '' : 's'}';
+  return "We've seen ${count(debits, 'debit')} and ${count(credits, 'credit')} by text in "
+      '${account.textDays} days — turn this on?';
 }
 
 TextStyle _labelStyle(SpendColors c) =>

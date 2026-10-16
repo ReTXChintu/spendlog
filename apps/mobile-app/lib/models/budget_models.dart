@@ -547,6 +547,9 @@ class BankFace {
   /// are further apart than rounding. Null when in step or never stated.
   final BalanceDrift? drift;
 
+  /// Of [balanceMinor], money in nobody has explained yet.
+  final int provisionalMinor;
+
   const BankFace({
     required this.accountId,
     required this.name,
@@ -560,6 +563,7 @@ class BankFace {
     this.debitCards = const [],
     this.hasCardDetails = false,
     this.drift,
+    this.provisionalMinor = 0,
   });
 
   bool get isCash => accountType == 'CASH';
@@ -579,6 +583,7 @@ class BankFace {
       debitCards: _maps(json['debitCards']).map(DebitCardFace.fromJson).toList(),
       hasCardDetails: _bool(json['hasCardDetails']),
       drift: BalanceDrift.maybe(json['drift']),
+      provisionalMinor: _intOrNull(json['provisionalMinor']) ?? 0,
     );
   }
 }

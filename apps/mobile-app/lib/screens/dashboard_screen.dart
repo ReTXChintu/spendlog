@@ -18,12 +18,14 @@ import '../widgets/home/wallet.dart';
 import '../widgets/loan_dialog.dart';
 import '../widgets/pocket_money.dart';
 import '../widgets/state_block.dart';
+import '../widgets/what_came_in_sheet.dart';
 import 'accounts_screen.dart';
 import 'investments/investments_screen.dart';
 import 'monthly_budget_screen.dart';
 import 'passbook_screen.dart';
 import 'people_screen.dart';
 import 'perks_screen.dart';
+import 'statements_screen.dart';
 import 'transactions_screen.dart';
 
 /// The Dashboard tab of Home: what you need to know now.
@@ -172,6 +174,27 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
     await load();
   }
 
+  /// Money that came in without a text: "What came in?".
+  Future<void> _openMissingCredit(MissingCredit credit) async {
+    final changed = await showWhatCameInSheet(context, credit: credit);
+    if (changed == true) await load();
+  }
+
+  /// A statement to fetch for a bank that never texts money in: that
+  /// account's statements, asking for the month.
+  Future<void> _openStatementDue(BalanceTodo todo) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => StatementsScreen(
+          onlyAccountId: todo.accountId,
+          title: 'Statements',
+          dueMonth: todo.month,
+        ),
+      ),
+    );
+    await load();
+  }
+
   /// The payments no account could be placed for, on their own.
   Future<void> _openUnknownAccount() async {
     await Navigator.of(context).push(
@@ -254,6 +277,8 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
             onOpenPassbook: _openPassbook,
             onOpenUnexplained: _openUnexplained,
             onOpenUnknownAccount: _openUnknownAccount,
+            onOpenMissingCredit: _openMissingCredit,
+            onOpenStatementDue: _openStatementDue,
           ),
 
           // Above the money, because a broken rule is the one thing here
@@ -442,6 +467,12 @@ class _Todos extends StatelessWidget {
   /// The payments with no account: the ledger narrowed to them.
   final VoidCallback onOpenUnknownAccount;
 
+  /// Money in without a text: "What came in?".
+  final Future<void> Function(MissingCredit credit) onOpenMissingCredit;
+
+  /// A statement due: that account's statements.
+  final Future<void> Function(BalanceTodo todo) onOpenStatementDue;
+
   const _Todos({
     required this.data,
     this.onOpenTransactions,
@@ -451,6 +482,8 @@ class _Todos extends StatelessWidget {
     required this.onOpenPassbook,
     required this.onOpenUnexplained,
     required this.onOpenUnknownAccount,
+    required this.onOpenMissingCredit,
+    required this.onOpenStatementDue,
   });
 
   @override
@@ -466,6 +499,21 @@ class _Todos extends StatelessWidget {
           text: todo.title,
           urgent: true,
           onTap: () => onOpenPassbook(todo.accountId!, alertId: todo.alertId, reconcile: true),
+        ));
+      } else if (todo.isMissingCredit) {
+        final credit = todo.missingCredit!;
+        jobs.add((
+          icon: Icons.south_west,
+          text: '${todo.title}. ${todo.body}',
+          urgent: true,
+          onTap: () => onOpenMissingCredit(credit),
+        ));
+      } else if (todo.isStatementDue) {
+        jobs.add((
+          icon: Icons.receipt_long_outlined,
+          text: todo.title,
+          urgent: false,
+          onTap: () => onOpenStatementDue(todo),
         ));
       } else if (todo.isUnexplained && todo.transactionId != null) {
         jobs.add((

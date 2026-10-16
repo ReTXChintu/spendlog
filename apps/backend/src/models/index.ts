@@ -10,6 +10,8 @@ import {
   EMI_ROLES,
   LOAN_INSTALMENT_STATUSES,
   LOAN_STATUSES,
+  MISSING_CREDIT_ANSWERS,
+  MISSING_CREDIT_STATUSES,
   PERK_KINDS,
   RULE_MATCH_TYPES,
   STATEMENT_KINDS,
@@ -29,6 +31,8 @@ import {
   EmiRole,
   LoanInstalmentStatus,
   LoanStatus,
+  MissingCreditResolution,
+  MissingCreditStatus,
   PerkKind,
   RuleMatchType,
   StatementKind,
@@ -365,11 +369,47 @@ export interface AccountDoc {
   /// Everything on it is theirs to spend: still the user's money, so it
   /// counts in the month and against the monthly budget.
   pocketMoney?: PocketMoney | null;
+  /// This bank texts when money leaves and not when it arrives. Said by
+  /// the user, never guessed - though the overview suggests it when the
+  /// messages look that way. A gap on such an account is read as money in
+  /// first, and its statement is asked for once a month.
+  noCreditAlerts?: boolean;
+  /// Every starting balance a fresh start replaced, newest last, so the
+  /// last one can be put back. Kept short: an undo, not an audit trail.
+  openingHistory: OpeningHistoryEntry[];
+  /// The months (YYYY-MM) whose "upload the statement" to-do was waved
+  /// away for this account.
+  statementDueDismissed: string[];
   isActive: boolean;
   color?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
+
+/**
+ * A starting balance a fresh start replaced, and what that fresh start
+ * cleared away with it - so undoing it puts all of it back, not only the
+ * figure.
+ */
+export interface OpeningHistoryEntry {
+  /// Null when the account had no starting balance before.
+  minor: number | null;
+  at: Date | null;
+  replacedAt: Date;
+  dismissedMissingCreditIds: Types.ObjectId[];
+  seenAlertIds: Types.ObjectId[];
+}
+
+const openingHistorySchema = new Schema<OpeningHistoryEntry>(
+  {
+    minor: { type: Number, default: null },
+    at: { type: Date, default: null },
+    replacedAt: { type: Date, required: true },
+    dismissedMissingCreditIds: { type: [Schema.Types.ObjectId], default: [] },
+    seenAlertIds: { type: [Schema.Types.ObjectId], default: [] },
+  },
+  { _id: false }
+);
 
 const accountAliasSchema = new Schema<AccountAlias>(
   {
@@ -402,6 +442,9 @@ const accountSchema = new Schema<AccountDoc>(
     openingBalanceAt: { type: Date, default: null },
     isSavings: { type: Boolean, default: false },
     pocketMoney: { type: pocketMoneySchema, default: null },
+    noCreditAlerts: { type: Boolean, default: false },
+    openingHistory: { type: [openingHistorySchema], default: [] },
+    statementDueDismissed: { type: [String], default: [] },
     isActive: { type: Boolean, default: true },
     color: { type: String, default: null },
   },
@@ -2284,6 +2327,72 @@ balanceAlertSchema.index({ userId: 1, seenAt: 1, createdAt: -1 });
 balanceAlertSchema.index({ userId: 1, accountId: 1, statedAt: 1, driftMinor: 1 }, { unique: true });
 
 export const BalanceAlert = model<BalanceAlertDoc>("BalanceAlert", balanceAlertSchema);
+
+/**
+ * Money that came into an account without SpendLog seeing it: between two
+ * of the bank's own figures for the account, the balance rose by more than
+ * the rows in between explain.
+ *
+ * Not a transaction. Until the user says what it was it counts as nothing
+ * - not income, not in the savings bucket - and lives only as a to-do and
+ * as a provisional line in the passbook, so the running balance there
+ * agrees with the bank. Answering it writes the real row.
+ *
+ * One per gap between two particular stated figures (key), so finding the
+ * same gap again finds this rather than adding a second.
+ */
+export interface MissingCreditDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  accountId: Types.ObjectId;
+  amountMinor: number;
+  /// The window the money arrived in: after the first figure, up to and
+  /// including the moment of the second.
+  after: Date;
+  before: Date;
+  /// The two figures. A transaction whose message stated a balance, a
+  /// checkpoint, or - for the first - the starting balance (both null).
+  afterTransactionId?: Types.ObjectId | null;
+  afterCheckpointId?: Types.ObjectId | null;
+  beforeTransactionId?: Types.ObjectId | null;
+  beforeCheckpointId?: Types.ObjectId | null;
+  /// The two figures as one string, unique per account.
+  key: string;
+  status: MissingCreditStatus;
+  /// How it was answered, or gap_closed when rows added since explain it.
+  resolvedAs?: MissingCreditResolution | null;
+  resolvedTransactionId?: Types.ObjectId | null;
+  /// "user", or "fresh_start" when a fresh start made it moot.
+  dismissedReason?: string | null;
+  closedAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const missingCreditSchema = new Schema<MissingCreditDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    accountId: { type: Schema.Types.ObjectId, ref: "Account", required: true },
+    amountMinor: { type: Number, required: true, min: 1 },
+    after: { type: Date, required: true },
+    before: { type: Date, required: true },
+    afterTransactionId: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
+    afterCheckpointId: { type: Schema.Types.ObjectId, ref: "BalanceCheckpoint", default: null },
+    beforeTransactionId: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
+    beforeCheckpointId: { type: Schema.Types.ObjectId, ref: "BalanceCheckpoint", default: null },
+    key: { type: String, required: true },
+    status: { type: String, enum: MISSING_CREDIT_STATUSES, default: "open" },
+    resolvedAs: { type: String, enum: [...MISSING_CREDIT_ANSWERS, "gap_closed"], default: null },
+    resolvedTransactionId: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
+    dismissedReason: { type: String, default: null },
+    closedAt: { type: Date, default: null },
+  },
+  { timestamps: true, ...serialization }
+);
+missingCreditSchema.index({ accountId: 1, key: 1 }, { unique: true });
+missingCreditSchema.index({ userId: 1, status: 1, before: -1 });
+
+export const MissingCredit = model<MissingCreditDoc>("MissingCredit", missingCreditSchema);
 
 /**
  * When a daily job last ran, and whether a process is running it now.

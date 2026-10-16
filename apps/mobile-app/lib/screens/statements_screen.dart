@@ -14,7 +14,7 @@ import 'statement_detail_screen.dart';
 /// written, and nothing ever showed one — so "5 statements could not be
 /// read" was the whole of what anybody knew. This is that list.
 class StatementsScreen extends StatefulWidget {
-  const StatementsScreen({super.key, this.onlyAccountId, this.title});
+  const StatementsScreen({super.key, this.onlyAccountId, this.title, this.dueMonth});
 
   /// Which account's statements to show. Null shows every account's, which
   /// is how the pile with no account is reached.
@@ -22,6 +22,11 @@ class StatementsScreen extends StatefulWidget {
 
   /// What to call the screen when it is about one account.
   final String? title;
+
+  /// Opened from the "upload last month's statement" to-do for a bank that
+  /// never texts money in: the month wanted, YYYY-MM. The screen says so,
+  /// with the way to fetch it and the way to say there is none.
+  final String? dueMonth;
 
   @override
   State<StatementsScreen> createState() => _StatementsScreenState();
@@ -309,9 +314,72 @@ class _StatementsScreenState extends State<StatementsScreen> {
     });
   }
 
+  /// Reads the mailbox for the statement the to-do asked for.
+  Future<void> _fetchDue() async {
+    await _act('sync', () async {
+      final result = await ApiClient.instance.post('/statements/sync') as Map<String, dynamic>?;
+      final read = result?['read'] as int? ?? 0;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(read == 0 ? 'No new statement in the mailbox yet.' : 'Read $read new statement${read == 1 ? '' : 's'}.'),
+        ));
+      }
+    });
+  }
+
+  /// There is no statement for that month: stop asking for it.
+  Future<void> _skipDue() async {
+    final navigator = Navigator.of(context);
+    await _act('skip', () async {
+      await ApiClient.instance.post('/accounts/${widget.onlyAccountId}/statement-due/dismiss', {'month': widget.dueMonth});
+      navigator.pop(true);
+    });
+  }
+
+  Widget _dueBanner(String month) {
+    final c = context.c;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: c.warnBg, borderRadius: BorderRadius.circular(T.rMd)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "${readableMonth(month)}'s statement",
+            style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: c.warn),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            "This bank doesn't text you about money coming in. Its statement lists every credit, and SpendLog "
+            'adds the ones it never saw. It reads statements from your mailbox.',
+            style: TextStyle(fontSize: 12.3, height: 1.45, color: c.ink70),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              FilledButton.tonal(
+                onPressed: _busy != null ? null : _fetchDue,
+                child: Text(_busy == 'sync' ? 'Reading…' : 'Read the mailbox'),
+              ),
+              TextButton(
+                onPressed: _busy != null ? null : _skipDue,
+                child: const Text('No statement this month'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final due = widget.dueMonth;
 
     return Scaffold(
       backgroundColor: c.paper,
@@ -319,7 +387,14 @@ class _StatementsScreenState extends State<StatementsScreen> {
         title: Text(widget.title ?? 'Statements'),
         shape: Border(bottom: BorderSide(color: c.line)),
       ),
-      body: _loading
+      body: due == null || widget.onlyAccountId == null
+          ? _list()
+          : Column(children: [_dueBanner(due), Expanded(child: _list())]),
+    );
+  }
+
+  Widget _list() {
+    return _loading
           ? const Center(child: CircularProgressIndicator())
           : _shown.isEmpty
               ? const StateBlock(
@@ -340,8 +415,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
                       ],
                     ],
                   ),
-                ),
-    );
+                );
   }
 
   /// Statements that were read more than once, and the offer to start over.

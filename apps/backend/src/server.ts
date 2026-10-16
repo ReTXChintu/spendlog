@@ -9,6 +9,7 @@ import { runLendingBackfill } from "./modules/contacts/contacts.backfill";
 import { runSpendLimitBackfill } from "./modules/accounts/accounts.backfill";
 import { runNightlyDriftCheck } from "./modules/accounts/accounts.drift";
 import { runAccountUnknownBackfill, runStatedBalanceBackfill } from "./modules/accounts/accounts.statedBackfill";
+import { runMissingCreditBackfill } from "./modules/accounts/accounts.missingCredits";
 import { runCardBillAccountBackfill, runCardBillBackfill } from "./modules/cards/cards.billPayment.service";
 import { runDailyFundRefresh } from "./modules/funds/funds.cache";
 import { runTransferLegBackfill } from "./modules/transactions/transactions.transfer";
@@ -85,7 +86,7 @@ async function start() {
   // legs that are already on the right accounts. Then every transfer still
   // recorded as one row is given its other leg - after the card bills, so
   // a bill's two sides are paired as a bill and not taken for a transfer.
-  runCardBillAccountBackfill()
+  const legsDone = runCardBillAccountBackfill()
     .catch((err) => console.error("Card bill account backfill failed:", err))
     .then(() => runCardBillBackfill())
     .catch((err) => console.error("Card bill backfill failed:", err))
@@ -93,7 +94,14 @@ async function start() {
     .catch((err) => console.error("Transfer leg backfill failed:", err));
   // The bank's balance read off every message already stored, and the
   // payments that were guessed to be cash taken out of the cash balance.
-  runStatedBalanceBackfill().catch((err) => console.error("Stated balance backfill failed:", err));
+  const statedDone = runStatedBalanceBackfill().catch((err) => console.error("Stated balance backfill failed:", err));
+  // Then the last ninety days' money in that no message ever announced,
+  // once per user: after the balances are read off the stored messages,
+  // which is what it is measured from, and after transfers have their
+  // other legs, which explain some of what would otherwise look missing.
+  Promise.all([legsDone, statedDone])
+    .then(() => runMissingCreditBackfill())
+    .catch((err) => console.error("Missing credit backfill failed:", err));
   runAccountUnknownBackfill().catch((err) => console.error("Account unknown backfill failed:", err));
 
   setInterval(() => {

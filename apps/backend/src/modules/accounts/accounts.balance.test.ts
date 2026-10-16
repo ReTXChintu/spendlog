@@ -110,7 +110,10 @@ describe("an account's expected balance", () => {
         expectedMinor: 53_800_00,
         transactionCount: 4,
         since: undefined,
+        // Nothing has come in unexplained, so nothing is provisional.
+        provisionalMinor: 0,
         // No message has said a balance yet, so there is nothing to be off from.
+        lastStated: null,
         drift: null,
       }
     );
