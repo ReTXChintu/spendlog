@@ -2,6 +2,20 @@ import { Types } from "mongoose";
 import { Trip } from "../../models";
 
 /**
+ * The one place in the app where a query is scoped by something other than
+ * the signed-in user.
+ *
+ * Everything else ends in `userId: currentUserId(req)`, which is what keeps
+ * one person's ledger out of another's. A trip is shared on purpose, so its
+ * reads are authorised by membership instead — and that exception lives
+ * here, in one function, rather than being spelled out at each endpoint
+ * where it could be forgotten.
+ */
+export async function assertTripMember(tripId: string, userId: Types.ObjectId) {
+  return Trip.findOne({ _id: tripId, "members.userId": userId });
+}
+
+/**
  * Which trip, if any, a payment made at this moment belongs to.
  *
  * Matched on when the money was spent rather than when the message turned

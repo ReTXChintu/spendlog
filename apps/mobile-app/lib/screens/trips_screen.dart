@@ -5,7 +5,9 @@ import '../theme.dart';
 import '../utils/format.dart';
 import '../widgets/state_block.dart';
 import 'join_trip_screen.dart';
+import 'trip_add_payments_screen.dart';
 import 'trip_members_screen.dart';
+import 'trip_payments_screen.dart';
 
 /// Trips: a holiday totalled on its own.
 ///
@@ -61,6 +63,11 @@ class _TripsScreenState extends State<TripsScreen> {
       _summary = null;
       _settlement = null;
     });
+    await _loadDetail(trip);
+  }
+
+  /// The open trip's summary and settlement.
+  Future<void> _loadDetail(Trip trip) async {
     try {
       final results = await Future.wait([
         ApiClient.instance.get('/trips/${trip.id}/summary'),
@@ -111,6 +118,31 @@ class _TripsScreenState extends State<TripsScreen> {
         ),
       );
     });
+  }
+
+  /// The list's totals, and the open trip's figures, after payments were
+  /// put on a trip or taken off it somewhere else.
+  Future<void> _refresh(Trip trip) async {
+    await _load();
+    if (mounted && _openId == trip.id) await _loadDetail(trip);
+  }
+
+  Future<void> _addEarlier(Trip trip) async {
+    final added = await Navigator.of(context).push<int>(
+      MaterialPageRoute(builder: (_) => TripAddPaymentsScreen(trip: trip)),
+    );
+    if (added == null || added == 0 || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(addedToTripMessage(added, trip.name))),
+    );
+    await _refresh(trip);
+  }
+
+  Future<void> _openPayments(Trip trip) async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => TripPaymentsScreen(trip: trip)),
+    );
+    if (changed == true && mounted) await _refresh(trip);
   }
 
   Future<void> _joinTrip() async {
@@ -218,6 +250,8 @@ class _TripsScreenState extends State<TripsScreen> {
                   onTap: () => _open(trip),
                   onMembers: () => _openMembers(trip),
                   onRescan: () => _rescan(trip),
+                  onAddEarlier: () => _addEarlier(trip),
+                  onPayments: () => _openPayments(trip),
                   onDelete: () => _run(
                     () => ApiClient.instance.delete('/trips/${trip.id}'),
                     done: 'Trip deleted. Every payment kept.',
@@ -321,6 +355,12 @@ class _TripCard extends StatelessWidget {
   final VoidCallback onRescan;
   final VoidCallback onDelete;
 
+  /// Tickets and bookings paid before the trip started, which its dates
+  /// never take in. Offered on an ended trip too: the flights get booked
+  /// before, and remembered after.
+  final VoidCallback onAddEarlier;
+  final VoidCallback onPayments;
+
   const _TripCard({
     required this.trip,
     required this.isOpen,
@@ -331,6 +371,8 @@ class _TripCard extends StatelessWidget {
     required this.onMembers,
     required this.onRescan,
     required this.onDelete,
+    required this.onAddEarlier,
+    required this.onPayments,
   });
 
   @override
@@ -433,11 +475,15 @@ class _TripCard extends StatelessWidget {
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              _Figure(label: 'Total', value: formatMoneyShort(summary!.totalMinor)),
-                              _Figure(label: 'Days', value: '${summary!.dayCount}'),
-                              _Figure(
-                                label: 'Per day',
-                                value: formatMoneyShort(summary!.perDayMinor),
+                              Flexible(
+                                child: _Figure(label: 'Total', value: formatMoneyShort(summary!.totalMinor)),
+                              ),
+                              Flexible(child: _Figure(label: 'Days', value: '${summary!.dayCount}')),
+                              Flexible(
+                                child: _Figure(
+                                  label: 'Per day',
+                                  value: formatMoneyShort(summary!.perDayMinor),
+                                ),
                               ),
                             ],
                           ),
@@ -539,20 +585,56 @@ class _TripCard extends StatelessWidget {
                             ),
                           ),
                         ],
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 12),
                         Row(
                           children: [
-                            TextButton.icon(
-                              onPressed: busy ? null : onMembers,
-                              icon: const Icon(Icons.group_outlined, size: 16),
-                              label: const Text('People'),
+                            Expanded(
+                              flex: 3,
+                              child: OutlinedButton.icon(
+                                onPressed: busy ? null : onAddEarlier,
+                                icon: const Icon(Icons.playlist_add, size: 17),
+                                label: const Text(
+                                  'Add earlier payments',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
                             ),
-                            TextButton.icon(
-                              onPressed: busy ? null : onRescan,
-                              icon: const Icon(Icons.sync, size: 15),
-                              label: const Text('Re-scan'),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              flex: 2,
+                              child: OutlinedButton(
+                                onPressed: busy ? null : onPayments,
+                                child: const Text(
+                                  'Payments',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
                             ),
-                            const Spacer(),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            // Wraps rather than running under Delete on a
+                            // narrow phone with large text.
+                            Expanded(
+                              child: Wrap(
+                                children: [
+                                  TextButton.icon(
+                                    onPressed: busy ? null : onMembers,
+                                    icon: const Icon(Icons.group_outlined, size: 16),
+                                    label: const Text('People'),
+                                  ),
+                                  TextButton.icon(
+                                    onPressed: busy ? null : onRescan,
+                                    icon: const Icon(Icons.sync, size: 15),
+                                    label: const Text('Re-scan'),
+                                  ),
+                                ],
+                              ),
+                            ),
                             TextButton(
                               onPressed: busy ? null : onDelete,
                               style: TextButton.styleFrom(foregroundColor: c.debit),
@@ -587,7 +669,13 @@ class _Figure extends StatelessWidget {
       children: [
         Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: c.muted)),
         const SizedBox(height: 2),
-        Text(value, style: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w800, color: c.ink)),
+        // A lakh-sized trip on a narrow phone shrinks a little rather than
+        // losing digits.
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(value, style: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w800, color: c.ink)),
+        ),
       ],
     );
   }

@@ -11,6 +11,7 @@ import 'emi_sheet.dart';
 import 'person_picker_sheet.dart';
 import 'raw_message_sheet.dart';
 import 'refund_sheet.dart';
+import 'trip_picker_sheet.dart';
 
 /// Whether a merchant reads like a bank's raw payee rather than a name a
 /// person chose: a UPI handle ("9876@ybl") or a shouted reference
@@ -188,6 +189,11 @@ class _EditSheetState extends State<_EditSheet> {
   /// trip's dates goes on it; switched off, this one comes off for good -
   /// the trip's re-scan leaves anything edited by hand alone.
   late bool _onTrip;
+
+  /// A trip picked in this sheet for a payment on none - the tickets booked
+  /// before it started, which its dates will never take in. Goes on when
+  /// saved; switching it off again just forgets the pick.
+  Trip? _pickedTrip;
 
   /// Who else it was for or from - shared by split and settling up, so
   /// switching between the two keeps the people already picked.
@@ -967,6 +973,11 @@ class _EditSheetState extends State<_EditSheet> {
       // to everyone on it.
       if (widget.transaction?.tripId != null && !_onTrip) 'tripId': null,
       if (widget.transaction?.tripId != null && _onTrip)
+        'tripShareWith': _tripJustMine ? [widget.transaction!.userId] : null,
+      // Put on a trip by hand, whatever its date. Saved as an edit, so the
+      // trip's re-scans never take it back off.
+      if (_pickedTrip != null && _isDebit) 'tripId': _pickedTrip!.id,
+      if (_pickedTrip != null && _isDebit && widget.transaction != null)
         'tripShareWith': _tripJustMine ? [widget.transaction!.userId] : null,
     };
 
@@ -2116,11 +2127,44 @@ class _EditSheetState extends State<_EditSheet> {
 
   // ---- More ----------------------------------------------------------
 
+  Future<void> _pickTrip() async {
+    final trip = await showTripPickerSheet(context);
+    if (trip == null || !mounted) return;
+    setState(() {
+      _pickedTrip = trip;
+      _tripJustMine = false;
+    });
+  }
+
   /// The rare things, out of the way until asked for.
   Widget _moreSection() {
     final c = context.c;
     final t = widget.transaction;
+    final tripName = t?.tripName ?? _pickedTrip?.name;
     final items = <Widget>[
+      if (t?.tripId == null && _pickedTrip == null && _isDebit)
+        _MoreTile(
+          icon: Icons.luggage_outlined,
+          title: 'Add to a trip',
+          subtitle: 'Tickets or a booking paid before it started.',
+          onTap: _saving ? null : _pickTrip,
+        ),
+      if (_pickedTrip != null && _isDebit)
+        SwitchListTile(
+          value: true,
+          // Off forgets the pick, and "Add to a trip" is offered again.
+          onChanged: (_) => setState(() {
+            _pickedTrip = null;
+            _tripJustMine = false;
+          }),
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: Text('On ${_pickedTrip!.name}', style: TextStyle(fontSize: 13, color: c.ink)),
+          subtitle: Text(
+            'Goes onto the trip when you save, and stays on whatever its date.',
+            style: TextStyle(fontSize: 11.5, color: c.muted),
+          ),
+        ),
       if (t?.tripName != null)
         SwitchListTile(
           value: _onTrip,
@@ -2135,13 +2179,13 @@ class _EditSheetState extends State<_EditSheet> {
             style: TextStyle(fontSize: 11.5, color: c.muted),
           ),
         ),
-      if (t?.tripName != null && _isDebit && _onTrip)
+      if (t != null && _isDebit && ((t.tripName != null && _onTrip) || _pickedTrip != null))
         SwitchListTile(
           value: _tripJustMine,
           onChanged: (on) => setState(() => _tripJustMine = on),
           contentPadding: EdgeInsets.zero,
           dense: true,
-          title: Text('Just mine on ${t!.tripName}', style: TextStyle(fontSize: 13, color: c.ink)),
+          title: Text('Just mine on $tripName', style: TextStyle(fontSize: 13, color: c.ink)),
           subtitle: Text('Leave it out of who owes whom on the trip.',
               style: TextStyle(fontSize: 11.5, color: c.muted)),
         ),

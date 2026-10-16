@@ -14,7 +14,7 @@ import {
   setLoanSplits,
   splitsForNewAmount,
 } from "../loans/loans.splits";
-import { tripForOccurredAt } from "../trips/trips.service";
+import { assertTripMember, tripForOccurredAt } from "../trips/trips.service";
 import {
   ensureTransferLegs,
   handOverLegs,
@@ -528,6 +528,15 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
     parsed.data.accountId !== undefined ? parsed.data.accountId : existing.accountId?.toString()
   );
   if (transferProblem) return res.status(400).json({ error: transferProblem });
+  // Put on a trip by hand, which may be one whose dates it falls outside -
+  // the train booked a month before. Only a trip the user is on; taking it
+  // off one needs no check, and nor does a form re-sending the trip it is
+  // already on.
+  const tripChanged =
+    parsed.data.tripId !== undefined && (parsed.data.tripId ?? null) !== (existing.tripId?.toString() ?? null);
+  if (tripChanged && parsed.data.tripId && !(await assertTripMember(parsed.data.tripId, userId))) {
+    return res.status(400).json({ error: "Unknown trip" });
+  }
   // Marking a payment as the bill of the card it is on, or moving a bill
   // payment onto its card: refused, since a card cannot pay its own bill.
   // Only when this edit says so - a form sends every field, and a row left
@@ -557,6 +566,9 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   // have touched it: kept in step with the transfer no longer, and never
   // deleted along with it.
   if (existing.autoLeg) transferFields.autoLeg = false;
+  // "Just me" was said about the trip it is leaving, and may name people
+  // who are not on the next one.
+  if (tripChanged && parsed.data.tripShareWith === undefined) transferFields.tripShareWith = null;
   // An unexplained difference is explained once it is filed somewhere or
   // called something.
   if (

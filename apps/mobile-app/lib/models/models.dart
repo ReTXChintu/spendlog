@@ -1056,6 +1056,40 @@ class TripTransfer {
       );
 }
 
+/// A payment of the user's own, on no trip yet, that could be added to
+/// one by hand - the tickets booked and the hotel paid before it started.
+class TripCandidate {
+  final String id;
+  final DateTime occurredAt;
+  final String? merchant;
+  final int amountMinor;
+  final String? accountLabel;
+  final String? categoryName;
+
+  /// Reads like a ticket, a stay or a ride. Only a hint, to put those first.
+  final bool likelyTravel;
+
+  TripCandidate({
+    required this.id,
+    required this.occurredAt,
+    this.merchant,
+    required this.amountMinor,
+    this.accountLabel,
+    this.categoryName,
+    this.likelyTravel = false,
+  });
+
+  factory TripCandidate.fromJson(Map<String, dynamic> json) => TripCandidate(
+        id: json['id'] as String,
+        occurredAt: DateTime.parse(json['occurredAt'] as String),
+        merchant: json['merchant'] as String?,
+        amountMinor: json['amountMinor'] as int? ?? 0,
+        accountLabel: json['accountLabel'] as String?,
+        categoryName: json['categoryName'] as String?,
+        likelyTravel: json['likelyTravel'] == true,
+      );
+}
+
 class EmiPlan {
   final String id;
   final String? label;
