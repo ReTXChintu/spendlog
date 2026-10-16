@@ -587,7 +587,15 @@ export interface TransactionDoc {
   /// loan has no purchase to convert, so there is no PARENT to keep out of
   /// the totals: every transaction linked here counts in full, because a
   /// repayment is the actual spending.
+  ///
+  /// Kept in step with loanSplits, as the first loan in it, for everything
+  /// that only asks "is this a loan repayment at all".
   loanId?: Types.ObjectId | null;
+  /// Which loans this repays, and how much of it went to each. One payment
+  /// often settles several loans at once; a single-loan repayment is one
+  /// entry for the whole amount. Adds up to no more than the payment -
+  /// anything left over is a part nobody has said the purpose of yet.
+  loanSplits: LoanSplit[];
   /// On a credit that gives money back: how much of it belongs to which
   /// earlier purchases. A single credit often settles several cancelled
   /// orders, and only the allocated part stops counting as income.
@@ -714,6 +722,20 @@ export interface RefundAllocation {
   amountMinor: number;
 }
 
+/** One loan's part of a repayment. See TransactionDoc.loanSplits. */
+export interface LoanSplit {
+  loanId: Types.ObjectId;
+  amountMinor: number;
+}
+
+const loanSplitSchema = new Schema<LoanSplit>(
+  {
+    loanId: { type: Schema.Types.ObjectId, ref: "Loan", required: true },
+    amountMinor: { type: Number, required: true, min: 1 },
+  },
+  { _id: false }
+);
+
 const refundAllocationSchema = new Schema<RefundAllocation>(
   {
     transactionId: { type: Schema.Types.ObjectId, ref: "Transaction", required: true },
@@ -788,6 +810,7 @@ const transactionSchema = new Schema<TransactionDoc>(
     emiPlanId: { type: Schema.Types.ObjectId, ref: "EmiPlan", default: null },
     emiRole: { type: String, enum: EMI_ROLES, default: null },
     loanId: { type: Schema.Types.ObjectId, ref: "Loan", default: null },
+    loanSplits: { type: [loanSplitSchema], default: [] },
     isTransfer: { type: Boolean, default: false },
     transferAccountId: { type: Schema.Types.ObjectId, ref: "Account", default: null },
     transferPairId: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
@@ -871,6 +894,16 @@ transactionSchema.pre("findOneAndUpdate", async function () {
   if (patch) this.setUpdate({ ...update, $set: { ...set, ...patch } });
 });
 
+// A row written with only a loanId - by code that predates loanSplits, or
+// before the backfill reached it - is one loan's repayment of the whole
+// amount. Either way loanId ends up naming the first loan in the list.
+transactionSchema.pre("save", function () {
+  if (this.loanId && this.loanSplits.length === 0) {
+    this.loanSplits.push({ loanId: this.loanId, amountMinor: this.amountMinor });
+  }
+  this.loanId = this.loanSplits[0]?.loanId ?? null;
+});
+
 // Keeping the counted amount correct is the whole point of storing it, so
 // it is derived on every write rather than at any call site. save() covers
 // create(); findOneAndUpdate needs its own hook because it never loads a
@@ -920,9 +953,20 @@ transactionSchema.index({ userId: 1, "people.contactId": 1 });
 // A trip's totals read every member's transactions, so this is not scoped
 // by user the way the other indexes are.
 transactionSchema.index({ tripId: 1, occurredAt: -1 });
+// Every payment towards a loan, for working out where it stands.
+transactionSchema.index({ "loanSplits.loanId": 1 });
 
 // Exposed as `category`/`account` (alongside the raw `categoryId`/`accountId`)
 // so populated responses keep the shape the clients already expect.
+// What of a loan repayment is not put down to any loan yet: zero on
+// anything that is not one. Worked out rather than stored, so it can never
+// fall out of step with an amount corrected afterwards.
+transactionSchema.virtual("loanUnassignedMinor").get(function () {
+  const splits = this.loanSplits ?? [];
+  if (splits.length === 0) return 0;
+  return Math.max(0, this.amountMinor - splits.reduce((sum, split) => sum + split.amountMinor, 0));
+});
+
 transactionSchema.virtual("category", {
   ref: "Category",
   localField: "categoryId",
@@ -1138,8 +1182,16 @@ export interface LoanInstalmentDoc {
   dueDate: Date;
   amountMinor: number;
   status: LoanInstalmentStatus;
-  /// The real debit, once one has arrived and been matched to it - or been
-  /// pointed at it by hand from that payment's own edit screen.
+  /// How much of amountMinor payments cover. Worked out from the loan's
+  /// payments, oldest instalment first (see loans.allocation.ts), never
+  /// set by hand. The full amount on one ticked off by hand.
+  paidMinor: number;
+  /// Ticked off as paid by a person rather than covered by a payment on
+  /// the ledger - paid before SpendLog was keeping track, or with money it
+  /// never saw. Payments flow past it.
+  byHand: boolean;
+  /// The payment that finished covering it, or the last to reach into it
+  /// while it is only partly covered.
   transactionId?: Types.ObjectId | null;
   paidAt?: Date | null;
   createdAt: Date;
@@ -1154,6 +1206,8 @@ const loanInstalmentSchema = new Schema<LoanInstalmentDoc>(
     dueDate: { type: Date, required: true },
     amountMinor: { type: Number, required: true, min: 0 },
     status: { type: String, enum: LOAN_INSTALMENT_STATUSES, default: "DUE" },
+    paidMinor: { type: Number, default: 0, min: 0 },
+    byHand: { type: Boolean, default: false },
     transactionId: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
     paidAt: { type: Date, default: null },
   },

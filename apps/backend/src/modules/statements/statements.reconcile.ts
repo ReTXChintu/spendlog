@@ -5,7 +5,7 @@ import { StatementLineResolution } from "../../types";
 import { categorizeTransaction } from "../../parsing/categorizer";
 import { tripForOccurredAt } from "../trips/trips.service";
 import { countsAsStatementSpend, isLedgerWorthy, looksLikeCardBill } from "./statements.classify";
-import { markCardBillPayment } from "../cards/cards.billPayment.service";
+import { markCardBillPayment, paysOwnCard } from "../cards/cards.billPayment.service";
 
 /**
  * Matching a statement against the ledger, and adding what is missing.
@@ -334,10 +334,12 @@ async function addFromLine(
   // the narration names a card of the user's, the payment is linked to it
   // and counts as nothing. "CC PAYMENT ICICI 2009" against a card ending
   // 2009 is not a guess.
-  const paidCard =
+  const named =
     statement.kind === "BANK" && line.type === "DEBIT" && looksLikeCardBill(line.description)
       ? await findCardNamedIn(statement.userId, line.description)
       : null;
+  // Never the card the statement is for: a card does not pay its own bill.
+  const paidCard = named && !(await paysOwnCard(statement.userId, statement.accountId, named)) ? named : null;
 
   const created = await Transaction.create({
     userId: statement.userId,

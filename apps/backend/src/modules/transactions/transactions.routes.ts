@@ -3,11 +3,17 @@ import { FilterQuery, Types } from "mongoose";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
-import { Account, Loan, LoanInstalment, Transaction, TransactionDoc, TransactionSourceEntry } from "../../models";
+import { Account, Transaction, TransactionDoc, TransactionSourceEntry } from "../../models";
 import { ingestRawMessage } from "../../parsing/ingest";
 import { checkPeople, shareablePart } from "../contacts/contacts.people";
-import { attachToLoan } from "../loans/loans.matching";
-import { reopenLoanIfNeeded } from "../loans/loans.routes";
+import { splitsOf } from "../loans/loans.allocation";
+import {
+  LoanSplitError,
+  checkLoanSplits,
+  reallocateLoan,
+  setLoanSplits,
+  splitsForNewAmount,
+} from "../loans/loans.splits";
 import { tripForOccurredAt } from "../trips/trips.service";
 import {
   ensureTransferLegs,
@@ -17,6 +23,8 @@ import {
   syncTransferLegs,
 } from "./transactions.transfer";
 import { ensureCardBillLeg, syncCardBillLeg } from "../cards/cards.billLeg";
+import { cardPaymentProblem } from "../cards/cards.billPayment.service";
+import { mergeTransactions } from "./transactions.merge";
 import { IST_OFFSET, istDayEnd, istDayKey, istDayStart } from "../../time";
 import { TRANSACTION_TYPES } from "../../types";
 
@@ -232,6 +240,12 @@ const personShareBody = z.object({
 // Mirrors the edit form field for field: the same form adds a transaction
 // and corrects one, so it has to accept the same shape — including the
 // nulls it sends for fields the user left blank.
+// One loan's part of a repayment.
+const loanSplitBody = z.object({
+  loanId: z.string().regex(OBJECT_ID),
+  amountMinor: z.number().int().positive(),
+});
+
 const createTransactionSchema = z.object({
   amountMinor: z.number().int().positive(),
   currency: z.string().min(1).max(8).default("INR"),
@@ -265,6 +279,7 @@ const createTransactionSchema = z.object({
   cardPaymentFor: z.string().regex(OBJECT_ID).nullable().optional(),
   commitmentId: z.string().regex(OBJECT_ID).nullable().optional(),
   loanId: z.string().regex(OBJECT_ID).nullable().optional(),
+  loanSplits: z.array(loanSplitBody).max(20).optional(),
 });
 
 // POST /transactions — manual entry (cash spends, or anything the auto
@@ -298,6 +313,24 @@ transactionsRouter.post("/", async (req, res) => {
     parsed.data.accountId
   );
   if (transferProblem) return res.status(400).json({ error: transferProblem });
+  // A card's bill, paid from that same card: a purchase, never a payment.
+  const billProblem = await cardPaymentProblem(currentUserId(req), parsed.data);
+  if (billProblem) return res.status(400).json({ error: billProblem });
+
+  // Which loans it repays, checked before anything is written. A bare
+  // loanId is the older way of saying one loan, the whole amount.
+  let loanSplits: Awaited<ReturnType<typeof checkLoanSplits>> = [];
+  if (parsed.data.type === "DEBIT") {
+    const asked =
+      parsed.data.loanSplits ??
+      (parsed.data.loanId ? [{ loanId: parsed.data.loanId, amountMinor: parsed.data.amountMinor }] : []);
+    try {
+      loanSplits = await checkLoanSplits(currentUserId(req), parsed.data.amountMinor, asked);
+    } catch (error) {
+      if (error instanceof LoanSplitError) return res.status(400).json({ error: error.message });
+      throw error;
+    }
+  }
 
   const created = await Transaction.create({
     userId: currentUserId(req),
@@ -323,15 +356,9 @@ transactionsRouter.post("/", async (req, res) => {
     source: "MANUAL",
   });
 
-  // A loan claims an instalment as it is linked, so it goes through the
+  // A loan's instalments move as it is linked, so it goes through the
   // same step an edit uses rather than being written as a plain field.
-  if (parsed.data.type === "DEBIT" && parsed.data.loanId) {
-    const error = await applyLoanLink(created._id, currentUserId(req), parsed.data.loanId);
-    if (error) {
-      await created.deleteOne();
-      return res.status(400).json({ error });
-    }
-  }
+  if (loanSplits.length > 0) await setLoanSplits(created, loanSplits);
 
   // The other account's side, found or written in, so a transfer typed in
   // by hand shows on both accounts - and a card bill on the card. Said in
@@ -366,9 +393,14 @@ const updateTransactionSchema = z.object({
   // The fixed monthly cost this went towards. Paying early is the point
   // of marking the payment rather than ticking a box on a due date.
   commitmentId: z.string().nullable().optional(),
-  // Which loan this repays. null clears it and gives back whichever
-  // instalment it was claiming.
+  // Which loan this repays, all of it. null clears it and gives back
+  // whatever it was covering. The older way of saying one loan; loanSplits
+  // wins when both are sent.
   loanId: z.string().regex(OBJECT_ID).nullable().optional(),
+  // Which loans this repays, and how much went to each. An empty list
+  // takes it off every loan. Need not add up to the whole payment - what
+  // is left over is saved as not yet put down to any loan.
+  loanSplits: z.array(loanSplitBody).max(20).optional(),
   // Zero is meaningful: someone else's bill paid from the user's card, all
   // of which is owed back. null clears the split entirely.
   split: z
@@ -416,45 +448,36 @@ async function checkTransferAccount(
 }
 
 /**
- * Moves which loan (if any) a payment is claiming, undoing the old claim
- * before making the new one.
+ * The loans an edit leaves a payment repaying, checked, or null when the
+ * edit does not touch them.
  *
- * A plain $set would leave an instalment marked PAID by a transaction that
- * no longer says it paid it - picking a different loan, or clearing this
- * one, has to hand that instalment back to being due first. Returns an
- * error message on a bad id, or null once it is done.
+ * loanSplits says it outright. A bare loanId is the older way, and means
+ * the whole payment to that loan - except that naming the loan it already
+ * leads with changes nothing, so a client that only knows loanId cannot
+ * flatten a combined payment just by saving it. An amount changed on its
+ * own carries a single-loan repayment along with it.
  */
-async function applyLoanLink(
-  transactionId: Types.ObjectId,
+async function nextLoanSplits(
+  existing: TransactionDoc,
   userId: Types.ObjectId,
-  loanId: string | null
-): Promise<string | null> {
-  const transaction = await Transaction.findOne({ _id: transactionId, userId });
-  if (!transaction) return null; // Reported as 404 by the update just after this.
+  body: { loanId?: string | null; loanSplits?: { loanId: string; amountMinor: number }[]; amountMinor?: number; type?: string }
+) {
+  const amountMinor = body.amountMinor ?? existing.amountMinor;
+  const current = splitsOf(existing).map((split) => split.loanId);
+  // Money in repays nothing.
+  if ((body.type ?? existing.type) !== "DEBIT") return current.length > 0 ? [] : null;
 
-  if (transaction.loanId) {
-    const claimed = await LoanInstalment.findOne({ transactionId: transaction._id });
-    if (claimed) {
-      claimed.status = "DUE";
-      claimed.transactionId = null;
-      claimed.paidAt = null;
-      await claimed.save();
-      // A loan that closed by finishing its schedule is not finished any
-      // more, now that one of its instalments is due again.
-      await reopenLoanIfNeeded(claimed.loanId);
-    }
-    transaction.loanId = null;
+  if (body.loanSplits !== undefined) {
+    // The app sends an empty list with every edit of a payment that is
+    // not a repayment; on one that never was, there is nothing to do.
+    if (body.loanSplits.length === 0 && current.length === 0) return null;
+    return checkLoanSplits(userId, amountMinor, body.loanSplits, current);
   }
-
-  if (loanId) {
-    const loan = await Loan.findOne({ _id: loanId, userId });
-    if (!loan) return "Unknown loan";
-    await attachToLoan(transaction, loan._id);
-  } else {
-    await transaction.save();
+  if (body.loanId === null) return current.length > 0 ? [] : null;
+  if (body.loanId !== undefined && body.loanId !== current[0]) {
+    return checkLoanSplits(userId, amountMinor, [{ loanId: body.loanId, amountMinor }], current);
   }
-
-  return null;
+  return splitsForNewAmount(existing, amountMinor);
 }
 
 transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
@@ -505,6 +528,25 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
     parsed.data.accountId !== undefined ? parsed.data.accountId : existing.accountId?.toString()
   );
   if (transferProblem) return res.status(400).json({ error: transferProblem });
+  // Marking a payment as the bill of the card it is on, or moving a bill
+  // payment onto its card: refused, since a card cannot pay its own bill.
+  // Only when this edit says so - a form sends every field, and a row left
+  // that way by old data is mended by the backfill, not held against an
+  // unrelated edit.
+  const differs = (sent: string | null | undefined, stored: unknown) =>
+    sent !== undefined && (sent ?? null) !== (stored ? String(stored) : null);
+  if (
+    differs(parsed.data.cardPaymentFor, existing.cardPaymentFor) ||
+    differs(parsed.data.accountId, existing.accountId) ||
+    differs(parsed.data.type, existing.type)
+  ) {
+    const billProblem = await cardPaymentProblem(userId, {
+      type: parsed.data.type ?? existing.type,
+      accountId: parsed.data.accountId !== undefined ? parsed.data.accountId : existing.accountId,
+      cardPaymentFor: parsed.data.cardPaymentFor !== undefined ? parsed.data.cardPaymentFor : existing.cardPaymentFor,
+    });
+    if (billProblem) return res.status(400).json({ error: billProblem });
+  }
   // No longer a transfer: there is no other account to speak of.
   const transferFields: Record<string, unknown> = willBeTransfer ? {} : { transferAccountId: null };
   // Only money in can be set aside; on a payment it would zero real spending.
@@ -524,16 +566,19 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
     transferFields.needsExplanation = false;
   }
 
-  // Which loan a payment repays is not a plain field the way cardPaymentFor
-  // is: picking one claims an instalment on it, and picking a different
-  // one - or clearing it - has to give back whichever instalment this
-  // transaction was claiming before. Handled as its own step, rather than
-  // folded into the $set below, because of that side effect.
-  if (parsed.data.loanId !== undefined) {
-    const error = await applyLoanLink(new Types.ObjectId(req.params.id), userId, parsed.data.loanId);
-    if (error) return res.status(400).json({ error });
+  // Which loans a payment repays is not a plain field the way cardPaymentFor
+  // is: every loan it touches, before and after, has its instalments
+  // worked out again. Handled as its own step, rather than folded into the
+  // $set below, because of that side effect.
+  let loanSplits: Awaited<ReturnType<typeof nextLoanSplits>>;
+  try {
+    loanSplits = await nextLoanSplits(existing, userId, parsed.data);
+  } catch (error) {
+    if (error instanceof LoanSplitError) return res.status(400).json({ error: error.message });
+    throw error;
   }
-  const { loanId: _handledAbove, people: _checkedAbove, ...fields } = parsed.data;
+  if (loanSplits) await setLoanSplits(existing, loanSplits);
+  const { loanId: _handledAbove, loanSplits: _alsoAbove, people: _checkedAbove, ...fields } = parsed.data;
 
   // Whether this edit changes what kind of transaction it is, as opposed
   // to filing it. Compared against the row rather than read off the body,
@@ -581,6 +626,9 @@ transactionsRouter.delete("/:id", validObjectIdParam("id"), async (req, res) => 
   // The other leg of a transfer: gone with it if SpendLog wrote it in,
   // otherwise unpaired. See releaseLegs.
   await releaseLegs(deleted);
+
+  // A repayment gone is money no longer paid towards its loans.
+  for (const split of splitsOf(deleted)) await reallocateLoan(split.loanId);
 
   // Deleting a refund puts the purchases it covered back to costing what
   // they did; deleting a purchase releases the refunds pointing at it
@@ -814,12 +862,6 @@ const mergeSchema = z.object({
   sourceIds: z.array(z.string().regex(OBJECT_ID)).min(1).max(10),
 });
 
-/** Whether two source entries describe the same message. */
-function isSameMessage(a: TransactionSourceEntry, b: TransactionSourceEntry): boolean {
-  if (a.sourceRef && b.sourceRef) return a.sourceRef === b.sourceRef;
-  return a.source === b.source && new Date(a.receivedAt).getTime() === new Date(b.receivedAt).getTime();
-}
-
 // POST /transactions/:id/merge — for the same payment recorded twice when
 // automatic dedup didn't spot it: the bank's email quoted a different
 // amount because it included a fee, or arrived outside the time window.
@@ -839,40 +881,12 @@ transactionsRouter.post("/:id/merge", validObjectIdParam("id"), async (req, res)
     return res.status(404).json({ error: "Not found" });
   }
 
+  await mergeTransactions(target, sources);
+  // A repayment merged away no longer pays anything; one restored by an
+  // unmerge pays again (see below).
   for (const source of sources) {
-    for (const entry of source.sources) {
-      if (!target.sources.some((existing) => isSameMessage(existing, entry))) {
-        target.sources.push(entry);
-      }
-    }
-
-    // Gaps only. Whatever the surviving row already says is the answer,
-    // and it can be corrected by hand afterwards either way.
-    if (!target.merchant && source.merchant) target.merchant = source.merchant;
-    if (!target.accountId && source.accountId) {
-      target.accountId = source.accountId;
-      target.accountUnknown = false;
-    }
-    if (!target.categoryId && source.categoryId) target.categoryId = source.categoryId;
-    if (!target.note && source.note) target.note = source.note;
-    // The bank's figures: whichever message had them.
-    if (target.statedBalanceMinor == null && source.statedBalanceMinor != null) {
-      target.statedBalanceMinor = source.statedBalanceMinor;
-    }
-    if (target.statedAvailableLimitMinor == null && source.statedAvailableLimitMinor != null) {
-      target.statedAvailableLimitMinor = source.statedAvailableLimitMinor;
-    }
-
-    // A leg of a transfer is still one once merged: the pairing moves to
-    // the row that survives.
-    await handOverLegs(source, target);
-
-    // Verbatim, so unmerging restores the row rather than approximating it.
-    target.mergedFrom.push(source.toObject() as unknown as Record<string, unknown>);
-    await source.deleteOne();
+    for (const split of splitsOf(source)) await reallocateLoan(split.loanId);
   }
-
-  await target.save();
   await target.populate(["category", "account"]);
 
   res.json(target);
@@ -931,6 +945,9 @@ transactionsRouter.post("/:id/unmerge", validObjectIdParam("id"), async (req, re
   target.sources = primary ? [primary] : [];
   target.mergedFrom = [];
   await target.save();
+  for (const row of restored as TransactionDoc[]) {
+    for (const split of splitsOf(row)) await reallocateLoan(split.loanId);
+  }
   await target.populate(["category", "account"]);
 
   res.json({ transaction: target, restoredCount: restored.length });

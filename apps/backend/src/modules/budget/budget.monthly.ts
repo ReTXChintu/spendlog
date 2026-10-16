@@ -291,9 +291,11 @@ export interface MonthlyBudgetStatus {
 
 /** Spending in a month by category, and how much of it was fixed costs. */
 async function spendingIn(userId: Types.ObjectId, month: Pick<UserMonth, "start" | "end">) {
-  // One pass. A payment towards a commitment, a loan instalment or a card
-  // EMI's instalment is a fixed cost; anything else is the day to day.
-  const rows = await Transaction.aggregate<{ _id: { categoryId: Types.ObjectId | null; fixed: boolean }; total: number }>([
+  // One pass. A payment towards a commitment or a card EMI's instalment is
+  // a fixed cost; a loan repayment is one for the part put down to its
+  // loans, and anything it was not split to yet is the day to day, the
+  // same as everything else.
+  const rows = await Transaction.aggregate<{ _id: Types.ObjectId | null; total: number; fixed: number }>([
     {
       $match: {
         userId,
@@ -303,28 +305,43 @@ async function spendingIn(userId: Types.ObjectId, month: Pick<UserMonth, "start"
       },
     },
     {
-      $group: {
-        _id: {
-          categoryId: { $ifNull: ["$categoryId", null] },
-          fixed: {
-            $or: [
-              { $gt: ["$commitmentId", null] },
-              { $gt: ["$loanId", null] },
-              { $eq: ["$emiRole", "INSTALMENT"] },
-            ],
-          },
+      $addFields: {
+        fixedPart: {
+          $cond: [
+            { $or: [{ $gt: ["$commitmentId", null] }, { $eq: ["$emiRole", "INSTALMENT"] }] },
+            "$countedAmountMinor",
+            {
+              $min: [
+                "$countedAmountMinor",
+                {
+                  $cond: [
+                    { $gt: [{ $size: { $ifNull: ["$loanSplits", []] } }, 0] },
+                    { $sum: "$loanSplits.amountMinor" },
+                    // A row from before loanSplits: its one loan, in full.
+                    { $cond: [{ $gt: ["$loanId", null] }, "$countedAmountMinor", 0] },
+                  ],
+                },
+              ],
+            },
+          ],
         },
+      },
+    },
+    {
+      $group: {
+        _id: { $ifNull: ["$categoryId", null] },
         total: { $sum: "$countedAmountMinor" },
+        fixed: { $sum: "$fixedPart" },
       },
     },
   ]);
 
   const byCategory = new Map<string, { spent: number; fixed: number }>();
   for (const row of rows) {
-    const key = row._id.categoryId?.toString() ?? "none";
+    const key = row._id?.toString() ?? "none";
     const entry = byCategory.get(key) ?? { spent: 0, fixed: 0 };
     entry.spent += row.total;
-    if (row._id.fixed) entry.fixed += row.total;
+    entry.fixed += row.fixed;
     byCategory.set(key, entry);
   }
   return byCategory;
@@ -350,7 +367,11 @@ async function fixedStillDue(userId: Types.ObjectId, month: UserMonth): Promise<
       },
       { $group: { _id: "$commitmentId", total: { $sum: "$countedAmountMinor" } } },
     ]),
-    LoanInstalment.find({ userId, status: "DUE", dueDate: { $gte: month.start, $lt: month.end } }).select("amountMinor"),
+    LoanInstalment.find({
+      userId,
+      status: { $in: ["DUE", "PARTIAL"] },
+      dueDate: { $gte: month.start, $lt: month.end },
+    }).select("amountMinor paidMinor"),
     EmiInstalment.find({ userId, status: "DUE", dueDate: { $gte: month.start, $lt: month.end } }).select("amountMinor"),
   ]);
   const paid = new Map(paidRows.map((row) => [row._id.toString(), row.total]));
@@ -370,7 +391,10 @@ async function fixedStillDue(userId: Types.ObjectId, month: UserMonth): Promise<
     const shortfall = commitmentAmountFor(commitment, month.from) - (paid.get(commitment._id.toString()) ?? 0);
     if (shortfall > 0) add(commitment.categoryId?.toString() ?? "none", shortfall);
   }
-  for (const instalment of [...loanDue, ...emiDue]) add("none", instalment.amountMinor);
+  // A loan instalment partly paid already is only still to go out for
+  // what it is short by.
+  for (const instalment of loanDue) add("none", instalment.amountMinor - (instalment.paidMinor ?? 0));
+  for (const instalment of emiDue) add("none", instalment.amountMinor);
   return due;
 }
 

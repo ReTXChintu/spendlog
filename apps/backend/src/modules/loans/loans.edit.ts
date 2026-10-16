@@ -1,6 +1,8 @@
 import { Types } from "mongoose";
 import { Loan, LoanInstalment } from "../../models";
 import { addMonths } from "../emi/emi.schedule";
+import { isByHand } from "./loans.allocation";
+import { reallocateLoan } from "./loans.splits";
 
 /** A change the loan cannot take, worded for the person who asked for it. */
 export class LoanEditError extends Error {}
@@ -19,7 +21,10 @@ export async function rescheduleLoan(
 ): Promise<void> {
   const existing = await LoanInstalment.find({ loanId }).sort({ seq: 1 });
 
-  const paidBeyond = existing.filter((row) => row.seq > schedule.months && row.status === "PAID");
+  // Only a tick by hand is lost by a shorter term. A payment that covered
+  // an instalment past the new end is still on the ledger, and simply
+  // counts as extra on the loan once the schedule stops short of it.
+  const paidBeyond = existing.filter((row) => row.seq > schedule.months && isByHand(row));
   if (paidBeyond.length > 0) {
     throw new LoanEditError(
       `${paidBeyond.length} ${paidBeyond.length === 1 ? "instalment" : "instalments"} past month ` +
@@ -53,6 +58,8 @@ export async function rescheduleLoan(
   }
 
   await LoanInstalment.deleteMany({ loanId, seq: { $gt: schedule.months } });
+  // The same payments, poured into the new schedule.
+  await reallocateLoan(loanId);
 }
 
 /**
@@ -62,7 +69,8 @@ export async function rescheduleLoan(
  * twelve paid long before SpendLog ever saw a message about it. Marking
  * goes oldest first; unmarking goes newest first, and only touches ones
  * that were ticked by hand - one matched to a real payment is undone from
- * that payment, not by lowering a number.
+ * that payment, not by lowering a number. The loan's payments are poured
+ * in again afterwards, so they move past whatever was just ticked.
  */
 export async function setPaidCount(loanId: Types.ObjectId, target: number): Promise<void> {
   const rows = await LoanInstalment.find({ loanId }).sort({ seq: 1 });
@@ -77,6 +85,8 @@ export async function setPaidCount(loanId: Types.ObjectId, target: number): Prom
     const toMark = rows.filter((row) => row.status !== "PAID").slice(0, target - paid.length);
     for (const row of toMark) {
       row.status = "PAID";
+      row.byHand = true;
+      row.paidMinor = row.amountMinor;
       // When it would have been paid, rather than today: the point is
       // recording something that already happened.
       row.paidAt = row.dueDate < now ? row.dueDate : now;
@@ -84,7 +94,7 @@ export async function setPaidCount(loanId: Types.ObjectId, target: number): Prom
       await row.save();
     }
   } else if (target < paid.length) {
-    const manual = paid.filter((row) => !row.transactionId).reverse();
+    const manual = paid.filter((row) => isByHand(row)).reverse();
     const needed = paid.length - target;
     if (manual.length < needed) {
       const linked = paid.length - manual.length;
@@ -95,10 +105,15 @@ export async function setPaidCount(loanId: Types.ObjectId, target: number): Prom
     }
     for (const row of manual.slice(0, needed)) {
       row.status = "DUE";
+      row.byHand = false;
+      row.paidMinor = 0;
+      row.transactionId = null;
       row.paidAt = null;
       await row.save();
     }
   }
+
+  await reallocateLoan(loanId);
 }
 
 /**
@@ -109,6 +124,6 @@ export async function setPaidCount(loanId: Types.ObjectId, target: number): Prom
  * closed it no longer describes it.
  */
 export async function syncLoanStatus(loanId: Types.ObjectId): Promise<void> {
-  const stillDue = await LoanInstalment.countDocuments({ loanId, status: "DUE" });
+  const stillDue = await LoanInstalment.countDocuments({ loanId, status: { $in: ["DUE", "PARTIAL"] } });
   await Loan.updateOne({ _id: loanId }, { $set: { status: stillDue === 0 ? "CLOSED" : "ACTIVE" } });
 }

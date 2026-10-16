@@ -5,6 +5,7 @@ import '../models/models.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/format.dart';
+import '../utils/loan_tab.dart';
 import '../utils/split.dart';
 import 'emi_sheet.dart';
 import 'person_picker_sheet.dart';
@@ -39,6 +40,25 @@ class _Person {
 }
 
 String _rupees(int minor) => (minor / 100).toStringAsFixed(2);
+
+/// One loan a repayment could go to, with its part as it is being typed.
+/// Every loan offered has one, ticked or not, so unticking a loan and
+/// ticking it again keeps what was typed for it.
+class _LoanPart {
+  final String loanId;
+  bool picked;
+  final TextEditingController amount;
+
+  /// What the loan has owing for this payment's date, from the server's
+  /// suggestion. Null until it answers.
+  int? dueMinor;
+
+  /// Typed in this sheet, so no suggestion may replace it.
+  bool typed = false;
+
+  _LoanPart({required this.loanId, this.picked = false, int? amountMinor})
+      : amount = TextEditingController(text: amountMinor == null ? '' : _rupees(amountMinor));
+}
 
 /// Full manual edit, and the same form used to add a transaction by hand.
 ///
@@ -139,7 +159,16 @@ class _EditSheetState extends State<_EditSheet> {
   late bool _isFixed;
   String? _cardPaymentFor;
   String? _commitmentId;
-  String? _loanId;
+
+  /// Which loans a repayment goes to and how much to each. See _LoanPart.
+  final List<_LoanPart> _loanParts = [];
+
+  /// The loans the payment already repaid when the sheet opened.
+  late final List<LoanSplit> _savedLoanSplits;
+
+  /// What each loan has owing for this payment's date; null until the
+  /// server answers, and never needed to save.
+  LoanSplitSuggestion? _loanSuggestion;
 
   /// On a split: whether the user is one of the heads. Off is money lent.
   late bool _includeMe;
@@ -223,7 +252,10 @@ class _EditSheetState extends State<_EditSheet> {
     _cardPaymentFor = t?.cardPaymentFor;
     _commitmentId = t?.commitmentId;
     _isFixed = _commitmentId != null;
-    _loanId = t?.loanId;
+    _savedLoanSplits = t != null && t.type == 'DEBIT' ? t.loanSplits : const [];
+    for (final split in _savedLoanSplits) {
+      _loanParts.add(_LoanPart(loanId: split.loanId, picked: true, amountMinor: split.amountMinor));
+    }
     _tripJustMine = t?.tripShareWith?.isNotEmpty ?? false;
     _onTrip = t?.tripId != null;
     _showMore = _tripJustMine;
@@ -234,7 +266,7 @@ class _EditSheetState extends State<_EditSheet> {
       _ when t.isSettlement => _Kind.settlement,
       _ when t.isTransfer => _Kind.transfer,
       _ when t.type == 'DEBIT' && t.cardPaymentFor != null => _Kind.cardBill,
-      _ when t.type == 'DEBIT' && t.loanId != null => _Kind.loan,
+      _ when t.type == 'DEBIT' && t.loanSplits.isNotEmpty => _Kind.loan,
       _ when t.split != null => _Kind.split,
       _ when t.type == 'CREDIT' && t.isEarmarked => _Kind.earmark,
       _ when t.type == 'CREDIT' && t.isSalary => _Kind.salary,
@@ -281,6 +313,9 @@ class _EditSheetState extends State<_EditSheet> {
     _myShareManual.dispose();
     for (final person in _people) {
       person.amount.dispose();
+    }
+    for (final part in _loanParts) {
+      part.amount.dispose();
     }
     super.dispose();
   }
@@ -349,19 +384,94 @@ class _EditSheetState extends State<_EditSheet> {
     }
   }
 
-  /// Active loans, plus whichever this payment already claims - a closed
-  /// loan should not vanish from its own dropdown.
+  /// Active loans, plus whichever this payment already repays - a closed
+  /// loan should not vanish from its own list.
   Future<void> _loadLoans() async {
     try {
       final result = await ApiClient.instance.get('/loans') as List<dynamic>;
       if (!mounted) return;
       final all = result.map((l) => Loan.fromJson(l as Map<String, dynamic>)).toList();
-      setState(
-        () => _loans = all.where((loan) => loan.status == 'ACTIVE' || loan.id == _loanId).toList(),
-      );
+      final saved = {for (final split in _savedLoanSplits) split.loanId};
+      setState(() {
+        _loans = all.where((loan) => loan.status == 'ACTIVE' || saved.contains(loan.id)).toList();
+        for (final loan in _loans) {
+          if (!_loanParts.any((part) => part.loanId == loan.id)) _loanParts.add(_LoanPart(loanId: loan.id));
+        }
+      });
+      if (_kind == _Kind.loan) await _loadLoanSuggestion();
     } catch (_) {
       // The chip simply does not appear.
     }
+  }
+
+  /// What each loan has owing around this payment's date, to fill the rows
+  /// with. Only fills what nobody has typed or saved: a payment already
+  /// split keeps its split, and its unticked rows get their dues as a
+  /// starting figure for if they are ticked.
+  ///
+  /// On a fresh payment, the loans ticked are the one set whose dues add
+  /// up to the amount when there is exactly one, and otherwise every loan
+  /// with something owing.
+  Future<void> _loadLoanSuggestion() async {
+    final day = DateFormat('yyyy-MM-dd').format(_occurredAt);
+    final own = _isNew ? '' : '&transactionId=${widget.transaction!.id}';
+    try {
+      final json = await ApiClient.instance
+          .get('/loans/split-suggestion?amountMinor=$_totalMinor&on=$day$own') as Map<String, dynamic>;
+      if (!mounted) return;
+      final suggestion = LoanSplitSuggestion.fromJson(json);
+      setState(() {
+        _loanSuggestion = suggestion;
+        final fresh = _savedLoanSplits.isEmpty && !_loanParts.any((part) => part.typed);
+        final match = suggestion.matches.length == 1 ? suggestion.matches.single.toSet() : null;
+        for (final due in suggestion.loans) {
+          final part = _loanParts.where((part) => part.loanId == due.loanId).firstOrNull;
+          if (part == null) continue;
+          part.dueMinor = due.dueMinor;
+          if (part.typed || (part.picked && _savedLoanSplits.isNotEmpty)) continue;
+          if (due.dueMinor > 0) part.amount.text = _rupees(due.dueMinor);
+          if (fresh) part.picked = match != null ? match.contains(due.loanId) : due.dueMinor > 0;
+        }
+      });
+    } catch (_) {
+      // The rows stay as they are, to be filled by hand.
+    }
+  }
+
+  List<_LoanPart> get _pickedLoanParts => _loanParts.where((part) => part.picked).toList();
+
+  int get _loanAssignedMinor =>
+      _pickedLoanParts.fold(0, (sum, part) => sum + (parseRupees(part.amount.text) ?? 0));
+
+  String _loanLabel(String loanId) =>
+      _loans.where((loan) => loan.id == loanId).firstOrNull?.label ?? 'that loan';
+
+  /// Every loan with something owing, ticked, at what it owes.
+  void _fillLoanDues() {
+    setState(() {
+      _error = null;
+      for (final part in _loanParts) {
+        final due = part.dueMinor;
+        if (due == null || due <= 0) continue;
+        part.picked = true;
+        part.typed = true;
+        part.amount.text = _rupees(due);
+      }
+    });
+  }
+
+  /// The whole payment shared equally between the loans ticked.
+  void _splitLoansEvenly() {
+    final picked = _pickedLoanParts;
+    if (picked.isEmpty) return;
+    final parts = splitEvenly(_totalMinor, picked.length);
+    setState(() {
+      _error = null;
+      for (var i = 0; i < picked.length; i++) {
+        picked[i].typed = true;
+        picked[i].amount.text = _rupees(parts[i]);
+      }
+    });
   }
 
   // ---- Accounts ------------------------------------------------------
@@ -462,6 +572,7 @@ class _EditSheetState extends State<_EditSheet> {
       if (_isLend || kind == _Kind.settlement) _fillFromPerson();
       _autoFillTransfer();
     });
+    if (kind == _Kind.loan) _loadLoanSuggestion();
   }
 
   /// Changing direction has to drop anything the new one cannot mean, or
@@ -630,7 +741,6 @@ class _EditSheetState extends State<_EditSheet> {
     _isSpecial = false;
     _isFixed = false;
     _cardPaymentFor = null;
-    _loanId = null;
     bool isOn() => contact != null && _people.any((person) => person.contactId == contact.id);
 
     if (_isDebit && _kind != _Kind.settlement) {
@@ -792,8 +902,18 @@ class _EditSheetState extends State<_EditSheet> {
         }
       case _Kind.cardBill when _cardPaymentFor == null:
         return _fail('Pick which card this bill was for.');
-      case _Kind.loan when _loanId == null:
-        return _fail('Pick which loan this repays.');
+      case _Kind.loan:
+        final picked = _pickedLoanParts;
+        if (picked.isEmpty) return _fail('Tick which loans this repays.');
+        for (final part in picked) {
+          final minor = parseRupees(part.amount.text);
+          if (minor == null || minor <= 0) {
+            return _fail('Give ${_loanLabel(part.loanId)} an amount, or untick it.');
+          }
+        }
+        if (_loanAssignedMinor > total) {
+          return _fail('The loans add up to ${formatMoney(_loanAssignedMinor - total)} more than the payment.');
+        }
       default:
         break;
     }
@@ -834,7 +954,15 @@ class _EditSheetState extends State<_EditSheet> {
       'isSalary': !_isDebit && _kind == _Kind.salary,
       'cardPaymentFor': _isDebit && _kind == _Kind.cardBill ? _cardPaymentFor : null,
       'commitmentId': _isDebit && _isFixed ? _commitmentId : null,
-      'loanId': _isDebit && _kind == _Kind.loan ? _loanId : null,
+      // Every loan it repays and how much went to each; an empty list takes
+      // it off them all. Short of the whole payment is fine - the rest is
+      // saved as not put down to any loan yet, and shown as such.
+      'loanSplits': _isDebit && _kind == _Kind.loan
+          ? [
+              for (final part in _pickedLoanParts)
+                LoanSplit(loanId: part.loanId, amountMinor: parseRupees(part.amount.text) ?? 0).toJson(),
+            ]
+          : const <Map<String, dynamic>>[],
       // Taken off the trip, or narrowed to the payer alone, or widened back
       // to everyone on it.
       if (widget.transaction?.tripId != null && !_onTrip) 'tripId': null,
@@ -856,7 +984,8 @@ class _EditSheetState extends State<_EditSheet> {
             as Map<String, dynamic>;
         transferLeg = TransferLeg.maybe(created['transferLeg']);
         final id = created['id'] as String;
-        final needsEdit = editOnly.entries.any((e) => e.value != null && e.value != false);
+        final needsEdit = editOnly.entries
+            .any((e) => e.value != null && e.value != false && !(e.value is List && (e.value as List).isEmpty));
         if (needsEdit) await ApiClient.instance.patch('/transactions/$id', editOnly);
         // A refund needs a row to point from, so its purchases are picked
         // the moment it exists.
@@ -1397,7 +1526,7 @@ class _EditSheetState extends State<_EditSheet> {
   Widget _kindPicker() {
     final c = context.c;
     final hasCards = _cardAccounts.isNotEmpty || _cardPaymentFor != null;
-    final hasLoans = _loans.isNotEmpty || _loanId != null;
+    final hasLoans = _loans.isNotEmpty || _savedLoanSplits.isNotEmpty;
     final hasCommitments = _commitments.isNotEmpty || _commitmentId != null;
 
     // (label, icon, selected, onTap)
@@ -1768,33 +1897,112 @@ class _EditSheetState extends State<_EditSheet> {
   }
 
   /// A loan has no purchase to keep out of the totals the way an EMI's
-  /// does, so this always counts in full - the picker only ever says which
-  /// schedule the payment closes off next.
+  /// does, so this always counts in full. One payment often repays several
+  /// loans at once: each one it went to is ticked with its share, and what
+  /// is left over is saved as not put down to any loan yet - shown, so it
+  /// gets sorted out, but never a reason to refuse the save.
   Widget _loanPanel() {
     final c = context.c;
+    final total = _totalMinor;
+    final assigned = _loanAssignedMinor;
+    final rows = [
+      for (final loan in _loans)
+        if (_loanParts.where((part) => part.loanId == loan.id).firstOrNull case final part?) (loan, part),
+    ];
+    final hasDues = _loanSuggestion?.loans.any((due) => due.dueMinor > 0) ?? false;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        DropdownButtonFormField<String?>(
-          initialValue: _loans.any((loan) => loan.id == _loanId) ? _loanId : null,
-          isExpanded: true,
-          hint: Text('Which loan?', style: TextStyle(color: c.mutedLight)),
-          decoration: _inputDecoration(context, label: 'Loan'),
-          dropdownColor: c.surface,
-          style: TextStyle(fontSize: 14, color: c.ink),
-          items: [
-            for (final loan in _loans)
-              DropdownMenuItem<String?>(
-                value: loan.id,
-                child: Text('${loan.label} - ${loan.paidCount} of ${loan.months} paid',
-                    overflow: TextOverflow.ellipsis),
+        for (final (loan, part) in rows) _loanRow(loan, part),
+        const SizedBox(height: 6),
+        Text(
+          loanAssignedLine(assignedMinor: assigned, totalMinor: total),
+          key: const ValueKey('loan-assigned-line'),
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+            color: assigned == total ? c.ink70 : c.warn,
+          ),
+        ),
+        Wrap(
+          spacing: 4,
+          children: [
+            if (hasDues)
+              TextButton(
+                onPressed: _fillLoanDues,
+                style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                child: const Text('Fill dues'),
+              ),
+            if (_pickedLoanParts.length > 1)
+              TextButton(
+                onPressed: _splitLoansEvenly,
+                style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                child: const Text('Split evenly'),
               ),
           ],
-          onChanged: (value) => setState(() => _loanId = value),
         ),
-        const SizedBox(height: 6),
-        const _Hint('Claims whichever instalment is next due, whatever the exact amount here.'),
+        const _Hint("Each loan's share goes into its oldest instalment still owed. More runs on into "
+            'the next one; less leaves it part paid.'),
       ],
+    );
+  }
+
+  /// One loan: whether this payment went to it, how much, and where the
+  /// loan stands as things are.
+  Widget _loanRow(Loan loan, _LoanPart part) {
+    final c = context.c;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          Checkbox(
+            key: ValueKey('loan-pick-${loan.id}'),
+            value: part.picked,
+            visualDensity: VisualDensity.compact,
+            onChanged: (value) => setState(() {
+              _error = null;
+              part.picked = value ?? false;
+            }),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  loan.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: c.ink),
+                ),
+                Text(
+                  loanTabShort(loan.balanceMinor),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11.5, color: loan.balanceMinor < 0 ? c.warn : c.muted),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 116,
+            child: TextField(
+              key: ValueKey('loan-amount-${loan.id}'),
+              controller: part.amount,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: kNum.copyWith(fontSize: 14, color: c.ink),
+              decoration: _inputDecoration(context, hint: '0.00').copyWith(prefixText: '₹ '),
+              // Typing an amount means the payment went there.
+              onChanged: (_) => setState(() {
+                _error = null;
+                part.typed = true;
+                part.picked = true;
+              }),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

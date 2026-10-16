@@ -9,7 +9,8 @@ import { budgetPace } from "../budget/budget.pace";
 import { monthlyBudgetStatus } from "../budget/budget.monthly";
 import { perkIsLive } from "../perks/perks.match";
 import { upcomingBills } from "../statements/statements.bills";
-import { loanProgress } from "../loans/loans.routes";
+import { tabTotals } from "../loans/loans.allocation";
+import { loanStanding } from "../loans/loans.routes";
 import { planStatus } from "../ai/ai.coach";
 import { expectedBalances, tracksBalance } from "../accounts/accounts.balance";
 import { balanceTodos } from "../accounts/accounts.drift";
@@ -365,15 +366,20 @@ async function activeLoans(userId: Types.ObjectId) {
   const loans = await Loan.find({ userId, status: "ACTIVE" }).sort({ createdAt: 1 });
   const instalments = await LoanInstalment.find({ loanId: { $in: loans.map((loan) => loan._id) } });
 
-  const withProgress = loans.map((loan) => ({
-    ...loan.toJSON(),
-    ...loanProgress(instalments.filter((instalment) => instalment.loanId.equals(loan._id))),
-  }));
+  const standing = await loanStanding(loans, instalments);
+  // The card shows where each loan stands, not its payment history.
+  const withProgress = loans.map((loan, index) => {
+    const { payments: _history, ...rest } = standing[index];
+    return { ...loan.toJSON(), ...rest };
+  });
 
   return {
     count: loans.length,
     monthlyMinor: loans.reduce((total, loan) => total + loan.monthlyAmountMinor, 0),
     remainingMinor: withProgress.reduce((total, loan) => total + loan.remainingMinor, 0),
+    // Ahead or behind across every running loan, the way one combined
+    // payment each month is actually thought about.
+    totals: tabTotals(standing),
     // Soonest due first: the one to have money ready for.
     loans: withProgress.sort(
       (a, b) => (a.nextDue?.dueDate.getTime() ?? Infinity) - (b.nextDue?.dueDate.getTime() ?? Infinity)

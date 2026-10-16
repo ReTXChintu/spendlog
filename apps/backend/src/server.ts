@@ -12,8 +12,10 @@ import { runAccountUnknownBackfill, runStatedBalanceBackfill } from "./modules/a
 import { runMissingCreditBackfill } from "./modules/accounts/accounts.missingCredits";
 import { runCardBillAccountBackfill, runCardBillBackfill } from "./modules/cards/cards.billPayment.service";
 import { runCardBillLegBackfill } from "./modules/cards/cards.billLeg";
+import { runCardCreditBackfill, runPaymentTwinBackfill, runSelfPaymentRepair } from "./modules/cards/cards.billRepair";
 import { runDailyFundRefresh } from "./modules/funds/funds.cache";
 import { runTransferLegBackfill } from "./modules/transactions/transactions.transfer";
+import { runLoanSplitBackfill } from "./modules/loans/loans.backfill";
 import { syncAllConnectedEmails } from "./modules/ingestion/gmail.service";
 
 const EMAIL_SYNC_INTERVAL_MS = 15 * 60 * 1000;
@@ -89,12 +91,23 @@ async function start() {
   // a bill's two sides are paired as a bill and not taken for a transfer.
   // Between the two, every card bill still recorded as the bank's debit
   // alone is given its card side, once the bills are all marked.
+  // Woven in (cards.billRepair): purchases once marked as paying their own
+  // card counted again, before anything pairs with them; money onto a card
+  // "from a/c" recognised as a payment once the bills are marked; and an
+  // issuer's second "payment received" folded into the first once every
+  // bill has its card side, so the one kept is the paired one.
   const legsDone = runCardBillAccountBackfill()
     .catch((err) => console.error("Card bill account backfill failed:", err))
+    .then(() => runSelfPaymentRepair())
+    .catch((err) => console.error("Card self-payment repair failed:", err))
     .then(() => runCardBillBackfill())
     .catch((err) => console.error("Card bill backfill failed:", err))
+    .then(() => runCardCreditBackfill())
+    .catch((err) => console.error("Card credit backfill failed:", err))
     .then(() => runCardBillLegBackfill())
     .catch((err) => console.error("Card bill leg backfill failed:", err))
+    .then(() => runPaymentTwinBackfill())
+    .catch((err) => console.error("Card payment twin backfill failed:", err))
     .then(() => runTransferLegBackfill())
     .catch((err) => console.error("Transfer leg backfill failed:", err));
   // The bank's balance read off every message already stored, and the
@@ -108,6 +121,9 @@ async function start() {
     .then(() => runMissingCreditBackfill())
     .catch((err) => console.error("Missing credit backfill failed:", err));
   runAccountUnknownBackfill().catch((err) => console.error("Account unknown backfill failed:", err));
+  // Loan repayments onto loanSplits, and every loan's instalments covered
+  // by what was actually paid towards it rather than one tick per payment.
+  runLoanSplitBackfill().catch((err) => console.error("Loan split backfill failed:", err));
 
   setInterval(() => {
     syncAllConnectedEmails().catch((err) => console.error("Background Gmail sync failed:", err));

@@ -1,6 +1,8 @@
 import { HydratedDocument, Types } from "mongoose";
 import { LoanInstalment, TransactionDoc } from "../../models";
-import { closeLoanIfFinished } from "./loans.routes";
+import { splitsOf } from "./loans.allocation";
+import { setLoanSplits } from "./loans.splits";
+import { combinationsFor, duesAround, splitsFromDues } from "./loans.suggest";
 
 /** A lender bills on its own schedule, not always on the due date. */
 const DUE_WINDOW_DAYS = 12;
@@ -27,13 +29,16 @@ export async function matchLoanInstalment(
 ): Promise<boolean> {
   if (transaction.type !== "DEBIT") return false;
   // Already spoken for - matched on an earlier pass, or picked by hand.
-  if (transaction.loanId) return false;
+  if (splitsOf(transaction).length > 0) return false;
 
   const windowMs = DUE_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
+  // A partly covered instalment is still the one this month's debit is
+  // for: a loan a little ahead from last month still takes the usual
+  // amount, and leaving it out would stop the debit matching at all.
   const candidates = await LoanInstalment.find({
     userId: transaction.userId,
-    status: "DUE",
+    status: { $in: ["DUE", "PARTIAL"] },
     dueDate: {
       $gte: new Date(transaction.occurredAt.getTime() - windowMs),
       $lte: new Date(transaction.occurredAt.getTime() + windowMs),
@@ -46,7 +51,7 @@ export async function matchLoanInstalment(
     .sort({ dueDate: 1 })
     .populate("loanId");
 
-  if (candidates.length === 0) return false;
+  if (candidates.length === 0) return matchCombinedLoans(transaction);
 
   // Prefer one whose loan repays from the same account, when both are
   // known. Two loans billing a similar instalment in the same fortnight is
@@ -62,48 +67,63 @@ export async function matchLoanInstalment(
   // within tolerance, so the worst case is attributing a payment to the
   // right loan a month early.
   const instalment = onSameAccount ?? candidates[0];
+  const loanId = (instalment.loanId as unknown as { _id: Types.ObjectId })._id ?? instalment.loanId;
 
-  instalment.status = "PAID";
-  instalment.paidAt = new Date();
-  instalment.transactionId = transaction._id;
-  await instalment.save();
-
-  transaction.loanId = instalment.loanId as never;
-  await transaction.save();
-
-  await closeLoanIfFinished(instalment.loanId);
+  // The whole debit to that loan. Which instalment it then covers is the
+  // tab's business - the oldest one still owed, the same as any payment.
+  await setLoanSplits(transaction, [{ loanId, amountMinor: transaction.amountMinor }]);
 
   return true;
 }
 
 /**
- * Claiming a loan by hand, from the payment's own edit screen.
+ * One debit that repays several loans at once: when no single instalment
+ * fits, but what a few running loans have owing adds up to the debit
+ * within a rupee.
+ *
+ * Applied only when exactly one set of loans fits. Two sets that both add
+ * up - ₹5,000 + ₹5,000 against ₹10,000 owed on a third, say - is a guess,
+ * and a wrong guess here is worse than none: it would mark loans paid that
+ * were not, and hide the one that was. Left alone, the editor offers the
+ * same sets to pick from (GET /loans/split-suggestion).
+ *
+ * A set of one is left alone too. That is the single-loan matcher's call,
+ * and it already declined.
+ */
+export async function matchCombinedLoans(transaction: HydratedDocument<TransactionDoc>): Promise<boolean> {
+  if (transaction.type !== "DEBIT" || transaction.emiRole) return false;
+  if (splitsOf(transaction).length > 0) return false;
+
+  const dues = await duesAround(transaction.userId, transaction.occurredAt);
+  const sets = combinationsFor(dues, transaction.amountMinor);
+  if (sets.length !== 1 || sets[0].length < 2) return false;
+
+  const picked = dues.filter((due) => sets[0].includes(due.loanId));
+  const splits = splitsFromDues(picked, transaction.amountMinor);
+  await setLoanSplits(
+    transaction,
+    splits.map((split) => ({ loanId: new Types.ObjectId(split.loanId), amountMinor: split.amountMinor }))
+  );
+  return true;
+}
+
+/**
+ * Claiming a loan by hand, from the payment's own edit screen: the whole
+ * payment towards that one loan.
  *
  * Unlike the matcher above, this carries no doubt about which loan is
- * meant - someone has already said so - so it claims whichever instalment
- * on that loan is soonest due, without checking the amount against it.
- * The oldest still-due instalment is always the right one to close next
- * regardless of what this particular payment came to: an extra or a
- * short repayment still counts against the schedule in order.
+ * meant - someone has already said so - so the amount is not checked
+ * against anything. The money goes into the oldest instalment still owed,
+ * like any payment: an extra one runs on into the next, a short one leaves
+ * the instalment partly covered.
  *
  * Leaves the transaction linked to the loan even when nothing is left to
- * claim - a loan already fully scheduled can still take an extra payment,
+ * cover - a loan already fully scheduled can still take an extra payment,
  * and that payment is still a fact about the loan worth keeping.
  */
 export async function attachToLoan(
   transaction: HydratedDocument<TransactionDoc>,
   loanId: Types.ObjectId
 ): Promise<void> {
-  transaction.loanId = loanId as never;
-
-  const instalment = await LoanInstalment.findOne({ loanId, status: "DUE" }).sort({ seq: 1 });
-  if (instalment) {
-    instalment.status = "PAID";
-    instalment.paidAt = new Date();
-    instalment.transactionId = transaction._id;
-    await instalment.save();
-    await closeLoanIfFinished(loanId);
-  }
-
-  await transaction.save();
+  await setLoanSplits(transaction, [{ loanId, amountMinor: transaction.amountMinor }]);
 }

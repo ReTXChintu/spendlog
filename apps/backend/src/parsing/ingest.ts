@@ -10,8 +10,13 @@ import { findDuplicate, detectSelfTransfer } from "./dedupe";
 import { parseStatedFigures } from "./balance";
 import { parseTransactionText } from "./parser";
 import { horizonFor } from "../modules/ledger/ledger.horizon";
-import { cardBillAccount, cardBillContext, markCardBillPayment } from "../modules/cards/cards.billPayment.service";
-import { mayBeCardPayment } from "../modules/cards/cards.billPayment";
+import {
+  cardBillAccount,
+  cardBillContext,
+  findPaymentTwin,
+  markCardBillPayment,
+} from "../modules/cards/cards.billPayment.service";
+import { mayBeCardPayment, recogniseCardBill } from "../modules/cards/cards.billPayment";
 import { detectAfterStatedBalance } from "../modules/accounts/accounts.missingCredits";
 import {
   adoptAutoLeg,
@@ -156,6 +161,28 @@ export async function ingestRawMessage(params: {
     if (added && stated.balanceMinor !== null) await detectAfterStatedBalance(duplicate);
 
     return { status: "duplicate", transaction: duplicate };
+  }
+
+  // A card's issuer saying a payment arrived a second time, hours later
+  // and in other words (see findPaymentTwin). Only for a message that is
+  // itself a card's "payment received": two ordinary credits of the same
+  // amount on a card are two credits.
+  const twin =
+    parsed.type === "CREDIT" &&
+    accountId &&
+    accountType === "CARD" &&
+    recogniseCardBill({ text: params.rawText, type: "CREDIT", accountId: accountId.toString(), accountType }, context.cards)
+      ?.side === "PAYMENT_RECEIVED"
+      ? await findPaymentTwin({ userId: params.userId, cardId: accountId, amountMinor: parsed.amountMinor, occurredAt })
+      : null;
+  if (twin) {
+    // A written-in side finding its first message is adopted by it, the
+    // way findAutoLeg's are; anything else just gains a source.
+    const written = twin.autoLeg;
+    await absorbMessage(twin, { userId: params.userId, entry, parsed, accountId, stated }, () => {
+      if (written) adoptAutoLeg(twin, occurredAt);
+    });
+    return { status: "duplicate", transaction: twin };
   }
 
   const categoryId = await categorizeTransaction({

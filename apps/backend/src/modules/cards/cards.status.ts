@@ -171,7 +171,9 @@ export async function chargedBetween(
         userId,
         accountId: cardId,
         occurredAt: { $gte: from, $lt: to },
-        cardPaymentFor: null,
+        // Its own bill payments, but not a purchase wrongly marked as
+        // paying this very card - that is a charge all the same.
+        $and: [{ $or: [{ cardPaymentFor: null }, { cardPaymentFor: cardId }] }],
         emiRole: { $ne: "PARENT" },
         $or: [{ type: "DEBIT" }, { type: "CREDIT", isTransfer: { $ne: true } }],
       },

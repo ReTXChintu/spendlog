@@ -197,7 +197,8 @@ export async function paidTowards(userId: Types.ObjectId, cardId: Types.ObjectId
         userId,
         occurredAt: { $gte: since },
         $or: [
-          { type: "DEBIT", cardPaymentFor: cardId },
+          // Never a debit on the card itself: that is a purchase on it.
+          { type: "DEBIT", cardPaymentFor: cardId, accountId: { $ne: cardId } },
           { type: "CREDIT", accountId: cardId, isTransfer: true, transferPairId: null, cardPaymentFor: null },
         ],
       },

@@ -241,6 +241,35 @@ class PersonShare {
   Map<String, dynamic> toJson() => {'contactId': contactId, 'amountMinor': amountMinor};
 }
 
+/// One loan's part of a repayment.
+class LoanSplit {
+  final String loanId;
+  final int amountMinor;
+
+  const LoanSplit({required this.loanId, required this.amountMinor});
+
+  factory LoanSplit.fromJson(Map<String, dynamic> json) {
+    // A bare id normally, but a populated loan reads the same way.
+    final loan = json['loanId'];
+    return LoanSplit(
+      loanId: loan is Map<String, dynamic> ? loan['id'] as String : loan as String,
+      amountMinor: json['amountMinor'] as int? ?? 0,
+    );
+  }
+
+  /// The splits a server sent, or - from one that predates them - the one
+  /// loan the payment names, for all of it.
+  static List<LoanSplit> listFrom(Object? json, {String? loanId, required int amountMinor}) {
+    final list = (json as List<dynamic>? ?? [])
+        .map((split) => LoanSplit.fromJson(split as Map<String, dynamic>))
+        .toList();
+    if (list.isEmpty && loanId != null) return [LoanSplit(loanId: loanId, amountMinor: amountMinor)];
+    return list;
+  }
+
+  Map<String, dynamic> toJson() => {'loanId': loanId, 'amountMinor': amountMinor};
+}
+
 class Transaction {
   final String id;
   final int amountMinor;
@@ -303,7 +332,15 @@ class Transaction {
 
   /// The loan this repays. Counts as spending in full - a loan has no
   /// purchase to keep out of the totals the way an EMI's parent does.
+  /// The first of [loanSplits] when there are several.
   final String? loanId;
+
+  /// Which loans this repays, and how much went to each. One payment often
+  /// settles several loans at once.
+  final List<LoanSplit> loanSplits;
+
+  /// The part of a loan repayment not put down to any loan yet.
+  final int loanUnassignedMinor;
   final TransactionSplit? split;
   final bool isSettlement;
 
@@ -366,6 +403,8 @@ class Transaction {
     this.cardPaymentFor,
     this.commitmentId,
     this.loanId,
+    this.loanSplits = const [],
+    this.loanUnassignedMinor = 0,
     this.split,
     this.isSettlement = false,
     this.people = const [],
@@ -429,6 +468,8 @@ class Transaction {
         cardPaymentFor: json['cardPaymentFor'] as String?,
         commitmentId: json['commitmentId'] as String?,
         loanId: json['loanId'] as String?,
+        loanSplits: LoanSplit.listFrom(json['loanSplits'], loanId: json['loanId'] as String?, amountMinor: json['amountMinor'] as int),
+        loanUnassignedMinor: json['loanUnassignedMinor'] as int? ?? 0,
         split: json['split'] != null
             ? TransactionSplit.fromJson(json['split'] as Map<String, dynamic>)
             : null,
@@ -1069,8 +1110,24 @@ class Loan {
   final DateTime? startDate;
   final String? accountId;
 
-  /// The earliest instalment still due, or null once nothing is.
+  /// The earliest instalment not yet fully covered, or null once nothing
+  /// is owed: overdue while behind, the one extra is going into while
+  /// ahead.
   final LoanNextDue? nextDue;
+
+  /// The tab: everything paid towards it, against everything that has
+  /// fallen due by today. Positive balance is ahead, negative behind.
+  final int paidMinor;
+  final int dueToDateMinor;
+  final int balanceMinor;
+
+  /// The due date (IST, YYYY-MM-DD) of the latest instalment fully
+  /// covered, so "ahead" can say how far it reaches.
+  final String? coveredThrough;
+
+  /// Only on the loans list, not the dashboard's copy.
+  final List<LoanInstalmentRow> instalments;
+  final List<LoanPaymentShare> payments;
 
   Loan({
     required this.id,
@@ -1086,7 +1143,16 @@ class Loan {
     this.startDate,
     this.accountId,
     this.nextDue,
+    this.paidMinor = 0,
+    this.dueToDateMinor = 0,
+    this.balanceMinor = 0,
+    this.coveredThrough,
+    this.instalments = const [],
+    this.payments = const [],
   });
+
+  int get aheadMinor => balanceMinor > 0 ? balanceMinor : 0;
+  int get behindMinor => balanceMinor < 0 ? -balanceMinor : 0;
 
   factory Loan.fromJson(Map<String, dynamic> json) {
     final next = json['nextDue'];
@@ -1104,24 +1170,171 @@ class Loan {
       status: json['status'] as String? ?? 'ACTIVE',
       interestRatePctAnnual: (json['interestRatePctAnnual'] as num?)?.toDouble(),
       startDate: start == null ? null : DateTime.tryParse(start),
-      accountId: json['accountId'] as String?,
+      // Populated with the account on the loans list, a bare id elsewhere.
+      accountId: json['accountId'] is Map<String, dynamic>
+          ? (json['accountId'] as Map<String, dynamic>)['id'] as String?
+          : json['accountId'] as String?,
       nextDue: next is Map<String, dynamic> ? LoanNextDue.fromJson(next) : null,
+      paidMinor: json['paidMinor'] as int? ?? 0,
+      dueToDateMinor: json['dueToDateMinor'] as int? ?? 0,
+      balanceMinor: json['balanceMinor'] as int? ?? 0,
+      coveredThrough: json['coveredThrough'] as String?,
+      instalments: (json['instalments'] as List<dynamic>? ?? [])
+          .map((row) => LoanInstalmentRow.fromJson(row as Map<String, dynamic>))
+          .toList(),
+      payments: (json['payments'] as List<dynamic>? ?? [])
+          .map((row) => LoanPaymentShare.fromJson(row as Map<String, dynamic>))
+          .toList(),
     );
   }
 }
 
-/// The next instalment on a loan: which one, when, and how much.
+/// The next instalment on a loan: which one, when, and how much - and how
+/// much of it is already in hand.
 class LoanNextDue {
   final int seq;
   final DateTime dueDate;
   final int amountMinor;
+  final int alreadyCoveredMinor;
 
-  LoanNextDue({required this.seq, required this.dueDate, required this.amountMinor});
+  LoanNextDue({
+    required this.seq,
+    required this.dueDate,
+    required this.amountMinor,
+    this.alreadyCoveredMinor = 0,
+  });
+
+  int get shortMinor => amountMinor - alreadyCoveredMinor;
 
   factory LoanNextDue.fromJson(Map<String, dynamic> json) => LoanNextDue(
         seq: json['seq'] as int? ?? 0,
         dueDate: DateTime.tryParse(json['dueDate'] as String? ?? '') ?? DateTime.now(),
         amountMinor: json['amountMinor'] as int? ?? 0,
+        alreadyCoveredMinor: json['alreadyCoveredMinor'] as int? ?? 0,
+      );
+}
+
+/// One instalment on a loan's schedule. PARTIAL is paid in part, and owes
+/// [shortMinor] still.
+class LoanInstalmentRow {
+  final int seq;
+  final DateTime dueDate;
+  final int amountMinor;
+  final int paidMinor;
+
+  /// DUE, PARTIAL, PAID or SKIPPED.
+  final String status;
+
+  LoanInstalmentRow({
+    required this.seq,
+    required this.dueDate,
+    required this.amountMinor,
+    required this.paidMinor,
+    required this.status,
+  });
+
+  int get shortMinor => status == 'PAID' ? 0 : amountMinor - paidMinor;
+
+  factory LoanInstalmentRow.fromJson(Map<String, dynamic> json) {
+    final status = json['status'] as String? ?? 'DUE';
+    final amount = json['amountMinor'] as int? ?? 0;
+    return LoanInstalmentRow(
+      seq: json['seq'] as int? ?? 0,
+      dueDate: DateTime.tryParse(json['dueDate'] as String? ?? '') ?? DateTime.now(),
+      amountMinor: amount,
+      // An older server has no paidMinor; a paid row was paid in full.
+      paidMinor: json['paidMinor'] as int? ?? (status == 'PAID' ? amount : 0),
+      status: status,
+    );
+  }
+}
+
+/// A payment towards a loan, and this loan's share of it.
+class LoanPaymentShare {
+  final String transactionId;
+  final DateTime occurredAt;
+  final String? merchant;
+  final int amountMinor;
+
+  /// The whole payment, of which [amountMinor] went to this loan.
+  final int totalMinor;
+
+  LoanPaymentShare({
+    required this.transactionId,
+    required this.occurredAt,
+    this.merchant,
+    required this.amountMinor,
+    required this.totalMinor,
+  });
+
+  bool get isShared => totalMinor > amountMinor;
+
+  factory LoanPaymentShare.fromJson(Map<String, dynamic> json) => LoanPaymentShare(
+        transactionId: json['transactionId'] as String? ?? '',
+        occurredAt: DateTime.tryParse(json['occurredAt'] as String? ?? '') ?? DateTime.now(),
+        merchant: json['merchant'] as String?,
+        amountMinor: json['amountMinor'] as int? ?? 0,
+        totalMinor: json['totalMinor'] as int? ?? 0,
+      );
+}
+
+/// Ahead or behind across every running loan.
+class LoanTotals {
+  final int paidMinor;
+  final int dueToDateMinor;
+  final int balanceMinor;
+
+  const LoanTotals({this.paidMinor = 0, this.dueToDateMinor = 0, this.balanceMinor = 0});
+
+  factory LoanTotals.fromJson(Map<String, dynamic>? json) => LoanTotals(
+        paidMinor: json?['paidMinor'] as int? ?? 0,
+        dueToDateMinor: json?['dueToDateMinor'] as int? ?? 0,
+        balanceMinor: json?['balanceMinor'] as int? ?? 0,
+      );
+}
+
+/// What each running loan has owing for a payment on a given day, from
+/// GET /loans/split-suggestion.
+class LoanSplitSuggestion {
+  final List<LoanDue> loans;
+  final int totalDueMinor;
+  final int remainderMinor;
+
+  /// Every set of loans whose dues add up to the amount, within a rupee.
+  final List<List<String>> matches;
+
+  LoanSplitSuggestion({
+    required this.loans,
+    required this.totalDueMinor,
+    required this.remainderMinor,
+    this.matches = const [],
+  });
+
+  factory LoanSplitSuggestion.fromJson(Map<String, dynamic> json) => LoanSplitSuggestion(
+        loans: (json['loans'] as List<dynamic>? ?? [])
+            .map((row) => LoanDue.fromJson(row as Map<String, dynamic>))
+            .toList(),
+        totalDueMinor: json['totalDueMinor'] as int? ?? 0,
+        remainderMinor: json['remainderMinor'] as int? ?? 0,
+        matches: (json['matches'] as List<dynamic>? ?? [])
+            .map((match) => ((match as Map<String, dynamic>)['loanIds'] as List<dynamic>).cast<String>())
+            .toList(),
+      );
+}
+
+class LoanDue {
+  final String loanId;
+  final String label;
+  final int dueMinor;
+  final int balanceMinor;
+
+  LoanDue({required this.loanId, required this.label, required this.dueMinor, required this.balanceMinor});
+
+  factory LoanDue.fromJson(Map<String, dynamic> json) => LoanDue(
+        loanId: json['loanId'] as String,
+        label: json['label'] as String? ?? 'Loan',
+        dueMinor: json['dueMinor'] as int? ?? 0,
+        balanceMinor: json['balanceMinor'] as int? ?? 0,
       );
 }
 
@@ -1537,6 +1750,9 @@ class DashboardData {
   final int loanMonthlyMinor;
   final int loanRemainingMinor;
 
+  /// Ahead or behind across every running loan.
+  final LoanTotals loanTotals;
+
   /// Each active loan, soonest due first.
   final List<Loan> loans;
   final int owedBalanceMinor;
@@ -1576,6 +1792,7 @@ class DashboardData {
     required this.loanCount,
     required this.loanMonthlyMinor,
     required this.loanRemainingMinor,
+    this.loanTotals = const LoanTotals(),
     required this.loans,
     required this.owedBalanceMinor,
     required this.expiringPerks,
@@ -1614,6 +1831,7 @@ class DashboardData {
       loanCount: loans['count'] as int? ?? 0,
       loanMonthlyMinor: loans['monthlyMinor'] as int? ?? 0,
       loanRemainingMinor: loans['remainingMinor'] as int? ?? 0,
+      loanTotals: LoanTotals.fromJson(loans['totals'] as Map<String, dynamic>?),
       loans: (loans['loans'] as List<dynamic>? ?? [])
           .map((loan) => Loan.fromJson(loan as Map<String, dynamic>))
           .toList(),

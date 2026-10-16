@@ -99,7 +99,7 @@ export async function ensureCardBillLeg(
   const accounts = known ?? (await accountsOf(debit.userId));
   const card = accounts.get(debit.cardPaymentFor!.toString());
   if (!card || card.accountType !== "CARD") return null;
-  if (debit.accountId?.equals(card._id)) return null;
+  if (debit.accountId?.equals(card._id) || sameId(ownerOf(debit.accountId, accounts)?._id, card._id)) return null;
 
   const transfers = await transferCategoryId();
   const existing = await findCardSide(debit, card, accounts);

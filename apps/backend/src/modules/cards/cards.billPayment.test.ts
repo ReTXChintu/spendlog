@@ -195,6 +195,41 @@ describe("not mistaking other payments for a card bill", () => {
   }
 });
 
+// The CSB Edge RuPay card, through the Jupiter app. Its purchases go over
+// UPI, so "UPI Ref no." in them is the card paying, not a bank account -
+// and 88 of them were once read as the card paying its own bill.
+describe("a purchase on the CSB card is never its bill", () => {
+  const CSB: BillCard = { id: "csb", bankName: "CSB Bank", nickname: "Edge CSB RuPay", last4: "6623", isActive: true };
+  const cards = [...ALL_CARDS, CSB];
+  const purchases: [string, string][] = [
+    [
+      "Jupiter's purchase alert, as it arrives",
+      "Rs.600.00 debited to your Edge CSB Bank RuPay Credit Card ending 6623 on 9/10/26, 8:40 PM - (UPI Ref no.123456789012). To dispute, call 18002667. Thanks for using the Jupiter App.",
+    ],
+    ["the short form", "Rs.600.00 debited to your Edge CSB Bank RuPay Credit Card"],
+    ["paid via UPI", "Rs.600.00 debited to your Edge CSB Bank RuPay Credit Card ending 6623 via UPI"],
+    ["spent on the card", "Rs.600.00 spent on your Edge CSB Bank RuPay Credit Card ending 6623 at ZOMATO via UPI"],
+    [
+      "debited from the card",
+      "Rs.600.00 debited from your Edge CSB Bank RuPay Credit Card ending 6623 on 9/10/26 (UPI Ref no.123456789012)",
+    ],
+  ];
+
+  for (const [name, text] of purchases) {
+    it(name, () => {
+      // Filed under the card, as the parser files it, and not yet placed.
+      for (const extra of [{ accountId: "csb", accountType: "CARD" as const }, { accountType: null }, {}]) {
+        assert.equal(recogniseCardBill(debit(text, extra), cards), null, JSON.stringify(extra));
+      }
+    });
+  }
+
+  it("still reads a bank paying the card's bill as a payment", () => {
+    const text = "Rs 7,908.00 debited from your account XX1614 towards Edge CSB Bank RuPay Credit Card ending 6623 via UPI";
+    assert.deepEqual(recogniseCardBill(debit(text), cards), { side: "PAYMENT", cardId: "csb" });
+  });
+});
+
 describe("recognising the card's own 'payment received'", () => {
   const cases: [string, string, string][] = [
     [
@@ -244,11 +279,28 @@ describe("recognising the card's own 'payment received'", () => {
     });
   });
 
+  it("recognises money from a bank account onto the card, with no word for a payment", () => {
+    const CSB: BillCard = { id: "csb", bankName: "CSB Bank", last4: "6623", isActive: true };
+    const text =
+      "Rs 677.00 credited to your Edge CSB Bank RuPay Credit Card ending 6623 from a/c no. XX1614 on 9/11/26, 4:08 PM - (UPI Ref no. 123456789012). Thanks for using the Jupiter App.";
+    // XX1614 need not be an account of the user's.
+    assert.deepEqual(recogniseCardBill(credit(text), [...ALL_CARDS, CSB]), { side: "PAYMENT_RECEIVED", cardId: "csb" });
+    assert.deepEqual(recogniseCardBill(credit(text, { accountId: "csb" }), [CSB]), {
+      side: "PAYMENT_RECEIVED",
+      cardId: "csb",
+    });
+  });
+
   it("is not a refund, cashback or money into a bank account", () => {
     for (const text of [
       "Refund of Rs 499.00 received on your ICICI Bank Credit Card XX2009 from AMAZON",
       "Cashback of Rs 150 credited to your SBI Credit Card ending 4321",
       "Rs 50,000.00 credited to your A/c XX9876 on 01-10-26 by NEFT from ACME CORP. Payment received. -HDFC Bank",
+      // Credited from somewhere, but not from an account: money coming back.
+      "Rs 499.00 credited to your ICICI Bank Credit Card XX2009 from AMAZON on 06-10-26",
+      "Rs 677.00 refund credited to your Edge CSB Bank RuPay Credit Card ending 6623 from a/c no. XX1614",
+      "Rs 677.00 reversal credited to your Edge CSB Bank RuPay Credit Card ending 6623 from a/c no. XX1614",
+      "Rs 50 cashback credited to your Edge CSB Bank RuPay Credit Card ending 6623 from account XX1614",
     ]) {
       assert.equal(recogniseCardBill(credit(text), ALL_CARDS), null, text);
     }

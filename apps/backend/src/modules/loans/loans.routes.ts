@@ -3,9 +3,13 @@ import { Types } from "mongoose";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
-import { Account, Loan, LoanInstalment, Transaction } from "../../models";
+import { Account, Loan, LoanDoc, LoanInstalment, Transaction } from "../../models";
+import { istDayKey, istDayStart } from "../../time";
 import { buildSchedule, monthlyInstalmentMinor } from "../emi/emi.schedule";
+import { loanTab, tabTotals } from "./loans.allocation";
 import { LoanEditError, rescheduleLoan, setPaidCount, syncLoanStatus } from "./loans.edit";
+import { paymentsFor, reallocateLoan } from "./loans.splits";
+import { combinationsFor, duesAround } from "./loans.suggest";
 
 export const loansRouter = Router();
 loansRouter.use(requireAuth);
@@ -18,7 +22,11 @@ loansRouter.use(requireAuth);
  * totals once instalments start counting.
  */
 
-// GET /loans — every loan, with its instalments and where it stands.
+// GET /loans — every loan, with its instalments, where it stands against
+// its schedule, and each payment towards it with its share. `?totals=1`
+// wraps the list as { loans, totals }, for the tab across every running
+// loan; without it the list is the bare array it has always been, so an
+// app that predates the tab keeps reading it.
 loansRouter.get("/", async (req, res) => {
   const userId = currentUserId(req);
   const loans = await Loan.find({ userId }).sort({ status: 1, startDate: -1 }).populate("accountId");
@@ -27,35 +35,123 @@ loansRouter.get("/", async (req, res) => {
   })
     .sort({ seq: 1 })
     .populate("transactionId");
+  const standing = await loanStanding(loans, instalments);
 
-  res.json(
-    loans.map((loan) => {
-      const own = instalments.filter((instalment) => instalment.loanId.equals(loan._id));
-      return { ...loan.toJSON(), instalments: own.map((instalment) => instalment.toJSON()), ...loanProgress(own) };
-    })
-  );
+  const listed = loans.map((loan, index) => {
+    const own = instalments.filter((instalment) => instalment.loanId.equals(loan._id));
+    return { ...loan.toJSON(), instalments: own.map((instalment) => instalment.toJSON()), ...standing[index] };
+  });
+
+  if (req.query.totals === "1") {
+    const running = standing.filter((_, index) => loans[index].status === "ACTIVE");
+    return res.json({ loans: listed, totals: tabTotals(running) });
+  }
+  res.json(listed);
 });
+
+/**
+ * Where each loan stands: its progress through the schedule, its tab
+ * (ahead or behind), and every payment towards it with its share. Shared
+ * with the dashboard, so the two never disagree about a loan.
+ */
+export async function loanStanding(
+  loans: Pick<LoanDoc, "_id">[],
+  instalments: {
+    loanId: Types.ObjectId;
+    seq: number;
+    status: string;
+    amountMinor: number;
+    paidMinor?: number;
+    byHand?: boolean;
+    transactionId?: unknown;
+    dueDate: Date;
+  }[],
+  now = new Date()
+) {
+  const payments = await paymentsFor(loans.map((loan) => loan._id));
+  return loans.map((loan) => {
+    const own = instalments.filter((instalment) => instalment.loanId.equals(loan._id));
+    const paid = payments.get(String(loan._id)) ?? [];
+    return {
+      ...loanProgress(own),
+      ...loanTab(own, paid.reduce((sum, payment) => sum + payment.amountMinor, 0), now),
+      // Newest first, the way a payment history reads.
+      payments: [...paid].reverse().map((payment) => ({
+        transactionId: String(payment.transactionId),
+        occurredAt: payment.occurredAt,
+        merchant: payment.merchant,
+        amountMinor: payment.amountMinor,
+        totalMinor: payment.totalMinor,
+      })),
+    };
+  });
+}
 
 /**
  * Where a loan stands, from its instalments. Shared with the dashboard, so
  * the two never disagree about how much of a loan is left.
+ *
+ * A partly covered instalment is still owed, for what it is short by.
+ * Also reads a card EMI's instalments, which are only ever due or paid.
  */
 export function loanProgress(
-  instalments: { seq: number; status: string; amountMinor: number; dueDate: Date }[]
+  instalments: { seq: number; status: string; amountMinor: number; paidMinor?: number; dueDate: Date }[]
 ) {
   const paid = instalments.filter((instalment) => instalment.status === "PAID");
   const due = instalments
-    .filter((instalment) => instalment.status === "DUE")
+    .filter((instalment) => instalment.status === "DUE" || instalment.status === "PARTIAL")
     .sort((a, b) => a.seq - b.seq);
+  const covered = (instalment: { status: string; amountMinor: number; paidMinor?: number }) =>
+    instalment.status === "PAID" ? instalment.amountMinor : (instalment.paidMinor ?? 0);
 
   return {
     paidCount: paid.length,
-    paidMinor: paid.reduce((sum, instalment) => sum + instalment.amountMinor, 0),
+    paidMinor: instalments.reduce((sum, instalment) => sum + covered(instalment), 0),
     // What is still to pay, ignoring anything deliberately skipped.
-    remainingMinor: due.reduce((sum, instalment) => sum + instalment.amountMinor, 0),
+    remainingMinor: due.reduce((sum, instalment) => sum + instalment.amountMinor - covered(instalment), 0),
     nextDue: due[0] ? { dueDate: due[0].dueDate, amountMinor: due[0].amountMinor, seq: due[0].seq } : null,
   };
 }
+
+const IST_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+const splitSuggestionSchema = z.object({
+  amountMinor: z.coerce.number().int().nonnegative().default(0),
+  /// The payment's date, as an IST day or an instant. Today when left out.
+  on: z.string().optional(),
+  /// A payment being edited: worked out as if it were not linked yet.
+  transactionId: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
+});
+
+// GET /loans/split-suggestion — how a payment made on `on` would divide
+// across the running loans: what each has owing for that cycle, net of
+// anything an earlier payment already put towards it, and what is left
+// over (or missing) against `amountMinor`. `matches` lists every set of
+// loans whose dues add up to the amount within a rupee, smallest first.
+loansRouter.get("/split-suggestion", async (req, res) => {
+  const parsed = splitSuggestionSchema.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const { amountMinor, transactionId } = parsed.data;
+  const raw = parsed.data.on;
+  const on = raw ? (IST_DAY.test(raw) ? istDayStart(raw) : new Date(raw)) : new Date();
+  if (Number.isNaN(on.getTime())) return res.status(400).json({ error: "Unreadable date" });
+
+  const dues = await duesAround(currentUserId(req), on, {
+    excludeTransactionId: transactionId ? new Types.ObjectId(transactionId) : null,
+  });
+  const totalDueMinor = dues.reduce((sum, due) => sum + due.dueMinor, 0);
+
+  res.json({
+    amountMinor,
+    on: istDayKey(on),
+    loans: dues,
+    totalDueMinor,
+    // Positive is extra beyond what is owing, negative is short of it.
+    remainderMinor: amountMinor - totalDueMinor,
+    matches: amountMinor > 0 ? combinationsFor(dues, amountMinor).map((loanIds) => ({ loanIds })) : [],
+  });
+});
 
 // GET /loans/upcoming — what falls due in the next window, for the
 // dashboard's committed-outflow figure. Defaults to 45 days, the same as
@@ -66,14 +162,16 @@ loansRouter.get("/upcoming", async (req, res) => {
 
   const due = await LoanInstalment.find({
     userId: currentUserId(req),
-    status: "DUE",
+    status: { $in: ["DUE", "PARTIAL"] },
     dueDate: { $lte: until },
   })
     .sort({ dueDate: 1 })
     .populate({ path: "loanId", populate: { path: "accountId" } });
 
   res.json({
-    totalMinor: due.reduce((sum, instalment) => sum + instalment.amountMinor, 0),
+    // Only what is still short on each: a part already paid is not about
+    // to go out.
+    totalMinor: due.reduce((sum, instalment) => sum + instalment.amountMinor - (instalment.paidMinor ?? 0), 0),
     instalments: due,
   });
 });
@@ -221,10 +319,16 @@ loansRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   await loan.save();
 
   if (data.status === "CLOSED") {
-    await LoanInstalment.updateMany({ loanId: loan._id, status: "DUE" }, { $set: { status: "SKIPPED" } });
+    // A part already paid on one stays recorded against it; the rest of it
+    // is settled along with everything after.
+    await LoanInstalment.updateMany(
+      { loanId: loan._id, status: { $in: ["DUE", "PARTIAL"] } },
+      { $set: { status: "SKIPPED" } }
+    );
     await Loan.updateOne({ _id: loan._id }, { $set: { status: "CLOSED" } });
   } else if (data.status === "ACTIVE") {
     await LoanInstalment.updateMany({ loanId: loan._id, status: "SKIPPED" }, { $set: { status: "DUE" } });
+    await reallocateLoan(loan._id);
     await syncLoanStatus(loan._id);
   } else if (scheduleChanged || data.paidCount !== undefined) {
     await syncLoanStatus(loan._id);
@@ -236,13 +340,20 @@ loansRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
 // DELETE /loans/:id — it was added by mistake. Any transaction already
 // linked to one of its instalments is freed rather than left pointing at
 // nothing, the same as an EMI's purchase goes back to counting on its own
-// when the plan converting it is undone.
+// when the plan converting it is undone. A payment split across loans
+// keeps its other loans; this one's share becomes unassigned.
 loansRouter.delete("/:id", validObjectIdParam("id"), async (req, res) => {
   const userId = currentUserId(req);
   const loan = await Loan.findOne({ _id: req.params.id, userId });
   if (!loan) return res.status(404).json({ error: "Not found" });
 
-  await Transaction.updateMany({ userId, loanId: loan._id }, { $set: { loanId: null } });
+  const linked = await Transaction.find({ userId, $or: [{ loanId: loan._id }, { "loanSplits.loanId": loan._id }] });
+  for (const transaction of linked) {
+    const kept = transaction.loanSplits.filter((split) => !split.loanId.equals(loan._id));
+    transaction.loanSplits = kept as never;
+    transaction.loanId = kept[0]?.loanId ?? null;
+    await transaction.save();
+  }
   await LoanInstalment.deleteMany({ loanId: loan._id });
   await loan.deleteOne();
 
@@ -265,6 +376,8 @@ loansRouter.post("/instalments/:id/pay", validObjectIdParam("id"), async (req, r
   if (!instalment) return res.status(404).json({ error: "Not found" });
 
   instalment.status = "PAID";
+  instalment.byHand = true;
+  instalment.paidMinor = instalment.amountMinor;
   instalment.paidAt = new Date();
   if (parsed.data.transactionId) {
     instalment.transactionId = (
@@ -273,28 +386,8 @@ loansRouter.post("/instalments/:id/pay", validObjectIdParam("id"), async (req, r
   }
   await instalment.save();
 
-  await closeLoanIfFinished(instalment.loanId);
+  // Payments it was partly covered by move on to the next one.
+  await reallocateLoan(instalment.loanId);
 
-  res.json(instalment);
+  res.json(await LoanInstalment.findById(instalment._id).orFail());
 });
-
-/** A loan with nothing left due has run its course. */
-export async function closeLoanIfFinished(loanId: unknown): Promise<void> {
-  const stillDue = await LoanInstalment.countDocuments({ loanId, status: "DUE" });
-  if (stillDue === 0) {
-    await Loan.updateOne({ _id: loanId, status: "ACTIVE" }, { $set: { status: "CLOSED" } });
-  }
-}
-
-/**
- * The reverse of the above: an instalment that was paid, and has just been
- * put back to being due, means a loan closed by finishing its schedule is
- * not actually finished any more.
- *
- * Only ever fires on a loan that closed itself this way - one closed by
- * hand, or cancelled, is left alone. Unpicking a payment is not the same
- * decision as choosing to reopen a loan someone deliberately settled.
- */
-export async function reopenLoanIfNeeded(loanId: unknown): Promise<void> {
-  await Loan.updateOne({ _id: loanId, status: "CLOSED" }, { $set: { status: "ACTIVE" } });
-}

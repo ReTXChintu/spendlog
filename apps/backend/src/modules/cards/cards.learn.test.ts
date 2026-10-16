@@ -278,6 +278,13 @@ describe("a card's own cycle, once it is known", () => {
 });
 
 describe("what is actually left on the card", () => {
+  /// The bank account a bill is paid from. Never the card itself: a card
+  /// cannot pay its own bill (see paysItself).
+  async function paidFrom(): Promise<Types.ObjectId> {
+    const found = await Account.findOne({ userId, accountType: "BANK" });
+    return (found ?? (await Account.create({ userId, bankName: "Federal Bank", last4: "5130", accountType: "BANK" })))._id;
+  }
+
   async function cardWithBill(billMinor: number) {
     const hdfc = await Account.create({
       userId,
@@ -343,7 +350,7 @@ describe("what is actually left on the card", () => {
     // nothing on the card side to pair it with.
     await Transaction.create({
       userId,
-      accountId: hdfc._id,
+      accountId: await paidFrom(),
       cardPaymentFor: hdfc._id,
       type: "DEBIT",
       amountMinor: 14_000_00,
@@ -372,7 +379,7 @@ describe("what is actually left on the card", () => {
 
     await Transaction.create({
       userId,
-      accountId: hdfc._id,
+      accountId: await paidFrom(),
       cardPaymentFor: hdfc._id,
       type: "DEBIT",
       amountMinor: 13_950_00,
@@ -400,7 +407,7 @@ describe("what is actually left on the card", () => {
     for (const [day, rupees] of [["2026-09-22", 6000], ["2026-09-28", 5000]] as [string, number][]) {
       await Transaction.create({
         userId,
-        accountId: hdfc._id,
+        accountId: await paidFrom(),
         cardPaymentFor: hdfc._id,
         type: "DEBIT",
         amountMinor: rupees * 100,

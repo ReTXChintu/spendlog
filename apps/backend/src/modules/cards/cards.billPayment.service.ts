@@ -47,11 +47,13 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export interface CardBillContext {
   cards: BillCard[];
   accountTypeOf: Map<string, AccountType>;
+  /// A debit card's bank account, by the card's id.
+  ownerOf: Map<string, string>;
 }
 
 export async function cardBillContext(userId: Types.ObjectId): Promise<CardBillContext> {
   const accounts = await Account.find({ userId }).select(
-    "bankName issuer nickname aliases last4 accountType isActive"
+    "bankName issuer nickname aliases last4 accountType isActive linkedAccountId"
   );
   return {
     cards: accounts
@@ -66,7 +68,65 @@ export async function cardBillContext(userId: Types.ObjectId): Promise<CardBillC
         isActive: card.isActive,
       })),
     accountTypeOf: new Map(accounts.map((account) => [account._id.toString(), account.accountType])),
+    ownerOf: new Map(
+      accounts
+        .filter((account) => account.accountType === "DEBIT" && account.linkedAccountId)
+        .map((account) => [account._id.toString(), account.linkedAccountId!.toString()])
+    ),
   };
+}
+
+/**
+ * Whether a debit filed under this account would be paying its own card:
+ * filed under the card itself, or under a debit card whose account is that
+ * card. Never a bill payment, whatever the words say. A card cannot pay its
+ * own bill, so a debit on it is the card being charged - a purchase - and
+ * taking it for the bill makes that purchase vanish from every total while
+ * marking the bill paid.
+ *
+ * Checked everywhere cardPaymentFor is set: recognition, pairing, the
+ * statement reconciler, the backfills and a person's own edit.
+ */
+export function paysItself(
+  accountId: Types.ObjectId | string | null | undefined,
+  cardId: Types.ObjectId | string | null | undefined,
+  context: Pick<CardBillContext, "ownerOf">
+): boolean {
+  if (!accountId || !cardId) return false;
+  const account = accountId.toString();
+  const card = cardId.toString();
+  return account === card || context.ownerOf.get(account) === card;
+}
+
+/** paysItself, for a caller with no context loaded: one account read at most. */
+export async function paysOwnCard(
+  userId: Types.ObjectId,
+  accountId: Types.ObjectId | string | null | undefined,
+  cardId: Types.ObjectId | string | null | undefined
+): Promise<boolean> {
+  if (!accountId || !cardId) return false;
+  if (accountId.toString() === cardId.toString()) return true;
+  if (!Types.ObjectId.isValid(accountId.toString())) return false;
+  const account = await Account.findOne({ _id: accountId, userId }).select("accountType linkedAccountId");
+  return account?.accountType === "DEBIT" && account.linkedAccountId?.toString() === cardId.toString();
+}
+
+/// What a person is told when they mark a payment as the bill of the card
+/// it was made on.
+export const PAYS_ITSELF_ERROR =
+  "A card's bill cannot be paid from the card itself. Pick the account the money left, or leave the card bill unset.";
+
+/**
+ * The problem with a payment as an edit or a new row would leave it, or
+ * null when there is none: a debit marked as paying the card it is filed
+ * under.
+ */
+export async function cardPaymentProblem(
+  userId: Types.ObjectId,
+  row: { type: string; accountId?: Types.ObjectId | string | null; cardPaymentFor?: Types.ObjectId | string | null }
+): Promise<string | null> {
+  if (row.type !== "DEBIT" || !row.cardPaymentFor) return null;
+  return (await paysOwnCard(userId, row.accountId, row.cardPaymentFor)) ? PAYS_ITSELF_ERROR : null;
 }
 
 /**
@@ -212,6 +272,8 @@ async function pairSides(
     .filter(({ candidate, other, otherCard }) => {
       if (!other || other.side === match.side) return false;
       if (ourCard && otherCard && ourCard !== otherCard) return false;
+      // A debit on the very card it would be paying is a purchase on it.
+      if (paysItself((isDebit ? transaction : candidate).accountId, ourCard ?? otherCard, context)) return false;
       // Already a transfer to somewhere else: someone else's pair.
       if (candidate.isTransfer && candidate.transferAccountId && !candidate.cardPaymentFor) return false;
       return true;
@@ -267,6 +329,9 @@ export async function markCardBillPayment(
       ? { side: "PAYMENT", cardId: transaction.cardPaymentFor.toString() }
       : recognise(transaction, known);
   if (!match) return false;
+  // A debit on the card it names is that card being charged, however the
+  // message reads (see paysItself).
+  if (transaction.type === "DEBIT" && paysItself(transaction.accountId, match.cardId, known)) return false;
 
   if (await applyMatch(transaction, match)) await transaction.save();
   await pairSides(transaction, match, known);
@@ -274,6 +339,72 @@ export async function markCardBillPayment(
   // card's side written in (see cards.billLeg).
   await ensureCardBillLeg(transaction);
   return true;
+}
+
+/// How far apart two "payment received" messages for one payment can be.
+export const PAYMENT_TWIN_DAYS = 3;
+
+/**
+ * The payment already on a card that a "payment received" message is a
+ * second report of, if there is one.
+ *
+ * Issuers say it twice. HDFC texts "PAYMENT OF Rs. 4031.00 RECEIVED
+ * TOWARDS YOUR CREDIT CARD" the evening it lands, then "Online Payment of
+ * Rs.4031 ... was credited to your card" the next morning: hours apart and
+ * worded differently, so the twenty-minute duplicate check never sees it.
+ * Taken for a second payment, it marks the bill paid twice over.
+ *
+ * The twin is a payment credit on the same card - the card's side of a
+ * bill paired with its bank debit, one written in for it (autoLeg), or one
+ * with no debit at all - of the same amount, within three days. Not when a
+ * debit marked for this card, of the same amount, is still waiting for its
+ * card side: then two payments were made, and this message is the second
+ * one's.
+ */
+export async function findPaymentTwin(params: {
+  userId: Types.ObjectId;
+  cardId: Types.ObjectId;
+  amountMinor: number;
+  occurredAt: Date;
+  excludeId?: Types.ObjectId;
+}): Promise<HydratedDocument<TransactionDoc> | null> {
+  const at = params.occurredAt.getTime();
+  const twins = await Transaction.find({
+    userId: params.userId,
+    ...(params.excludeId ? { _id: { $ne: params.excludeId } } : {}),
+    type: "CREDIT",
+    accountId: params.cardId,
+    amountMinor: params.amountMinor,
+    isTransfer: true,
+    cardPaymentFor: null,
+    "refundOf.0": { $exists: false },
+    occurredAt: { $gte: new Date(at - PAYMENT_TWIN_DAYS * DAY_MS), $lte: new Date(at + PAYMENT_TWIN_DAYS * DAY_MS) },
+  });
+  if (twins.length === 0) return null;
+
+  const waiting = await Transaction.exists({
+    userId: params.userId,
+    type: "DEBIT",
+    cardPaymentFor: params.cardId,
+    amountMinor: params.amountMinor,
+    transferPairId: null,
+    occurredAt: {
+      $gte: new Date(at - CARD_POSTS_AFTER_DAYS * DAY_MS),
+      $lte: new Date(at + CARD_POSTS_BEFORE_DAYS * DAY_MS),
+    },
+  });
+  if (waiting) return null;
+
+  // The one already paired with its debit, then one whose own words say a
+  // payment arrived, then the closest in time.
+  const says = (row: HydratedDocument<TransactionDoc>) =>
+    recogniseCardBill({ text: wordsOf(row), type: "CREDIT", accountType: "CARD" }, [])?.side === "PAYMENT_RECEIVED";
+  const distance = (row: HydratedDocument<TransactionDoc>) => Math.abs(row.occurredAt.getTime() - at);
+  const ranked = twins.map((row) => ({ row, paired: Boolean(row.transferPairId), says: says(row) }));
+  ranked.sort(
+    (a, b) => Number(b.paired) - Number(a.paired) || Number(b.says) - Number(a.says) || distance(a.row) - distance(b.row)
+  );
+  return ranked[0].row;
 }
 
 /// Raised whenever the recogniser learns enough that rows it passed over
@@ -394,6 +525,8 @@ export async function backfillCardBillAccounts(userId: Types.ObjectId): Promise<
 
     const routed = await cardBillAccount(userId, text, parsed, context);
     if (!routed || sameAccount(routed.accountId, row.accountId)) continue;
+    // Never onto the card the debit is marked as paying.
+    if (row.type === "DEBIT" && paysItself(routed.accountId, row.cardPaymentFor, context)) continue;
 
     row.accountId = routed.accountId;
     const partner = row.transferPairId ? await Transaction.findById(row.transferPairId) : null;

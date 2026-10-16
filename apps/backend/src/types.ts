@@ -61,7 +61,10 @@ export type EmiRole = (typeof EMI_ROLES)[number];
 export const LOAN_STATUSES = ["ACTIVE", "CLOSED", "CANCELLED"] as const;
 export type LoanStatus = (typeof LOAN_STATUSES)[number];
 
-export const LOAN_INSTALMENT_STATUSES = ["DUE", "PAID", "SKIPPED"] as const;
+// PARTIAL: payments reach part of the way into it, and the rest is still
+// owed. Payments fill instalments oldest first, so at most one of a loan's
+// instalments is ever partly covered.
+export const LOAN_INSTALMENT_STATUSES = ["DUE", "PARTIAL", "PAID", "SKIPPED"] as const;
 export type LoanInstalmentStatus = (typeof LOAN_INSTALMENT_STATUSES)[number];
 
 export const COMMITMENT_KINDS = ["RENT", "SIP", "INSURANCE", "LOAN", "OTHER"] as const;

@@ -83,14 +83,29 @@ async function debit(userId: Types.ObjectId, amountMinor: number, occurredAt: Da
 describe("matching a monthly debit to its loan instalment", () => {
   it("ticks off the instalment it pays", async () => {
     const userId = await makeUser();
+    const loan = await makeLoan(userId, { months: 1 });
+
+    const payment = await debit(userId, 500000, new Date("2026-09-10T06:00:00Z"));
+    assert.equal(await matchLoanInstalment(payment), true);
+
+    const first = await LoanInstalment.findOne({ loanId: loan._id, seq: 1 }).orFail();
+    assert.equal(first.status, "PAID");
+    assert.equal(String(first.transactionId), String(payment._id));
+  });
+
+  it("pays the oldest instalment still owed, even when it matched a later one", async () => {
+    const userId = await makeUser();
     const loan = await makeLoan(userId);
 
+    // September's was never paid, so October's debit settles that first
+    // and the loan is a month behind - not up to date with a gap in it.
     const payment = await debit(userId, 500000, new Date("2026-10-10T06:00:00Z"));
     assert.equal(await matchLoanInstalment(payment), true);
 
-    const second = await LoanInstalment.findOne({ loanId: loan._id, seq: 2 }).orFail();
-    assert.equal(second.status, "PAID");
-    assert.equal(String(second.transactionId), String(payment._id));
+    const [first, second] = await LoanInstalment.find({ loanId: loan._id, seq: { $lte: 2 } }).sort({ seq: 1 });
+    assert.equal(first.status, "PAID");
+    assert.equal(String(first.transactionId), String(payment._id));
+    assert.equal(second.status, "DUE");
   });
 
   it("counts the payment in full - a loan has no parent to keep out of the totals", async () => {
@@ -183,17 +198,19 @@ describe("matching a monthly debit to its loan instalment", () => {
 });
 
 describe("claiming a loan by hand", () => {
-  it("claims the oldest still-due instalment, regardless of the amount", async () => {
+  it("puts any amount towards the oldest still-due instalment", async () => {
     const userId = await makeUser();
     const loan = await makeLoan(userId);
 
     // Nothing about this figure lines up with the schedule - a hand pick
-    // carries its own certainty about which loan is meant.
+    // carries its own certainty about which loan is meant. It covers what
+    // it paid, and no more.
     const payment = await debit(userId, 99, new Date("2026-09-10T10:00:00Z"));
     await attachToLoan(payment, loan._id);
 
     const first = await LoanInstalment.findOne({ loanId: loan._id, seq: 1 }).orFail();
-    assert.equal(first.status, "PAID");
+    assert.equal(first.status, "PARTIAL");
+    assert.equal(first.paidMinor, 99);
     assert.equal(String(first.transactionId), String(payment._id));
 
     const stored = await Transaction.findById(payment._id).orFail();

@@ -127,6 +127,19 @@ const CARD_INSTRUMENT_RE = new RegExp(
   "i"
 );
 
+// The card was what was charged: "Rs.600.00 debited to your Edge CSB Bank
+// RuPay Credit Card ending 6623", which is how Jupiter words a purchase on
+// the CSB card. Its "UPI Ref no." is the RuPay card paying over UPI, not a
+// bank account, so nothing else in the message says otherwise. The words
+// in between may not name an account: "debited from your account towards
+// HDFC Credit Card" is a bank paying the card.
+const CARD_CHARGED_RE = new RegExp(
+  "\\b(?:debited|charged)\\s+(?:to|on|from)\\s+(?:your\\s+|ur\\s+)?" +
+    "(?:(?!(?:to|towards|for|of|a\\/c|acct|account|savings)\\b)[a-z&]+\\s+){0,5}?" +
+    "(?:credit\\s+)?card\\b(?!\\s*(?:bill|payment|pymt|pmt|dues?)\\b)",
+  "i"
+);
+
 // Signs the money came out of a bank account rather than a card. "account"
 // only when it is not a card's: issuers say "Credit Card Account". A bill
 // paid through BBPS or a bill desk came from a bank too - a card cannot
@@ -180,6 +193,15 @@ const PAYMENT_RECEIVED_RE = new RegExp(
   "\\bpayment\\b.{0,80}?\\b(?:received|credited|realised|realized|posted|accepted|successful(?:ly)?|processed)\\b" +
     "|\\b(?:received|credited)\\b.{0,30}?\\bpayment\\b" +
     "|\\bthank\\s*you\\s*for\\s*(?:your\\s*|the\\s*)?payment\\b",
+  "i"
+);
+// Money onto a card from a bank account, with no word for a payment: "Rs
+// 677.00 credited to your Edge CSB Bank RuPay Credit Card ending 6623 from
+// a/c no. XX1614". Only from an account - "credited to your Credit Card
+// from AMAZON" is a merchant giving money back.
+const CARD_CREDITED_FROM_ACCOUNT_RE = new RegExp(
+  "\\bcredited\\s+(?:to|on|in(?:to)?)\\s+(?:your\\s+|ur\\s+)?(?:[a-z&]+\\s+){0,5}?credit\\s*card\\b" +
+    ".{0,60}?\\bfrom\\s+(?:your\\s+|ur\\s+)?(?:bank\\s+)?(?:a\\/c|acct|account|savings)\\b",
   "i"
 );
 const CARD_SIDE_WORD_RE = /\bcard\b|\bcc\b/i;
@@ -316,7 +338,7 @@ export function pickCard(params: {
 /** Whether a debit's words say it paid a card bill. */
 function isBillPayment(text: string, input: CardBillInput, cards: BillCard[]): boolean {
   if (LOAN_OR_EMI_RE.test(text)) return false;
-  if (CARD_INSTRUMENT_RE.test(text)) return false;
+  if (CARD_INSTRUMENT_RE.test(text) || CARD_CHARGED_RE.test(text)) return false;
   // Filed under a card, and nothing says a bank account paid it: this is
   // the card being charged. (Filed under a card *and* naming the account
   // debited is the parser seeing "Credit Card XX5678" in a bank's message
@@ -342,7 +364,7 @@ function isBillPayment(text: string, input: CardBillInput, cards: BillCard[]): b
 function isPaymentReceived(text: string): boolean {
   if (LOAN_OR_EMI_RE.test(text) || NOT_A_PAYMENT_RE.test(text)) return false;
   if (BANK_CREDITED_RE.test(text)) return false;
-  return CARD_SIDE_WORD_RE.test(text) && PAYMENT_RECEIVED_RE.test(text);
+  return CARD_SIDE_WORD_RE.test(text) && (PAYMENT_RECEIVED_RE.test(text) || CARD_CREDITED_FROM_ACCOUNT_RE.test(text));
 }
 
 /// How far apart the two sides of one payment may be: the card posts it

@@ -5,6 +5,7 @@ import '../models/models.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
 import '../utils/format.dart';
+import '../utils/loan_tab.dart';
 import '../services/reminder_service.dart';
 import '../widgets/card_picker.dart';
 import '../widgets/commitment_amount.dart';
@@ -15,12 +16,12 @@ import '../widgets/home/investments_tile.dart';
 import '../widgets/home/monthly_budget_card.dart';
 import '../widgets/home/plan_warnings.dart';
 import '../widgets/home/wallet.dart';
-import '../widgets/loan_dialog.dart';
 import '../widgets/pocket_money.dart';
 import '../widgets/state_block.dart';
 import '../widgets/what_came_in_sheet.dart';
 import 'accounts_screen.dart';
 import 'investments/investments_screen.dart';
+import 'loans_screen.dart';
 import 'monthly_budget_screen.dart';
 import 'passbook_screen.dart';
 import 'people_screen.dart';
@@ -231,8 +232,11 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
     await load();
   }
 
-  Future<void> _editLoan(Loan loan) async {
-    if (await LoanDialog.show(context, loan: loan)) await load();
+  /// Where the loan stands - its instalments and the payments towards it
+  /// - with editing it one tap further in.
+  Future<void> _openLoan(Loan loan) async {
+    await LoansScreen.open(context, loanId: loan.id);
+    await load();
   }
 
   @override
@@ -371,12 +375,13 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
             const _Group('Loans'),
             _Heading(
               title: '${formatMoney(data.loanMonthlyMinor)} a month',
-              sub: '${formatMoneyShort(data.loanRemainingMinor)} still to repay across '
-                  '${data.loanCount == 1 ? 'one loan' : '${data.loanCount} loans'}. Tap one to change it.',
+              sub: '${loanTotalLine(data.loanTotals.balanceMinor)} · '
+                  '${formatMoneyShort(data.loanRemainingMinor)} still to repay across '
+                  '${data.loanCount == 1 ? 'one loan' : '${data.loanCount} loans'}. Tap one for its instalments.',
             ),
             const SizedBox(height: 12),
             HomeGrid(items: [
-              for (final loan in data.loans) GridItem(_LoanTile(loan: loan, onTap: () => _editLoan(loan))),
+              for (final loan in data.loans) GridItem(_LoanTile(loan: loan, onTap: () => _openLoan(loan))),
             ]),
           ],
         ],
@@ -866,11 +871,25 @@ class _LoanTile extends StatelessWidget {
             '${loan.paidCount} of ${loan.months} paid · ${formatMoneyShort(loan.remainingMinor)} left',
             style: TextStyle(fontSize: 11.5, color: c.muted),
           ),
+          // Ahead or behind on what has fallen due: the figure a single
+          // payment across every loan each month most needs checking.
+          if (loan.balanceMinor != 0)
+            Text(
+              loanTabShort(loan.balanceMinor),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                color: loan.balanceMinor < 0 ? c.warn : c.credit,
+              ),
+            ),
           if (next != null)
             Text(
+              // What is still short on it: part may already be paid.
               overdue
-                  ? '${formatMoneyShort(next.amountMinor)} was due ${formatShortDate(next.dueDate)}'
-                  : 'Next ${formatMoneyShort(next.amountMinor)} on ${formatShortDate(next.dueDate)}',
+                  ? '${formatMoneyShort(next.shortMinor)} was due ${formatShortDate(next.dueDate)}'
+                  : 'Next ${formatMoneyShort(next.shortMinor)} on ${formatShortDate(next.dueDate)}',
               style: TextStyle(
                 fontSize: 11.5,
                 fontWeight: overdue ? FontWeight.w700 : FontWeight.w600,

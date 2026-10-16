@@ -12,6 +12,7 @@ import '../services/sms_service.dart';
 import '../services/update_service.dart';
 import '../theme.dart';
 import '../utils/format.dart';
+import '../utils/loan_tab.dart';
 import '../version.dart';
 import '../widgets/commitment_amount.dart';
 import '../widgets/family_section.dart';
@@ -1075,7 +1076,7 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
                             ? 'Closed'
                             : 'Cancelled'
                         : '${loan.paidCount} of ${loan.months} paid · '
-                            '${formatMoney(loan.remainingMinor)} left',
+                            '${formatMoney(loan.remainingMinor)} left · ${loanTabShort(loan.balanceMinor)}',
                   ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,

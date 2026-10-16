@@ -219,8 +219,28 @@ export interface LoanInstalment {
   seq: number;
   dueDate: string;
   amountMinor: number;
-  status: "DUE" | "PAID" | "SKIPPED";
+  /** PARTIAL: payments reach part of the way into it. */
+  status: "DUE" | "PARTIAL" | "PAID" | "SKIPPED";
+  /** How much of amountMinor payments cover. */
+  paidMinor?: number;
+  /** Ticked off by hand rather than covered by a payment. */
+  byHand?: boolean;
   transactionId: string | null;
+}
+
+/** One loan's part of a repayment. */
+export interface LoanSplit {
+  loanId: string;
+  amountMinor: number;
+}
+
+/** Ahead (positive) or behind (negative) on what has fallen due so far. */
+export interface LoanTabTotals {
+  paidMinor: number;
+  dueToDateMinor: number;
+  balanceMinor: number;
+  aheadMinor: number;
+  behindMinor: number;
 }
 
 export interface Loan {
@@ -239,9 +259,25 @@ export interface Loan {
   /** Absent on the dashboard's copy, which only needs where it stands. */
   instalments?: LoanInstalment[];
   paidCount: number;
+  /** Everything paid towards it: its share of every payment, plus any
+      instalment ticked off by hand. */
   paidMinor: number;
   remainingMinor: number;
-  nextDue: { seq: number; dueDate: string; amountMinor: number } | null;
+  nextDue: {
+    seq: number;
+    dueDate: string;
+    amountMinor: number;
+    on?: string;
+    alreadyCoveredMinor?: number;
+  } | null;
+  /** The tab. Absent from an older server. */
+  dueToDateMinor?: number;
+  balanceMinor?: number;
+  aheadMinor?: number;
+  behindMinor?: number;
+  coveredThrough?: string | null;
+  /** Each payment towards it and its share; only on the loans list. */
+  payments?: { transactionId: string; occurredAt: string; merchant: string | null; amountMinor: number; totalMinor: number }[];
 }
 
 export interface AiSettings {
@@ -589,6 +625,10 @@ export interface Transaction {
   /** The loan this repays. Counts as spending in full - a loan has no
       purchase to keep out of the totals the way an EMI's parent does. */
   loanId?: string | null;
+  /** Which loans this repays and how much went to each. loanId is the first. */
+  loanSplits?: LoanSplit[];
+  /** The part of a loan repayment not put down to any loan yet. */
+  loanUnassignedMinor?: number;
   split: TransactionSplit | null;
   isSettlement: boolean;
   /** Who else it was for or from. On a payment, what each owes back; on
@@ -881,7 +921,7 @@ export interface DashboardData {
   picks: CardPicks;
   needsCategory: { yesterday: number; month: number };
   emis: { count: number; monthlyMinor: number; remainingMinor: number; plans: EmiPlan[] };
-  loans: { count: number; monthlyMinor: number; remainingMinor: number; loans: Loan[] };
+  loans: { count: number; monthlyMinor: number; remainingMinor: number; totals?: LoanTabTotals; loans: Loan[] };
   owed: { balanceMinor: number };
   expiringPerks: Perk[];
   statements: {
