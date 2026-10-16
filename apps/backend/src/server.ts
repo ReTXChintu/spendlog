@@ -11,6 +11,7 @@ import { runNightlyDriftCheck } from "./modules/accounts/accounts.drift";
 import { runAccountUnknownBackfill, runStatedBalanceBackfill } from "./modules/accounts/accounts.statedBackfill";
 import { runMissingCreditBackfill } from "./modules/accounts/accounts.missingCredits";
 import { runCardBillAccountBackfill, runCardBillBackfill } from "./modules/cards/cards.billPayment.service";
+import { runCardBillLegBackfill } from "./modules/cards/cards.billLeg";
 import { runDailyFundRefresh } from "./modules/funds/funds.cache";
 import { runTransferLegBackfill } from "./modules/transactions/transactions.transfer";
 import { syncAllConnectedEmails } from "./modules/ingestion/gmail.service";
@@ -86,10 +87,14 @@ async function start() {
   // legs that are already on the right accounts. Then every transfer still
   // recorded as one row is given its other leg - after the card bills, so
   // a bill's two sides are paired as a bill and not taken for a transfer.
+  // Between the two, every card bill still recorded as the bank's debit
+  // alone is given its card side, once the bills are all marked.
   const legsDone = runCardBillAccountBackfill()
     .catch((err) => console.error("Card bill account backfill failed:", err))
     .then(() => runCardBillBackfill())
     .catch((err) => console.error("Card bill backfill failed:", err))
+    .then(() => runCardBillLegBackfill())
+    .catch((err) => console.error("Card bill leg backfill failed:", err))
     .then(() => runTransferLegBackfill())
     .catch((err) => console.error("Transfer leg backfill failed:", err));
   // The bank's balance read off every message already stored, and the

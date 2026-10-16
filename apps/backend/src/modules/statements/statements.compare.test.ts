@@ -17,7 +17,7 @@ function line(fields: { id: string; day: string; amountMinor: number; type?: "DE
   };
 }
 
-function row(fields: { id: string; at: string; amountMinor: number; type?: "DEBIT" | "CREDIT"; accountId?: string | null }): CompareRow {
+function row(fields: { id: string; at: string; amountMinor: number; type?: "DEBIT" | "CREDIT"; accountId?: string | null; autoLeg?: boolean }): CompareRow {
   return {
     transactionId: fields.id,
     occurredAt: new Date(fields.at),
@@ -25,6 +25,7 @@ function row(fields: { id: string; at: string; amountMinor: number; type?: "DEBI
     amountMinor: fields.amountMinor,
     type: fields.type ?? "DEBIT",
     accountId: fields.accountId === undefined ? own : fields.accountId,
+    autoLeg: fields.autoLeg ?? false,
   };
 }
 
@@ -83,5 +84,40 @@ describe("a statement beside the ledger", () => {
       new Set([own])
     );
     assert.deepEqual(result.onStatementNotInApp, []);
+  });
+
+  it("matches a card's bill payment line to the side SpendLog wrote in, days before the card posted it", () => {
+    const result = compareLines(
+      [line({ id: "pay", day: "2026-09-18", amountMinor: 12_000_00, type: "CREDIT", kind: "PAYMENT" })],
+      [
+        // Written in at the moment the bank let the money go, four days
+        // before the card posted it.
+        row({ id: "leg", at: "2026-09-14T10:00:00+05:30", amountMinor: 12_000_00, type: "CREDIT", autoLeg: true }),
+        // The bank's debit, on another account and the other way.
+        row({ id: "debit", at: "2026-09-14T10:00:00+05:30", amountMinor: 12_000_00, accountId: elsewhere }),
+      ],
+      new Set([own])
+    );
+    assert.deepEqual(result.pairs, [{ lineId: "pay", transactionId: "leg" }]);
+    assert.deepEqual(result.onStatementNotInApp, []);
+    assert.deepEqual(result.inAppNotOnStatement, []);
+  });
+
+  it("matches the card's own payment row too, and never reports a payment line missing", () => {
+    const result = compareLines(
+      [
+        line({ id: "pay", day: "2026-09-18", amountMinor: 12_000_00, type: "CREDIT", kind: "PAYMENT" }),
+        line({ id: "unseen", day: "2026-09-25", amountMinor: 3_000_00, type: "CREDIT", kind: "PAYMENT" }),
+      ],
+      [
+        row({ id: "received", at: "2026-09-17T10:00:00+05:30", amountMinor: 12_000_00, type: "CREDIT" }),
+        // Four days before is too early for a row a message dated itself.
+        row({ id: "stale", at: "2026-09-21T10:00:00+05:30", amountMinor: 3_000_00, type: "CREDIT" }),
+      ],
+      new Set([own])
+    );
+    assert.deepEqual(result.pairs, [{ lineId: "pay", transactionId: "received" }]);
+    assert.deepEqual(result.onStatementNotInApp, []);
+    assert.deepEqual(result.inAppNotOnStatement.map((r) => r.transactionId), ["stale"]);
   });
 });

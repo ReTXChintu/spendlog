@@ -4,6 +4,7 @@ import { Account, AccountDoc, Transaction, TransactionDoc } from "../../models";
 import { TransactionType } from "../../types";
 import { accountLabel } from "../accounts/accounts.drift";
 import { transferCategoryId } from "../categories/categories.system";
+import { CARD_POSTS_AFTER_DAYS, CARD_POSTS_BEFORE_DAYS, mayBeCardPayment } from "../cards/cards.billPayment";
 
 /**
  * Every transfer between the user's own accounts, as two real rows.
@@ -41,12 +42,15 @@ import { transferCategoryId } from "../categories/categories.system";
  * other and is only ever unpaired.
  *
  * Credit cards are left out on both sides: paying a card's bill is
- * cardPaymentFor, with a pairing of its own in cards.billPayment.service.
+ * cardPaymentFor, with a pairing of its own in cards.billPayment.service,
+ * and its card side found or written in by cards.billLeg - on the same
+ * pattern, with these helpers.
  */
 
 /// The two sides of one transfer can post days apart - a NEFT on a
 /// Friday evening lands on Monday.
 const LEG_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** What happened to the other side of a transfer, for the client to say so. */
 export interface TransferLegResult {
@@ -58,10 +62,13 @@ export interface TransferLegResult {
   /// Which way the money moved that account.
   type: TransactionType;
   amountMinor: number;
+  /// Set on the card's side of a bill payment, so the client can word it
+  /// as one ("paid into HDFC ••1377"). Absent for a transfer.
+  kind?: "CARD_BILL";
 }
 
-type AccountRow = Pick<AccountDoc, "_id" | "accountType" | "linkedAccountId" | "bankName" | "nickname" | "last4">;
-type Accounts = Map<string, AccountRow>;
+export type AccountRow = Pick<AccountDoc, "_id" | "accountType" | "linkedAccountId" | "bankName" | "nickname" | "last4">;
+export type Accounts = Map<string, AccountRow>;
 
 export async function accountsOf(userId: Types.ObjectId): Promise<Accounts> {
   const accounts = await Account.find({ userId }).select("accountType linkedAccountId bankName nickname last4").lean<AccountRow[]>();
@@ -74,7 +81,7 @@ export async function accountsOf(userId: Types.ObjectId): Promise<Accounts> {
  * a starting balance - a leg belongs on the bank whether or not anyone has
  * told SpendLog what is in it.
  */
-function ownerOf(id: Types.ObjectId | null | undefined, accounts: Accounts): AccountRow | null {
+export function ownerOf(id: Types.ObjectId | null | undefined, accounts: Accounts): AccountRow | null {
   const account = id ? accounts.get(id.toString()) : undefined;
   if (!account) return null;
   if (account.accountType === "DEBIT" && account.linkedAccountId) {
@@ -112,11 +119,11 @@ function hereOf(transaction: Pick<TransactionDoc, "accountId" | "accountUnknown"
 }
 
 /** Whether a row is the unconfirmed leg written in for this transfer. */
-function isUnconfirmedLegOf(leg: Pick<TransactionDoc, "autoLeg" | "autoLegOf">, transfer: { _id: Types.ObjectId }): boolean {
+export function isUnconfirmedLegOf(leg: Pick<TransactionDoc, "autoLeg" | "autoLegOf">, transfer: { _id: Types.ObjectId }): boolean {
   return Boolean(leg.autoLeg) && Boolean(leg.autoLegOf?.equals(transfer._id));
 }
 
-function resultOf(action: TransferLegResult["action"], leg: HydratedDocument<TransactionDoc>, account: AccountRow): TransferLegResult {
+export function resultOf(action: TransferLegResult["action"], leg: HydratedDocument<TransactionDoc>, account: AccountRow): TransferLegResult {
   return {
     action,
     transactionId: leg._id.toString(),
@@ -250,7 +257,7 @@ export type TransferSnapshot = Pick<
   "type" | "amountMinor" | "occurredAt" | "accountId" | "isTransfer" | "transferAccountId" | "transferPairId"
 >;
 
-function sameId(a: Types.ObjectId | null | undefined, b: Types.ObjectId | null | undefined): boolean {
+export function sameId(a: Types.ObjectId | null | undefined, b: Types.ObjectId | null | undefined): boolean {
   return a && b ? a.equals(b) : !a && !b;
 }
 
@@ -394,6 +401,11 @@ export async function handOverLegs(
  * direction and amount, within three days. Null when there is none, or
  * when the message names no account - one nobody can place is no evidence
  * for a particular account's leg.
+ *
+ * On a credit card the leg is the card's side of a bill payment, written
+ * in at the moment the bank let the money go. The card's own message
+ * comes up to four days after that (a day before, at most), and is never
+ * money coming back: a refund of the same amount is a refund.
  */
 export async function findAutoLeg(params: {
   userId: Types.ObjectId;
@@ -401,20 +413,27 @@ export async function findAutoLeg(params: {
   type: TransactionType;
   amountMinor: number;
   occurredAt: Date;
+  /// The message's words, for telling a card's payment from its refund.
+  rawText?: string | null;
 }): Promise<HydratedDocument<TransactionDoc> | null> {
   if (!params.accountId) return null;
   const accounts = await accountsOf(params.userId);
   const owner = ownerOf(params.accountId, accounts);
   if (!owner) return null;
+  const onCard = owner.accountType === "CARD";
+  if (onCard && !mayBeCardPayment(params.rawText)) return null;
 
   const at = params.occurredAt.getTime();
+  const window = onCard
+    ? { $gte: new Date(at - CARD_POSTS_AFTER_DAYS * DAY_MS), $lte: new Date(at + CARD_POSTS_BEFORE_DAYS * DAY_MS) }
+    : { $gte: new Date(at - LEG_WINDOW_MS), $lte: new Date(at + LEG_WINDOW_MS) };
   const legs = await Transaction.find({
     userId: params.userId,
     autoLeg: true,
     type: params.type,
     amountMinor: params.amountMinor,
     accountId: { $in: familyOf(owner, accounts) },
-    occurredAt: { $gte: new Date(at - LEG_WINDOW_MS), $lte: new Date(at + LEG_WINDOW_MS) },
+    occurredAt: window,
   });
   legs.sort((a, b) => Math.abs(a.occurredAt.getTime() - at) - Math.abs(b.occurredAt.getTime() - at));
   return legs[0] ?? null;

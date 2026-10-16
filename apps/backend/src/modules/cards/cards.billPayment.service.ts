@@ -5,7 +5,14 @@ import { AccountType } from "../../types";
 import { findAccount, resolveAccount } from "../../parsing/accounts";
 import { billPaymentAccount, ParsedTransaction, parseTransactionText } from "../../parsing/parser";
 import { transferCategoryId } from "../categories/categories.system";
-import { BillCard, CardBillMatch, recogniseCardBill } from "./cards.billPayment";
+import {
+  BillCard,
+  CARD_POSTS_AFTER_DAYS,
+  CARD_POSTS_BEFORE_DAYS,
+  CardBillMatch,
+  recogniseCardBill,
+} from "./cards.billPayment";
+import { ensureCardBillLeg } from "./cards.billLeg";
 
 /**
  * Marking card bill payments as they arrive, and in what was imported
@@ -34,10 +41,6 @@ import { BillCard, CardBillMatch, recogniseCardBill } from "./cards.billPayment"
  * the same hook as every other write.
  */
 
-/// How far apart the two sides of one payment may be: the card posts it
-/// up to a few days after the bank lets it go, never much before.
-const CARD_POSTS_AFTER_DAYS = 4;
-const CARD_POSTS_BEFORE_DAYS = 1;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** What recognising needs to know about a user's accounts, loaded once. */
@@ -267,6 +270,9 @@ export async function markCardBillPayment(
 
   if (await applyMatch(transaction, match)) await transaction.save();
   await pairSides(transaction, match, known);
+  // No card side that reads as one: a plainer credit on the card, or the
+  // card's side written in (see cards.billLeg).
+  await ensureCardBillLeg(transaction);
   return true;
 }
 

@@ -345,6 +345,24 @@ function isPaymentReceived(text: string): boolean {
   return CARD_SIDE_WORD_RE.test(text) && PAYMENT_RECEIVED_RE.test(text);
 }
 
+/// How far apart the two sides of one payment may be: the card posts it
+/// up to a few days after the bank lets it go, never much before.
+export const CARD_POSTS_AFTER_DAYS = 4;
+export const CARD_POSTS_BEFORE_DAYS = 1;
+
+/**
+ * Whether money arriving on a card could be a bill payment, by its words:
+ * anything but money coming back (a refund, a reversal, cashback) or a
+ * loan. Looser than recognising "payment received" - a statement row or
+ * a terse alert often says no more than "credited" - and meant only for
+ * a credit that already sits beside a debit of the same amount marked as
+ * paying that card.
+ */
+export function mayBeCardPayment(text: string | null | undefined): boolean {
+  const words = normalise(text ?? "");
+  return !NOT_A_PAYMENT_RE.test(words) && !LOAN_OR_EMI_RE.test(words);
+}
+
 /**
  * Whether a transaction is a card bill being paid, which side of it, and
  * which card - or null when it is anything else.

@@ -85,6 +85,18 @@ async function sms(userId: Types.ObjectId, rawText: string, day: string) {
   return result.transaction!;
 }
 
+/**
+ * The card's own message for a bill already seen from the bank: it takes
+ * over the card side written in for that payment (cards.billLeg) rather
+ * than arriving as a row of its own.
+ */
+async function cardSms(userId: Types.ObjectId, rawText: string, day: string) {
+  const result = await ingestRawMessage({ userId, rawText, source: "SMS", sourceRef: null, receivedAt: on(day) });
+  assert.equal(result.status, "duplicate", rawText);
+  assert.equal(result.transaction!.autoLeg, false);
+  return result.transaction!;
+}
+
 async function extraIncome(userId: Types.ObjectId): Promise<number> {
   const [row] = await Transaction.aggregate<{ total: number }>([
     { $match: await extraIncomeMatch(userId) },
@@ -122,7 +134,7 @@ describe("a card bill imported from SMS", () => {
     assert.equal(paid.countedAmountMinor, 0);
     assert.equal(paid.countedReason, "CARD_BILL");
 
-    const received = await sms(userId, BILL_RECEIVED, "2026-10-06");
+    const received = await cardSms(userId, BILL_RECEIVED, "2026-10-06");
     assert.equal(received.type, "CREDIT");
     assert.equal(received.countedAmountMinor, 0);
 
@@ -288,7 +300,7 @@ describe("the account a card bill is filed under", () => {
 
     await sms(userId, PURCHASE, "2026-10-03");
     const paid = await sms(userId, BILL_PAID, "2026-10-05");
-    const received = await sms(userId, BILL_RECEIVED, "2026-10-06");
+    const received = await cardSms(userId, BILL_RECEIVED, "2026-10-06");
 
     // Paired, each leg on its own account and naming the other's.
     const [debit, credit] = await Promise.all([Transaction.findById(paid._id), Transaction.findById(received._id)]);

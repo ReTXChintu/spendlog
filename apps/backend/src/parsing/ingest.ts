@@ -11,6 +11,7 @@ import { parseStatedFigures } from "./balance";
 import { parseTransactionText } from "./parser";
 import { horizonFor } from "../modules/ledger/ledger.horizon";
 import { cardBillAccount, cardBillContext, markCardBillPayment } from "../modules/cards/cards.billPayment.service";
+import { mayBeCardPayment } from "../modules/cards/cards.billPayment";
 import { detectAfterStatedBalance } from "../modules/accounts/accounts.missingCredits";
 import {
   adoptAutoLeg,
@@ -112,11 +113,26 @@ export async function ingestRawMessage(params: {
   if (duplicate?.autoLeg && !(await couldBeSameAccount(params.userId, duplicate.accountId, accountId))) {
     duplicate = null;
   }
+  // Nor is a refund landing on a card the card's side of a bill payment,
+  // however close its amount and time.
+  if (
+    duplicate?.autoLeg &&
+    duplicate.accountId &&
+    context.accountTypeOf.get(duplicate.accountId.toString()) === "CARD" &&
+    !mayBeCardPayment(params.rawText)
+  ) {
+    duplicate = null;
+  }
 
-  // The other account's side of a transfer, written in because its bank
-  // sent nothing - until now. The message becomes that row rather than a
-  // second one beside it, and the pairing stays.
-  const autoLeg = duplicate ? (duplicate.autoLeg ? duplicate : null) : await findAutoLeg(found);
+  // The other account's side of a transfer, or a card's side of a bill
+  // payment, written in because nobody texted it - until now. The message
+  // becomes that row rather than a second one beside it, and the pairing
+  // stays.
+  const autoLeg = duplicate
+    ? duplicate.autoLeg
+      ? duplicate
+      : null
+    : await findAutoLeg({ ...found, rawText: params.rawText });
   if (autoLeg) {
     await absorbMessage(autoLeg, { userId: params.userId, entry, parsed, accountId, stated }, () =>
       adoptAutoLeg(autoLeg, occurredAt)

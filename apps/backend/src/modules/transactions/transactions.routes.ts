@@ -16,6 +16,7 @@ import {
   releaseLegs,
   syncTransferLegs,
 } from "./transactions.transfer";
+import { ensureCardBillLeg, syncCardBillLeg } from "../cards/cards.billLeg";
 import { IST_OFFSET, istDayEnd, istDayKey, istDayStart } from "../../time";
 import { TRANSACTION_TYPES } from "../../types";
 
@@ -333,9 +334,9 @@ transactionsRouter.post("/", async (req, res) => {
   }
 
   // The other account's side, found or written in, so a transfer typed in
-  // by hand shows on both accounts. Said in the response, so the app can
-  // tell the user what else just appeared.
-  const transferLeg = await ensureTransferLegs(created);
+  // by hand shows on both accounts - and a card bill on the card. Said in
+  // the response, so the app can tell the user what else just appeared.
+  const transferLeg = (await ensureCardBillLeg(created)) ?? (await ensureTransferLegs(created));
 
   const tx = await Transaction.findById(created._id).populate("category").populate("account").populate("trip");
   res.status(201).json({ ...tx!.toJSON(), transferLeg });
@@ -564,8 +565,10 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
 
   // The other leg of the transfer, moved, taken away or given, to match
   // what this edit said - and in the response, so the app can say what
-  // else changed.
-  const transferLeg = await syncTransferLegs(updated, existing);
+  // else changed. A card bill's card side is kept the same way, by its
+  // own rules (cards.billLeg).
+  const cardSide = await syncCardBillLeg(updated, existing);
+  const transferLeg = cardSide.handled ? cardSide.leg : await syncTransferLegs(updated, existing);
 
   res.json({ ...updated.toJSON(), transferLeg });
 });

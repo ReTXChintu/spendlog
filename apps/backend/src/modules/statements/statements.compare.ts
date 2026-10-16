@@ -2,6 +2,7 @@ import { HydratedDocument, Types } from "mongoose";
 import { Account, CardStatementDoc, Transaction } from "../../models";
 import { StatementLineKind, TransactionType } from "../../types";
 import { accountLedgers } from "../accounts/accounts.balance";
+import { CARD_POSTS_AFTER_DAYS } from "../cards/cards.billPayment";
 import { isLedgerWorthy } from "./statements.classify";
 import { closingBalanceOf } from "./statements.reconcile";
 
@@ -44,6 +45,10 @@ export interface CompareRow {
   amountMinor: number;
   type: TransactionType;
   accountId: string | null;
+  /// Written in by SpendLog for the far side of a transfer or a card
+  /// bill, dated by the side it was written for rather than by when this
+  /// account posted it.
+  autoLeg?: boolean;
 }
 
 export interface Comparison {
@@ -60,6 +65,10 @@ export interface Comparison {
  * statement's own account over one filed elsewhere - a row filed on the
  * wrong account is still the same payment, and better found than listed
  * as missing. A row may be taken once.
+ *
+ * A row SpendLog wrote in carries the other side's moment, and a card
+ * posts a bill payment up to four days after the bank let it go - so one
+ * of those may sit that much earlier than its line.
  */
 export function compareLines(
   lines: Omit<CompareLine, "addedTransactionId">[],
@@ -71,17 +80,21 @@ export function compareLines(
   const missing: CompareLine[] = [];
 
   for (const line of lines) {
-    if (!isLedgerWorthy(line.kind)) continue;
+    // A card's bill payment is never added from a statement, so it is
+    // never missing - but the row standing for it, the card's own message
+    // or the side SpendLog wrote in, is not extra either.
+    const payment = line.kind === "PAYMENT";
+    if (!isLedgerWorthy(line.kind) && !payment) continue;
 
     const candidates = rows.filter(
       (row) =>
         !claimed.has(row.transactionId) &&
         row.amountMinor === line.amountMinor &&
         row.type === line.type &&
-        Math.abs(row.occurredAt.getTime() - line.date.getTime()) <= COMPARE_DRIFT_DAYS * DAY_MS
+        withinDrift(row, line.date)
     );
     const own = candidates.filter((row) => row.accountId && ownAccountIds.has(row.accountId));
-    const pool = own.length > 0 ? own : candidates;
+    const pool = own.length > 0 || payment ? own : candidates;
     const best = pool.sort(
       (a, b) =>
         Math.abs(a.occurredAt.getTime() - line.date.getTime()) - Math.abs(b.occurredAt.getTime() - line.date.getTime())
@@ -90,7 +103,7 @@ export function compareLines(
     if (best) {
       claimed.add(best.transactionId);
       pairs.push({ lineId: line.lineId, transactionId: best.transactionId });
-    } else {
+    } else if (!payment) {
       missing.push({ ...line, addedTransactionId: null });
     }
   }
@@ -101,6 +114,13 @@ export function compareLines(
     matched: pairs.length,
     pairs,
   };
+}
+
+/** Whether a row is close enough in time to be a line. See compareLines. */
+function withinDrift(row: CompareRow, lineDate: Date): boolean {
+  const lag = lineDate.getTime() - row.occurredAt.getTime();
+  const late = (row.autoLeg ? Math.max(COMPARE_DRIFT_DAYS, CARD_POSTS_AFTER_DAYS) : COMPARE_DRIFT_DAYS) * DAY_MS;
+  return lag >= -COMPARE_DRIFT_DAYS * DAY_MS && lag <= late;
 }
 
 /** The span a statement's lines cover, widened by the drift the matcher allows. */
@@ -151,10 +171,18 @@ export async function compareStatement(statement: HydratedDocument<CardStatement
   const addedIds = new Set(addedByThis.values());
 
   const window = statement.lines.length > 0 ? windowOf(statement) : null;
+  // From further back for a row SpendLog wrote in, which may be dated
+  // days before the card posted it. Only to be matched: one that old and
+  // unmatched belongs to the statement before.
+  const writtenInFrom = window ? new Date(window.from.getTime() - CARD_POSTS_AFTER_DAYS * DAY_MS) : null;
   const rows = window
-    ? await Transaction.find({ userId, occurredAt: { $gte: window.from, $lte: window.to } })
-        .select("accountId occurredAt merchant amountMinor type")
-        .lean<{ _id: Types.ObjectId; accountId?: Types.ObjectId | null; occurredAt: Date; merchant?: string | null; amountMinor: number; type: TransactionType }[]>()
+    ? await Transaction.find({
+        userId,
+        occurredAt: { $lte: window.to },
+        $or: [{ occurredAt: { $gte: window.from } }, { autoLeg: true, occurredAt: { $gte: writtenInFrom } }],
+      })
+        .select("accountId occurredAt merchant amountMinor type autoLeg")
+        .lean<{ _id: Types.ObjectId; accountId?: Types.ObjectId | null; occurredAt: Date; merchant?: string | null; amountMinor: number; type: TransactionType; autoLeg?: boolean }[]>()
     : [];
 
   const comparison = compareLines(
@@ -175,9 +203,13 @@ export async function compareStatement(statement: HydratedDocument<CardStatement
         amountMinor: row.amountMinor,
         type: row.type,
         accountId: row.accountId?.toString() ?? null,
+        autoLeg: Boolean(row.autoLeg),
       })),
     own
   );
+  if (window) {
+    comparison.inAppNotOnStatement = comparison.inAppNotOnStatement.filter((row) => row.occurredAt >= window.from);
+  }
   for (const line of comparison.onStatementNotInApp) {
     line.addedTransactionId = addedByThis.get(line.lineId) ?? null;
   }

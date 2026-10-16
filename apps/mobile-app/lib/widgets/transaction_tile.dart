@@ -167,9 +167,11 @@ class TransactionTile extends StatelessWidget {
                           background: context.c.chipNeutral,
                           foreground: context.c.transfer,
                         ),
-                      // SpendLog wrote this side of a transfer in itself;
-                      // no message from the bank stands behind it yet.
-                      if (transaction.autoLeg) const AutoLegChip(),
+                      // SpendLog wrote this side of a transfer in itself -
+                      // or a card bill's, on the card - and no message
+                      // stands behind it yet.
+                      if (transaction.autoLeg)
+                        AutoLegChip(forCardBill: transaction.account?.accountType == 'CARD'),
                       // The message named no account, so this is in no
                       // balance until someone says which it was on.
                       if (transaction.accountUnknown)
@@ -333,21 +335,30 @@ class _CategoryChip extends StatelessWidget {
 const kAutoLegHint = "Your bank didn't text this one, so SpendLog added it to match the transfer. "
     'It turns into the real thing if the message comes in later.';
 
+/// The same, for the payment written in on a card when its bill was paid.
+const kCardBillLegHint = "Your card company didn't text this one, so SpendLog added it to match the bill "
+    'you paid. It turns into the real thing if the message comes in later.';
+
 /// On a row SpendLog wrote in for the other side of a transfer, because
-/// that bank never sent a message for it. Tap or hold for why.
+/// that bank never sent a message for it - or, [forCardBill], for the
+/// payment arriving on a card whose bill was paid from the bank. Tap or
+/// hold for why.
 class AutoLegChip extends StatelessWidget {
-  const AutoLegChip({super.key});
+  final bool forCardBill;
+
+  const AutoLegChip({super.key, this.forCardBill = false});
 
   @override
   Widget build(BuildContext context) {
+    final hint = forCardBill ? kCardBillLegHint : kAutoLegHint;
     return Tooltip(
-      message: kAutoLegHint,
+      message: hint,
       triggerMode: TooltipTriggerMode.tap,
       showDuration: const Duration(seconds: 5),
       child: Semantics(
-        hint: kAutoLegHint,
+        hint: hint,
         child: _Badge(
-          label: 'Added for your transfer',
+          label: forCardBill ? 'Added for your bill payment' : 'Added for your transfer',
           background: context.c.brand50,
           foreground: context.c.brandDark,
         ),

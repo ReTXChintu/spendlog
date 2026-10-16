@@ -278,8 +278,9 @@ class Transaction {
   final String? transferPairId;
 
   /// A leg SpendLog wrote in for a transfer because the other bank never
-  /// texted its side. Turns false once a message turns up for it, or the
-  /// user edits it.
+  /// texted its side - or, on a credit card, the payment arriving for a
+  /// bill paid from the bank. Turns false once a message turns up for it,
+  /// or the user edits it.
   final bool autoLeg;
 
   /// CREDIT only: money received for a purchase still to come. Not income
@@ -454,7 +455,8 @@ class Transaction {
 
 /// What saving a transfer did to its other side, as the server's
 /// `transferLeg` says: paired with a row already on the other account, or
-/// a row written in there because that bank sent nothing.
+/// a row written in there because that bank sent nothing. A card bill
+/// payment's card side comes back the same way, marked [forCardBill].
 class TransferLeg {
   /// paired | created
   final String action;
@@ -465,12 +467,17 @@ class TransferLeg {
   final String type;
   final int amountMinor;
 
+  /// The money arriving on the card a bill was paid to, rather than the
+  /// far side of a transfer.
+  final bool forCardBill;
+
   const TransferLeg({
     required this.action,
     required this.transactionId,
     required this.accountName,
     required this.type,
     required this.amountMinor,
+    this.forCardBill = false,
   });
 
   /// Null when the save did nothing to the other side.
@@ -485,16 +492,22 @@ class TransferLeg {
       accountName: value['accountName'] as String? ?? 'the other account',
       type: value['type'] as String? ?? 'CREDIT',
       amountMinor: (value['amountMinor'] as num?)?.round() ?? 0,
+      forCardBill: value['kind'] == 'CARD_BILL',
     );
   }
 
   bool get created => action == 'created';
 
-  /// "Also recorded ₹3,000 into Federal Bank ••3295", for a snackbar.
+  /// "Also recorded ₹3,000 into Federal Bank ••3295", for a snackbar -
+  /// or "Also recorded ₹12,000 paid into HDFC ••1377" for a card bill.
   String get message {
     // Whole rupees without the paise, as a person would say it.
     final money = amountMinor % 100 == 0 ? formatMoneyShort(amountMinor) : formatMoney(amountMinor);
-    final where = type == 'CREDIT' ? 'into $accountName' : 'out of $accountName';
+    final where = forCardBill
+        ? 'paid into $accountName'
+        : type == 'CREDIT'
+            ? 'into $accountName'
+            : 'out of $accountName';
     return created ? 'Also recorded $money $where' : 'Matched with the $money already $where';
   }
 }
