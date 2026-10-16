@@ -24,6 +24,12 @@ const realFetch = globalThis.fetch;
 let guruRequests: { path: string; key: string | null }[] = [];
 let guruReplies: { status: number; json: unknown }[] = [];
 let sleeps: number[] = [];
+/**
+ * The minute between the calendar and GMP, held shut until a test opens
+ * it. Instant, it raced the request: on a slow runner GMP was merged
+ * before the first response read the cache.
+ */
+let minutePassed: Promise<void> = Promise.resolve();
 
 before(async () => {
   mongod = await MongoMemoryServer.create();
@@ -41,6 +47,7 @@ before(async () => {
   config = loadedEnv;
   routes.setIpoSleepForTests(async (ms) => {
     sleeps.push(ms);
+    await minutePassed;
   });
 
   const user = await models.User.create({ email: "ipos@example.com" });
@@ -79,6 +86,7 @@ beforeEach(async () => {
   guruRequests = [];
   guruReplies = [];
   sleeps = [];
+  minutePassed = Promise.resolve();
   config.env.ipoApiKey = "test-ipo-key";
   await models.IpoCache.deleteMany({});
 });
@@ -245,11 +253,15 @@ describe("GET /ipos", () => {
       })
     );
 
+    let passMinute!: () => void;
+    minutePassed = new Promise((resolve) => (passMinute = resolve));
+
     // The calendar is shown straight away, without waiting for GMP.
     const first = await getIpos();
     assert.equal(first.open.length, 3);
     assert.ok(first.open.every((row: any) => row.gmp === null && row.perLot === null));
 
+    passMinute();
     await routes.iposSettled();
     assert.deepEqual(
       guruRequests.map((request) => request.path),
