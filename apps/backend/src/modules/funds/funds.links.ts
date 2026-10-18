@@ -2,6 +2,7 @@ import { Types } from "mongoose";
 import { FixedCommitment, FundHolding, FundHoldingDoc, FundTxn, Transaction } from "../../models";
 import { istDayKey } from "../../time";
 import { addDays } from "./funds.math";
+import { sipAmountOn, stepFor } from "./funds.sip";
 
 /**
  * Debits that look like a SIP going out, offered against the holding they
@@ -76,17 +77,20 @@ export function scoreDebit(debit: DebitLike, holding: Pick<FundHoldingDoc, "fund
 
   const sip = holding.sip;
   if (sip) {
-    const off = Math.abs(debit.amountMinor - sip.amountMinor);
-    if (off <= Math.max(sip.amountMinor * 0.01, 500)) {
+    // Against the amount and day the SIP ran at then, for one that's changed.
+    const on = istDayKey(debit.occurredAt);
+    const expected = sipAmountOn(sip, on);
+    const off = Math.abs(debit.amountMinor - expected);
+    if (off <= Math.max(expected * 0.01, 500)) {
       score += 3;
       reasons.push("amount");
-    } else if (off <= sip.amountMinor * 0.1) {
+    } else if (off <= expected * 0.1) {
       score += 1;
       reasons.push("amount_near");
     }
 
-    const day = Number(istDayKey(debit.occurredAt).slice(8, 10));
-    const apart = dayDistance(day, sip.dayOfMonth);
+    const day = Number(on.slice(8, 10));
+    const apart = dayDistance(day, stepFor(sip, on.slice(0, 7)).dayOfMonth);
     if (apart <= 3) {
       score += 2;
       reasons.push("day");
@@ -189,9 +193,10 @@ export async function linkSuggestions(userId: Types.ObjectId, now = new Date()) 
       for (const holding of holdings) {
         if (holding.commitmentId) continue;
         let score = 0;
-        if (holding.sip && Math.abs(holding.sip.amountMinor - commitment.amountMinor) <= holding.sip.amountMinor * 0.01) score += 3;
+        const inForce = holding.sip ? stepFor(holding.sip, today.slice(0, 7)) : null;
+        if (inForce && Math.abs(inForce.amountMinor - commitment.amountMinor) <= inForce.amountMinor * 0.01) score += 3;
         if (houseWords(holding).some((word) => text.includes(word))) score += 2;
-        if (holding.sip && dayDistance(holding.sip.dayOfMonth, commitment.dayOfMonth) <= 3) score += 1;
+        if (inForce && dayDistance(inForce.dayOfMonth, commitment.dayOfMonth) <= 3) score += 1;
         if (score >= 2 && (!suggested || score > suggested.score)) suggested = { id: holding._id.toString(), score };
       }
       return {

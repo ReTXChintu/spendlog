@@ -44,10 +44,12 @@ export function goalJson(goal: GoalDoc, portfolio: Portfolio) {
   const linked = portfolio.views.filter((view) => ids.has(view.holding._id.toString()));
   const holdingsValueMinor = linked.reduce((sum, view) => sum + view.summary.valueMinor, 0);
   const currentMinor = holdingsValueMinor + (goal.savedMinor ?? 0);
-  // A running SIP is what goes in each month; a holding without one is
-  // read from what actually went in over the last three months.
+  // A running SIP is what goes in each month - the step in force now, or
+  // nothing while it's paused, however much went in before the pause. A
+  // holding without one is read from what actually went in over the last
+  // three months.
   const actualMonthlyMinor = linked.reduce(
-    (sum, view) => sum + (view.monthlySipMinor > 0 ? view.monthlySipMinor : recentMonthlyMinor(view, portfolio.today)),
+    (sum, view) => sum + (view.sipRunning ? view.monthlySipMinor : recentMonthlyMinor(view, portfolio.today)),
     0
   );
 

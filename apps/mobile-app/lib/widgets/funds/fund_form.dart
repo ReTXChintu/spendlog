@@ -24,6 +24,17 @@ class FundFormData {
   final String? sipEnd;
   final bool sipActive;
 
+  /// Amounts the SIP changed to along the way, after the one it started at.
+  final List<SipChangeDraft> sipChanges;
+
+  /// YYYY-MM, months nothing went in.
+  final List<String> sipSkips;
+
+  /// Editing a SIP that exists. Its history is then always sent, even
+  /// empty, so taking the last change out takes it out on the server too;
+  /// a new SIP with no history sends the same body it always did.
+  final bool editingSip;
+
   final String folio;
 
   const FundFormData({
@@ -38,6 +49,9 @@ class FundFormData {
     this.sipStart,
     this.sipEnd,
     this.sipActive = true,
+    this.sipChanges = const [],
+    this.sipSkips = const [],
+    this.editingSip = false,
     this.folio = '',
   });
 
@@ -75,12 +89,46 @@ class FundFormData {
       if (sipEnd != null && sipEnd!.compareTo(start) < 0) {
         return const FundFormCheck.error("The SIP can't end before it starts.");
       }
+
+      // The history, checked as the server checks it (funds.sip.ts).
+      final startMonth = start.substring(0, 7);
+      final endMonth = sipEnd?.substring(0, 7);
+      final steps = <Map<String, dynamic>>[];
+      final changedIn = <String>{};
+      for (final change in sipChanges) {
+        final month = change.month;
+        final label = sipMonthLabel(month);
+        final changeMinor = parseRupees(change.amount);
+        if (changeMinor == null || changeMinor < 100) return FundFormCheck.error('Enter the new amount from $label.');
+        if (month.compareTo(startMonth) <= 0) {
+          return FundFormCheck.error('$label is when the SIP started. Change the amount above instead.');
+        }
+        if (endMonth != null && month.compareTo(endMonth) > 0) {
+          return FundFormCheck.error("The amount can't change after the SIP ends ($label).");
+        }
+        if (!changedIn.add(month)) return FundFormCheck.error('Two changes from $label. Keep one.');
+        steps.add({
+          'fromOn': '$month-01',
+          'amountMinor': changeMinor,
+          if (change.dayOfMonth != null) 'dayOfMonth': change.dayOfMonth,
+        });
+      }
+      steps.sort((a, b) => (a['fromOn'] as String).compareTo(b['fromOn'] as String));
+      final skips = [...sipSkips]..sort();
+      for (final month in skips) {
+        if (month.compareTo(startMonth) < 0 || (endMonth != null && month.compareTo(endMonth) > 0)) {
+          return FundFormCheck.error('${sipMonthLabel(month)} is outside the SIP. Skipped months fall while it ran.');
+        }
+      }
+
       sip = {
         'amountMinor': amountMinor,
         'dayOfMonth': dayOfMonth,
         'startOn': start,
         'endOn': sipEnd,
         'active': sipActive,
+        if (editingSip || steps.isNotEmpty) 'steps': steps,
+        if (editingSip || skips.isNotEmpty) 'skips': skips,
       };
     }
 
@@ -89,6 +137,19 @@ class FundFormData {
 
     return FundFormCheck(opening: opening, sip: sip, folio: folioText.isEmpty ? null : folioText);
   }
+}
+
+/// An amount the SIP changed to, from a month on, as typed.
+class SipChangeDraft {
+  /// YYYY-MM.
+  final String month;
+  final String amount;
+
+  /// The SIP day from then, when a stored change moved it; carried through
+  /// an edit untouched.
+  final int? dayOfMonth;
+
+  const SipChangeDraft({required this.month, this.amount = '', this.dayOfMonth});
 }
 
 class FundFormCheck {
@@ -123,11 +184,17 @@ class FundFormFields {
         asOf = opening?.asOf ?? istToday(),
         firstOn = opening?.firstOn,
         runsSip = sip != null,
-        sipAmount = TextEditingController(text: sip == null ? '' : _rupees(sip.amountMinor)),
+        sipAmount = TextEditingController(text: sip == null ? '' : _rupees(sip.history.first.amountMinor)),
         sipDay = TextEditingController(text: sip?.dayOfMonth.toString() ?? ''),
         sipStart = sip?.startOn,
         sipEnd = sip?.endOn,
         sipActive = sip?.active ?? true,
+        sipChanges = [
+          for (final step in sip?.history.skip(1) ?? const <FundSipStep>[])
+            SipChangeFields(month: step.month, amount: _rupees(step.amountMinor), dayOfMonth: step.dayOfMonth),
+        ],
+        sipSkips = [...?sip?.skips],
+        editingSip = sip != null,
         folio = TextEditingController(text: folio ?? '');
 
   bool holdsUnits;
@@ -142,8 +209,22 @@ class FundFormFields {
   String? sipStart;
   String? sipEnd;
   bool sipActive;
+  final List<SipChangeFields> sipChanges;
+  final List<String> sipSkips;
+  final bool editingSip;
 
   final TextEditingController folio;
+
+  /// A new change, a month after the last one (or the start).
+  void addChange() {
+    final after = sipChanges.isNotEmpty ? sipChanges.last.month : (sipStart ?? istToday()).substring(0, 7);
+    sipChanges.add(SipChangeFields(month: shiftSipMonth(after, 1)));
+  }
+
+  void removeChange(SipChangeFields change) {
+    sipChanges.remove(change);
+    change.dispose();
+  }
 
   static String _rupees(int minor) => minor % 100 == 0 ? (minor ~/ 100).toString() : (minor / 100).toStringAsFixed(2);
   static String _plain(double value) =>
@@ -161,6 +242,12 @@ class FundFormFields {
         sipStart: sipStart,
         sipEnd: sipEnd,
         sipActive: sipActive,
+        sipChanges: [
+          for (final change in sipChanges)
+            SipChangeDraft(month: change.month, amount: change.amount.text, dayOfMonth: change.dayOfMonth),
+        ],
+        sipSkips: sipSkips,
+        editingSip: editingSip,
         folio: folio.text,
       );
 
@@ -169,8 +256,23 @@ class FundFormFields {
     invested.dispose();
     sipAmount.dispose();
     sipDay.dispose();
+    for (final change in sipChanges) {
+      change.dispose();
+    }
     folio.dispose();
   }
+}
+
+/// One change of amount on the form: the month, and the amount from then.
+class SipChangeFields {
+  SipChangeFields({required this.month, String amount = '', this.dayOfMonth})
+      : amount = TextEditingController(text: amount);
+
+  String month;
+  final TextEditingController amount;
+  final int? dayOfMonth;
+
+  void dispose() => amount.dispose();
 }
 
 /// A date picker over plain YYYY-MM-DD days.
@@ -187,6 +289,118 @@ Future<String?> pickIsoDate(
 }
 
 DateTime get _todayDate => DateTime.parse(istToday());
+
+/// A month picker: a year with arrows, and its twelve months. Months
+/// outside [first]..[last] (YYYY-MM) can't be picked. Pops YYYY-MM.
+Future<String?> pickMonth(
+  BuildContext context, {
+  required String title,
+  String? initial,
+  required String first,
+  required String last,
+}) {
+  final start = initial ?? istToday().substring(0, 7);
+  final clamped = start.compareTo(first) < 0 ? first : (start.compareTo(last) > 0 ? last : start);
+  var year = int.parse(clamped.substring(0, 4));
+  final firstYear = int.parse(first.substring(0, 4));
+  final lastYear = int.parse(last.substring(0, 4));
+  return showDialog<String>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setState) {
+        final c = context.c;
+        return AlertDialog(
+          insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+          title: Text(title),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    IconButton(
+                      tooltip: 'Previous year',
+                      onPressed: year > firstYear ? () => setState(() => year -= 1) : null,
+                      icon: const Icon(Icons.chevron_left),
+                    ),
+                    Expanded(
+                      child: Text(
+                        '$year',
+                        textAlign: TextAlign.center,
+                        style: kNum.copyWith(fontSize: 16, fontWeight: FontWeight.w800, color: c.ink),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Next year',
+                      onPressed: year < lastYear ? () => setState(() => year += 1) : null,
+                      icon: const Icon(Icons.chevron_right),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    for (var m = 1; m <= 12; m++)
+                      Builder(builder: (context) {
+                        final month = '$year-${m.toString().padLeft(2, '0')}';
+                        final allowed = month.compareTo(first) >= 0 && month.compareTo(last) <= 0;
+                        final chosen = month == clamped;
+                        return SizedBox(
+                          width: 64,
+                          child: chosen
+                              ? FilledButton(
+                                  key: ValueKey('pick-month-$month'),
+                                  style: FilledButton.styleFrom(padding: EdgeInsets.zero),
+                                  onPressed: allowed ? () => Navigator.of(context).pop(month) : null,
+                                  child: Text(sipMonthLabel(month, withYear: false)),
+                                )
+                              : OutlinedButton(
+                                  key: ValueKey('pick-month-$month'),
+                                  style: OutlinedButton.styleFrom(padding: EdgeInsets.zero),
+                                  onPressed: allowed ? () => Navigator.of(context).pop(month) : null,
+                                  child: Text(sipMonthLabel(month, withYear: false)),
+                                ),
+                        );
+                      }),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel'))],
+        );
+      },
+    ),
+  );
+}
+
+/// A row that shows a month and opens the month picker.
+class MonthField extends StatelessWidget {
+  const MonthField({super.key, required this.label, required this.month, required this.onPick});
+
+  final String label;
+
+  /// YYYY-MM.
+  final String month;
+  final VoidCallback onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return InkWell(
+      onTap: onPick,
+      borderRadius: BorderRadius.circular(T.rSm),
+      child: InputDecorator(
+        decoration: InputDecoration(labelText: label, suffixIcon: const Icon(Icons.expand_more, size: 18)),
+        child: Text(sipMonthLabel(month), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, color: c.ink)),
+      ),
+    );
+  }
+}
 
 /// A row that shows a date and opens the picker, with an optional clear.
 class DateField extends StatelessWidget {
@@ -461,11 +675,131 @@ class SipFields extends StatelessWidget {
             ),
           ),
         ],
+        const SizedBox(height: 14),
+        SipHistoryFields(fields: fields, onChanged: onChanged),
         const SizedBox(height: 8),
         Text(
           "Each month's instalment is bought at that day's NAV. Link the bank debits too, and they replace the "
-          'scheduled ones, so a skipped month shows.',
+          'scheduled ones at what was really paid.',
           style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
+        ),
+      ],
+    );
+  }
+}
+
+/// The SIP's history on the form: amounts it changed to, and months it
+/// skipped. Empty by default - one amount needs nothing here - so someone
+/// entering an old SIP can describe it all in one go, and no one else has
+/// to look at it.
+class SipHistoryFields extends StatelessWidget {
+  const SipHistoryFields({super.key, required this.fields, required this.onChanged});
+
+  final FundFormFields fields;
+  final VoidCallback onChanged;
+
+  String get _startMonth => (fields.sipStart ?? istToday()).substring(0, 7);
+
+  /// The last month a change or skip can name: the end, or a year from now.
+  String get _lastMonth => fields.sipEnd?.substring(0, 7) ?? shiftSipMonth(istToday().substring(0, 7), 12);
+
+  Future<void> _pickChangeMonth(BuildContext context, SipChangeFields change) async {
+    final first = shiftSipMonth(_startMonth, 1);
+    if (first.compareTo(_lastMonth) > 0) return;
+    final picked = await pickMonth(context, title: 'Amount changed from', initial: change.month, first: first, last: _lastMonth);
+    if (picked != null) {
+      change.month = picked;
+      onChanged();
+    }
+  }
+
+  Future<void> _addSkip(BuildContext context) async {
+    final latest = fields.sipSkips.isEmpty ? istToday().substring(0, 7) : ([...fields.sipSkips]..sort()).last;
+    final picked = await pickMonth(context, title: 'Skipped a month', initial: latest, first: _startMonth, last: _lastMonth);
+    if (picked != null && !fields.sipSkips.contains(picked)) {
+      fields.sipSkips
+        ..add(picked)
+        ..sort();
+      onChanged();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Changes along the way', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: c.ink)),
+        const SizedBox(height: 2),
+        Text(
+          'Raised or lowered the amount, or missed a month? Add it and every figure counts it.',
+          style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
+        ),
+        for (final (i, change) in fields.sipChanges.indexed) ...[
+          const SizedBox(height: 10),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: MonthField(
+                  key: ValueKey('sip-change-month-$i'),
+                  label: 'From',
+                  month: change.month,
+                  onPick: () => _pickChangeMonth(context, change),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  key: ValueKey('sip-change-amount-$i'),
+                  controller: change.amount,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: 'New amount', prefixText: '₹ '),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Remove this change',
+                icon: Icon(Icons.close, size: 18, color: c.muted),
+                onPressed: () {
+                  fields.removeChange(change);
+                  onChanged();
+                },
+              ),
+            ],
+          ),
+        ],
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            for (final month in fields.sipSkips)
+              InputChip(
+                label: Text('Skipped ${sipMonthLabel(month)}'),
+                onDeleted: () {
+                  fields.sipSkips.remove(month);
+                  onChanged();
+                },
+                deleteButtonTooltipMessage: 'Not skipped',
+              ),
+            ActionChip(
+              key: const ValueKey('sip-add-change'),
+              avatar: const Icon(Icons.add, size: 16),
+              label: const Text('Amount changed from…'),
+              onPressed: () {
+                fields.addChange();
+                onChanged();
+              },
+            ),
+            ActionChip(
+              key: const ValueKey('sip-add-skip'),
+              avatar: const Icon(Icons.add, size: 16),
+              label: const Text('Skipped a month'),
+              onPressed: () => _addSkip(context),
+            ),
+          ],
         ),
       ],
     );

@@ -1,9 +1,20 @@
-import { Router } from "express";
+import { Request, Response, Router } from "express";
 import { Types } from "mongoose";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
-import { FixedCommitment, FundCache, FundCacheDoc, FundHolding, FundNav, FundTxn, Goal, Transaction, User } from "../../models";
+import {
+  FixedCommitment,
+  FundCache,
+  FundCacheDoc,
+  FundHolding,
+  FundHoldingDoc,
+  FundNav,
+  FundTxn,
+  Goal,
+  Transaction,
+  User,
+} from "../../models";
 import { istDayKey } from "../../time";
 import { decryptPassword } from "../statements/statements.crypto";
 import { AiError, withModel } from "../ai/ai.gemini";
@@ -11,7 +22,20 @@ import { fundAdvice } from "./funds.advice";
 import { peers as loadPeers, requireScheme, STALE_AFTER_MS } from "./funds.cache";
 import { linkSuggestions } from "./funds.links";
 import { FLAG_RULES } from "./funds.math";
-import { holdingJson, ledgerJson, loadPortfolio, portfolioTotals, sparkline } from "./funds.portfolio";
+import { holdingJson, ledgerJson, loadPortfolio, planJson, portfolioTotals, sparkline } from "./funds.portfolio";
+import {
+  isMonth,
+  MIN_SIP_MINOR,
+  monthOf,
+  resumedFrom,
+  SipInput,
+  SipPlan,
+  sipToStore,
+  withAmountFrom,
+  withoutSkip,
+  withPause,
+  withSkip,
+} from "./funds.sip";
 import { FundSourceError, isDirectPlan, isGrowthOption, isRegularPlan, searchSchemes } from "./funds.sources";
 
 export const fundsRouter = Router();
@@ -33,13 +57,30 @@ fundsRouter.use(requireAuth);
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD");
 const objectId = z.string().regex(/^[0-9a-fA-F]{24}$/);
 
+const sipAmount = z.number().int().min(MIN_SIP_MINOR, "Each SIP amount has to be at least ₹1.");
+const sipDay = z.number().int().min(1).max(31);
+const month = z.string().refine(isMonth, "Use YYYY-MM");
+
+const stepSchema = z.object({ fromOn: day, amountMinor: sipAmount, dayOfMonth: sipDay.nullable().optional() });
+const pauseSchema = z
+  .object({ fromOn: day, toOn: day.nullable().optional() })
+  .refine((pause) => !pause.toOn || pause.toOn >= pause.fromOn, { message: "A pause can't end before it starts." });
+
+/**
+ * A SIP: what it started at (`amountMinor`), and its history - every
+ * change of amount (`steps`, all of them or only those after the start),
+ * months skipped and runs paused. funds.sip.ts says how each is read.
+ */
 const sipSchema = z
   .object({
-    amountMinor: z.number().int().min(100),
-    dayOfMonth: z.number().int().min(1).max(31),
+    amountMinor: sipAmount.optional(),
+    dayOfMonth: sipDay,
     startOn: day,
     endOn: day.nullable().optional(),
     active: z.boolean().optional(),
+    steps: z.array(stepSchema).max(240).optional(),
+    skips: z.array(month).max(600).optional(),
+    pauses: z.array(pauseSchema).max(120).optional(),
   })
   .refine((sip) => !sip.endOn || sip.endOn >= sip.startOn, { message: "The SIP can't end before it starts." });
 
@@ -69,11 +110,11 @@ const updateSchema = z.object({
   commitmentId: objectId.nullable().optional(),
 });
 
-/** A SIP as stored: stopped without an end date means stopped today. */
-function sipToStore(sip: z.infer<typeof sipSchema> | null | undefined, today: string) {
-  if (!sip) return sip;
-  const active = sip.active ?? true;
-  return { ...sip, active, endOn: sip.endOn ?? (active ? null : today) };
+/** A request's SIP as stored, or what's wrong with it. null clears it. */
+function storeSip(sip: z.infer<typeof sipSchema> | null, today: string, stored?: SipPlan | null) {
+  if (!sip) return { sip: null };
+  const result = sipToStore(sip, today, stored);
+  return "error" in result ? { error: result.error } : { sip: result };
 }
 
 function futureCheck(input: { opening?: { asOf: string } | null }, today: string) {
@@ -88,6 +129,7 @@ async function holdingDetail(userId: Types.ObjectId, holdingId: string) {
   return {
     ...holdingJson(view, portfolio.now),
     txns: view.ledger.map(ledgerJson).reverse(),
+    sipPlan: planJson(view, portfolio.today),
     sparkline: sparkline(view.series),
     navError: view.nav.lastError,
   };
@@ -182,6 +224,9 @@ fundsRouter.post("/holdings", async (req, res) => {
 
   // Checked here as well as by the unique index, which a fresh database
   // may not have built yet.
+  const sip = storeSip(parsed.data.sip ?? null, today);
+  if ("error" in sip) return res.status(400).json({ error: sip.error });
+
   const folio = parsed.data.folio || null;
   if (await FundHolding.exists({ userId, schemeCode: parsed.data.schemeCode, folio })) {
     return res.status(409).json({ error: "That fund is already in your portfolio under this folio." });
@@ -205,7 +250,7 @@ fundsRouter.post("/holdings", async (req, res) => {
       isDirect: isDirectPlan(scheme.schemeName),
       isGrowth: isGrowthOption(scheme.schemeName),
       folio,
-      sip: sipToStore(parsed.data.sip, today) ?? null,
+      sip: sip.sip,
       opening: parsed.data.opening ?? null,
     });
     res.status(201).json(await holdingDetail(userId, created._id.toString()));
@@ -218,7 +263,8 @@ fundsRouter.post("/holdings", async (req, res) => {
 });
 
 // GET /funds/holdings/:id — one holding with every line of its history
-// (newest first) and about a year of NAVs for a sparkline.
+// (newest first), its SIP month by month (the last 24 months and the
+// next 3, oldest first), and about a year of NAVs for a sparkline.
 fundsRouter.get("/holdings/:id", validObjectIdParam("id"), async (req, res) => {
   const detail = await holdingDetail(currentUserId(req), req.params.id);
   if (!detail) return res.status(404).json({ error: "Not found" });
@@ -226,7 +272,8 @@ fundsRouter.get("/holdings/:id", validObjectIdParam("id"), async (req, res) => {
 });
 
 // PATCH /funds/holdings/:id — folio, SIP, opening snapshot, or the SIP
-// commitment it's connected to. null clears any of them.
+// commitment it's connected to. null clears any of them. A SIP sent
+// without steps, skips or pauses keeps the ones stored (see sipToStore).
 fundsRouter.patch("/holdings/:id", validObjectIdParam("id"), async (req, res) => {
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
@@ -249,7 +296,11 @@ fundsRouter.patch("/holdings/:id", validObjectIdParam("id"), async (req, res) =>
 
   const update: Record<string, unknown> = {};
   if (parsed.data.folio !== undefined) update.folio = parsed.data.folio || null;
-  if (parsed.data.sip !== undefined) update.sip = sipToStore(parsed.data.sip, today);
+  if (parsed.data.sip !== undefined) {
+    const sip = storeSip(parsed.data.sip, today, (holding.toObject() as FundHoldingDoc).sip);
+    if ("error" in sip) return res.status(400).json({ error: sip.error });
+    update.sip = sip.sip;
+  }
   if (parsed.data.opening !== undefined) update.opening = parsed.data.opening;
   if (parsed.data.commitmentId !== undefined) update.commitmentId = parsed.data.commitmentId;
   holding.set(update);
@@ -263,6 +314,90 @@ fundsRouter.patch("/holdings/:id", validObjectIdParam("id"), async (req, res) =>
     throw error;
   }
   res.json(await holdingDetail(userId, holding._id.toString()));
+});
+
+/** The first thing wrong with a request, in words. */
+const firstProblem = (error: z.ZodError) => error.issues[0]?.message ?? "That doesn't look right.";
+
+/**
+ * Changes a holding's SIP history with `change` - which gives the SIP as
+ * it should be, or what's wrong - and answers with the holding, every
+ * figure worked out again from the new history.
+ */
+async function changeSip(req: Request, res: Response, change: (sip: SipPlan, today: string) => SipInput | string) {
+  const userId = currentUserId(req);
+  const today = istDayKey(new Date());
+  const holding = await FundHolding.findOne({ _id: req.params.id, userId });
+  if (!holding) return res.status(404).json({ error: "Not found" });
+  const stored = (holding.toObject() as FundHoldingDoc).sip;
+  if (!stored) return res.status(400).json({ error: "This fund has no SIP yet. Add one first." });
+
+  const next = change(stored, today);
+  if (typeof next === "string") return res.status(400).json({ error: next });
+  const result = sipToStore(next, today, stored);
+  if ("error" in result) return res.status(400).json({ error: result.error });
+  holding.set({ sip: result });
+  await holding.save();
+  res.json(await holdingDetail(userId, holding._id.toString()));
+}
+
+const changeSchema = z.object({ fromOn: day, amountMinor: sipAmount, dayOfMonth: sipDay.nullable().optional() });
+
+// POST /funds/holdings/:id/sip/change — the SIP's amount from a month on:
+// a step-up or a step-down, until the next change already there. In the
+// month it started, it's what it started at. A new dayOfMonth moves the
+// SIP day from then too.
+fundsRouter.post("/holdings/:id/sip/change", validObjectIdParam("id"), async (req, res) => {
+  const parsed = changeSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: firstProblem(parsed.error) });
+  const { fromOn, amountMinor, dayOfMonth } = parsed.data;
+  await changeSip(req, res, (sip) =>
+    monthOf(fromOn) < monthOf(sip.startOn)
+      ? "That's before the SIP started. Change its start date instead."
+      : withAmountFrom(sip, monthOf(fromOn), amountMinor, dayOfMonth)
+  );
+});
+
+const skipSchema = z.object({ month });
+
+// POST /funds/holdings/:id/sip/skip — no instalment that month: missed,
+// bounced, or paused for just the one. Skipping it again changes nothing.
+fundsRouter.post("/holdings/:id/sip/skip", validObjectIdParam("id"), async (req, res) => {
+  const parsed = skipSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Pick a month, as YYYY-MM." });
+  await changeSip(req, res, (sip) => withSkip(sip, parsed.data.month));
+});
+
+// DELETE /funds/holdings/:id/sip/skip/:month — the instalment went in after
+// all. A month inside a pause comes out of it; the rest stay paused.
+fundsRouter.delete("/holdings/:id/sip/skip/:month", validObjectIdParam("id"), async (req, res) => {
+  const target = req.params.month;
+  if (!isMonth(target)) return res.status(400).json({ error: "Pick a month, as YYYY-MM." });
+  await changeSip(req, res, (sip) => withoutSkip(sip, target));
+});
+
+const pauseRequestSchema = z
+  .object({ fromOn: day, toOn: day.nullable().optional() })
+  .refine((pause) => !pause.toOn || pause.toOn >= pause.fromOn, { message: "A pause can't end before it starts." });
+
+// POST /funds/holdings/:id/sip/pause — nothing going in from a month,
+// to a month or until resumed. Joined with a pause it touches.
+fundsRouter.post("/holdings/:id/sip/pause", validObjectIdParam("id"), async (req, res) => {
+  const parsed = pauseRequestSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: firstProblem(parsed.error) });
+  const { fromOn, toOn } = parsed.data;
+  await changeSip(req, res, (sip) => withPause(sip, monthOf(fromOn), toOn ? monthOf(toOn) : null));
+});
+
+const resumeSchema = z.object({ fromOn: day.optional() });
+
+// POST /funds/holdings/:id/sip/resume — going in again from a month (this
+// one when not given): any pause ends the month before, and one that
+// hadn't started yet is dropped.
+fundsRouter.post("/holdings/:id/sip/resume", validObjectIdParam("id"), async (req, res) => {
+  const parsed = resumeSchema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ error: firstProblem(parsed.error) });
+  await changeSip(req, res, (sip, today) => resumedFrom(sip, monthOf(parsed.data.fromOn ?? today)));
 });
 
 // DELETE /funds/holdings/:id — the holding, its links and entries, and its

@@ -264,7 +264,7 @@ class _AddFundScreenState extends State<AddFundScreen> {
         ToggleSection(
           icon: Icons.event_repeat_outlined,
           title: 'I run a SIP',
-          subtitle: 'A fixed amount each month, on the same day.',
+          subtitle: 'An amount each month on the same day, with any changes along the way.',
           on: _fields.runsSip,
           onChanged: (on) => setState(() {
             _fields.runsSip = on;

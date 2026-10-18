@@ -6,6 +6,7 @@ import '../../utils/format.dart';
 import '../../widgets/funds/fund_form.dart';
 import '../../widgets/funds/fund_text.dart';
 import '../../widgets/funds/fund_widgets.dart';
+import '../../widgets/funds/sip_history.dart';
 import '../../widgets/state_block.dart';
 import 'link_sheets.dart';
 
@@ -223,6 +224,76 @@ class _HoldingDetailScreenState extends State<HoldingDetailScreen> {
     );
   }
 
+  String get _sipPath => '/funds/holdings/${widget.holdingId}/sip';
+
+  /// A step-up or step-down from a month.
+  Future<void> _changeAmount() async {
+    final sip = _detail?.holding.sip;
+    if (sip == null) return;
+    final body = await showDialog<Map<String, dynamic>>(context: context, builder: (_) => SipChangeDialog(sip: sip));
+    if (body == null || !mounted) return;
+    await _apply(
+      'sip-change',
+      () => ApiClient.instance.post('$_sipPath/change', body),
+      done: 'SIP amount changed from ${sipMonthLabel(body['fromOn'] as String)}',
+      failed: "Couldn't change the amount.",
+    );
+  }
+
+  /// A month tapped on the timeline: skipped, or the skip taken back.
+  Future<void> _toggleMonth(SipPlanMonth month) async {
+    final label = sipMonthLabel(month.month);
+    if (month.linkedTransactionId != null) {
+      _toast('A payment is linked to $label. Unlink it in the history to skip the month.');
+      return;
+    }
+    if (month.covered) {
+      _toast('$label is inside the opening balance, so skipping it changes nothing.');
+      return;
+    }
+    final key = 'month-${month.month}';
+    if (month.isSkipped) {
+      // ApiClient.delete drops the body, so the detail is fetched again.
+      await _apply(
+        key,
+        () async {
+          await ApiClient.instance.delete('$_sipPath/skip/${month.month}');
+          return null;
+        },
+        done: '$label counted again',
+        failed: "Couldn't take that skip back.",
+      );
+      await _load();
+    } else {
+      await _apply(
+        key,
+        () => ApiClient.instance.post('$_sipPath/skip', {'month': month.month}),
+        done: '$label marked skipped',
+        failed: "Couldn't skip that month.",
+      );
+    }
+  }
+
+  Future<void> _pause() async {
+    final sip = _detail?.holding.sip;
+    if (sip == null) return;
+    final body = await showDialog<Map<String, dynamic>>(context: context, builder: (_) => SipPauseDialog(sip: sip));
+    if (body == null || !mounted) return;
+    await _apply(
+      'sip-pause',
+      () => ApiClient.instance.post('$_sipPath/pause', body),
+      done: 'SIP paused from ${sipMonthLabel(body['fromOn'] as String)}',
+      failed: "Couldn't pause the SIP.",
+    );
+  }
+
+  Future<void> _resume() => _apply(
+        'sip-pause',
+        () => ApiClient.instance.post('$_sipPath/resume', {}),
+        done: 'SIP resumed',
+        failed: "Couldn't resume the SIP.",
+      );
+
   Future<void> _disconnectCommitment() => _apply(
         'commitment',
         () => ApiClient.instance.patch('/funds/holdings/${widget.holdingId}', {'commitmentId': null}),
@@ -370,6 +441,21 @@ class _HoldingDetailScreenState extends State<HoldingDetailScreen> {
             onConnect: _connectCommitment,
             onDisconnect: _disconnectCommitment,
           ),
+          if (h.sip != null) ...[
+            const SizedBox(height: 18),
+            const FundSectionHeader(title: 'SIP history'),
+            const SizedBox(height: 8),
+            SipHistoryCard(
+              sip: h.sip!,
+              plan: detail.sipPlan,
+              paused: sipHasPauseAhead(h.sip!, istToday()),
+              busy: _busy,
+              onChangeAmount: _changeAmount,
+              onPause: _pause,
+              onResume: _resume,
+              onTapMonth: _toggleMonth,
+            ),
+          ],
           if (_suggestions.isNotEmpty) ...[
             const SizedBox(height: 18),
             FundSectionHeader(title: 'Payments that look like this SIP', count: _suggestions.length),
@@ -758,7 +844,7 @@ class _TermsCard extends StatelessWidget {
                     sipLine(sip),
                     'since ${formatIsoLongDate(sip.startOn)}',
                     if (sip.endOn != null) 'until ${formatIsoLongDate(sip.endOn!)}',
-                    if (!holding.sipRunning) 'stopped',
+                    if (holding.sipPaused) 'paused' else if (!holding.sipRunning) 'stopped',
                   ].join(' · '),
             sip == null ? 'Add' : 'Edit',
             onEditSip,
@@ -841,7 +927,7 @@ class LedgerRow extends StatelessWidget {
                 if (entry.pending) ...[
                   const SizedBox(height: 4),
                   const FundTag('Waiting for NAV', tone: TagTone.warn),
-                ] else if (!entry.counted && entry.note != null) ...[
+                ] else if (entry.note != null && (!entry.counted || entry.inSkippedMonth || entry.differsFromPlan)) ...[
                   const SizedBox(height: 2),
                   Text(entry.note!, style: TextStyle(fontSize: 11.5, fontStyle: FontStyle.italic, color: c.muted)),
                 ],
@@ -974,7 +1060,7 @@ class _EditTermsScreenState extends State<_EditTermsScreen> {
           ToggleSection(
             icon: _isSip ? Icons.event_repeat_outlined : Icons.account_balance_wallet_outlined,
             title: _isSip ? 'SIP' : 'Units already held',
-            subtitle: _isSip ? 'A fixed amount each month, on the same day.' : 'From a statement, as of a day.',
+            subtitle: _isSip ? 'An amount each month on the same day, with any changes along the way.' : 'From a statement, as of a day.',
             on: true,
             onChanged: null,
             child: _isSip

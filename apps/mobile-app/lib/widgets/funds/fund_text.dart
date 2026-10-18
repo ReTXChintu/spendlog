@@ -59,7 +59,51 @@ String shortSchemeName(String name) {
 }
 
 /// "₹5,000 on 5th".
-String sipLine(FundSip sip) => '${formatMoneyShort(sip.amountMinor)} on ${ordinalDay(sip.dayOfMonth)}';
+String sipLine(FundSip sip) => '${formatMoneyShort(sip.currentAmountMinor)} on ${ordinalDay(sip.currentDayOfMonth)}';
+
+const _monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/// "Jun 2026" from YYYY-MM (or a YYYY-MM-DD); "Jun" when [withYear] is false.
+String sipMonthLabel(String month, {bool withYear = true}) {
+  final parts = month.split('-');
+  final number = parts.length >= 2 ? int.tryParse(parts[1]) : null;
+  if (number == null || number < 1 || number > 12) return month;
+  return withYear ? '${_monthNames[number - 1]} ${parts[0]}' : _monthNames[number - 1];
+}
+
+/// A SIP's whole history in one line, oldest first:
+/// "₹1,000 from Jan 2026 · ₹2,000 from May · ₹1,000 from Jul · skipped Jun".
+/// The year is said the first time, and again whenever it changes.
+String sipHistoryLine(FundSip sip) {
+  final parts = <String>[];
+  String? year;
+  String label(String month) {
+    final said = month.substring(0, 4) == year;
+    year = month.substring(0, 4);
+    return sipMonthLabel(month, withYear: !said);
+  }
+
+  for (final step in sip.history) {
+    final day = step.dayOfMonth == null || step.dayOfMonth == sip.dayOfMonth ? '' : ' on ${ordinalDay(step.dayOfMonth!)}';
+    parts.add('${formatMoneyShort(step.amountMinor)}$day from ${label(step.month)}');
+  }
+  for (final month in [...sip.skips]..sort()) {
+    parts.add('skipped ${label(month)}');
+  }
+  for (final pause in sip.pauses) {
+    final from = label(pause.fromOn.substring(0, 7));
+    final to = pause.toOn;
+    parts.add(to == null ? 'paused from $from' : 'paused $from–${label(to.substring(0, 7))}');
+  }
+  return parts.join(' · ');
+}
+
+/// "YYYY-MM" for a month [count] months from [month].
+String shiftSipMonth(String month, int count) {
+  final parts = month.split('-').map(int.parse).toList();
+  final index = parts[0] * 12 + (parts[1] - 1) + count;
+  return '${index ~/ 12}-${(index % 12 + 1).toString().padLeft(2, '0')}';
+}
 
 /// "#12 of 48".
 String rankLine(PeerRank rank) => '#${rank.rank} of ${rank.of}';

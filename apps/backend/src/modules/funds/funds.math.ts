@@ -1,4 +1,5 @@
 import { FundTxnKind } from "../../types";
+import { SipPlan, sipSlots } from "./funds.sip";
 
 /**
  * A mutual fund holding, worked out from what the user told us.
@@ -176,31 +177,17 @@ export function xirr(flows: CashFlow[]): number | null {
   return (low + high) / 2;
 }
 
-export interface SipPlan {
-  amountMinor: number;
-  dayOfMonth: number;
-  startOn: string;
-  endOn?: string | null;
-}
+export type { SipPlan } from "./funds.sip";
 
 /**
  * Every date a SIP falls due from its start up to `until`, after `after`
- * when given. A SIP on the 31st falls on the last day of shorter months.
+ * when given - less the months skipped or paused. A SIP on the 31st falls
+ * on the last day of shorter months.
  */
 export function sipDates(sip: SipPlan, until: string, after?: string | null): string[] {
-  const last = sip.endOn && sip.endOn < until ? sip.endOn : until;
-  const [startYear, startMonth] = sip.startOn.split("-").map(Number);
-  const dates: string[] = [];
-  for (let offset = 0; offset < 1200; offset += 1) {
-    const year = startYear + Math.floor((startMonth - 1 + offset) / 12);
-    const month = ((startMonth - 1 + offset) % 12) + 1;
-    const date = Math.min(sip.dayOfMonth, daysInMonth(year, month));
-    const day = `${year}-${String(month).padStart(2, "0")}-${String(date).padStart(2, "0")}`;
-    if (day > last) break;
-    if (day < sip.startOn || (after && day <= after)) continue;
-    dates.push(day);
-  }
-  return dates;
+  return sipSlots(sip, until)
+    .filter((slot) => slot.state === "due" && !(after && slot.due <= after))
+    .map((slot) => slot.due);
 }
 
 export interface OpeningInput {
@@ -255,7 +242,18 @@ export interface LedgerEntry {
   transactionId: string | null;
   txnId: string | null;
   via: "link" | "commitment" | null;
+  /// The SIP month this stands for: a scheduled instalment's own, or the
+  /// one a linked debit replaced. Null for anything extra.
+  month: string | null;
+  /// What the SIP said that month's instalment would be - on a linked
+  /// debit, to set beside what was really paid.
+  plannedMinor: number | null;
+  /// A linked debit paid in a month marked skipped or paused. It still
+  /// counts; see buildLedger.
+  inSkippedMonth: boolean;
 }
+
+const rupees = (minor: number) => `₹${Math.round(minor / 100).toLocaleString("en-IN")}`;
 
 /// How far a linked debit can be from a scheduled instalment and still be
 /// that instalment. Half a month either way: a SIP on the 1st debited on
@@ -269,12 +267,19 @@ export const SAME_INSTALMENT_DAYS = 15;
  * - The opening snapshot covers everything up to and including its day.
  *   Scheduled instalments start after it; a linked debit or manual entry
  *   on or before it is shown but not counted.
+ * - Each month's instalment is the amount of the SIP step in force that
+ *   month (funds.sip.ts). A month skipped or paused has none.
  * - A scheduled instalment exists only once its NAV does - the next NAV
  *   published on or after its due date, for a holiday.
  * - A linked debit is the real thing, so it replaces the scheduled
- *   instalment nearest to it within SAME_INSTALMENT_DAYS. One debit
- *   replaces one instalment; a second debit in the same cycle is an extra
- *   purchase and is added.
+ *   instalment nearest to it within SAME_INSTALMENT_DAYS, at whatever it
+ *   really came to. One debit replaces one instalment; a second debit in
+ *   the same cycle is an extra purchase and is added.
+ * - A debit paid in a month marked skipped or paused is that month's
+ *   instalment after all: money that left the bank bought units, whatever
+ *   the plan said. The skip stays stored, so unlinking the debit brings
+ *   it back. Skipped months are matched like any other for this, which
+ *   also stops such a debit being taken for a neighbouring month's.
  * - The same transaction linked by hand and through a commitment counts once.
  */
 export function buildLedger(input: LedgerInput): LedgerEntry[] {
@@ -288,6 +293,9 @@ export function buildLedger(input: LedgerInput): LedgerEntry[] {
     transactionId: null,
     txnId: null,
     via: null,
+    month: null,
+    plannedMinor: null,
+    inSkippedMonth: false,
   } as const;
 
   if (opening) {
@@ -310,27 +318,31 @@ export function buildLedger(input: LedgerInput): LedgerEntry[] {
     .sort((a, b) => (a.on === b.on ? (a.via === "link" ? -1 : 1) : a.on < b.on ? -1 : 1))
     .filter((link) => !seen.has(link.transactionId) && seen.add(link.transactionId));
 
-  const scheduled = input.sip
-    ? sipDates(input.sip, today, cutoff)
-        .map((due) => ({ due, at: navOnOrAfter(series, due) }))
-        .filter((instalment) => instalment.at && instalment.at.day <= today)
-        .map((instalment) => ({ due: instalment.due, at: instalment.at!, replaced: false }))
+  // Every instalment day after the snapshot, skipped months included so a
+  // debit paid in one has a month to stand for. One whose NAV isn't out
+  // can still be replaced; it just isn't added until it is.
+  const slots = input.sip
+    ? sipSlots(input.sip, today)
+        .filter((slot) => cutoff === null || slot.due > cutoff)
+        .map((slot) => ({ ...slot, at: navOnOrAfter(series, slot.due), replaced: false }))
     : [];
 
   for (const link of linked) {
     const covered = cutoff !== null && link.on <= cutoff;
+    let nearest: (typeof slots)[number] | null = null;
     if (!covered) {
-      let nearest: (typeof scheduled)[number] | null = null;
-      for (const instalment of scheduled) {
-        if (instalment.replaced) continue;
-        const distance = Math.abs(daysBetween(instalment.due, link.on));
+      for (const slot of slots) {
+        if (slot.replaced) continue;
+        const distance = Math.abs(daysBetween(slot.due, link.on));
         if (distance > SAME_INSTALMENT_DAYS) continue;
-        if (!nearest || distance < Math.abs(daysBetween(nearest.due, link.on))) nearest = instalment;
+        if (!nearest || distance < Math.abs(daysBetween(nearest.due, link.on))) nearest = slot;
       }
       if (nearest) nearest.replaced = true;
     }
 
     const at = navOnOrAfter(series, link.on);
+    const inSkippedMonth = !!nearest && nearest.state !== "due";
+    const differs = !!nearest && Math.abs(link.amountMinor - nearest.amountMinor) >= 100;
     entries.push({
       ...base,
       kind: "LINKED",
@@ -341,24 +353,37 @@ export function buildLedger(input: LedgerInput): LedgerEntry[] {
       units: at && !covered ? link.amountMinor / 100 / at.nav : 0,
       counted: !covered,
       pending: !covered && !at,
-      note: covered ? "Inside the opening balance" : !at ? "Waiting for the NAV" : null,
+      note: covered
+        ? "Inside the opening balance"
+        : !at
+          ? "Waiting for the NAV"
+          : inSkippedMonth
+            ? `Paid in a month marked ${nearest!.state}, so it counts as that month's instalment`
+            : differs
+              ? `${rupees(link.amountMinor)} paid vs ${rupees(nearest!.amountMinor)} planned`
+              : null,
       transactionId: link.transactionId,
       txnId: link.txnId ?? null,
       via: link.via,
+      month: nearest?.month ?? null,
+      plannedMinor: nearest?.amountMinor ?? null,
+      inSkippedMonth,
     });
   }
 
-  for (const instalment of scheduled) {
-    if (instalment.replaced) continue;
+  for (const slot of slots) {
+    if (slot.replaced || slot.state !== "due" || !slot.at || slot.at.day > today) continue;
     entries.push({
       ...base,
       kind: "SIP_SCHEDULED",
-      on: instalment.due,
-      navDay: instalment.at.day,
-      nav: instalment.at.nav,
-      amountMinor: input.sip!.amountMinor,
-      units: input.sip!.amountMinor / 100 / instalment.at.nav,
+      on: slot.due,
+      navDay: slot.at.day,
+      nav: slot.at.nav,
+      amountMinor: slot.amountMinor,
+      units: slot.amountMinor / 100 / slot.at.nav,
       counted: true,
+      month: slot.month,
+      plannedMinor: slot.amountMinor,
     });
   }
 
@@ -386,6 +411,82 @@ export function buildLedger(input: LedgerInput): LedgerEntry[] {
 
   const order: Record<FundTxnKind, number> = { OPENING: 0, SIP_SCHEDULED: 1, LINKED: 1, MANUAL_BUY: 1, REDEEM: 2 };
   return entries.sort((a, b) => (a.on === b.on ? order[a.kind] - order[b.kind] : a.on < b.on ? -1 : 1));
+}
+
+export type PlanStatus = "invested" | "skipped" | "paused" | "pending_nav" | "upcoming";
+
+/** One month of a SIP, planned against what happened. */
+export interface PlanMonth {
+  month: string;
+  /// The instalment day that month.
+  due: string;
+  plannedMinor: number;
+  status: PlanStatus;
+  linkedTransactionId: string | null;
+  /// What really went in: the debit's amount, or the scheduled one.
+  actualMinor: number | null;
+  units: number | null;
+  nav: number | null;
+  navDay: string | null;
+  /// On or before the opening snapshot, so inside it rather than added.
+  covered: boolean;
+  /// Marked skipped or paused, but a debit was paid that month anyway.
+  markedSkipped: boolean;
+}
+
+/**
+ * The SIP month by month from `fromMonth` to `toMonth`, oldest first:
+ * what each month was meant to be and what became of it. Read off the
+ * ledger, so it can never disagree with the totals.
+ *
+ * A month inside the opening snapshot shows its plan, `covered`, without
+ * units - the snapshot holds it. Months before the SIP starts or after it
+ * ends aren't listed.
+ */
+export function sipMonthPlan(
+  input: Pick<LedgerInput, "sip" | "opening" | "today">,
+  entries: LedgerEntry[],
+  fromMonth: string,
+  toMonth: string
+): PlanMonth[] {
+  if (!input.sip) return [];
+  const cutoff = input.opening?.asOf ?? null;
+  const byMonth = new Map<string, LedgerEntry>();
+  for (const entry of entries) {
+    if (entry.month && (entry.kind === "SIP_SCHEDULED" || entry.kind === "LINKED")) byMonth.set(entry.month, entry);
+  }
+
+  const last = `${toMonth}-31`;
+  return sipSlots(input.sip, last)
+    .filter((slot) => slot.month >= fromMonth && slot.month <= toMonth)
+    .map((slot) => {
+      const entry = byMonth.get(slot.month);
+      const covered = cutoff !== null && slot.due <= cutoff;
+      const month: PlanMonth = {
+        month: slot.month,
+        due: slot.due,
+        plannedMinor: slot.amountMinor,
+        status: slot.state === "due" ? (slot.due > input.today ? "upcoming" : covered ? "invested" : "pending_nav") : slot.state,
+        linkedTransactionId: null,
+        actualMinor: null,
+        units: null,
+        nav: null,
+        navDay: null,
+        covered,
+        markedSkipped: false,
+      };
+      if (!entry) return month;
+      return {
+        ...month,
+        status: entry.pending ? "pending_nav" : "invested",
+        linkedTransactionId: entry.kind === "LINKED" ? entry.transactionId : null,
+        actualMinor: entry.amountMinor,
+        units: entry.pending ? null : entry.units,
+        nav: entry.nav,
+        navDay: entry.navDay,
+        markedSkipped: slot.state !== "due",
+      };
+    });
 }
 
 /// Shorter than this and an annualised figure says more about one week's

@@ -2022,8 +2022,28 @@ const ipoCacheSchema = new Schema<IpoCacheDoc>({
 
 export const IpoCache = model<IpoCacheDoc>("IpoCache", ipoCacheSchema);
 
-/** A monthly SIP as the user set it up with the fund house. */
+/** An amount a SIP ran at from a month on (funds.sip.ts). */
+export interface FundSipStep {
+  /// YYYY-MM-DD; only the month counts.
+  fromOn: string;
+  amountMinor: number;
+  /// The SIP day from then on, when the mandate moved to another date.
+  dayOfMonth?: number | null;
+}
+
+/** Months with no instalment, from one to another, or until resumed. */
+export interface FundSipPause {
+  fromOn: string;
+  toOn?: string | null;
+}
+
+/**
+ * A monthly SIP as the user set it up with the fund house, with its
+ * history: every change of amount, and the months skipped or paused.
+ */
 export interface FundSip {
+  /// What it started at, the same as the first step's. A row stored
+  /// before steps existed has only this, and reads as that one step.
   amountMinor: number;
   dayOfMonth: number;
   /// YYYY-MM-DD, IST. The first instalment is the first SIP day on or after it.
@@ -2031,6 +2051,11 @@ export interface FundSip {
   /// The last day an instalment can fall on, when it has stopped or will.
   endOn?: string | null;
   active: boolean;
+  /// Oldest first, the first from startOn.
+  steps?: FundSipStep[];
+  /// YYYY-MM, each a month with no instalment.
+  skips?: string[];
+  pauses?: FundSipPause[];
 }
 
 /**
@@ -2076,6 +2101,23 @@ export interface FundHoldingDoc {
   updatedAt: Date;
 }
 
+const fundSipStepSchema = new Schema<FundSipStep>(
+  {
+    fromOn: { type: String, required: true },
+    amountMinor: { type: Number, required: true, min: 1 },
+    dayOfMonth: { type: Number, default: null, min: 1, max: 31 },
+  },
+  { _id: false }
+);
+
+const fundSipPauseSchema = new Schema<FundSipPause>(
+  {
+    fromOn: { type: String, required: true },
+    toOn: { type: String, default: null },
+  },
+  { _id: false }
+);
+
 const fundSipSchema = new Schema<FundSip>(
   {
     amountMinor: { type: Number, required: true, min: 1 },
@@ -2083,6 +2125,11 @@ const fundSipSchema = new Schema<FundSip>(
     startOn: { type: String, required: true },
     endOn: { type: String, default: null },
     active: { type: Boolean, default: true },
+    // No default: a row without steps is one the backfill hasn't reached
+    // (funds.backfill.ts), and every reader treats it as one step anyway.
+    steps: { type: [fundSipStepSchema], default: undefined },
+    skips: { type: [String], default: undefined },
+    pauses: { type: [fundSipPauseSchema], default: undefined },
   },
   { _id: false }
 );

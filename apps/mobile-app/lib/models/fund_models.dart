@@ -27,13 +27,68 @@ class FundFlag {
   static const all = [laggingCategory, lowXirr, regularPlan];
 }
 
-/// A running (or stopped) SIP's details, as the user gave them.
+/// An amount a SIP ran at from a month on.
+class FundSipStep {
+  /// YYYY-MM-DD; only the month counts.
+  final String fromOn;
+  final int amountMinor;
+
+  /// The SIP day from then, when the mandate moved to another date.
+  final int? dayOfMonth;
+
+  const FundSipStep({required this.fromOn, required this.amountMinor, this.dayOfMonth});
+
+  String get month => fromOn.length >= 7 ? fromOn.substring(0, 7) : fromOn;
+
+  static FundSipStep? maybe(Object? value) {
+    final json = _map(value);
+    final fromOn = _str(json?['fromOn']);
+    final amount = _intOrNull(json?['amountMinor']);
+    if (json == null || fromOn == null || amount == null) return null;
+    return FundSipStep(fromOn: fromOn, amountMinor: amount, dayOfMonth: _intOrNull(json['dayOfMonth']));
+  }
+
+  Map<String, dynamic> toJson() => {'fromOn': fromOn, 'amountMinor': amountMinor, 'dayOfMonth': dayOfMonth};
+}
+
+/// Months with no instalment, from one month to another, or until resumed.
+class FundSipPause {
+  final String fromOn;
+  final String? toOn;
+
+  const FundSipPause({required this.fromOn, this.toOn});
+
+  static FundSipPause? maybe(Object? value) {
+    final json = _map(value);
+    final fromOn = _str(json?['fromOn']);
+    if (json == null || fromOn == null) return null;
+    return FundSipPause(fromOn: fromOn, toOn: _str(json['toOn']));
+  }
+
+  Map<String, dynamic> toJson() => {'fromOn': fromOn, 'toOn': toOn};
+}
+
+/// A running (or stopped) SIP's details, as the user gave them, with its
+/// history: every change of amount and the months skipped or paused.
 class FundSip {
+  /// What it started at.
   final int amountMinor;
   final int dayOfMonth;
   final String startOn;
   final String? endOn;
   final bool active;
+
+  /// Oldest first, the first from the start, as sent - empty from an older
+  /// server that sent only an amount. Read [history] instead.
+  final List<FundSipStep> steps;
+
+  /// YYYY-MM, each a month with no instalment.
+  final List<String> skips;
+  final List<FundSipPause> pauses;
+
+  /// The amount and day in force this month, as the server works it out.
+  final int? _currentAmountMinor;
+  final int? _currentDayOfMonth;
 
   const FundSip({
     required this.amountMinor,
@@ -41,7 +96,23 @@ class FundSip {
     required this.startOn,
     this.endOn,
     this.active = true,
-  });
+    this.steps = const [],
+    this.skips = const [],
+    this.pauses = const [],
+    int? currentAmountMinor,
+    int? currentDayOfMonth,
+  })  : _currentAmountMinor = currentAmountMinor,
+        _currentDayOfMonth = currentDayOfMonth;
+
+  /// The steps, or the one amount when there are none.
+  List<FundSipStep> get history => steps.isEmpty ? [FundSipStep(fromOn: startOn, amountMinor: amountMinor)] : steps;
+
+  /// The amount going in each month now.
+  int get currentAmountMinor => _currentAmountMinor ?? history.last.amountMinor;
+  int get currentDayOfMonth => _currentDayOfMonth ?? dayOfMonth;
+
+  /// Changed amount, skipped or paused at least once.
+  bool get hasHistory => history.length > 1 || skips.isNotEmpty || pauses.isNotEmpty;
 
   static FundSip? maybe(Object? value) {
     final json = _map(value);
@@ -49,6 +120,10 @@ class FundSip {
     final day = _intOrNull(json?['dayOfMonth']);
     final start = _str(json?['startOn']);
     if (json == null || amount == null || day == null || start == null) return null;
+    final steps = [
+      for (final row in json['steps'] is List ? json['steps'] as List : const [])
+        if (FundSipStep.maybe(row) case final step?) step,
+    ];
     return FundSip(
       amountMinor: amount,
       dayOfMonth: day,
@@ -56,6 +131,14 @@ class FundSip {
       endOn: _str(json['endOn']),
       // Stored with `active`; an older row without it was running.
       active: json['active'] is bool ? json['active'] as bool : true,
+      steps: steps,
+      skips: _strings(json['skips']),
+      pauses: [
+        for (final row in json['pauses'] is List ? json['pauses'] as List : const [])
+          if (FundSipPause.maybe(row) case final pause?) pause,
+      ],
+      currentAmountMinor: _intOrNull(json['currentAmountMinor']),
+      currentDayOfMonth: _intOrNull(json['currentDayOfMonth']),
     );
   }
 
@@ -65,6 +148,9 @@ class FundSip {
         'startOn': startOn,
         'endOn': endOn,
         'active': active,
+        'steps': [for (final step in history) step.toJson()],
+        'skips': skips,
+        'pauses': [for (final pause in pauses) pause.toJson()],
       };
 }
 
@@ -226,6 +312,9 @@ class FundHolding {
   final String? firstOn;
   final int heldDays;
   final int monthlySipMinor;
+
+  /// A SIP that hasn't stopped but sends nothing this month: paused.
+  final bool sipPaused;
   final double? oneYearPercent;
   final double? threeYearPercent;
   final HoldingPeers? peers;
@@ -265,6 +354,7 @@ class FundHolding {
     this.firstOn,
     this.heldDays = 0,
     this.monthlySipMinor = 0,
+    this.sipPaused = false,
     this.oneYearPercent,
     this.threeYearPercent,
     this.peers,
@@ -306,6 +396,7 @@ class FundHolding {
       firstOn: _str(json['firstOn']),
       heldDays: _int(json['heldDays']),
       monthlySipMinor: _int(json['monthlySipMinor']),
+      sipPaused: _bool(json['sipPaused']),
       oneYearPercent: _numOrNull(returns['oneYearPercent']),
       threeYearPercent: _numOrNull(returns['threeYearPercent']),
       peers: HoldingPeers.maybe(json['peers']),
@@ -322,6 +413,9 @@ class FundHolding {
   /// A SIP that is still going in each month - the server's call, since it
   /// knows today's date in IST and whether the end date has passed.
   bool get sipRunning => sip != null && monthlySipMinor > 0;
+
+  /// Stopped or ended, rather than paused for now.
+  bool get sipStopped => sip != null && monthlySipMinor == 0 && !sipPaused;
 }
 
 /// The ledger's kinds of line.
@@ -358,6 +452,14 @@ class FundLedgerEntry {
   /// "link" or "commitment" for a debit from SpendLog.
   final String? via;
 
+  /// The SIP month this stands for, and what the SIP said it would be -
+  /// set beside a linked debit's real amount.
+  final String? month;
+  final int? plannedMinor;
+
+  /// A debit paid in a month marked skipped or paused, counted anyway.
+  final bool inSkippedMonth;
+
   const FundLedgerEntry({
     required this.kind,
     required this.on,
@@ -371,6 +473,9 @@ class FundLedgerEntry {
     this.transactionId,
     this.txnId,
     this.via,
+    this.month,
+    this.plannedMinor,
+    this.inSkippedMonth = false,
   });
 
   factory FundLedgerEntry.fromJson(Map<String, dynamic> json) => FundLedgerEntry(
@@ -387,9 +492,88 @@ class FundLedgerEntry {
         transactionId: _str(json['transactionId']),
         txnId: _str(json['txnId']),
         via: _str(json['via']),
+        month: _str(json['month']),
+        plannedMinor: _intOrNull(json['plannedMinor']),
+        inSkippedMonth: _bool(json['inSkippedMonth']),
       );
 
   bool get isManual => kind == FundTxnKind.manualBuy || kind == FundTxnKind.redeem;
+
+  /// Paid something other than the SIP said: the server's note says what.
+  bool get differsFromPlan => plannedMinor != null && (plannedMinor! - amountMinor).abs() >= 100;
+}
+
+/// What became of a SIP month.
+class SipMonthStatus {
+  const SipMonthStatus._();
+  static const invested = 'invested';
+  static const skipped = 'skipped';
+  static const paused = 'paused';
+  static const pendingNav = 'pending_nav';
+  static const upcoming = 'upcoming';
+}
+
+/// One month of a SIP: what it was meant to be, and what happened.
+class SipPlanMonth {
+  /// YYYY-MM.
+  final String month;
+  final String due;
+  final int plannedMinor;
+  final String status;
+  final String? linkedTransactionId;
+  final int? actualMinor;
+  final double? units;
+  final double? nav;
+  final String? navDay;
+
+  /// Inside the opening snapshot: in it, not added again.
+  final bool covered;
+
+  /// Marked skipped or paused, but a payment was linked for it anyway.
+  final bool markedSkipped;
+
+  const SipPlanMonth({
+    required this.month,
+    required this.due,
+    required this.plannedMinor,
+    required this.status,
+    this.linkedTransactionId,
+    this.actualMinor,
+    this.units,
+    this.nav,
+    this.navDay,
+    this.covered = false,
+    this.markedSkipped = false,
+  });
+
+  static SipPlanMonth? maybe(Object? value) {
+    final json = _map(value);
+    final month = _str(json?['month']);
+    if (json == null || month == null) return null;
+    const statuses = [
+      SipMonthStatus.invested,
+      SipMonthStatus.skipped,
+      SipMonthStatus.paused,
+      SipMonthStatus.pendingNav,
+      SipMonthStatus.upcoming,
+    ];
+    final status = _str(json['status']);
+    return SipPlanMonth(
+      month: month,
+      due: _str(json['due']) ?? '$month-01',
+      plannedMinor: _int(json['plannedMinor']),
+      status: statuses.contains(status) ? status! : SipMonthStatus.upcoming,
+      linkedTransactionId: _str(json['linkedTransactionId']),
+      actualMinor: _intOrNull(json['actualMinor']),
+      units: _numOrNull(json['units']),
+      nav: _numOrNull(json['nav']),
+      navDay: _str(json['navDay']),
+      covered: _bool(json['covered']),
+      markedSkipped: _bool(json['markedSkipped']),
+    );
+  }
+
+  bool get isSkipped => status == SipMonthStatus.skipped || status == SipMonthStatus.paused;
 }
 
 /// A holding with its full history and a year of NAVs.
@@ -401,7 +585,16 @@ class HoldingDetail {
   final List<NavPoint> sparkline;
   final String? navError;
 
-  const HoldingDetail({required this.holding, this.txns = const [], this.sparkline = const [], this.navError});
+  /// The SIP month by month, oldest first: the last 24 months and the next 3.
+  final List<SipPlanMonth> sipPlan;
+
+  const HoldingDetail({
+    required this.holding,
+    this.txns = const [],
+    this.sparkline = const [],
+    this.navError,
+    this.sipPlan = const [],
+  });
 
   factory HoldingDetail.fromJson(Map<String, dynamic> json) => HoldingDetail(
         holding: FundHolding.fromJson(json),
@@ -411,6 +604,10 @@ class HoldingDetail {
             if (NavPoint.maybe(row) case final point?) point,
         ],
         navError: _str(json['navError']),
+        sipPlan: [
+          for (final row in json['sipPlan'] is List ? json['sipPlan'] as List : const [])
+            if (SipPlanMonth.maybe(row) case final month?) month,
+        ],
       );
 }
 

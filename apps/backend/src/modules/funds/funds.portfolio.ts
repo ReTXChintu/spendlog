@@ -18,12 +18,15 @@ import {
   ManualInput,
   MIN_XIRR_DAYS,
   NavSeries,
+  PlanMonth,
   rankAmong,
+  sipMonthPlan,
   summariseHolding,
   trailingReturn,
   xirr,
 } from "./funds.math";
 import { isRegularPlan } from "./funds.sources";
+import { addMonths, isPaused, monthOf, SipPlan, sipSteps, stepFor } from "./funds.sip";
 
 /**
  * A user's funds, read: each holding's ledger, totals and returns, where
@@ -60,8 +63,12 @@ export interface HoldingView {
     rank: ReturnType<typeof rankAmong>;
   } | null;
   flags: FundFlag[];
-  /// What goes in each month now: the SIP when one is running.
+  /// What goes in each month now: the SIP step in force when one is
+  /// running, nothing while it's paused.
   monthlySipMinor: number;
+  /// A SIP that hasn't been stopped or ended - paused or not.
+  sipRunning: boolean;
+  sipPaused: boolean;
   nav: { fetchedAt: Date | null; lastError: string | null; lastErrorAt: Date | null };
 }
 
@@ -176,6 +183,9 @@ export function viewHolding(
   }
 
   const isRegular = isRegularPlan(holding.schemeName);
+  const thisMonth = monthOf(today);
+  const running = sipRunning(holding, today);
+  const paused = running && isPaused(holding.sip!, thisMonth);
   // An IDCW plan's NAV drops by every payout, which no NAV-based return
   // sees, so it would always look like it lags. Only the plan is flagged.
   const flags = fundFlags({
@@ -201,7 +211,9 @@ export function viewHolding(
     threeYear,
     peers: peerView,
     flags,
-    monthlySipMinor: sipRunning(holding, today) ? holding.sip!.amountMinor : 0,
+    monthlySipMinor: running && !paused ? stepFor(holding.sip!, thisMonth).amountMinor : 0,
+    sipRunning: running,
+    sipPaused: paused,
     nav: { fetchedAt: history?.fetchedAt ?? null, lastError: history?.lastError ?? null, lastErrorAt: history?.lastErrorAt ?? null },
   };
 }
@@ -260,7 +272,7 @@ export function holdingJson(view: HoldingView, now: Date) {
     isGrowth: holding.isGrowth,
     isRegular: view.isRegular,
     folio: holding.folio ?? null,
-    sip: holding.sip ?? null,
+    sip: holding.sip ? sipJson(holding.sip, istDayKey(now)) : null,
     opening: holding.opening ?? null,
     commitmentId: holding.commitmentId?.toString() ?? null,
     units: Math.round(summary.units * 1000) / 1000,
@@ -277,6 +289,7 @@ export function holdingJson(view: HoldingView, now: Date) {
     firstOn: summary.firstOn,
     heldDays: summary.heldDays,
     monthlySipMinor: view.monthlySipMinor,
+    sipPaused: view.sipPaused,
     returns: { oneYearPercent: percent(view.oneYear), threeYearPercent: percent(view.threeYear) },
     peers: view.peers
       ? {
@@ -357,7 +370,62 @@ export function ledgerJson(entry: LedgerEntry) {
     transactionId: entry.transactionId,
     txnId: entry.txnId,
     via: entry.via,
+    month: entry.month,
+    plannedMinor: entry.plannedMinor,
+    inSkippedMonth: entry.inSkippedMonth,
   };
+}
+
+/**
+ * A SIP as the app gets it: as stored, its history read the way the maths
+ * reads it (so a row the backfill hasn't reached has its one step), and
+ * the amount and day in force this month.
+ */
+export function sipJson(sip: SipPlan, today: string) {
+  const steps = sipSteps(sip);
+  const current = stepFor(sip, monthOf(today));
+  return {
+    amountMinor: steps[0].amountMinor,
+    dayOfMonth: sip.dayOfMonth,
+    startOn: sip.startOn,
+    endOn: sip.endOn ?? null,
+    active: sip.active ?? true,
+    steps: steps.map((step) => ({ fromOn: step.fromOn, amountMinor: step.amountMinor, dayOfMonth: step.dayOfMonth ?? null })),
+    skips: [...(sip.skips ?? [])].sort(),
+    pauses: (sip.pauses ?? [])
+      .map((pause) => ({ fromOn: pause.fromOn, toOn: pause.toOn ?? null }))
+      .sort((a, b) => (a.fromOn < b.fromOn ? -1 : a.fromOn > b.fromOn ? 1 : 0)),
+    currentAmountMinor: current.amountMinor,
+    currentDayOfMonth: current.dayOfMonth,
+  };
+}
+
+/// How far back the month-by-month plan goes, this month included, and how far ahead.
+export const PLAN_PAST_MONTHS = 24;
+export const PLAN_AHEAD_MONTHS = 3;
+
+/** The SIP month by month, for the holding's page. */
+export function planJson(view: HoldingView, today: string) {
+  const thisMonth = monthOf(today);
+  const plan = sipMonthPlan(
+    { sip: view.holding.sip, opening: view.holding.opening, today },
+    view.ledger,
+    addMonths(thisMonth, -(PLAN_PAST_MONTHS - 1)),
+    addMonths(thisMonth, PLAN_AHEAD_MONTHS)
+  );
+  return plan.map((month: PlanMonth) => ({
+    month: month.month,
+    due: month.due,
+    plannedMinor: month.plannedMinor,
+    status: month.status,
+    linkedTransactionId: month.linkedTransactionId,
+    actualMinor: month.actualMinor,
+    units: month.units === null ? null : Math.round(month.units * 1000) / 1000,
+    nav: month.nav,
+    navDay: month.navDay,
+    covered: month.covered,
+    markedSkipped: month.markedSkipped,
+  }));
 }
 
 /** About a year of NAVs, thinned for a sparkline. */

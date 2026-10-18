@@ -478,7 +478,7 @@ class HoldingCard extends StatelessWidget {
     ];
 
     final meta = [
-      if (sip != null) h.sipRunning ? 'SIP ${sipLine(sip)}' : 'SIP stopped',
+      if (sip != null) h.sipRunning ? 'SIP ${sipLine(sip)}' : (h.sipPaused ? 'SIP paused' : 'SIP stopped'),
       if (h.pendingCount > 0) '${h.pendingCount} waiting for NAV',
       if (rank != null) '${rankLine(rank)} in category${peers?.basis == null ? '' : ' (${peers!.basis})'}',
     ];

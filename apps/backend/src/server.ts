@@ -14,6 +14,7 @@ import { runCardBillAccountBackfill, runCardBillBackfill } from "./modules/cards
 import { runCardBillLegBackfill } from "./modules/cards/cards.billLeg";
 import { runCardCreditBackfill, runPaymentTwinBackfill, runSelfPaymentRepair } from "./modules/cards/cards.billRepair";
 import { runDailyFundRefresh } from "./modules/funds/funds.cache";
+import { runSipStepsBackfill } from "./modules/funds/funds.backfill";
 import { runTransferLegBackfill } from "./modules/transactions/transactions.transfer";
 import { runLoanSplitBackfill } from "./modules/loans/loans.backfill";
 import { syncAllConnectedEmails } from "./modules/ingestion/gmail.service";
@@ -124,6 +125,9 @@ async function start() {
   // Loan repayments onto loanSplits, and every loan's instalments covered
   // by what was actually paid towards it rather than one tick per payment.
   runLoanSplitBackfill().catch((err) => console.error("Loan split backfill failed:", err));
+  // Every SIP stored as one amount given a one-step history, the shape a
+  // SIP's changes of amount and skipped months are kept in.
+  runSipStepsBackfill().catch((err) => console.error("SIP steps backfill failed:", err));
 
   setInterval(() => {
     syncAllConnectedEmails().catch((err) => console.error("Background Gmail sync failed:", err));

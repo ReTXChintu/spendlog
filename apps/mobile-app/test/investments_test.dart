@@ -266,6 +266,61 @@ Map<String, dynamic> _detail(Map<String, dynamic> holding) => {
         for (var i = 0; i < 60; i++) {'day': '2026-${(i ~/ 6 + 1).toString().padLeft(2, '0')}-01', 'nav': 80 + i * 0.3 + (i % 5) * 0.8},
       ],
       'navError': null,
+      'sipPlan': _plan,
+    };
+
+Map<String, dynamic> _planMonth(
+  String month,
+  String status, {
+  int planned = 100000,
+  int? actual,
+  double? units,
+  String? linked,
+  bool covered = false,
+}) =>
+    {
+      'month': month,
+      'due': '$month-05',
+      'plannedMinor': planned,
+      'status': status,
+      'linkedTransactionId': linked,
+      'actualMinor': actual,
+      'units': units,
+      'nav': units == null ? null : 93.0212,
+      'navDay': units == null ? null : '$month-05',
+      'covered': covered,
+      'markedSkipped': false,
+    };
+
+/// The SIP month by month, oldest first, as funds.portfolio.ts sends it.
+final _plan = [
+  _planMonth('2026-04', 'invested', actual: 100000, covered: true),
+  _planMonth('2026-05', 'invested', planned: 200000, actual: 200000, units: 21.5),
+  _planMonth('2026-06', 'invested', planned: 200000, actual: 200000, units: 21.5),
+  _planMonth('2026-07', 'skipped', planned: 200000),
+  _planMonth('2026-08', 'invested', actual: 200000, units: 21.5, linked: '650000000000000000000009'),
+  _planMonth('2026-09', 'paused'),
+  _planMonth('2026-10', 'pending_nav'),
+  _planMonth('2026-11', 'upcoming'),
+  _planMonth('2026-12', 'upcoming'),
+];
+
+/// A SIP that went 1,000 → 2,000 → 1,000, with July skipped.
+Map<String, dynamic> _historySip({List<Map<String, dynamic>> pauses = const []}) => {
+      'amountMinor': 100000,
+      'dayOfMonth': 5,
+      'startOn': '2026-01-05',
+      'endOn': null,
+      'active': true,
+      'steps': [
+        {'fromOn': '2026-01-05', 'amountMinor': 100000, 'dayOfMonth': null},
+        {'fromOn': '2026-05-01', 'amountMinor': 200000, 'dayOfMonth': null},
+        {'fromOn': '2026-08-01', 'amountMinor': 100000, 'dayOfMonth': null},
+      ],
+      'skips': ['2026-07'],
+      'pauses': pauses,
+      'currentAmountMinor': 100000,
+      'currentDayOfMonth': 5,
     };
 
 /// Answers each path with its body. A path missing from [routes] is a 404.
@@ -410,6 +465,28 @@ void main() {
       expect(d.txns[3].note, 'Inside the opening balance');
       expect(d.sparkline, hasLength(60));
       expect(HoldingDetail.fromJson({'id': 'z', 'txns': [{}], 'sparkline': [{'day': 'x'}]}).sparkline, isEmpty);
+      expect(d.sipPlan, hasLength(9));
+      expect(d.sipPlan[3].isSkipped, isTrue);
+      expect(d.sipPlan[4].linkedTransactionId, '650000000000000000000009');
+    });
+
+    test('a SIP with a history, and one from an older server with only an amount', () {
+      final sip = FundSip.maybe(_historySip())!;
+      expect(sip.history.map((step) => step.amountMinor), [100000, 200000, 100000]);
+      expect(sip.skips, ['2026-07']);
+      expect(sip.currentAmountMinor, 100000);
+      expect(sip.hasHistory, isTrue);
+
+      final old = FundSip.maybe({'amountMinor': 500000, 'dayOfMonth': 5, 'startOn': '2024-11-05'})!;
+      expect(old.history, hasLength(1));
+      expect(old.history.single.fromOn, '2024-11-05');
+      expect(old.currentAmountMinor, 500000);
+      expect(old.hasHistory, isFalse);
+
+      final paused = FundHolding.fromJson({..._holding(), 'monthlySipMinor': 0, 'sipPaused': true});
+      expect(paused.sipRunning, isFalse);
+      expect(paused.sipStopped, isFalse);
+      expect(SipPlanMonth.maybe({'month': '2026-01', 'status': 'nonsense'})!.status, SipMonthStatus.upcoming);
     });
 
     test('goals, advice, links and search', () {
@@ -492,6 +569,20 @@ void main() {
       expect(sipLine(const FundSip(amountMinor: 500000, dayOfMonth: 5, startOn: '2024-01-05')), '₹5,000 on 5th');
       expect(sipLine(const FundSip(amountMinor: 250000, dayOfMonth: 22, startOn: '2024-01-22')), '₹2,500 on 22nd');
       expect(rankLine(const PeerRank(rank: 12, of: 48, percentile: 77)), '#12 of 48');
+      expect(
+        sipHistoryLine(FundSip.maybe(_historySip())!),
+        '₹1,000 from Jan 2026 · ₹2,000 from May · ₹1,000 from Aug · skipped Jul',
+      );
+      expect(
+        sipHistoryLine(FundSip.maybe(_historySip(pauses: [
+          {'fromOn': '2026-09-01', 'toOn': '2026-10-31'},
+          {'fromOn': '2027-02-01', 'toOn': null},
+        ]))!),
+        '₹1,000 from Jan 2026 · ₹2,000 from May · ₹1,000 from Aug · skipped Jul · paused Sep–Oct · paused from Feb 2027',
+      );
+      expect(sipLine(FundSip.maybe(_historySip())!), '₹1,000 on 5th');
+      expect(sipMonthLabel('2026-06'), 'Jun 2026');
+      expect(shiftSipMonth('2026-12', 1), '2027-01');
       expect(heldFor(45), '45 days');
       expect(heldFor(426), '14 months');
       expect(heldFor(840), '2.3 years');
@@ -660,6 +751,83 @@ void main() {
           'A folio number is at most 40 characters.');
     });
 
+    test('add fund: a SIP history - changes of amount and skipped months - goes in the body', () {
+      FundFormCheck withHistory({List<SipChangeDraft> changes = const [], List<String> skips = const [], String? end}) =>
+          FundFormData(
+            runsSip: true,
+            sipAmount: '1000',
+            sipDay: '5',
+            sipStart: '2026-01-05',
+            sipEnd: end,
+            sipChanges: changes,
+            sipSkips: skips,
+          ).check(today);
+
+      // One amount, nothing else: the same body as ever.
+      expect(withHistory().sip!.containsKey('steps'), isFalse);
+      expect(withHistory().sip!.containsKey('skips'), isFalse);
+
+      final ok = withHistory(changes: const [
+        SipChangeDraft(month: '2026-08', amount: '1,000'),
+        SipChangeDraft(month: '2026-05', amount: '2000'),
+      ], skips: const ['2026-07']);
+      expect(ok.ok, isTrue);
+      expect(ok.createBody(9)['sip'], {
+        'amountMinor': 100000,
+        'dayOfMonth': 5,
+        'startOn': '2026-01-05',
+        'endOn': null,
+        'active': true,
+        'steps': [
+          {'fromOn': '2026-05-01', 'amountMinor': 200000},
+          {'fromOn': '2026-08-01', 'amountMinor': 100000},
+        ],
+        'skips': ['2026-07'],
+      });
+
+      expect(withHistory(changes: const [SipChangeDraft(month: '2026-05')]).error, 'Enter the new amount from May 2026.');
+      expect(withHistory(changes: const [SipChangeDraft(month: '2026-01', amount: '2000')]).error,
+          'Jan 2026 is when the SIP started. Change the amount above instead.');
+      expect(withHistory(changes: const [SipChangeDraft(month: '2026-09', amount: '2000')], end: '2026-06-30').error,
+          "The amount can't change after the SIP ends (Sep 2026).");
+      expect(
+        withHistory(changes: const [
+          SipChangeDraft(month: '2026-05', amount: '2000'),
+          SipChangeDraft(month: '2026-05', amount: '3000'),
+        ]).error,
+        'Two changes from May 2026. Keep one.',
+      );
+      expect(withHistory(skips: const ['2025-12']).error, 'Dec 2025 is outside the SIP. Skipped months fall while it ran.');
+
+      // Editing one that exists always sends its history, so the last change can be taken out.
+      const editing = FundFormData(runsSip: true, sipAmount: '1000', sipDay: '5', sipStart: '2026-01-05', editingSip: true);
+      expect(editing.check(today).sip!['steps'], isEmpty);
+      expect(editing.check(today).sip!['skips'], isEmpty);
+    });
+
+    test('editing a SIP starts from its history', () {
+      final fields = FundFormFields(
+        sip: FundSip.maybe({
+          ..._historySip(),
+          'steps': [
+            {'fromOn': '2026-01-05', 'amountMinor': 100000, 'dayOfMonth': null},
+            {'fromOn': '2026-05-01', 'amountMinor': 200000, 'dayOfMonth': 20},
+          ],
+        }),
+      );
+      addTearDown(fields.dispose);
+      expect(fields.sipAmount.text, '1000');
+      expect(fields.sipChanges.single.month, '2026-05');
+      expect(fields.sipChanges.single.amount.text, '2000');
+      expect(fields.sipSkips, ['2026-07']);
+      // A change that moved the SIP day keeps it through the edit.
+      expect(fields.data.check(today).sip!['steps'], [
+        {'fromOn': '2026-05-01', 'amountMinor': 200000, 'dayOfMonth': 20},
+      ]);
+      fields.addChange();
+      expect(fields.sipChanges.last.month, '2026-06');
+    });
+
     test('goal: a name, a cost and a future date', () {
       expect(const GoalFormData(target: '200000', targetOn: '2027-06-30').check(today, isNew: true).error,
           'Give the goal a name, like "Laptop".');
@@ -724,6 +892,52 @@ void main() {
       expect(body['sip']['dayOfMonth'], 5);
       expect(body['sip']['startOn'], istToday());
       expect(body.containsKey('opening'), isFalse);
+    });
+
+    testWidgets('the add-fund form takes an amount change and a skipped month, and posts them', (tester) async {
+      final log = <http.Request>[];
+      final thisMonth = istToday().substring(0, 7);
+      final nextMonth = shiftSipMonth(thisMonth, 1);
+      await http.runWithClient(() async {
+        await _pump(
+          tester,
+          const AddFundScreen(
+            initialScheme: SchemeResult(
+              schemeCode: 122639,
+              schemeName: 'Parag Parikh Flexi Cap Fund - Direct Plan - Growth',
+              isDirect: true,
+              isGrowth: true,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('I run a SIP'));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byKey(const ValueKey('sip-amount')), '1000');
+        await tester.enterText(find.byKey(const ValueKey('sip-day')), '5');
+
+        await tester.tap(find.byKey(const ValueKey('sip-add-change')));
+        await tester.pumpAndSettle();
+        expect(find.text(sipMonthLabel(nextMonth)), findsOneWidget);
+        await tester.enterText(find.byKey(const ValueKey('sip-change-amount-0')), '2000');
+
+        await tester.tap(find.byKey(const ValueKey('sip-add-skip')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(ValueKey('pick-month-$thisMonth')));
+        await tester.pumpAndSettle();
+        expect(find.text('Skipped ${sipMonthLabel(thisMonth)}'), findsOneWidget);
+
+        await tester.tap(find.text('Add to portfolio'));
+        await tester.pumpAndSettle();
+      }, () => _server({'/funds/holdings': http.Response(jsonEncode(_detail(_holding())), 201)}, log: log));
+
+      expect(log, hasLength(1));
+      final sip = (jsonDecode(log.single.body) as Map<String, dynamic>)['sip'] as Map<String, dynamic>;
+      expect(sip['amountMinor'], 100000);
+      expect(sip['steps'], [
+        {'fromOn': '$nextMonth-01', 'amountMinor': 200000},
+      ]);
+      expect(sip['skips'], [thisMonth]);
     });
 
     testWidgets('search prefers Direct-Growth and shows the tags', (tester) async {
@@ -913,7 +1127,7 @@ void main() {
 
     testWidgets('tapping a fund opens its page with the ledger', (tester) async {
       await http.runWithClient(() async {
-        await _pump(tester, const InvestmentsScreen());
+        await _pump(tester, const InvestmentsScreen(), height: 14400);
         await tester.pumpAndSettle();
         await tester.tap(find.text('Axis Bluechip Fund'));
         await tester.pumpAndSettle();
@@ -926,6 +1140,120 @@ void main() {
       expect(find.text('Linked payment'), findsNWidgets(2));
       expect(find.textContaining('#26 of 29', findRichText: true), findsOneWidget);
       expect(find.textContaining('Flagged when a fund is in the bottom 25%'), findsOneWidget);
+    });
+  });
+
+  group('SIP history', () {
+    const id = '64f000000000000000000001';
+    Map<String, dynamic> historyDetail({List<Map<String, dynamic>> pauses = const [], bool paused = false}) => {
+          ..._detail({..._holding(), 'sip': _historySip(pauses: pauses), 'monthlySipMinor': paused ? 0 : 100000, 'sipPaused': paused}),
+          'txns': [
+            {'kind': 'LINKED', 'on': '2026-08-05', 'navDay': '2026-08-05', 'nav': 93.1, 'amountMinor': 200000, 'units': 21.48, 'counted': true, 'pending': false, 'note': '₹2,000 paid vs ₹1,000 planned', 'transactionId': '650000000000000000000009', 'txnId': '680000000000000000000001', 'via': 'link', 'month': '2026-08', 'plannedMinor': 100000, 'inSkippedMonth': false},
+            {'kind': 'SIP_SCHEDULED', 'on': '2026-06-05', 'navDay': '2026-06-05', 'nav': 93.0, 'amountMinor': 200000, 'units': 21.5, 'counted': true, 'pending': false, 'note': null, 'transactionId': null, 'txnId': null, 'via': null, 'month': '2026-06', 'plannedMinor': 200000, 'inSkippedMonth': false},
+          ],
+        };
+
+    Map<String, Object> routes(Map<String, dynamic> detail) => {
+          '/funds/holdings/$id': detail,
+          '/sip/change': detail,
+          '/sip/skip': detail,
+          '/sip/skip/2026-07': detail,
+          '/sip/pause': detail,
+          '/sip/resume': detail,
+        };
+
+    Future<void> open(WidgetTester tester) async {
+      await _pump(tester, HoldingDetailScreen(key: UniqueKey(), holdingId: id), height: 14400);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('SIP HISTORY'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('the timeline shows each month: invested, skipped, paused, waiting, upcoming', (tester) async {
+      final log = <http.Request>[];
+      await http.runWithClient(() => open(tester), () => _server(routes(historyDetail()), log: log));
+
+      expect(find.text('₹1,000 from Jan 2026 · ₹2,000 from May · ₹1,000 from Aug · skipped Jul'), findsOneWidget);
+      // Newest first.
+      final dec = tester.getTopLeft(find.byKey(const ValueKey('plan-month-2026-12')));
+      final may = tester.getTopLeft(find.byKey(const ValueKey('plan-month-2026-05')));
+      expect(dec.dy, lessThan(may.dy));
+      expect(find.text('Skipped'), findsOneWidget);
+      expect(find.text('Paused'), findsOneWidget);
+      expect(find.text('Upcoming · due 5 Nov'), findsOneWidget);
+      expect(find.text('Waiting for NAV · due 5 Oct'), findsOneWidget);
+      expect(find.text('In the opening balance'), findsOneWidget);
+      expect(find.text('Invested · 21.500 units at ₹93.02'), findsNWidgets(3));
+      // August: a payment of 2,000 for a planned 1,000, on the timeline and in the ledger.
+      expect(find.text('planned ₹1,000'), findsOneWidget);
+      expect(find.text('₹2,000 paid vs ₹1,000 planned'), findsOneWidget);
+      expect(find.text('Pause'), findsOneWidget);
+      expect(log.where((request) => request.method != 'GET'), isEmpty);
+    });
+
+    testWidgets('changing the amount, skipping a month and taking a skip back call the right endpoints', (tester) async {
+      final log = <http.Request>[];
+      final thisMonth = istToday().substring(0, 7);
+      await http.runWithClient(() async {
+        await open(tester);
+
+        await tester.tap(find.text('Change amount'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+        expect(find.text('Enter the new monthly amount.'), findsOneWidget);
+        await tester.enterText(find.byKey(const ValueKey('sip-change-amount')), '2500');
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const ValueKey('plan-month-2026-06')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('plan-month-2026-07')));
+        await tester.pumpAndSettle();
+        // A month a payment is linked to isn't skipped from here.
+        await tester.tap(find.byKey(const ValueKey('plan-month-2026-08')));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('A payment is linked to Aug 2026'), findsOneWidget);
+      }, () => _server(routes(historyDetail()), log: log));
+
+      final calls = log.where((request) => request.method != 'GET').toList();
+      expect(calls.map((request) => '${request.method} ${request.url.path}'), [
+        'POST /funds/holdings/$id/sip/change',
+        'POST /funds/holdings/$id/sip/skip',
+        'DELETE /funds/holdings/$id/sip/skip/2026-07',
+      ]);
+      expect(jsonDecode(calls[0].body), {'fromOn': '$thisMonth-01', 'amountMinor': 250000});
+      expect(jsonDecode(calls[1].body), {'month': '2026-06'});
+      // The DELETE's body is dropped, so the detail is fetched again after it.
+      expect(log.last.method, 'GET');
+    });
+
+    testWidgets('pausing and resuming call the right endpoints', (tester) async {
+      final log = <http.Request>[];
+      final thisMonth = istToday().substring(0, 7);
+      await http.runWithClient(() async {
+        await open(tester);
+        await tester.tap(find.text('Pause'));
+        await tester.pumpAndSettle();
+        expect(find.text('Until I resume'), findsOneWidget);
+        await tester.tap(find.widgetWithText(FilledButton, 'Pause'));
+        await tester.pumpAndSettle();
+      }, () => _server(routes(historyDetail()), log: log));
+      final pause = log.singleWhere((request) => request.method == 'POST');
+      expect(pause.url.path, '/funds/holdings/$id/sip/pause');
+      expect(jsonDecode(pause.body), {'fromOn': '$thisMonth-01'});
+
+      final paused = historyDetail(pauses: [
+        {'fromOn': '$thisMonth-01', 'toOn': null},
+      ], paused: true);
+      log.clear();
+      await http.runWithClient(() async {
+        await open(tester);
+        await tester.tap(find.text('Resume'));
+        await tester.pumpAndSettle();
+      }, () => _server(routes(paused), log: log));
+      final resume = log.singleWhere((request) => request.method == 'POST');
+      expect(resume.url.path, '/funds/holdings/$id/sip/resume');
     });
   });
 
@@ -1005,6 +1333,41 @@ void main() {
         expect(tester.takeException(), isNull);
       });
 
+      testWidgets('SIP history and its dialogs (${brightness.name})', (tester) async {
+        final detail = _detail({
+          ...long,
+          'sip': _historySip(pauses: [
+            {'fromOn': '2026-09-01', 'toOn': '2026-09-30'},
+          ]),
+        });
+        await http.runWithClient(() async {
+          await _pump(tester, const HoldingDetailScreen(holdingId: '64f000000000000000000003'), brightness: brightness, height: 2400);
+          await tester.pumpAndSettle();
+          await tester.scrollUntilVisible(find.text('Change amount'), 300, scrollable: find.byType(Scrollable).last);
+          expect(tester.takeException(), isNull);
+
+          await tester.tap(find.text('Change amount'));
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          await tester.tap(find.byKey(const ValueKey('sip-change-from')));
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          await tester.tap(find.text('Cancel').last);
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Cancel'));
+          await tester.pumpAndSettle();
+
+          await tester.tap(find.text('Pause'));
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          await tester.tap(find.text('Cancel'));
+          await tester.pumpAndSettle();
+
+          await tester.scrollUntilVisible(find.byKey(const ValueKey('plan-month-2026-04')), 300, scrollable: find.byType(Scrollable).last);
+          expect(tester.takeException(), isNull);
+        }, () => _server({'/funds/holdings/64f000000000000000000003': detail}));
+      });
+
       testWidgets('add fund form and goal editor (${brightness.name})', (tester) async {
         await http.runWithClient(() async {
           await _pump(
@@ -1016,6 +1379,18 @@ void main() {
           await tester.pumpAndSettle();
           await tester.tap(find.text('I already hold units'));
           await tester.tap(find.text('I run a SIP'));
+          await tester.pumpAndSettle();
+          // With a change of amount, a skipped month, and the month picker open.
+          await tester.scrollUntilVisible(find.byKey(const ValueKey('sip-add-change')), 200, scrollable: find.byType(Scrollable).first);
+          await tester.ensureVisible(find.byKey(const ValueKey('sip-add-change')));
+          await tester.pumpAndSettle();
+          await tester.tap(find.byKey(const ValueKey('sip-add-change')));
+          await tester.pumpAndSettle();
+          await tester.enterText(find.byKey(const ValueKey('sip-change-amount-0')), '1,25,000');
+          await tester.tap(find.byKey(const ValueKey('sip-add-skip')));
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          await tester.tap(find.byKey(ValueKey('pick-month-${istToday().substring(0, 7)}')));
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
 

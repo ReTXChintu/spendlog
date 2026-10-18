@@ -332,7 +332,18 @@ describe("adding holdings", () => {
     const scheduled = body.txns.filter((txn: any) => txn.kind === "SIP_SCHEDULED");
     assert.equal(scheduled.length, expected.length);
     assert.equal(body.investedMinor, expected.length * 500_000);
-    assert.deepEqual(body.sip, { amountMinor: 500_000, dayOfMonth: 10, startOn, endOn: null, active: true });
+    assert.deepEqual(body.sip, {
+      amountMinor: 500_000,
+      dayOfMonth: 10,
+      startOn,
+      endOn: null,
+      active: true,
+      steps: [{ fromOn: startOn, amountMinor: 500_000, dayOfMonth: null }],
+      skips: [],
+      pauses: [],
+      currentAmountMinor: 500_000,
+      currentDayOfMonth: 10,
+    });
     assert.equal(body.monthlySipMinor, 500_000);
 
     // A weekend SIP day takes Monday's NAV.
@@ -897,6 +908,230 @@ describe("fund advice", () => {
     assert.match(response.body.error, /Gemini API key/);
     const nothing = await call("/funds/advice", user.token);
     assert.deepEqual(nothing.body, { advice: null, day: null, model: null, cached: true, hasKey: false });
+  });
+});
+
+describe("a SIP's history", () => {
+  /** YYYY-MM, `count` months from this one. */
+  const monthFrom = (count: number) => addMonths(`${TODAY.slice(0, 7)}-01`, count).slice(0, 7);
+  const scheduledOf = (body: any) => body.txns.filter((txn: any) => txn.kind === "SIP_SCHEDULED");
+  const sumAmounts = (txns: any[]) => txns.reduce((sum: number, txn: any) => sum + txn.amountMinor, 0);
+
+  it("adds a fund with its whole history: 1,000 a month, 2,000 for two, one skipped", async () => {
+    const user = await makeUser();
+    const startOn = `${monthFrom(-9)}-10`;
+    const twoFrom = monthFrom(-5);
+    const backFrom = monthFrom(-3);
+    const body = await addHolding(user.token, {
+      schemeCode: 100014,
+      sip: {
+        amountMinor: 100_000,
+        dayOfMonth: 10,
+        startOn,
+        steps: [
+          { fromOn: `${twoFrom}-01`, amountMinor: 200_000 },
+          { fromOn: `${backFrom}-01`, amountMinor: 100_000 },
+        ],
+        skips: [backFrom],
+      },
+    });
+
+    const planned = (day: string) => (day.slice(0, 7) >= twoFrom && day.slice(0, 7) < backFrom ? 200_000 : 100_000);
+    const expected = sipDaysSoFar(startOn, 10).filter((day) => day.slice(0, 7) !== backFrom);
+    const scheduled = scheduledOf(body);
+    assert.deepEqual(
+      scheduled.map((txn: any) => [txn.on, txn.amountMinor]).reverse(),
+      expected.map((day) => [day, planned(day)])
+    );
+    assert.equal(body.investedMinor, expected.reduce((sum, day) => sum + planned(day), 0));
+    for (const txn of scheduled) {
+      const units = txn.amountMinor / 100 / navOn(byCode.get(100014)!, txn.navDay);
+      assert.ok(Math.abs(txn.units - units) < 0.001);
+    }
+    assert.ok(body.xirrPercent > 10 && body.xirrPercent < 18, `${body.xirrPercent}`);
+    assert.equal(body.monthlySipMinor, 100_000);
+    assert.equal(body.sipPaused, false);
+    assert.deepEqual(
+      body.sip.steps.map((step: any) => [step.fromOn, step.amountMinor]),
+      [
+        [startOn, 100_000],
+        [`${twoFrom}-01`, 200_000],
+        [`${backFrom}-01`, 100_000],
+      ]
+    );
+    assert.deepEqual(body.sip.skips, [backFrom]);
+
+    // Month by month, from the start to three months ahead.
+    const plan = body.sipPlan;
+    assert.equal(plan.length, 13);
+    assert.equal(plan[0].month, monthFrom(-9));
+    const at = (month: string) => plan.find((row: any) => row.month === month);
+    assert.equal(at(backFrom).status, "skipped");
+    assert.equal(at(backFrom).plannedMinor, 100_000);
+    assert.equal(at(twoFrom).status, "invested");
+    assert.equal(at(twoFrom).plannedMinor, 200_000);
+    assert.equal(at(twoFrom).actualMinor, 200_000);
+    assert.ok(at(twoFrom).units > 0 && at(twoFrom).nav > 0);
+    assert.deepEqual(
+      plan.slice(-3).map((row: any) => row.status),
+      ["upcoming", "upcoming", "upcoming"]
+    );
+  });
+
+  it("steps up, skips, takes a skip back, pauses and resumes - the figures and the goal following", async () => {
+    const user = await makeUser();
+    const startOn = `${monthFrom(-6)}-10`;
+    const holding = await addHolding(user.token, { schemeCode: 100014, sip: { amountMinor: 100_000, dayOfMonth: 10, startOn } });
+    const goal = await call("/goals", user.token, {
+      method: "POST",
+      body: { name: "Bike", targetMinor: 20_000_000, targetOn: addMonths(TODAY, 30), holdingIds: [holding.id] },
+    });
+    assert.equal(goal.body.actualMonthlyMinor, 100_000);
+    const sipPath = `/funds/holdings/${holding.id}/sip`;
+
+    const up = await call(`${sipPath}/change`, user.token, { method: "POST", body: { fromOn: `${monthFrom(-2)}-01`, amountMinor: 200_000 } });
+    assert.equal(up.status, 200, JSON.stringify(up.body));
+    assert.equal(up.body.monthlySipMinor, 200_000);
+    assert.equal(up.body.sip.currentAmountMinor, 200_000);
+    assert.equal(up.body.investedMinor, sumAmounts(scheduledOf(up.body)));
+    assert.ok(scheduledOf(up.body).some((txn: any) => txn.on.startsWith(monthFrom(-2)) && txn.amountMinor === 200_000));
+    assert.ok(up.body.investedMinor > holding.investedMinor);
+
+    const skip = await call(`${sipPath}/skip`, user.token, { method: "POST", body: { month: monthFrom(-4) } });
+    assert.equal(skip.status, 200);
+    assert.ok(!scheduledOf(skip.body).some((txn: any) => txn.on.startsWith(monthFrom(-4))));
+    assert.equal(skip.body.investedMinor, up.body.investedMinor - 100_000);
+    assert.ok(skip.body.units < up.body.units);
+    const twice = await call(`${sipPath}/skip`, user.token, { method: "POST", body: { month: monthFrom(-4) } });
+    assert.deepEqual(twice.body.sip.skips, [monthFrom(-4)]);
+
+    const unskipped = await call(`${sipPath}/skip/${monthFrom(-4)}`, user.token, { method: "DELETE" });
+    assert.equal(unskipped.status, 200);
+    assert.deepEqual(unskipped.body.sip.skips, []);
+    assert.equal(unskipped.body.investedMinor, up.body.investedMinor);
+
+    // Paused from this month: nothing going in now, and the goal says so
+    // rather than falling back on what went in before.
+    const paused = await call(`${sipPath}/pause`, user.token, { method: "POST", body: { fromOn: `${monthFrom(0)}-01` } });
+    assert.equal(paused.status, 200);
+    assert.equal(paused.body.sipPaused, true);
+    assert.equal(paused.body.monthlySipMinor, 0);
+    assert.deepEqual(paused.body.sip.pauses, [{ fromOn: `${monthFrom(0)}-01`, toOn: null }]);
+    assert.ok(paused.body.sipPlan.slice(-4).every((row: any) => row.status === "paused"));
+    assert.equal((await call("/funds/portfolio", user.token)).body.totals.monthlySipMinor, 0);
+    assert.equal((await call(`/goals`, user.token)).body.goals[0].actualMonthlyMinor, 0);
+
+    const resumed = await call(`${sipPath}/resume`, user.token, { method: "POST", body: {} });
+    assert.equal(resumed.status, 200);
+    assert.deepEqual(resumed.body.sip.pauses, []);
+    assert.equal(resumed.body.monthlySipMinor, 200_000);
+    assert.equal((await call(`/goals`, user.token)).body.goals[0].actualMonthlyMinor, 200_000);
+  });
+
+  it("refuses a history that can't be", async () => {
+    const user = await makeUser();
+    const startOn = `${monthFrom(-6)}-10`;
+    const endOn = `${monthFrom(6)}-10`;
+    const holding = await addHolding(user.token, { schemeCode: 100014, sip: { amountMinor: 100_000, dayOfMonth: 10, startOn, endOn } });
+    const bare = await addHolding(user.token, { schemeCode: 100013 });
+    const sipPath = `/funds/holdings/${holding.id}/sip`;
+    const error = async (path: string, body: unknown, method = "POST") => {
+      const response = await call(path, user.token, { method, body });
+      assert.equal(response.status, 400, JSON.stringify(response.body));
+      return response.body.error;
+    };
+
+    assert.match(await error(`${sipPath}/change`, { fromOn: `${monthFrom(-7)}-01`, amountMinor: 200_000 }), /before the SIP started/);
+    assert.match(await error(`${sipPath}/change`, { fromOn: `${monthFrom(7)}-01`, amountMinor: 200_000 }), /between the SIP's start and its end/);
+    assert.match(await error(`${sipPath}/change`, { fromOn: `${monthFrom(-1)}-01`, amountMinor: 50 }), /at least ₹1/);
+    assert.match(await error(`${sipPath}/skip`, { month: monthFrom(-8) }), /between the SIP's start and its end/);
+    assert.match(await error(`${sipPath}/skip`, { month: "2026-13" }), /YYYY-MM/);
+    assert.match(await error(`${sipPath}/pause`, { fromOn: `${monthFrom(1)}-01`, toOn: `${monthFrom(0)}-01` }), /end before it starts/);
+    assert.match(await error(`/funds/holdings/${bare.id}/sip/skip`, { month: monthFrom(-1) }), /no SIP yet/);
+
+    const patch = (sip: Record<string, unknown>) =>
+      error(`/funds/holdings/${holding.id}`, { sip: { amountMinor: 100_000, dayOfMonth: 10, startOn, ...sip } }, "PATCH");
+    assert.match(
+      await patch({ steps: [{ fromOn: `${monthFrom(-2)}-01`, amountMinor: 200_000 }, { fromOn: `${monthFrom(-2)}-15`, amountMinor: 300_000 }] }),
+      /same month/
+    );
+    assert.match(await patch({ skips: [monthFrom(-3), monthFrom(-3)] }), /skipped twice/);
+
+    // Nothing was stored by any of it.
+    const reread = await call(`/funds/holdings/${holding.id}`, user.token);
+    assert.equal(reread.body.sip.steps.length, 1);
+    assert.deepEqual(reread.body.sip.skips, []);
+  });
+
+  it("counts a debit linked in a skipped month, and one of a different amount, and shows both", async () => {
+    const user = await makeUser();
+    const startOn = `${monthFrom(-6)}-10`;
+    const holding = await addHolding(user.token, {
+      schemeCode: 100014,
+      sip: { amountMinor: 100_000, dayOfMonth: 10, startOn, skips: [monthFrom(-2)] },
+    });
+    const inSkipped = await debit(user.id, `${monthFrom(-2)}-10`, 100_000);
+    const bigger = await debit(user.id, `${monthFrom(-4)}-10`, 200_000);
+    for (const transaction of [inSkipped, bigger]) {
+      const linked = await call(`/funds/holdings/${holding.id}/link`, user.token, {
+        method: "POST",
+        body: { transactionId: transaction._id.toString() },
+      });
+      assert.equal(linked.status, 200);
+    }
+
+    const detail = (await call(`/funds/holdings/${holding.id}`, user.token)).body;
+    const lineFor = (id: unknown) => detail.txns.find((txn: any) => txn.transactionId === String(id));
+    assert.equal(lineFor(inSkipped._id).inSkippedMonth, true);
+    assert.equal(lineFor(inSkipped._id).counted, true);
+    assert.equal(lineFor(bigger._id).note, "₹2,000 paid vs ₹1,000 planned");
+    assert.equal(lineFor(bigger._id).plannedMinor, 100_000);
+    assert.equal(detail.investedMinor, holding.investedMinor + 100_000 + 100_000);
+
+    const at = (month: string) => detail.sipPlan.find((row: any) => row.month === month);
+    assert.equal(at(monthFrom(-2)).status, "invested");
+    assert.equal(at(monthFrom(-2)).markedSkipped, true);
+    assert.equal(at(monthFrom(-2)).linkedTransactionId, inSkipped._id.toString());
+    assert.equal(at(monthFrom(-4)).actualMinor, 200_000);
+    assert.equal(at(monthFrom(-4)).plannedMinor, 100_000);
+  });
+
+  it("migrates a SIP stored as one amount without moving a figure", async () => {
+    const { backfillSipSteps } = await import("./funds.backfill");
+    const user = await makeUser();
+    const startOn = addMonths(TODAY, -14);
+    const holding = await addHolding(user.token, { schemeCode: 100014, sip: { amountMinor: 500_000, dayOfMonth: 10, startOn } });
+    // As a row from before steps looked.
+    await models.FundHolding.collection.updateOne(
+      { _id: new Types.ObjectId(holding.id) },
+      { $unset: { "sip.steps": 1, "sip.skips": 1, "sip.pauses": 1 } }
+    );
+    const raw = async () => (await models.FundHolding.collection.findOne({ _id: new Types.ObjectId(holding.id) }))!.sip;
+    assert.equal((await raw()).steps, undefined);
+
+    const figures = (body: any) => ({
+      units: body.units,
+      investedMinor: body.investedMinor,
+      valueMinor: body.valueMinor,
+      xirrPercent: body.xirrPercent,
+      monthlySipMinor: body.monthlySipMinor,
+      txns: body.txns,
+      sip: body.sip,
+    });
+    // Read safely before it's migrated: one step, the same figures.
+    const before = figures((await call(`/funds/holdings/${holding.id}`, user.token)).body);
+    assert.deepEqual(before, figures(holding));
+
+    assert.equal(await backfillSipSteps(user.id), 1);
+    const migrated = await raw();
+    assert.deepEqual(migrated.steps, [{ fromOn: startOn, amountMinor: 500_000, dayOfMonth: null }]);
+    assert.deepEqual(migrated.skips, []);
+    assert.deepEqual(migrated.pauses, []);
+    assert.deepEqual(figures((await call(`/funds/holdings/${holding.id}`, user.token)).body), before);
+
+    // Twice is safe; a SIP-less holding is left alone.
+    await addHolding(user.token, { schemeCode: 100013, opening: { units: 1, investedMinor: 1000, asOf: LAST } });
+    assert.equal(await backfillSipSteps(user.id), 0);
   });
 });
 
