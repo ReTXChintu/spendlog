@@ -6,11 +6,17 @@ import '../theme.dart';
 import 'home_shell.dart';
 import 'kid/kid_home_shell.dart';
 
+Widget _ownerHome(BuildContext context) => const HomeShell();
+
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key, this.notice});
+  const LoginScreen({super.key, this.notice, this.ownerHome = _ownerHome});
 
   /// Shown above the buttons, e.g. why a kid was just signed out.
   final String? notice;
+
+  /// Where an owner lands once signed in. Swapped in tests, which have no
+  /// SMS listener or push to start.
+  final WidgetBuilder ownerHome;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -20,7 +26,8 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _loading = false;
   String? _error;
 
-  // A kid has no Google sign-in: their parent made them an email and password.
+  // A kid never uses the shared account sign-in: their parent made them an
+  // email and password that only work here.
   bool _kidMode = false;
   final _email = TextEditingController();
   final _password = TextEditingController();
@@ -65,7 +72,7 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final success = await AuthService.instance.signIn();
       if (success && mounted) {
-        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const HomeShell()));
+        Navigator.of(context).pushReplacement(MaterialPageRoute(builder: widget.ownerHome));
       }
     } catch (e) {
       // The reason is shown rather than swallowed: this app is sideloaded,
@@ -122,7 +129,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   _kidMode = false;
                   _error = null;
                 }),
-        child: const Text('Back to Google sign-in'),
+        child: const Text('Back to sign-in'),
       ),
     ];
   }
@@ -201,7 +208,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     FilledButton.icon(
                       onPressed: _signIn,
                       icon: const Icon(Icons.login, size: 18),
-                      label: const Text('Sign in with Google'),
+                      label: const Text('Sign in with your account'),
                     ),
                   const SizedBox(height: 4),
                   TextButton(
@@ -221,12 +228,12 @@ class _LoginScreenState extends State<LoginScreen> {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(Icons.mail_outline, size: 15, color: context.c.brandDark),
+                        Icon(Icons.info_outline, size: 15, color: context.c.brandDark),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'Google will also ask for read-only Gmail access in this step, so email-based '
-                            'transaction alerts get picked up.',
+                            'One account for SpendLog, Trippin and InFrame. Your first sign-in creates your '
+                            'ledger.',
                             style: TextStyle(fontSize: 12.5, height: 1.45, color: context.c.ink70),
                           ),
                         ),

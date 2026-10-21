@@ -43,16 +43,17 @@ And inside `<application>`:
 Minimum Android `minSdkVersion` should be at least 21 (check
 `android/app/build.gradle`).
 
-### Google Sign-In setup
+### Sign-in setup
 
-Sign-in requests Gmail read access in the same consent step, so there is no
-separate "connect Gmail" prompt. The app sends Google's `serverAuthCode` to
-the backend, which exchanges it for a refresh token.
+Owners sign in through the identity server SpendLog shares with Trippin and
+InFrame, with `flutter_appauth` (a Custom Tab, PKCE, as the public client
+`spendlog-mobile`). The app sends the ID token to `POST /auth/oidc/mobile`,
+which checks it and returns a SpendLog session. Kids still sign in with the
+email and password a parent set.
 
-1. In Google Cloud Console, add an **Android** OAuth client (needs your app's package name + SHA-1 signing fingerprint) and, if you'll test on iOS, an iOS OAuth client — alongside the existing Web client the backend uses.
-2. `serverClientId` must be the **Web** client id, not the Android one — that's the client whose secret the backend holds. `npm run dev` passes it automatically from `GOOGLE_CLIENT_ID` in the root `.env` as `--dart-define=GOOGLE_WEB_CLIENT_ID=...`. Running `flutter run` directly means passing it yourself.
-3. For Android: no config file is needed for `google_sign_in` itself, but the SHA-1 fingerprint must be registered in Google Cloud Console for sign-in to succeed.
-4. For iOS: add the `REVERSED_CLIENT_ID` URL scheme to `ios/Runner/Info.plist` as described in the [google_sign_in iOS setup docs](https://pub.dev/packages/google_sign_in#ios-integration).
+1. The identity server must register `io.github.retxchintu.spendlog:/oauth2redirect` as a redirect URI (and post-logout redirect URI) for `spendlog-mobile`. The scheme is set by `appAuthRedirectScheme` in `android/app/build.gradle.kts`.
+2. The issuer is built in: `npm run dev` passes `OIDC_ISSUER` from the root `.env` as `--dart-define=OIDC_ISSUER=...`, and CI passes the `OIDC_ISSUER` repository secret. Running `flutter run` directly falls back to the default in `lib/config.dart`.
+3. Gmail import is connected separately, from Settings, through Google's own consent screen.
 
 ### Backend URL
 

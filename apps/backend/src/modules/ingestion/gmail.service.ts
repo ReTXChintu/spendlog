@@ -7,8 +7,9 @@ import { ingestRawMessage } from "../../parsing/ingest";
 
 export const GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 
-// Identity and Gmail read access are requested together, in one consent
-// screen, at sign-in. See modules/auth/auth.routes.ts.
+// What the Gmail consent screen asks for: read access, plus enough identity
+// to know which mailbox it was. This is not signing in - that goes through
+// the shared identity server (modules/auth). See email.routes.ts.
 export const LOGIN_SCOPES = [
   "openid",
   "https://www.googleapis.com/auth/userinfo.email",

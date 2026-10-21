@@ -67,26 +67,35 @@ Transport, etc.) once:
 npm run seed --workspace apps/backend
 ```
 
-### Google OAuth setup (required for login + Gmail import)
+### Sign-in
 
-Sign-in and Gmail read access are granted in a **single consent screen**,
-so there is no separate "connect Gmail" step.
+Owners sign in only through the OpenID Connect identity server SpendLog
+shares with Trippin and InFrame - one account for all three. Set the
+`OIDC_*` values in the root `.env` (see `.env.example`). The web app links
+to `/auth/oidc/start`, the identity server sends the browser back to
+`/auth/oidc/callback`, and the backend hands over its own session token in
+the URL fragment. Kids sign in on the phone with the email and password a
+parent set, and never use the identity server.
+
+### Google OAuth setup (Gmail import only)
+
+Google is used only to connect a Gmail account for reading bank alerts and
+statements (Settings > Connect Gmail). Nobody signs in with it.
 
 1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create an OAuth 2.0 Client ID (type: Web application).
 2. Add authorized redirect URI: `http://localhost:4000/auth/google/callback`
 3. Enable the Gmail API for the project.
 4. Under OAuth consent screen, add the `.../auth/gmail.readonly` scope, and add yourself as a test user.
 5. Copy the Client ID/Secret into the root `.env` (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`).
-6. For the mobile app's Google Sign-In, see `apps/mobile-app/README.md`.
 
 Because `gmail.readonly` is a restricted scope, Google shows an
 "unverified app" warning until the project goes through verification. In
 testing mode that's fine for accounts listed as test users — click
 *Advanced > Go to SpendLog (unsafe)* to continue.
 
-The browser never loads Google's JavaScript SDK: `/auth/google/start`
-redirects to Google, and `/auth/google/callback` redirects back with the
-session token in the URL fragment.
+The browser never loads Google's JavaScript SDK: Settings asks the
+backend for Google's consent URL, and `/auth/google/callback` stores the
+mailbox's refresh token and redirects back to Settings.
 
 ## Running everything in dev
 

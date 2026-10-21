@@ -7,6 +7,11 @@ const ERRORS: Record<string, string> = {
   oauth_failed: "Sign-in didn't go through — the link may have expired.",
   oauth_expired: "That sign-in link expired. Please try again.",
   no_token: "Sign-in didn't complete. Please try again.",
+  sso_unavailable: "The sign-in service isn't answering just now. Please try again in a minute.",
+  kid_email: "That email is a kid's login. Kids sign in on the SpendLog phone app with their own password.",
+  email_unverified:
+    "A SpendLog account already uses this email. Verify the address with your account, then sign in again.",
+  account_conflict: "This email's SpendLog account is already linked to a different sign-in.",
 };
 
 export function LoginPage() {
@@ -37,22 +42,15 @@ export function LoginPage() {
           <div className="signin-card">
             <h2>Sign in to SpendLog</h2>
             <p className="sub">
-              One Google account. Your first sign-in creates your ledger — there's no separate sign-up.
+              One account for SpendLog, Trippin and InFrame. Your first sign-in creates your ledger — there's no
+              separate sign-up.
             </p>
 
-            {/* A plain link to the backend, which redirects on to Google. No
-                Google JavaScript SDK, so an extension can't block sign-in. */}
-            <a className="btn btn-google" href={`${API_URL}/auth/google/start`}>
-              <Icon name="ic-google" /> Sign in with Google
+            {/* A plain link to the backend, which redirects on to the identity
+                server. No JavaScript SDK, so an extension can't block sign-in. */}
+            <a className="btn btn-sso" href={`${API_URL}/auth/oidc/start`}>
+              <Icon name="ic-lock" /> Sign in with your account
             </a>
-
-            <div className="permission-note">
-              <Icon name="ic-mail" />
-              <div>
-                Google will also ask for read-only access to your Gmail in this same step — that's how
-                email-based transaction alerts get picked up.
-              </div>
-            </div>
 
             {error && (
               <div className="signin-error">
@@ -60,14 +58,6 @@ export function LoginPage() {
                 <div>{ERRORS[error] ?? "Sign-in failed. Please try again."}</div>
               </div>
             )}
-
-            <div className="signin-notice">
-              <Icon name="ic-alert" />
-              <div>
-                Google may show an "unverified app" screen before you continue — that's expected while SpendLog
-                completes verification. It's safe to proceed.
-              </div>
-            </div>
           </div>
         </div>
       </section>

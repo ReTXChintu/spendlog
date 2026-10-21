@@ -21,9 +21,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     api.get<User>("/auth/me").then(setUser).catch(() => setUser(null));
   }, []);
 
-  function logout() {
+  // Signs out of the identity server too, or the next "Sign in" would let
+  // the same person straight back in without asking - on a shared computer,
+  // that is not signing out. Asked for while the session still works; if
+  // the identity server can't be reached, this browser is signed out anyway.
+  async function logout() {
+    let url: string | null = null;
+    try {
+      ({ url } = await api.get<{ url: string | null }>("/auth/oidc/logout-url"));
+    } catch {
+      // Signed out locally regardless.
+    }
     clearToken();
-    window.location.href = "/login";
+    window.location.href = url ?? "/login";
   }
 
   return (

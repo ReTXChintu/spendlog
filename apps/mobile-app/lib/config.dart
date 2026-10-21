@@ -3,7 +3,7 @@
 // defaultValue never applies. CI expands an unset secret to exactly that,
 // so every define here is checked for emptiness rather than trusted.
 const String _apiUrlDefine = String.fromEnvironment('API_URL');
-const String _googleClientIdDefine = String.fromEnvironment('GOOGLE_WEB_CLIENT_ID');
+const String _oidcIssuerDefine = String.fromEnvironment('OIDC_ISSUER');
 
 // Backend base URL. Supplied by `npm run dev` from MOBILE_API_URL in the
 // repo-root .env as a --dart-define; the default covers running the app
@@ -12,12 +12,23 @@ const String _googleClientIdDefine = String.fromEnvironment('GOOGLE_WEB_CLIENT_I
 const String apiBaseUrl =
     _apiUrlDefine.length == 0 ? 'http://10.0.2.2:4000' : _apiUrlDefine;
 
-/// The *web* OAuth client id. The backend exchanges the auth code Google
-/// returns using that client's secret, which is what yields a refresh token.
-/// null when it wasn't built in, so sign-in can say so instead of failing
-/// with an opaque platform error.
-const String? googleWebClientId =
-    _googleClientIdDefine.length == 0 ? null : _googleClientIdDefine;
+/// The identity server SpendLog, Trippin and InFrame share - the only way
+/// an owner signs in. Built in with --dart-define=OIDC_ISSUER=...; CI passes
+/// the OIDC_ISSUER repository secret and `npm run dev` the value in the
+/// repo-root .env. Must be exactly the issuer the server's discovery
+/// document names, with no trailing slash.
+const String oidcIssuer =
+    _oidcIssuerDefine.length == 0 ? 'https://pass-port.duckdns.org:50011' : _oidcIssuerDefine;
+
+/// The phone app's client at the identity server: public, PKCE only.
+const String oidcClientId = 'spendlog-mobile';
+
+/// Where the identity server sends the browser back to. The scheme is the
+/// app id, registered with AppAuth through `appAuthRedirectScheme` in
+/// android/app/build.gradle.kts; the two have to agree.
+const String oidcRedirectUri = 'io.github.retxchintu.spendlog:/oauth2redirect';
+
+const List<String> oidcScopes = ['openid', 'email', 'profile', 'offline_access'];
 
 // Key used for the stored session JWT in SharedPreferences. Declared here
 // because the background SMS isolate reads it without going through

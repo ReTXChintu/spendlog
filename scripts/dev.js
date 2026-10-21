@@ -65,11 +65,11 @@ run("frontend", "npm run dev --workspace apps/frontend", root);
 const deviceFlag = device ? ` -d ${JSON.stringify(device)}` : "";
 const mobileApiUrl = readRootEnv("MOBILE_API_URL");
 const apiDefine = mobileApiUrl ? ` --dart-define=API_URL=${JSON.stringify(mobileApiUrl)}` : "";
-// google_sign_in needs the *web* client id as serverClientId so the code it
-// returns can be exchanged by the backend for a Gmail refresh token.
-const webClientId = readRootEnv("GOOGLE_CLIENT_ID");
-const clientIdDefine = webClientId ? ` --dart-define=GOOGLE_WEB_CLIENT_ID=${JSON.stringify(webClientId)}` : "";
-run("mobile", `flutter run${deviceFlag}${apiDefine}${clientIdDefine}`, path.join(root, "apps", "mobile-app"));
+// The identity server the app signs owners in through - the same one the
+// backend checks its tokens against.
+const oidcIssuer = readRootEnv("OIDC_ISSUER");
+const issuerDefine = oidcIssuer ? ` --dart-define=OIDC_ISSUER=${JSON.stringify(oidcIssuer)}` : "";
+run("mobile", `flutter run${deviceFlag}${apiDefine}${issuerDefine}`, path.join(root, "apps", "mobile-app"));
 
 function shutdown() {
   for (const child of children) {

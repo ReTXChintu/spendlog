@@ -115,7 +115,7 @@ jobs:
       - name: Check the mobile secrets are set
         env:
           MOBILE_API_URL: ${{ secrets.MOBILE_API_URL }}
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          OIDC_ISSUER: ${{ secrets.OIDC_ISSUER }}
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -123,7 +123,7 @@ jobs:
         run: |
           set -euo pipefail
           missing=""
-          for name in MOBILE_API_URL GOOGLE_CLIENT_ID ANDROID_KEYSTORE_BASE64 \
+          for name in MOBILE_API_URL OIDC_ISSUER ANDROID_KEYSTORE_BASE64 \
                       ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
             if [ -z "${!name}" ]; then missing="$missing $name"; fi
           done
@@ -134,9 +134,8 @@ jobs:
           fi
           echo "All mobile secrets are present."
 
-      # Every release has to be signed with the same certificate: Google
-      # matches it against the Android OAuth client, and Android refuses to
-      # install an update signed by a different key.
+      # Every release has to be signed with the same certificate: Android
+      # refuses to install an update signed by a different key.
       - name: Restore the release keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -155,7 +154,7 @@ jobs:
         run: |
           flutter build apk --release \
             --dart-define=API_URL="${{ secrets.MOBILE_API_URL }}" \
-            --dart-define=GOOGLE_WEB_CLIENT_ID="${{ secrets.GOOGLE_CLIENT_ID }}"
+            --dart-define=OIDC_ISSUER="${{ secrets.OIDC_ISSUER }}"
 
       # Prints the certificate the APK actually carries, so the SHA-1 that
       # has to be registered with Google is in the build log. apksigner

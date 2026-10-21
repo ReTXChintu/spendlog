@@ -29,9 +29,23 @@ export const env = {
   host: process.env.BACKEND_HOST ?? "0.0.0.0",
   databaseUrl: required("DATABASE_URL"),
   jwtSecret: required("JWT_SECRET"),
+  // Gmail import only. Signing in goes through the identity server below.
   googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
   googleOAuthRedirectUri: process.env.GOOGLE_OAUTH_REDIRECT_URI ?? "",
+
+  // The OpenID Connect identity server SpendLog, Trippin and InFrame share.
+  // It is the only way an owner signs in; kids keep their own password.
+  // Empty issuer means sign-in is not configured, and says so.
+  oidcIssuer: process.env.OIDC_ISSUER ?? "",
+  oidcClientId: process.env.OIDC_CLIENT_ID || "spendlog-web",
+  oidcClientSecret: process.env.OIDC_CLIENT_SECRET ?? "",
+  oidcRedirectUri: process.env.OIDC_REDIRECT_URI ?? "",
+  oidcPostLogoutUri: process.env.OIDC_POST_LOGOUT_URI ?? "",
+  // The phone app's own client. Public, so it has no secret: the app does
+  // the code exchange itself and sends the ID token, which says which
+  // client it was issued to.
+  oidcMobileClientId: process.env.OIDC_MOBILE_CLIENT_ID || "spendlog-mobile",
   frontendUrl: process.env.FRONTEND_URL ?? "http://localhost:5173",
   // When both are set the backend serves HTTPS instead of HTTP. Google
   // requires HTTPS for any non-localhost OAuth redirect URI.

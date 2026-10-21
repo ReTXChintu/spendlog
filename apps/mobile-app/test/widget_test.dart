@@ -10,6 +10,6 @@ void main() {
     await tester.pumpWidget(const SpendLogApp());
     await tester.pumpAndSettle();
 
-    expect(find.text('Sign in with Google'), findsOneWidget);
+    expect(find.text('Sign in with your account'), findsOneWidget);
   });
 }

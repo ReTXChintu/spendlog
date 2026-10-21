@@ -3,10 +3,13 @@ import { useNavigate } from "react-router-dom";
 import { setToken } from "../lib/api";
 
 /**
- * Lands here after Google sign-in. The backend puts the session token in
- * the URL fragment, which never reaches a server or an access log; it is
- * stored and then wiped from the address bar and history so it isn't left
- * sitting in the URL.
+ * Lands here after signing in through the identity server. The backend
+ * puts the SpendLog session token in the URL fragment, which never reaches
+ * a server or an access log; it is stored and then wiped from the address
+ * bar and history so it isn't left sitting in the URL.
+ *
+ * `returnTo`, when present, is the page sign-in started from. The backend
+ * only passes on a path on this site, and it is checked again here.
  */
 export function AuthCallbackPage() {
   const navigate = useNavigate();
@@ -22,7 +25,10 @@ export function AuthCallbackPage() {
 
     setToken(token);
     window.history.replaceState(null, "", window.location.pathname);
-    navigate("/", { replace: true });
+    const returnTo = params.get("returnTo");
+    navigate(returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/", {
+      replace: true,
+    });
   }, [navigate]);
 
   return <p className="empty-state">Signing you in…</p>;

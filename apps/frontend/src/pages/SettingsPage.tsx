@@ -235,7 +235,8 @@ function ConnectionsTab() {
             <p className="desc">
               <span className="status-pill status-off">Not connected</span>
               <br />
-              Email access was declined when you signed in. You can grant it here instead.
+              Connect a Gmail account to pick up bank alerts and statements from email. SpendLog only ever reads
+              it.
             </p>
             <div className="set-card-actions">
               <button className="btn btn-sm btn-primary" onClick={connect}>
@@ -1209,8 +1210,8 @@ function YouTab() {
           </div>
         </div>
         <p className="desc">
-          Signed in with Google. Signing out doesn't remove any imported transactions — they are on the
-          server, not in this browser.
+          Signed in with your account — the same one as Trippin and InFrame. Signing out doesn't remove any
+          imported transactions — they are on the server, not in this browser.
         </p>
         <div className="set-card-actions">
           <button className="btn btn-sm btn-ghost btn-danger-text" onClick={logout}>

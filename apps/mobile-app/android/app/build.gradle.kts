@@ -18,9 +18,8 @@ if (file("google-services.json").exists()) {
 // Signing a release with the debug key means signing it with whatever
 // ~/.android/debug.keystore the build machine happens to have. A CI runner
 // generates that file fresh on every run, so each build would carry a
-// different certificate — Google Sign-In rejects the app (the SHA-1
-// registered for the OAuth client can never match) and Android refuses to
-// install a new build over the previous one.
+// different certificate, and Android refuses to install a new build over
+// the previous one.
 // Gradle only sees the process environment, which is how CI supplies these.
 // Locally they live in the repo-root .env with everything else, so that is
 // read as a fallback — a real environment variable still wins.
@@ -73,6 +72,11 @@ android {
         // increments on every release.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // Where the identity server sends the browser back to after sign-in:
+        // io.github.retxchintu.spendlog:/oauth2redirect. AppAuth registers
+        // its redirect activity for this scheme; lib/config.dart's
+        // oidcRedirectUri has to use the same one.
+        manifestPlaceholders["appAuthRedirectScheme"] = "io.github.retxchintu.spendlog"
     }
 
     signingConfigs {
@@ -99,8 +103,8 @@ android {
                 println("")
                 println(
                     "*** No ANDROID_KEYSTORE_PATH set, so this release APK is signed with the " +
-                        "DEBUG key. Google Sign-In will not work in it, and it cannot be installed " +
-                        "over a properly signed build. See docs/android-signing.md. ***"
+                        "DEBUG key. It cannot be installed over a properly signed build. " +
+                        "See docs/android-signing.md. ***"
                 )
                 println("")
                 signingConfig = signingConfigs.getByName("debug")

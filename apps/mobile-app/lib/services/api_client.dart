@@ -89,9 +89,10 @@ class ApiClient {
 
   dynamic _decode(http.Response res) {
     final path = res.request?.url.path ?? '';
-    // A 401 from kid sign-in is a wrong password, not an ended session,
-    // so it falls through to show the server's own message.
-    if (res.statusCode == 401 && !path.endsWith('/kid/login')) {
+    // A 401 from kid sign-in is a wrong password, and one from owner
+    // sign-in a token that did not check out - neither is an ended
+    // session, so they fall through to show the server's own message.
+    if (res.statusCode == 401 && !path.endsWith('/kid/login') && !path.endsWith('/auth/oidc/mobile')) {
       if (path.contains('/kid/')) {
         clearKidSession();
         final ended = onKidSessionEnded;

@@ -66,7 +66,16 @@ export interface UserDoc {
   _id: Types.ObjectId;
   email: string;
   name?: string | null;
+  /// From the days owners signed in with Google. Nothing sets it any more;
+  /// kept so the accounts it identified stay as they were.
   googleId?: string | null;
+  /// Who this is at the shared identity server: the ID token's `sub`. Set
+  /// at the first sign-in through it, after which it - not the email,
+  /// which can change there - is what finds the account.
+  oidcSub?: string | null;
+  /// The last ID token the web app was given, so signing out can tell the
+  /// identity server whose session to end. Never leaves the server.
+  oidcIdToken?: string | null;
   /// What lands each month, and when. Together these define the period the
   /// spending pace is measured over: salary day to salary day, because the
   /// money arrives and then gets spent.
@@ -124,8 +133,8 @@ export interface UserDoc {
   role?: "OWNER" | "KID";
   parentId?: Types.ObjectId | null;
   kidAccountIds?: Types.ObjectId[];
-  /// A kid's password, as an scrypt hash and its salt. Owners sign in with
-  /// Google and have none. Never leaves the server.
+  /// A kid's password, as an scrypt hash and its salt. Owners sign in
+  /// through the identity server and have none. Never leaves the server.
   passwordHash?: string | null;
   passwordSalt?: string | null;
   /// Bumped when the password is reset, which ends every session signed
@@ -239,6 +248,8 @@ const userSchema = new Schema<UserDoc>(
     email: { type: String, required: true, unique: true },
     name: { type: String, default: null },
     googleId: { type: String, default: null },
+    oidcSub: { type: String, default: null },
+    oidcIdToken: { type: String, default: null },
     salaryAmountMinor: { type: Number, default: null, min: 0 },
     salaryDay: { type: Number, default: null, min: 1, max: 31 },
     dailyBudgetMinor: { type: Number, default: null, min: 0 },
@@ -287,6 +298,7 @@ const userSchema = new Schema<UserDoc>(
         delete ret.loginLockedUntil;
         delete ret.tokenVersion;
         delete ret.backfills;
+        delete ret.oidcIdToken;
         return ret;
       },
     },
@@ -300,6 +312,12 @@ const userSchema = new Schema<UserDoc>(
 userSchema.index(
   { googleId: 1 },
   { unique: true, partialFilterExpression: { googleId: { $type: "string" } } }
+);
+// The same, for the identity server's subject: one account per person
+// there, and any number of accounts (kids, older owners) with none.
+userSchema.index(
+  { oidcSub: 1 },
+  { unique: true, partialFilterExpression: { oidcSub: { $type: "string" } } }
 );
 
 export const User = model<UserDoc>("User", userSchema);

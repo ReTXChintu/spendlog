@@ -1,11 +1,12 @@
 import 'package:flutter/services.dart';
-import 'package:google_sign_in/google_sign_in.dart';
+import 'package:flutter_appauth/flutter_appauth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../config.dart';
 import 'api_client.dart';
 
 /// A sign-in failure with something worth showing the user. The platform
-/// errors underneath are codes like "sign_in_failed ... ApiException: 10",
-/// which say nothing about what to actually do.
+/// errors underneath are codes and stack traces, which say nothing about
+/// what to actually do.
 class SignInException implements Exception {
   final String message;
   SignInException(this.message);
@@ -14,86 +15,128 @@ class SignInException implements Exception {
   String toString() => message;
 }
 
+/// The identity server, as far as the app needs it. Behind an interface so
+/// tests can stand in for the browser tab AppAuth opens.
+abstract class OidcAuthenticator {
+  /// Runs the login and returns the ID token, or null if the person
+  /// backed out. Throws [SignInException] for anything else.
+  Future<String?> signIn();
+
+  /// Ends the session at the identity server too.
+  Future<void> endSession(String idTokenHint);
+}
+
+/// The real one: AppAuth in a Custom Tab, with PKCE, as the public
+/// spendlog-mobile client. AppAuth does the code exchange itself and
+/// checks the ID token's nonce; the backend checks the rest.
+class AppAuthAuthenticator implements OidcAuthenticator {
+  const AppAuthAuthenticator([this._appAuth = const FlutterAppAuth()]);
+
+  final FlutterAppAuth _appAuth;
+
+  // Plain http only for a local identity server in development.
+  bool get _insecure => oidcIssuer.startsWith('http://');
+
+  @override
+  Future<String?> signIn() async {
+    final AuthorizationTokenResponse response;
+    try {
+      response = await _appAuth.authorizeAndExchangeCode(AuthorizationTokenRequest(
+        oidcClientId,
+        oidcRedirectUri,
+        issuer: oidcIssuer,
+        scopes: oidcScopes,
+        allowInsecureConnections: _insecure,
+      ));
+    } on FlutterAppAuthUserCancelledException {
+      return null;
+    } on PlatformException catch (e) {
+      throw SignInException(_describe(e));
+    }
+
+    final idToken = response.idToken;
+    if (idToken == null || idToken.isEmpty) {
+      throw SignInException('The sign-in service did not say who you are. Please try again.');
+    }
+    return idToken;
+  }
+
+  @override
+  Future<void> endSession(String idTokenHint) async {
+    await _appAuth.endSession(EndSessionRequest(
+      idTokenHint: idTokenHint,
+      postLogoutRedirectUrl: oidcRedirectUri,
+      issuer: oidcIssuer,
+      allowInsecureConnections: _insecure,
+    ));
+  }
+
+  String _describe(PlatformException e) {
+    final detail = '${e.code} ${e.message ?? ''} ${e.details ?? ''}'.toLowerCase();
+    if (detail.contains('network') || detail.contains('unable to resolve') || detail.contains('timeout')) {
+      return "Couldn't reach the sign-in service. Check your internet and try again.";
+    }
+    if (detail.contains('discovery')) {
+      return "The sign-in service at $oidcIssuer isn't answering. Try again in a minute.";
+    }
+    return 'Sign-in failed: ${e.message ?? e.code}'.trim();
+  }
+}
+
 class AuthService {
   AuthService._();
   static final AuthService instance = AuthService._();
 
-  // Gmail read access is requested in the same consent step as sign-in, so
-  // there's no separate "connect Gmail" prompt later. serverClientId is the
-  // *web* OAuth client id; see config.dart.
-  final GoogleSignIn _googleSignIn = GoogleSignIn(
-    scopes: const [
-      'email',
-      'profile',
-      'https://www.googleapis.com/auth/gmail.readonly',
-    ],
-    serverClientId: googleWebClientId,
-  );
+  /// Swapped in tests; the real one opens a browser tab.
+  OidcAuthenticator authenticator = const AppAuthAuthenticator();
+
+  /// The last ID token, kept only to tell the identity server whose
+  /// session to end at sign-out.
+  static const _idTokenKey = 'spendlog_oidc_id_token';
 
   Future<bool> isLoggedIn() async => (await ApiClient.getToken()) != null;
 
-  /// Signs in with Google and exchanges the result with our backend for a
-  /// session JWT. Returns true on success, false if the user cancelled.
+  /// Signs in at the identity server and trades its ID token with our
+  /// backend for a SpendLog session. Returns true on success, false if the
+  /// person cancelled.
   Future<bool> signIn() async {
-    if (googleWebClientId == null) {
+    final idToken = await authenticator.signIn();
+    if (idToken == null) return false;
+
+    final Map<String, dynamic> result;
+    try {
+      result = await ApiClient.instance.post('/auth/oidc/mobile', {'idToken': idToken}) as Map<String, dynamic>;
+    } on ApiException catch (e) {
+      // 403 is SpendLog saying exactly why (a kid's email, an unverified
+      // one); anything else is worth naming the server for, since this
+      // app is sideloaded and there is no console to check.
       throw SignInException(
-        'This build has no Google client id in it, so it cannot sign in. '
-        'It was built without GOOGLE_WEB_CLIENT_ID set.',
+        e.statusCode == 403 ? e.message : 'You signed in, but SpendLog at $apiBaseUrl did not accept it: ${e.message}',
       );
+    } catch (_) {
+      throw SignInException("Couldn't reach SpendLog at $apiBaseUrl. Check your internet and try again.");
     }
 
-    final GoogleSignInAccount? account;
-    try {
-      account = await _googleSignIn.signIn();
-    } on PlatformException catch (e) {
-      throw SignInException(_describePlatformError(e));
-    }
-    if (account == null) return false; // user cancelled
-
-    // Preferred: an auth code the backend can exchange for a refresh token,
-    // which is what makes unattended email import possible. Falls back to
-    // the ID token (identity only) if no code came back.
-    final serverAuthCode = account.serverAuthCode;
-    final body = <String, dynamic>{};
-
-    if (serverAuthCode != null) {
-      body['serverAuthCode'] = serverAuthCode;
-    } else {
-      final auth = await account.authentication;
-      final idToken = auth.idToken;
-      if (idToken == null) return false;
-      body['idToken'] = idToken;
-    }
-
-    try {
-      final result = await ApiClient.instance.post('/auth/google', body);
-      await ApiClient.setToken(result['token'] as String);
-    } catch (e) {
-      throw SignInException('Google accepted the sign-in but $apiBaseUrl did not: $e');
-    }
+    await ApiClient.setToken(result['token'] as String);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_idTokenKey, idToken);
     return true;
   }
 
-  /// Turns the Play Services error codes into something a person can act on.
-  String _describePlatformError(PlatformException e) {
-    final detail = '${e.message ?? ''} ${e.details ?? ''}';
-
-    // ApiException 10 is DEVELOPER_ERROR: the certificate this APK is
-    // signed with, paired with its package name, is not registered as an
-    // Android OAuth client in the Google Cloud project.
-    if (detail.contains('10:') || detail.contains('ApiException: 10')) {
-      return "Google rejected this build's signature. Its signing certificate "
-          'and package name have to be registered as an Android OAuth client.';
-    }
-    if (detail.contains('12501')) return 'Sign-in was cancelled.';
-    if (detail.contains('7:') || detail.contains('NETWORK_ERROR')) {
-      return 'No connection to Google. Check your internet and try again.';
-    }
-    return 'Google sign-in failed: ${e.code} ${e.message ?? ''}'.trim();
-  }
-
+  /// Signs this phone out, and the identity server too where it can. The
+  /// phone is signed out first and regardless: failing to reach the
+  /// identity server must never leave somebody stuck signed in.
   Future<void> signOut() async {
-    await _googleSignIn.signOut();
+    final prefs = await SharedPreferences.getInstance();
+    final idToken = prefs.getString(_idTokenKey);
+    await prefs.remove(_idTokenKey);
     await ApiClient.clearToken();
+
+    if (idToken == null) return;
+    try {
+      await authenticator.endSession(idToken);
+    } catch (_) {
+      // Local state is already gone; that is what signing out has to mean.
+    }
   }
 }
