@@ -922,6 +922,25 @@ class FixedCosts {
   }
 }
 
+/// Where a trip was planned, when Trippin made it. While [linked], Trippin
+/// owns the name, dates and people, and overwrites them on its next
+/// change; once unlinked it is an ordinary trip that remembers its origin.
+class TripSource {
+  final String app;
+  final String externalId;
+  final String? url;
+  final bool linked;
+
+  TripSource({required this.app, required this.externalId, this.url, required this.linked});
+
+  factory TripSource.fromJson(Map<String, dynamic> json) => TripSource(
+        app: json['app'] as String? ?? 'trippin',
+        externalId: json['externalId'] as String? ?? '',
+        url: json['url'] as String?,
+        linked: json['linked'] as bool? ?? false,
+      );
+}
+
 class Trip {
   final String id;
   final String name;
@@ -931,6 +950,7 @@ class Trip {
   final bool isActive;
   final int totalMinor;
   final int transactionCount;
+  final TripSource? source;
 
   Trip({
     required this.id,
@@ -941,6 +961,7 @@ class Trip {
     required this.isActive,
     this.totalMinor = 0,
     this.transactionCount = 0,
+    this.source,
   });
 
   factory Trip.fromJson(Map<String, dynamic> json) => Trip(
@@ -952,6 +973,9 @@ class Trip {
         isActive: json['isActive'] as bool? ?? (json['endedAt'] == null),
         totalMinor: json['totalMinor'] as int? ?? 0,
         transactionCount: json['transactionCount'] as int? ?? 0,
+        source: json['source'] is Map<String, dynamic>
+            ? TripSource.fromJson(json['source'] as Map<String, dynamic>)
+            : null,
       );
 }
 

@@ -308,6 +308,20 @@ export interface TripMember {
   isOwner?: boolean;
 }
 
+/**
+ * Where a trip was planned, when Trippin made it. While `linked`, Trippin
+ * owns the name, dates and members and overwrites them on its next
+ * change; once unlinked it is an ordinary trip that remembers its origin.
+ */
+export interface TripSource {
+  app: "trippin";
+  externalId: string;
+  url: string | null;
+  linked: boolean;
+  linkedAt: string | null;
+  unlinkedAt: string | null;
+}
+
 export interface Trip {
   id: string;
   name: string;
@@ -319,6 +333,7 @@ export interface Trip {
   isActive: boolean;
   totalMinor: number;
   transactionCount: number;
+  source?: TripSource | null;
 }
 
 export interface TripSummary {

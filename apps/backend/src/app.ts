@@ -14,6 +14,7 @@ import { familyRouter } from "./modules/family/family.routes";
 import { fundsRouter } from "./modules/funds/funds.routes";
 import { goalsRouter } from "./modules/funds/goals.routes";
 import { ipoRouter } from "./modules/ipos/ipos.routes";
+import { trippinRouter } from "./modules/integrations/trippin.routes";
 import { kidRouter } from "./modules/family/kid.routes";
 import { analyticsRouter } from "./modules/analytics/analytics.routes";
 import { budgetRouter } from "./modules/budget/budget.routes";
@@ -41,6 +42,12 @@ export const app = express();
 app.set("trust proxy", "loopback");
 
 app.use(cors());
+
+// Trippin's server-to-server calls. Ahead of the JSON parser on purpose:
+// they are signed over the exact bytes sent, which the router reads raw,
+// and they are authorised by that signature rather than requireAuth.
+app.use("/integrations/trippin", trippinRouter);
+
 app.use(express.json());
 
 app.get("/health", (_req, res) => res.json({ ok: true, version: APP_VERSION }));

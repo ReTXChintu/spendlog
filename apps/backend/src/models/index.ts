@@ -1256,9 +1256,49 @@ export interface TripDoc {
   /// Shared out of band — read out, or scanned as a QR code — so that
   /// joining needs no email address and no link handling.
   joinCode: string;
+  /// Where the trip was planned, when somewhere else made it. Null for a
+  /// trip started in SpendLog.
+  source?: TripSource | null;
   createdAt: Date;
   updatedAt: Date;
 }
+
+/**
+ * A trip Trippin asked SpendLog to track (see modules/integrations).
+ *
+ * Trippin owns the name, the dates and the members while `linked` is
+ * true, and overwrites them on its next change. Switching tracking off
+ * there unlinks rather than deletes: the trip and everything on it stay
+ * here as an ordinary trip, with `linked` false to say where it came from.
+ */
+export interface TripSource {
+  app: "trippin";
+  /// Trippin's own id for the trip.
+  externalId: string;
+  /// The trip's page in Trippin.
+  url?: string | null;
+  linked: boolean;
+  linkedAt?: Date | null;
+  unlinkedAt?: Date | null;
+  /// The identity-server subjects Trippin last listed as on the trip.
+  /// Only these are ever taken off by a later members change, so someone
+  /// who joined here with the code is not removed by Trippin, which never
+  /// knew about them.
+  memberSubs?: string[];
+}
+
+const tripSourceSchema = new Schema<TripSource>(
+  {
+    app: { type: String, enum: ["trippin"], required: true },
+    externalId: { type: String, required: true },
+    url: { type: String, default: null },
+    linked: { type: Boolean, default: true },
+    linkedAt: { type: Date, default: null },
+    unlinkedAt: { type: Date, default: null },
+    memberSubs: { type: [String], default: [] },
+  },
+  { _id: false }
+);
 
 const tripMemberSchema = new Schema<TripMember>(
   {
@@ -1276,11 +1316,17 @@ const tripSchema = new Schema<TripDoc>(
     endedAt: { type: Date, default: null },
     members: { type: [tripMemberSchema], default: [] },
     joinCode: { type: String, required: true },
+    source: { type: tripSourceSchema, default: null },
   },
   { timestamps: true, ...serialization }
 );
 
 tripSchema.index({ joinCode: 1 }, { unique: true });
+// One SpendLog trip per Trippin trip, however often it is linked again.
+tripSchema.index(
+  { "source.app": 1, "source.externalId": 1 },
+  { unique: true, partialFilterExpression: { "source.externalId": { $type: "string" } } }
+);
 // Membership is what authorises reading a trip, so it is looked up by it.
 tripSchema.index({ "members.userId": 1 });
 
@@ -1293,6 +1339,40 @@ tripSchema.index(
 );
 
 export const Trip = model<TripDoc>("Trip", tripSchema);
+
+/**
+ * An event another app in the suite has already sent and had processed.
+ *
+ * Trippin retries a delivery it did not hear back from, so the same event
+ * can arrive twice. Keeping what was answered the first time means a
+ * retry gets that answer again rather than doing the work twice. Only
+ * kept for a while: a retry comes within minutes, not months.
+ */
+export interface SuiteEventDoc {
+  _id: Types.ObjectId;
+  app: string;
+  eventId: string;
+  type: string;
+  /// What the first delivery was answered with.
+  response: unknown;
+  processedAt: Date;
+}
+
+/** How long a processed event is remembered. */
+export const SUITE_EVENT_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+const suiteEventSchema = new Schema<SuiteEventDoc>({
+  app: { type: String, required: true },
+  eventId: { type: String, required: true },
+  type: { type: String, required: true },
+  response: { type: Schema.Types.Mixed, default: {} },
+  processedAt: { type: Date, default: () => new Date() },
+});
+
+suiteEventSchema.index({ app: 1, eventId: 1 }, { unique: true });
+suiteEventSchema.index({ processedAt: 1 }, { expireAfterSeconds: SUITE_EVENT_TTL_SECONDS });
+
+export const SuiteEvent = model<SuiteEventDoc>("SuiteEvent", suiteEventSchema);
 
 export interface MerchantPresetDoc {
   _id: Types.ObjectId;

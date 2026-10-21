@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
 import '../theme.dart';
@@ -315,6 +316,14 @@ class _TripModeCard extends StatelessWidget {
               '${formatMoney(active!.totalMinor)} so far',
               style: TextStyle(fontSize: 12.5, color: c.muted),
             ),
+            if (active!.source?.linked ?? false) ...[
+              const SizedBox(height: 6),
+              Text(
+                "Planned in Trippin, so it runs on Trippin's dates. Ending it here works, "
+                "but Trippin's next change to the trip puts its dates back.",
+                style: TextStyle(fontSize: 12, height: 1.45, color: c.muted),
+              ),
+            ],
           ] else
             Text(
               'Start one and everything spent from now on goes onto it, until you end it.',
@@ -436,8 +445,8 @@ class _TripCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 3),
                         Text(
-                          '${formatDayLabel(trip.startedAt.toIso8601String().substring(0, 10))}'
-                          '${trip.endedAt != null ? ' – ${formatDayLabel(trip.endedAt!.toIso8601String().substring(0, 10))}' : ' – now'}'
+                          '${formatDayLabel(istDayOf(trip.startedAt))}'
+                          '${trip.endedAt != null ? ' – ${formatDayLabel(istDayOf(trip.endedAt!))}' : ' – now'}'
                           ' · ${trip.transactionCount} '
                           '${trip.transactionCount == 1 ? 'payment' : 'payments'}',
                           style: TextStyle(fontSize: 12, color: c.muted),
@@ -455,6 +464,7 @@ class _TripCard extends StatelessWidget {
               ),
             ),
           ),
+          if (trip.source != null) _TripSourceRow(source: trip.source!),
           if (isOpen)
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
@@ -649,6 +659,76 @@ class _TripCard extends StatelessWidget {
                       ],
                     ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Where a trip planned in Trippin says so: a chip back to it while
+/// linked, and a note of where it came from once tracking was switched off
+/// there.
+class _TripSourceRow extends StatelessWidget {
+  final TripSource source;
+
+  const _TripSourceRow({required this.source});
+
+  Future<void> _open() async {
+    final url = source.url;
+    if (url == null || url.isEmpty) return;
+    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final linked = source.linked;
+    final hasUrl = source.url != null && source.url!.isNotEmpty;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Material(
+            color: linked ? c.brand50 : c.chipNeutral,
+            borderRadius: BorderRadius.circular(100),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(100),
+              onTap: hasUrl ? _open : null,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.link, size: 13, color: linked ? c.brandDark : c.muted),
+                    const SizedBox(width: 5),
+                    Text(
+                      linked ? 'Planned in Trippin' : 'Was linked to Trippin',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: linked ? c.brandDark : c.muted,
+                      ),
+                    ),
+                    if (hasUrl) ...[
+                      const SizedBox(width: 4),
+                      Icon(Icons.open_in_new, size: 12, color: linked ? c.brandDark : c.muted),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            linked
+                ? "Its name, dates and people follow Trippin. You can still change them here, "
+                    "but Trippin's next change overwrites yours."
+                : "Tracking was switched off in Trippin. Everything on it stayed, and it's an "
+                    'ordinary trip now.',
+            style: TextStyle(fontSize: 11.5, height: 1.45, color: c.muted),
+          ),
         ],
       ),
     );

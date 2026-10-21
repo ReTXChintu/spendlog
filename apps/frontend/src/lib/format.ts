@@ -27,6 +27,15 @@ export function istToday(): string {
   return new Date(Date.now() + IST_OFFSET_MS).toISOString().slice(0, 10);
 }
 
+/**
+ * The IST day an instant falls on, as YYYY-MM-DD. Slicing the ISO string
+ * instead reads the UTC day, which for anything before 5:30am IST - a
+ * trip that starts at midnight, say - is the day before.
+ */
+export function istDayOf(iso: string): string {
+  return new Date(Date.parse(iso) + IST_OFFSET_MS).toISOString().slice(0, 10);
+}
+
 export function formatDayLabel(isoDate: string): string {
   const today = istToday();
   if (isoDate === today) return "Today";

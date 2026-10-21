@@ -64,6 +64,12 @@ DateTime fromIstWallClock(DateTime wallClock) =>
 /// Today's date in IST, as YYYY-MM-DD.
 String istToday() => _ist(DateTime.now()).toIso8601String().substring(0, 10);
 
+/// The IST day an instant falls on, as YYYY-MM-DD. Taking the first ten
+/// characters of the instant itself reads the UTC day, which for anything
+/// before 5:30am IST - a trip that starts at midnight, say - is the day
+/// before.
+String istDayOf(DateTime instant) => _ist(instant).toIso8601String().substring(0, 10);
+
 String formatDayLabel(String isoDate) {
   final today = istToday();
   if (isoDate == today) return 'Today';

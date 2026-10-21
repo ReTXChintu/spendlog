@@ -4,10 +4,16 @@ import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
 import { AccountDoc, CategoryDoc, Transaction, TransactionDoc, Trip, TripDoc, User } from "../../models";
-import { istDayKey } from "../../time";
 import { accountLabel } from "../accounts/accounts.label";
-import { assertTripMember, generateJoinCode } from "./trips.service";
-import { computeBalances, settle } from "./trips.settlement";
+import {
+  assertTripMember,
+  claimTransactions,
+  generateJoinCode,
+  isTripActive,
+  runningAt,
+  tripSettlement,
+  tripSpendSummary,
+} from "./trips.service";
 import { isLikelyTravel } from "./trips.travel";
 
 export const tripsRouter = Router();
@@ -30,7 +36,7 @@ tripsRouter.get("/", async (req, res) => {
       const totalsFor = totals.find((t) => t._id.equals(trip._id));
       return {
         ...trip.toJSON(),
-        isActive: trip.endedAt === null,
+        isActive: isTripActive(trip),
         totalMinor: totalsFor?.total ?? 0,
         transactionCount: totalsFor?.count ?? 0,
       };
@@ -40,8 +46,10 @@ tripsRouter.get("/", async (req, res) => {
 
 // GET /trips/active — the running trip, if trip mode is on.
 tripsRouter.get("/active", async (req, res) => {
-  const trip = await Trip.findOne({ "members.userId": currentUserId(req), endedAt: null });
-  res.json(trip ?? null);
+  const trip = await Trip.findOne({ "members.userId": currentUserId(req), ...runningAt() }).sort({
+    startedAt: -1,
+  });
+  res.json(trip ? { ...trip.toJSON(), isActive: true } : null);
 });
 
 const createTripSchema = z.object({
@@ -58,8 +66,9 @@ tripsRouter.post("/", async (req, res) => {
   const userId = currentUserId(req);
 
   // Trip mode is a switch, and two trips running at once would leave every
-  // payment ambiguous.
-  const running = await Trip.findOne({ ownerId: userId, endedAt: null });
+  // payment ambiguous. A trip planned in Trippin whose dates are under way
+  // counts as running too.
+  const running = await Trip.findOne({ ownerId: userId, ...runningAt() });
   if (running) {
     return res.status(409).json({
       error: `"${running.name}" is still running. End it before starting another.`,
@@ -111,7 +120,7 @@ tripsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   // Moving either end of the window changes what falls inside it.
   const claimed = await claimTransactions(trip);
 
-  res.json({ ...trip.toJSON(), isActive: trip.endedAt === null, claimedCount: claimed });
+  res.json({ ...trip.toJSON(), isActive: isTripActive(trip), claimedCount: claimed });
 });
 
 // DELETE /trips/:id — the trip goes, the spending stays. Nobody's ledger
@@ -136,89 +145,13 @@ tripsRouter.post("/:id/rescan", validObjectIdParam("id"), async (req, res) => {
   res.json({ claimedCount: claimed });
 });
 
-/**
- * Files everything inside the trip's window that is not on a trip already.
- *
- * Leaves anything hand-edited alone, which is how a transaction taken off a
- * trip on purpose stays off it — the same rule that stops automatic passes
- * overwriting corrections elsewhere.
- */
-async function claimTransactions(
-  trip: Pick<TripDoc, "_id" | "members" | "startedAt" | "endedAt">,
-  onlyUserId?: Types.ObjectId
-): Promise<number> {
-  const memberIds = onlyUserId ? [onlyUserId] : trip.members.map((member) => member.userId);
-
-  const result = await Transaction.updateMany(
-    {
-      userId: { $in: memberIds },
-      tripId: null,
-      editedAt: null,
-      occurredAt: {
-        $gte: trip.startedAt,
-        ...(trip.endedAt ? { $lte: trip.endedAt } : {}),
-      },
-    },
-    { $set: { tripId: trip._id } }
-  );
-
-  return result.modifiedCount;
-}
-
 // GET /trips/:id/summary — what the trip cost, and where it went.
 tripsRouter.get("/:id/summary", validObjectIdParam("id"), async (req, res) => {
   const userId = currentUserId(req);
   const trip = await assertTripMember(req.params.id, userId);
   if (!trip) return res.status(404).json({ error: "Not found" });
 
-  const match = { tripId: trip._id, type: "DEBIT" as const };
-
-  const [byMember, byCategory, days] = await Promise.all([
-    Transaction.aggregate([
-      { $match: match },
-      { $group: { _id: "$userId", spentMinor: { $sum: "$countedAmountMinor" }, count: { $sum: 1 } } },
-      { $lookup: { from: "users", localField: "_id", foreignField: "_id", as: "user" } },
-      {
-        $project: {
-          userId: "$_id",
-          spentMinor: 1,
-          count: 1,
-          name: { $ifNull: [{ $first: "$user.name" }, { $first: "$user.email" }] },
-        },
-      },
-      { $sort: { spentMinor: -1 } },
-    ]),
-    Transaction.aggregate([
-      { $match: { ...match, countedAmountMinor: { $gt: 0 } } },
-      { $group: { _id: "$categoryId", amountMinor: { $sum: "$countedAmountMinor" } } },
-      { $lookup: { from: "categories", localField: "_id", foreignField: "_id", as: "category" } },
-      {
-        $project: {
-          categoryId: "$_id",
-          amountMinor: 1,
-          name: { $ifNull: [{ $first: "$category.name" }, "Uncategorized"] },
-        },
-      },
-      { $sort: { amountMinor: -1 } },
-    ]),
-    Transaction.find({ ...match }).select("occurredAt").lean(),
-  ]);
-
-  const totalMinor = byMember.reduce((sum, entry) => sum + entry.spentMinor, 0);
-
-  // Days actually spent money on, not days elapsed: a trip with a quiet
-  // Sunday should not look cheaper per day because of it.
-  const dayCount = new Set(days.map((row) => istDayKey(row.occurredAt))).size;
-
-  res.json({
-    trip: { ...trip.toJSON(), isActive: trip.endedAt === null },
-    totalMinor,
-    transactionCount: days.length,
-    dayCount,
-    perDayMinor: dayCount === 0 ? 0 : Math.round(totalMinor / dayCount),
-    byMember,
-    byCategory,
-  });
+  res.json({ trip: { ...trip.toJSON(), isActive: isTripActive(trip) }, ...(await tripSpendSummary(trip)) });
 });
 
 // GET /trips/:id/transactions — everyone's spending on the trip.
@@ -369,7 +302,7 @@ tripsRouter.get("/:id", validObjectIdParam("id"), async (req, res) => {
 
   res.json({
     ...trip.toJSON(),
-    isActive: trip.endedAt === null,
+    isActive: isTripActive(trip),
     members: trip.members.map((member) => {
       const user = users.find((u) => u._id.equals(member.userId));
       return {
@@ -402,13 +335,13 @@ tripsRouter.post("/join", async (req, res) => {
   if (!trip) return res.status(404).json({ error: "No trip with that code" });
 
   if (trip.members.some((member) => member.userId.equals(userId))) {
-    return res.json({ ...trip.toJSON(), isActive: trip.endedAt === null, alreadyJoined: true });
+    return res.json({ ...trip.toJSON(), isActive: isTripActive(trip), alreadyJoined: true });
   }
 
   trip.members.push({ userId, joinedAt: new Date() });
   await trip.save();
 
-  res.json({ ...trip.toJSON(), isActive: trip.endedAt === null, alreadyJoined: false });
+  res.json({ ...trip.toJSON(), isActive: isTripActive(trip), alreadyJoined: false });
 });
 
 // POST /trips/:id/rotate-code — for a code that has ended up somewhere it
@@ -467,54 +400,10 @@ tripsRouter.delete(
 );
 
 // GET /trips/:id/settlement — who owes whom, and the payments that square
-// it off.
-//
-// Every expense is shared by everyone on the trip unless it says
-// otherwise, which is the common case and saves marking each one up. The
-// figures come from countedAmountMinor, so a refunded hotel and a bill
-// split with somebody outside the trip both behave without this knowing
-// anything about refunds or splits.
+// it off. The arithmetic and its rules live in tripSettlement.
 tripsRouter.get("/:id/settlement", validObjectIdParam("id"), async (req, res) => {
   const trip = await assertTripMember(req.params.id, currentUserId(req));
   if (!trip) return res.status(404).json({ error: "Not found" });
 
-  const memberIds = trip.members.map((member) => member.userId.toString());
-
-  const transactions = await Transaction.find({
-    tripId: trip._id,
-    type: "DEBIT",
-    countedAmountMinor: { $gt: 0 },
-  }).select("userId countedAmountMinor tripShareWith");
-
-  const expenses = transactions.map((transaction) => ({
-    payerId: transaction.userId.toString(),
-    amountMinor: transaction.countedAmountMinor,
-    sharerIds: transaction.tripShareWith?.length
-      ? transaction.tripShareWith.map((id) => id.toString())
-      : memberIds,
-  }));
-
-  const balances = computeBalances(expenses);
-  const transfers = settle(balances);
-
-  // Anyone who has left still appears in the arithmetic, so their name has
-  // to be resolvable too.
-  const involved = new Set([...balances.map((b) => b.userId), ...memberIds]);
-  const users = await User.find({ _id: { $in: [...involved] } })
-    .select("name email")
-    .lean();
-
-  const nameFor = (userId: string) => {
-    const user = users.find((candidate) => candidate._id.toString() === userId);
-    return user?.name ?? user?.email ?? "Someone";
-  };
-
-  res.json({
-    balances: balances.map((balance) => ({ ...balance, name: nameFor(balance.userId) })),
-    transfers: transfers.map((transfer) => ({
-      ...transfer,
-      fromName: nameFor(transfer.fromUserId),
-      toName: nameFor(transfer.toUserId),
-    })),
-  });
+  res.json(await tripSettlement(trip));
 });

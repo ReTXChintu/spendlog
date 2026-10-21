@@ -1,12 +1,50 @@
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Icon } from "../components/Icon";
 import { StateBlock } from "../components/States";
 import { api } from "../lib/api";
-import { formatDayLabel, formatMoney, formatMoneyShort } from "../lib/format";
+import { formatDayLabel, formatMoney, formatMoneyShort, istDayOf } from "../lib/format";
 import { Trip, TripMember, TripSettlement, TripSummary } from "../types";
 
 /** The trip detail, where members are resolved to people. */
 type TripDetail = Trip & { members: TripMember[] };
+
+/**
+ * Where a trip planned in Trippin says so: a chip back to it while
+ * linked, and a note of where it came from once tracking was switched off
+ * there.
+ */
+function TripSourceRow({ trip }: { trip: Trip }) {
+  const source = trip.source;
+  if (!source) return null;
+
+  const label = source.linked ? "Planned in Trippin" : "Was linked to Trippin";
+  const chip = source.url ? (
+    <a
+      className={`trip-source-chip${source.linked ? "" : " is-past"}`}
+      href={source.url}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      <Icon name="ic-link" /> {label}
+    </a>
+  ) : (
+    <span className={`trip-source-chip${source.linked ? "" : " is-past"}`}>
+      <Icon name="ic-link" /> {label}
+    </span>
+  );
+
+  return (
+    <div className="trip-source">
+      {chip}
+      <span className="trip-source-note">
+        {source.linked
+          ? "Its name, dates and people follow Trippin. You can still change them here, but Trippin's next change overwrites yours."
+          : "Tracking was switched off in Trippin. Everything on it stayed, and it's an ordinary trip now."}
+      </span>
+    </div>
+  );
+}
 
 /**
  * Trips: a holiday totalled on its own.
@@ -17,7 +55,9 @@ type TripDetail = Trip & { members: TripMember[] };
  */
 export function TripsPage() {
   const [trips, setTrips] = useState<Trip[] | null>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
+  // Trippin links straight to a trip here, as /trips?trip=<id>.
+  const [searchParams] = useSearchParams();
+  const [openId, setOpenId] = useState<string | null>(() => searchParams.get("trip"));
   const [summary, setSummary] = useState<TripSummary | null>(null);
   const [detail, setDetail] = useState<TripDetail | null>(null);
   const [settlement, setSettlement] = useState<TripSettlement | null>(null);
@@ -120,9 +160,15 @@ export function TripsPage() {
               <div className="trip-start-label">Trip mode is on</div>
               <div className="trip-start-name">{active.name}</div>
               <div className="trip-start-sub">
-                Since {formatDayLabel(active.startedAt.slice(0, 10))} ·{" "}
+                Since {formatDayLabel(istDayOf(active.startedAt))} ·{" "}
                 {formatMoney(active.totalMinor)} so far
               </div>
+              {active.source?.linked && (
+                <div className="trip-start-sub">
+                  Planned in Trippin, so it runs on Trippin's dates. Ending it here works, but
+                  Trippin's next change to the trip puts its dates back.
+                </div>
+              )}
             </div>
             <button
               className="btn btn-primary"
@@ -193,14 +239,16 @@ export function TripsPage() {
                     {trip.isActive && <span className="trip-live">Running</span>}
                   </span>
                   <span className="trip-card-sub">
-                    {formatDayLabel(trip.startedAt.slice(0, 10))}
-                    {trip.endedAt ? ` – ${formatDayLabel(trip.endedAt.slice(0, 10))}` : " – now"} ·{" "}
+                    {formatDayLabel(istDayOf(trip.startedAt))}
+                    {trip.endedAt ? ` – ${formatDayLabel(istDayOf(trip.endedAt))}` : " – now"} ·{" "}
                     {trip.transactionCount} {trip.transactionCount === 1 ? "payment" : "payments"}
                   </span>
                 </span>
                 <span className="trip-card-total num">{formatMoney(trip.totalMinor)}</span>
                 <Icon name={openId === trip.id ? "ic-chevron-down" : "ic-chevron-right"} />
               </button>
+
+              <TripSourceRow trip={trip} />
 
               {openId === trip.id && summary && (
                 <div className="trip-detail">
