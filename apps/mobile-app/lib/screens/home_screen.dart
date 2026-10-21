@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../theme.dart';
+import '../widgets/ds/ds.dart';
 import 'analytics_screen.dart';
 import 'dashboard_screen.dart';
 
@@ -52,18 +52,22 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     final c = context.c;
     return Column(
       children: [
-        Material(
-          color: c.surface,
-          child: TabBar(
-            controller: _tabs,
-            labelColor: c.brandDark,
-            unselectedLabelColor: c.muted,
-            indicatorColor: c.brand,
-            indicatorSize: TabBarIndicatorSize.label,
-            dividerColor: c.line,
-            labelStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
-            unselectedLabelStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
-            tabs: const [Tab(text: 'Dashboard', height: 42), Tab(text: 'Analytics', height: 42)],
+        // The two halves as a segmented control (the system's only tab
+        // style). It follows the swipe, so the pages still slide.
+        Container(
+          color: c.bg,
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: AnimatedBuilder(
+            animation: _tabs.animation ?? _tabs,
+            builder: (context, _) {
+              final at = (_tabs.animation?.value ?? _tabs.index.toDouble()).round();
+              return DsSegmented<int>(
+                segments: const [(0, 'Dashboard'), (1, 'Analytics')],
+                selected: at,
+                height: 36,
+                onChanged: (i) => _tabs.animateTo(i),
+              );
+            },
           ),
         ),
         Expanded(

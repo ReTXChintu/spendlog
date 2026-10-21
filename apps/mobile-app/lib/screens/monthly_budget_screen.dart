@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import '../widgets/ds/ds.dart';
 import '../utils/format.dart';
 import '../widgets/state_block.dart';
 
@@ -155,17 +155,28 @@ class _MonthlyBudgetScreenState extends State<MonthlyBudgetScreen> {
 
     final picked = await showModalBottomSheet<Category>(
       context: context,
-      showDragHandle: true,
       isScrollControlled: true,
       builder: (sheetContext) => SafeArea(
         child: ConstrainedBox(
           constraints: BoxConstraints(maxHeight: MediaQuery.of(sheetContext).size.height * 0.7),
           child: ListView(
             shrinkWrap: true,
+            padding: const EdgeInsets.only(bottom: 16),
             children: [
+              const DsDragHandle(),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
+                child: DsSheetHeader(title: 'Add a limit'),
+              ),
               for (final category in free)
                 ListTile(
-                  leading: Icon(categoryIcon(category.icon), color: parseHexColor(category.color)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                  leading: DsIconTile(
+                    categoryIcon(category.icon),
+                    size: 36,
+                    color: parseHexColor(category.color),
+                    background: parseHexColor(category.color).withValues(alpha: .12),
+                  ),
                   title: Text(category.name),
                   onTap: () => Navigator.of(sheetContext).pop(category),
                 ),
@@ -226,10 +237,10 @@ class _MonthlyBudgetScreenState extends State<MonthlyBudgetScreen> {
     final c = context.c;
 
     return Scaffold(
-      backgroundColor: c.paper,
+      backgroundColor: c.bg,
       appBar: AppBar(
-        title: Text('Monthly budget', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: c.ink)),
-        shape: Border(bottom: BorderSide(color: c.line)),
+        title: const Text('Monthly budget'),
+        shape: Border(bottom: BorderSide(color: c.ln)),
       ),
       body: _body(),
       bottomNavigationBar: _status == null ? null : _footer(),
@@ -248,135 +259,147 @@ class _MonthlyBudgetScreenState extends State<MonthlyBudgetScreen> {
       );
     }
     final status = _status;
-    if (status == null) return const Center(child: CircularProgressIndicator());
+    if (status == null) return const Center(child: DsSpinner());
 
     final c = context.c;
     final month = status.month.label;
     final canAdd = _categories.any((category) => !_rows.any((row) => row.category.id == category.id));
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      padding: kPagePad,
       children: [
-        Text(
-          'FOR THE MONTH',
-          style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: c.muted),
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          key: const Key('budget-total'),
-          controller: _total,
-          autofocus: !status.configured,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          onChanged: (_) => _changed(),
-          style: kNum.copyWith(fontSize: 26, fontWeight: FontWeight.w800, color: c.ink),
-          decoration: InputDecoration(
-            prefixText: '₹ ',
-            prefixStyle: kNum.copyWith(fontSize: 26, fontWeight: FontWeight.w800, color: c.muted),
-            hintText: '20000',
-            filled: true,
-            fillColor: c.surface,
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(T.rMd),
-              borderSide: BorderSide(color: c.lineStrong),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(T.rMd),
-              borderSide: BorderSide(color: c.brand, width: 1.5),
-            ),
+        DsCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const DsLabel('For the month'),
+              const SizedBox(height: 6),
+              TextField(
+                key: const Key('budget-total'),
+                controller: _total,
+                autofocus: !status.configured,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                onChanged: (_) => _changed(),
+                style: kNum.copyWith(fontSize: 22, height: 28 / 22, fontWeight: FontWeight.w600, color: c.tx),
+                decoration: InputDecoration(
+                  prefixText: '₹ ',
+                  prefixStyle: kNum.copyWith(fontSize: 22, fontWeight: FontWeight.w600, color: c.tx3),
+                  hintText: '20000',
+                  hintStyle: kNum.copyWith(fontSize: 22, fontWeight: FontWeight.w600, color: c.tx3),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Everything counts against this - rent, EMIs, SIPs, one-off buys and the day to day. Whatever is '
+                'left when the month ends goes into your savings bucket.',
+                style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx2),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                month.isEmpty
+                    ? 'Applies from this month on. Months already over keep the budget they had.'
+                    : 'Applies from this month ($month) on. Months already over keep the budget they had.',
+                style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
+              ),
+            ],
           ),
         ),
-        const SizedBox(height: 10),
-        Text(
-          'Everything counts against this - rent, EMIs, SIPs, one-off buys and the day to day. Whatever is '
-          'left when the month ends goes into your savings bucket.',
-          style: TextStyle(fontSize: 12.5, height: 1.5, color: c.ink70),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          month.isEmpty
-              ? 'Applies from this month on. Months already over keep the budget they had.'
-              : 'Applies from this month ($month) on. Months already over keep the budget they had.',
-          style: TextStyle(fontSize: 12, height: 1.45, color: c.muted),
-        ),
-        const SizedBox(height: 24),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'CATEGORY LIMITS',
-                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: c.muted),
+        const SizedBox(height: kCardGap),
+        DsCard(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              DsSectionHeader(
+                'Category limits',
+                trailing: canAdd
+                    ? TextButton.icon(
+                        onPressed: _addLimit,
+                        icon: const DsIcon(DsIcons.plus, size: 18),
+                        label: const Text('Add a limit'),
+                        style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
+                      )
+                    : null,
               ),
-            ),
-            if (canAdd)
-              TextButton.icon(
-                onPressed: _addLimit,
-                icon: const Icon(Icons.add, size: 17),
-                label: const Text('Add a limit'),
+              const SizedBox(height: 4),
+              Text(
+                'Optional. Limits share out the total - they never add to it - and anything without a limit of its '
+                'own comes out of what is left unassigned.',
+                style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
               ),
-          ],
-        ),
-        Text(
-          'Optional. Limits share out the total - they never add to it - and anything without a limit of its '
-          'own comes out of what is left unassigned.',
-          style: TextStyle(fontSize: 12, height: 1.45, color: c.muted),
-        ),
-        const SizedBox(height: 12),
-        if (_rows.isEmpty)
-          OutlinedButton.icon(
-            onPressed: canAdd ? _addLimit : null,
-            icon: const Icon(Icons.add, size: 17),
-            label: const Text('Limit dining, groceries, transport…'),
+              const SizedBox(height: 12),
+              if (_rows.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: OutlinedButton.icon(
+                    onPressed: canAdd ? _addLimit : null,
+                    icon: const DsIcon(DsIcons.plus, size: 18),
+                    label: const Text('Limit dining, groceries, transport…'),
+                  ),
+                ),
+              for (var i = 0; i < _rows.length; i++) _limitField(_rows[i], last: i == _rows.length - 1),
+            ],
           ),
-        for (final row in _rows) _limitField(row),
+        ),
       ],
     );
   }
 
-  Widget _limitField(_LimitRow row) {
+  /// One limit as a table row: the category, a 44 px right-aligned amount
+  /// input, and a way to take the limit off.
+  Widget _limitField(_LimitRow row, {required bool last}) {
     final c = context.c;
-    final colour = parseHexColor(row.category.color, fallback: c.brand);
+    final colour = parseHexColor(row.category.color, fallback: c.ac);
     final invalid = row.amount.text.trim().isNotEmpty && parseRupees(row.amount.text) == null;
+    final r10 = BorderRadius.circular(Ds.rMd);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
-      decoration: BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: invalid ? c.debit : c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(border: last ? null : Border(bottom: BorderSide(color: c.ln))),
       child: Row(
         children: [
-          Container(
-            width: 28,
-            height: 28,
-            decoration: BoxDecoration(color: colour.withValues(alpha: .14), borderRadius: BorderRadius.circular(8)),
-            child: Icon(categoryIcon(row.category.icon), size: 16, color: colour),
+          DsIconTile(
+            categoryIcon(row.category.icon),
+            size: 36,
+            color: colour,
+            background: colour.withValues(alpha: .12),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Expanded(
             child: Text(
               row.category.name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: c.ink),
+              style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx),
             ),
           ),
+          const SizedBox(width: 8),
           SizedBox(
-            width: 116,
+            width: 128,
+            height: 44,
             child: TextField(
               key: Key('limit-${row.category.id}'),
               controller: row.amount,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               textAlign: TextAlign.right,
+              textAlignVertical: TextAlignVertical.center,
               onChanged: (_) => _changed(),
-              style: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w700, color: c.ink),
+              style: kNum.copyWith(fontSize: 14, fontWeight: FontWeight.w600, color: c.tx),
               decoration: InputDecoration(
                 isDense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                 prefixText: '₹ ',
                 hintText: '0',
-                border: InputBorder.none,
-                prefixStyle: kNum.copyWith(fontSize: 15, color: c.muted),
+                hintStyle: kNum.copyWith(fontSize: 14, color: c.tx3),
+                prefixStyle: kNum.copyWith(fontSize: 14, color: c.tx3),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: r10,
+                  borderSide: invalid ? BorderSide(color: c.crit, width: 2) : BorderSide(color: c.ln2),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: r10,
+                  borderSide: BorderSide(color: invalid ? c.crit : c.ac, width: 2),
+                ),
               ),
             ),
           ),
@@ -384,7 +407,7 @@ class _MonthlyBudgetScreenState extends State<MonthlyBudgetScreen> {
             onPressed: () => _removeLimit(row),
             tooltip: 'Remove this limit',
             visualDensity: VisualDensity.compact,
-            icon: Icon(Icons.close, size: 18, color: c.mutedLight),
+            icon: DsIcon(DsIcons.x, size: 18, color: c.tx3),
           ),
         ],
       ),
@@ -396,8 +419,8 @@ class _MonthlyBudgetScreenState extends State<MonthlyBudgetScreen> {
 
     return SafeArea(
       child: Container(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-        decoration: BoxDecoration(color: c.surface, border: Border(top: BorderSide(color: c.line))),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        decoration: BoxDecoration(color: c.sf2, border: Border(top: BorderSide(color: c.ln))),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -405,16 +428,16 @@ class _MonthlyBudgetScreenState extends State<MonthlyBudgetScreen> {
             AssignMeter(
               totalMinor: _totalMinor,
               parts: [
-                for (final row in _rows)
+                for (var i = 0; i < _rows.length; i++)
                   (
-                    colour: parseHexColor(row.category.color, fallback: c.brand),
-                    amountMinor: parseRupees(row.amount.text) ?? 0,
+                    colour: c.chart[i % (c.chart.length - 1)],
+                    amountMinor: parseRupees(_rows[i].amount.text) ?? 0,
                   ),
               ],
             ),
             if (_error != null) ...[
               const SizedBox(height: 8),
-              Text(_error!, style: TextStyle(fontSize: 12.5, height: 1.4, color: c.debit)),
+              DsCallout(title: _error!, tone: DsTone.crit),
             ],
             const SizedBox(height: 12),
             FilledButton(
@@ -430,9 +453,10 @@ class _MonthlyBudgetScreenState extends State<MonthlyBudgetScreen> {
 
 /// How much of the total the category limits have claimed, live.
 ///
-/// "₹X of ₹Y assigned · ₹Z unassigned", over a bar split by category
-/// colour - or, once the limits come to more than the total, by how much,
-/// in red, because that is the one state that cannot be saved.
+/// "₹X of ₹Y assigned · ₹Z unassigned", over an allocation bar split by
+/// limit - or, once the limits come to more than the total, by how much,
+/// in red with an alert banner, because that is the one state that cannot
+/// be saved.
 class AssignMeter extends StatelessWidget {
   const AssignMeter({super.key, required this.totalMinor, required this.parts});
 
@@ -448,12 +472,13 @@ class AssignMeter extends StatelessWidget {
     if (total == null || total <= 0) {
       return Text(
         'Enter the total for the month first.',
-        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: c.muted),
+        style: TextStyle(fontSize: 13, height: 18 / 13, fontWeight: FontWeight.w600, color: c.tx3),
       );
     }
 
     final over = assigned > total;
     final rest = total - assigned;
+    final shown = [for (final part in parts) if (part.amountMinor > 0) part];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -463,30 +488,34 @@ class AssignMeter extends StatelessWidget {
               ? '${formatMoneyShort(assigned)} of ${formatMoneyShort(total)} assigned · ${formatMoneyShort(-rest)} over'
               : '${formatMoneyShort(assigned)} of ${formatMoneyShort(total)} assigned · '
                   '${formatMoneyShort(rest)} unassigned',
-          style: kNum.copyWith(fontSize: 12.8, fontWeight: FontWeight.w700, color: over ? c.debit : c.ink70),
+          style: kNum.copyWith(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w600, color: over ? c.crit : c.tx),
         ),
         const SizedBox(height: 8),
         ClipRRect(
-          borderRadius: BorderRadius.circular(100),
+          borderRadius: BorderRadius.circular(6),
           child: SizedBox(
-            height: 8,
+            height: 12,
             child: over
-                ? ColoredBox(color: c.debit)
+                ? ColoredBox(color: c.critFill)
                 : Row(
                     children: [
-                      for (final part in parts)
-                        if (part.amountMinor > 0)
-                          Expanded(flex: part.amountMinor, child: ColoredBox(color: part.colour)),
-                      if (rest > 0) Expanded(flex: rest, child: ColoredBox(color: c.track)),
+                      for (var i = 0; i < shown.length; i++) ...[
+                        if (i > 0) const SizedBox(width: 2),
+                        Expanded(flex: shown[i].amountMinor, child: ColoredBox(color: shown[i].colour)),
+                      ],
+                      if (rest > 0) ...[
+                        if (shown.isNotEmpty) const SizedBox(width: 2),
+                        Expanded(flex: rest, child: ColoredBox(color: c.sunk)),
+                      ],
                     ],
                   ),
           ),
         ),
         if (over) ...[
-          const SizedBox(height: 6),
-          Text(
-            "Limits can't come to more than the budget. Lower a limit or raise the total.",
-            style: TextStyle(fontSize: 12, height: 1.4, color: c.debit),
+          const SizedBox(height: 10),
+          const DsCallout(
+            title: "Limits can't come to more than the budget. Lower a limit or raise the total.",
+            tone: DsTone.crit,
           ),
         ],
       ],

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
-import '../theme.dart';
 import '../utils/format.dart';
+import 'ds/ds.dart';
 
 String _labelFor(String source) => switch (source) {
       'MANUAL' => 'Added by hand',
@@ -10,11 +10,11 @@ String _labelFor(String source) => switch (source) {
       _ => 'SMS',
     };
 
-IconData _iconFor(String source) => switch (source) {
-      'MANUAL' => Icons.edit_outlined,
-      'STATEMENT' => Icons.receipt_long_outlined,
-      'EMAIL' => Icons.mail_outline,
-      _ => Icons.sms_outlined,
+DsGlyph _iconFor(String source) => switch (source) {
+      'MANUAL' => DsIcons.pencil,
+      'STATEMENT' => DsIcons.list,
+      'EMAIL' => DsIcons.mail,
+      _ => DsIcons.message,
     };
 
 /// Shows the messages a transaction was parsed from. Rows appear without the
@@ -38,76 +38,65 @@ Future<void> showRawMessageSheet(BuildContext context, Transaction transaction) 
 
   return showModalBottomSheet<void>(
     context: context,
-    backgroundColor: context.c.surface,
     isScrollControlled: true,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(T.rLg)),
-    ),
-    builder: (context) => SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 38,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: context.c.lineStrong,
-                  borderRadius: BorderRadius.circular(100),
-                ),
-              ),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              sources.length > 1 ? 'Original messages' : 'Original message',
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: context.c.ink),
-            ),
-            if (sources.length > 1) ...[
+    builder: (context) {
+      final c = context.c;
+      return SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const DsDragHandle(),
               const SizedBox(height: 4),
-              Text(
-                'This transaction was reported ${sources.length} times.',
-                style: TextStyle(fontSize: 12, color: context.c.muted),
+              DsSheetHeader(
+                title: sources.length > 1 ? 'Original messages' : 'Original message',
+                subtitle: sources.length > 1 ? 'This transaction was reported ${sources.length} times.' : null,
+                icon: DsIcons.message,
               ),
-            ],
-            const SizedBox(height: 14),
-            for (final entry in sources) ...[
-              Row(
-                children: [
-                  Icon(_iconFor(entry.source), size: 13, color: context.c.muted),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      '${_labelFor(entry.source)} · ${formatDateTime(entry.receivedAt)}',
-                      style: TextStyle(fontSize: 12, color: context.c.muted),
+              const SizedBox(height: 16),
+              for (final entry in sources) ...[
+                Row(
+                  children: [
+                    DsIcon(_iconFor(entry.source), size: 16, color: c.tx3),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '${_labelFor(entry.source)} · ${formatDateTime(entry.receivedAt)}',
+                        style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3),
+                      ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Container(
-                width: double.infinity,
-                constraints: const BoxConstraints(maxHeight: 240),
-                padding: const EdgeInsets.all(13),
-                decoration: BoxDecoration(
-                  color: context.c.darkPanel,
-                  border: Border.all(color: context.c.darkPanel),
-                  borderRadius: BorderRadius.circular(T.rSm),
+                  ],
                 ),
-                child: SingleChildScrollView(
-                  child: Text(
-                    entry.rawText ?? 'No original message stored for this transaction.',
-                    style: kNum.copyWith(fontSize: 12, height: 1.5, color: context.c.darkPanelText),
+                const SizedBox(height: 6),
+                Container(
+                  width: double.infinity,
+                  constraints: const BoxConstraints(maxHeight: 240),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: c.sf2,
+                    border: Border.all(color: c.ln),
+                    borderRadius: BorderRadius.circular(Ds.rLg),
+                  ),
+                  child: SingleChildScrollView(
+                    child: entry.rawText == null
+                        ? Text(
+                            'No original message stored for this transaction.',
+                            style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
+                          )
+                        : Text(
+                            entry.rawText!,
+                            style: kMono.copyWith(fontSize: 13, height: 20 / 13, color: c.tx),
+                          ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 14),
+                const SizedBox(height: 16),
+              ],
             ],
-          ],
+          ),
         ),
-      ),
-    ),
+      );
+    },
   );
 }

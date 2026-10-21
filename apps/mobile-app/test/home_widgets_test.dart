@@ -279,7 +279,7 @@ void main() {
 
       expect(tester.takeException(), isNull);
       expect(find.text('Set balance'), findsOneWidget);
-      expect(find.text('SET ASIDE FOR LATER'), findsOneWidget);
+      expect(find.text('Set aside for later'), findsOneWidget);
 
       expect(find.text('Over by ₹600'), findsOneWidget);
       expect(find.text('+₹2,340 if the month ended now'), findsOneWidget);

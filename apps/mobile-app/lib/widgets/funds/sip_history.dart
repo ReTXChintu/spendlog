@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/fund_models.dart';
-import '../../theme.dart';
+import '../ds/ds.dart';
 import '../../utils/format.dart';
 import 'fund_form.dart';
 import 'fund_text.dart';
@@ -56,82 +56,102 @@ class _SipHistoryCardState extends State<SipHistoryCard> {
     final months = widget.plan.reversed.toList();
     final shown = _all ? months : months.take(SipHistoryCard.shortList).toList();
     final pauseBusy = widget.busy.contains('sip-pause');
+    final buttonStyle = OutlinedButton.styleFrom(
+      minimumSize: const Size(0, 40),
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      textStyle: const TextStyle(fontFamily: Ds.sans, fontSize: 14, fontWeight: FontWeight.w600),
+    );
     return FundCard(
       padding: EdgeInsets.zero,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
                   sipHistoryLine(widget.sip),
-                  style: TextStyle(fontSize: 13, height: 1.4, fontWeight: FontWeight.w700, color: c.ink),
+                  style: kNum.copyWith(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   children: [
                     OutlinedButton.icon(
+                      style: buttonStyle,
                       onPressed: widget.busy.contains('sip-change') ? null : widget.onChangeAmount,
-                      icon: const Icon(Icons.trending_up, size: 17),
+                      icon: const DsIcon(DsIcons.pencil, size: 18),
                       label: const Text('Change amount'),
                     ),
                     OutlinedButton.icon(
+                      style: buttonStyle,
                       onPressed: pauseBusy ? null : (widget.paused ? widget.onResume : widget.onPause),
-                      icon: Icon(widget.paused ? Icons.play_circle_outline : Icons.pause_circle_outline, size: 17),
+                      icon: Icon(widget.paused ? Icons.play_arrow_rounded : Icons.pause_rounded, size: 18),
                       label: Text(widget.paused ? 'Resume' : 'Pause'),
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
                 Text(
                   'Tap a month to mark it skipped, or to take the skip back.',
-                  style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
+                  style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 8),
               ],
             ),
           ),
           if (months.isEmpty)
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 6, 14, 14),
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
               child: Text(
                 'No instalments in the last two years or the next three months.',
-                style: TextStyle(fontSize: 12.5, height: 1.4, color: c.muted),
+                style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
               ),
             ),
-          for (final month in shown) ...[
-            Divider(height: 1, color: c.line),
+          for (final (i, month) in shown.indexed)
             SipMonthRow(
               month: month,
               busy: widget.busy.contains('month-${month.month}'),
               onTap: () => widget.onTapMonth(month),
+              first: i == 0,
+              last: i == shown.length - 1,
             ),
-          ],
           if (months.length > SipHistoryCard.shortList) ...[
-            Divider(height: 1, color: c.line),
+            Divider(height: 1, color: c.ln),
             TextButton(
               onPressed: () => setState(() => _all = !_all),
               child: Text(_all ? 'Show fewer' : 'Show all ${months.length} months'),
             ),
-          ],
+          ] else if (months.isNotEmpty)
+            const SizedBox(height: 8),
         ],
       ),
     );
   }
 }
 
-/// One month of the timeline.
+/// One month of the timeline: a 10 px dot on an `ln2` connector (§7.8),
+/// filled `ac` once invested, a dashed `ac` ring while still to come.
 class SipMonthRow extends StatelessWidget {
-  const SipMonthRow({super.key, required this.month, required this.onTap, this.busy = false});
+  const SipMonthRow({
+    super.key,
+    required this.month,
+    required this.onTap,
+    this.busy = false,
+    this.first = false,
+    this.last = false,
+  });
 
   final SipPlanMonth month;
   final VoidCallback onTap;
   final bool busy;
+
+  /// Where the connector stops, at the top and bottom of the timeline.
+  final bool first;
+  final bool last;
 
   /// "Invested · 10.234 units at ₹97.1234", "Skipped", "Upcoming · due 10 Nov".
   static String describe(SipPlanMonth month) {
@@ -154,12 +174,12 @@ class SipMonthRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final (icon, colour) = switch (month.status) {
-      SipMonthStatus.invested => (Icons.check_circle_outline, month.covered ? c.muted : c.credit),
-      SipMonthStatus.skipped => (Icons.remove_circle_outline, c.muted),
-      SipMonthStatus.paused => (Icons.pause_circle_outline, c.warn),
-      SipMonthStatus.pendingNav => (Icons.schedule, c.warn),
-      _ => (Icons.event_outlined, c.mutedLight),
+    final dot = switch (month.status) {
+      SipMonthStatus.invested => _Dot(fill: month.covered ? c.tx3 : c.ac),
+      SipMonthStatus.skipped => _Dot(ring: c.ln2),
+      SipMonthStatus.paused => _Dot(ring: c.warnFill),
+      SipMonthStatus.pendingNav => _Dot(fill: c.warnFill),
+      _ => _Dot(ring: c.ac, dashed: true),
     };
     final skipped = month.isSkipped;
     final actual = month.actualMinor;
@@ -168,47 +188,140 @@ class SipMonthRow extends StatelessWidget {
       key: ValueKey('plan-month-${month.month}'),
       onTap: busy ? null : onTap,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 9, 14, 9),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 20,
-              child: busy
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                  : Icon(icon, size: 18, color: colour),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(sipMonthLabel(month.month), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: c.ink)),
-                  Text(describe(month), style: TextStyle(fontSize: 11.5, height: 1.35, color: c.muted)),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  formatMoneyShort(actual ?? month.plannedMinor),
-                  style: kNum.copyWith(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: skipped || month.status == SipMonthStatus.upcoming ? c.muted : c.ink,
-                    decoration: skipped ? TextDecoration.lineThrough : null,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                width: 20,
+                child: CustomPaint(
+                  painter: _ConnectorPainter(color: c.ln2, top: !first, bottom: !last),
+                  child: Center(
+                    child: busy
+                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        : dot,
                   ),
                 ),
-                if (differs)
-                  Text('planned ${formatMoneyShort(month.plannedMinor)}', style: TextStyle(fontSize: 11, color: c.muted)),
-              ],
-            ),
-          ],
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        sipMonthLabel(month.month),
+                        style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx),
+                      ),
+                      Text(describe(month), style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3)),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    formatMoneyShort(actual ?? month.plannedMinor),
+                    style: kNum.copyWith(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: skipped || month.status == SipMonthStatus.upcoming ? c.tx3 : c.tx,
+                      decoration: skipped ? TextDecoration.lineThrough : null,
+                    ),
+                  ),
+                  if (differs)
+                    Text(
+                      'planned ${formatMoneyShort(month.plannedMinor)}',
+                      style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3),
+                    ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
+}
+
+/// A 10 px timeline marker: filled, a ring, or a dashed ring.
+class _Dot extends StatelessWidget {
+  const _Dot({this.fill, this.ring, this.dashed = false});
+
+  final Color? fill;
+  final Color? ring;
+  final bool dashed;
+
+  @override
+  Widget build(BuildContext context) => CustomPaint(
+        size: const Size.square(10),
+        painter: _DotPainter(fill: fill, ring: ring, dashed: dashed, background: context.c.sf),
+      );
+}
+
+class _DotPainter extends CustomPainter {
+  _DotPainter({this.fill, this.ring, required this.dashed, required this.background});
+
+  final Color? fill;
+  final Color? ring;
+  final bool dashed;
+  final Color background;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final centre = size.center(Offset.zero);
+    final r = size.width / 2;
+    // Covers the connector behind a hollow marker.
+    canvas.drawCircle(centre, r, Paint()..color = fill ?? background);
+    if (ring == null) return;
+    final paint = Paint()
+      ..color = ring!
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+    final rect = Rect.fromCircle(center: centre, radius: r - 0.75);
+    if (!dashed) {
+      canvas.drawOval(rect, paint);
+      return;
+    }
+    const segments = 8;
+    const sweep = 2 * 3.141592653589793 / segments;
+    for (var i = 0; i < segments; i++) {
+      canvas.drawArc(rect, i * sweep, sweep * 0.55, false, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DotPainter old) =>
+      old.fill != fill || old.ring != ring || old.dashed != dashed || old.background != background;
+}
+
+/// The 1 px `ln2` line that joins the timeline's markers.
+class _ConnectorPainter extends CustomPainter {
+  _ConnectorPainter({required this.color, required this.top, required this.bottom});
+
+  final Color color;
+  final bool top;
+  final bool bottom;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final x = size.width / 2;
+    final mid = size.height / 2;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1;
+    if (top) canvas.drawLine(Offset(x, 0), Offset(x, mid), paint);
+    if (bottom) canvas.drawLine(Offset(x, mid), Offset(x, size.height), paint);
+  }
+
+  @override
+  bool shouldRepaint(_ConnectorPainter old) => old.color != color || old.top != top || old.bottom != bottom;
 }
 
 /// "Change amount": from which month, and the new amount. Pops the body
@@ -270,27 +383,29 @@ class _SipChangeDialogState extends State<SipChangeDialog> {
                   if (picked != null) setState(() => _month = picked);
                 },
               ),
-              const SizedBox(height: 10),
-              TextField(
-                key: const ValueKey('sip-change-amount'),
-                controller: _amount,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: InputDecoration(
-                  labelText: 'Each month from then',
-                  prefixText: '₹ ',
-                  hintText: (widget.sip.currentAmountMinor ~/ 100).toString(),
+              const SizedBox(height: 16),
+              DsField(
+                label: 'Each month from then',
+                error: _error,
+                help: 'A step-up or a step-down. It holds until the next change already there; '
+                    'earlier months keep what they were.',
+                child: TextField(
+                  key: const ValueKey('sip-change-amount'),
+                  controller: _amount,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  style: kNum.copyWith(fontSize: 15, color: c.tx),
+                  decoration: InputDecoration(
+                    prefixText: '₹ ',
+                    hintText: (widget.sip.currentAmountMinor ~/ 100).toString(),
+                    enabledBorder: _error == null
+                        ? null
+                        : OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(Ds.rMd),
+                            borderSide: BorderSide(color: c.crit, width: 2),
+                          ),
+                  ),
                 ),
               ),
-              const SizedBox(height: 8),
-              Text(
-                'A step-up or a step-down. It holds until the next change already there; '
-                'earlier months keep what they were.',
-                style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 8),
-                Text(_error!, style: TextStyle(fontSize: 12, height: 1.4, color: c.debit)),
-              ],
             ],
           ),
         ),
@@ -351,36 +466,34 @@ class _SipPauseDialogState extends State<SipPauseDialog> {
                   }
                 },
               ),
-              const SizedBox(height: 10),
-              InkWell(
-                key: const ValueKey('sip-pause-to'),
-                onTap: () async {
-                  final picked = await pickMonth(context, title: 'Paused until', initial: _to ?? _from, first: _from, last: _last);
-                  if (picked != null) setState(() => _to = picked);
-                },
-                borderRadius: BorderRadius.circular(T.rSm),
-                child: InputDecorator(
-                  decoration: InputDecoration(
-                    labelText: 'Until (optional)',
-                    suffixIcon: _to == null
-                        ? const Icon(Icons.expand_more, size: 18)
-                        : IconButton(
-                            tooltip: 'Until I resume',
-                            icon: const Icon(Icons.close, size: 18),
-                            onPressed: () => setState(() => _to = null),
-                          ),
-                  ),
-                  child: Text(
-                    _to == null ? 'Until I resume' : sipMonthLabel(_to!),
-                    style: TextStyle(fontSize: 15, color: _to == null ? c.mutedLight : c.ink),
+              const SizedBox(height: 16),
+              DsField(
+                label: 'Until (optional)',
+                help: 'Paused months buy nothing and the monthly figure shows ₹0 while it lasts. '
+                    'Instalments before it stay.',
+                child: InkWell(
+                  key: const ValueKey('sip-pause-to'),
+                  onTap: () async {
+                    final picked = await pickMonth(context, title: 'Paused until', initial: _to ?? _from, first: _from, last: _last);
+                    if (picked != null) setState(() => _to = picked);
+                  },
+                  borderRadius: BorderRadius.circular(Ds.rMd),
+                  child: InputDecorator(
+                    decoration: InputDecoration(
+                      suffixIcon: _to == null
+                          ? DsIcon(DsIcons.chevronDown, size: 20, color: c.tx2)
+                          : IconButton(
+                              tooltip: 'Until I resume',
+                              icon: DsIcon(DsIcons.x, size: 18, color: c.tx2),
+                              onPressed: () => setState(() => _to = null),
+                            ),
+                    ),
+                    child: Text(
+                      _to == null ? 'Until I resume' : sipMonthLabel(_to!),
+                      style: TextStyle(fontSize: 15, color: _to == null ? c.tx3 : c.tx),
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Paused months buy nothing and the monthly figure shows ₹0 while it lasts. '
-                'Instalments before it stay.',
-                style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
               ),
             ],
           ),

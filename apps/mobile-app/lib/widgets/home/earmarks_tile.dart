@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/models.dart';
-import '../../theme.dart';
+import '../ds/ds.dart';
 import '../../utils/format.dart';
 import 'home_grid.dart';
 
@@ -18,7 +18,7 @@ class EarmarksTile extends StatelessWidget {
     final c = context.c;
     return HomeTile(
       label: 'Set aside for later',
-      icon: Icons.savings_outlined,
+      icon: DsIcons.piggyBank,
       onTap: () => _showAll(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -27,7 +27,7 @@ class EarmarksTile extends StatelessWidget {
           const SizedBox(height: 2),
           Text(
             earmarks.count == 1 ? 'for one purchase to come' : 'for ${earmarks.count} purchases to come',
-            style: TextStyle(fontSize: 11.5, color: c.muted),
+            style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
           ),
           const SizedBox(height: 8),
           for (final item in earmarks.items.take(_shown))
@@ -37,11 +37,11 @@ class EarmarksTile extends StatelessWidget {
                 '${item.label} · ${formatMoneyShort(item.leftMinor)} left',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 11.5, color: c.ink70),
+                style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx2),
               ),
             ),
           if (earmarks.items.length > _shown)
-            Text('+${earmarks.items.length - _shown} more', style: TextStyle(fontSize: 11, color: c.mutedLight)),
+            Text('+${earmarks.items.length - _shown} more', style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3)),
         ],
       ),
     );
@@ -51,23 +51,27 @@ class EarmarksTile extends StatelessWidget {
     final c = context.c;
     showModalBottomSheet<void>(
       context: context,
-      showDragHandle: true,
       builder: (context) => SafeArea(
         child: ListView(
           shrinkWrap: true,
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           children: [
-            Text('Set aside for later', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: c.ink)),
+            const DsDragHandle(),
             const SizedBox(height: 4),
+            Text(
+              'Set aside for later',
+              style: TextStyle(fontSize: 19, height: 24 / 19, fontWeight: FontWeight.w600, color: c.tx),
+            ),
+            const SizedBox(height: 6),
             Text(
               'Money you received for something still to buy. It is not counted as income; link the '
               'purchase to it from the transaction once you make it.',
-              style: TextStyle(fontSize: 12, height: 1.45, color: c.muted),
+              style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx2),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 16),
             for (final item in earmarks.items)
               Padding(
-                padding: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.only(bottom: 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -78,21 +82,19 @@ class EarmarksTile extends StatelessWidget {
                             item.label,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: c.ink),
+                            style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w500, color: c.tx),
                           ),
                         ),
-                        Text(formatMoney(item.leftMinor), style: kNum.copyWith(fontSize: 13, color: c.ink)),
+                        Text(
+                          formatMoney(item.leftMinor),
+                          style: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w600, color: c.tx),
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 5),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(100),
-                      child: LinearProgressIndicator(
-                        value: item.amountMinor > 0 ? (item.spentMinor / item.amountMinor).clamp(0.0, 1.0) : 0,
-                        minHeight: 5,
-                        backgroundColor: c.track,
-                        valueColor: AlwaysStoppedAnimation(c.brand),
-                      ),
+                    const SizedBox(height: 6),
+                    DsMeter(
+                      value: item.amountMinor > 0 ? (item.spentMinor / item.amountMinor).clamp(0.0, 1.0) : 0,
+                      color: c.ac,
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -100,7 +102,7 @@ class EarmarksTile extends StatelessWidget {
                         '${formatMoneyShort(item.spentMinor)} of ${formatMoneyShort(item.amountMinor)} used',
                         if (item.occurredAt != null) 'received ${formatShortDate(item.occurredAt!)}',
                       ].join(' · '),
-                      style: TextStyle(fontSize: 11.5, color: c.muted),
+                      style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3),
                     ),
                   ],
                 ),

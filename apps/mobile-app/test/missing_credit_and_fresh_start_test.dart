@@ -247,7 +247,7 @@ void main() {
         expect(find.text('What came in?'), findsOneWidget);
         expect(find.text('+₹5,000.00'), findsOneWidget);
         expect(find.text('₹5,000 came into Federal Bank ••5130 between 5 and 12 Oct'), findsOneWidget);
-        expect(find.text('MOST LIKELY'), findsOneWidget);
+        expect(find.text('Most likely'), findsOneWidget);
 
         await tester.tap(find.text('From HDFC ••8342 — you sent ₹5,000 on 11 Oct'));
         await tester.pumpAndSettle();

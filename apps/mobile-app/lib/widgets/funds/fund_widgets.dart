@@ -1,28 +1,36 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../../models/fund_models.dart';
-import '../../theme.dart';
 import '../../utils/format.dart';
+import '../ds/ds.dart';
 import 'fund_text.dart';
 
 /// The pieces the Investments screens share: tags, flag notes, the
 /// allocation bar, the NAV sparkline and the holding card.
 
-/// One colour per asset class, from the theme so dark mode follows.
-Color assetClassColor(SpendColors c, String assetClass) => switch (assetClass) {
-      'equity' => c.brand,
-      'debt' => c.credit,
-      'hybrid' => c.warn,
-      _ => c.mutedLight,
+/// One colour per asset class, from the chart palette (§3.3): equity is c1,
+/// debt c2, hybrid c3, and anything else the warm grey that always comes last.
+Color assetClassColor(DsColors c, String assetClass) => switch (assetClass) {
+      'equity' => c.chart[0],
+      'debt' => c.chart[1],
+      'hybrid' => c.chart[2],
+      _ => c.chart.last,
     };
 
-/// Green for up, red for down, plain for nothing either way.
-Color gainColor(SpendColors c, num? value) =>
-    value == null || value == 0 ? c.ink70 : (value > 0 ? c.credit : c.debit);
+/// Green for a gain, red for a loss (a judgement, §3.2), plain for neither.
+Color gainColor(DsColors c, num? value) =>
+    value == null || value == 0 ? c.tx2 : (value > 0 ? c.good : c.crit);
 
 enum TagTone { neutral, brand, warn, good }
 
-/// A small rounded label: "Direct", "Regular", "IDCW", "Waiting for NAV".
+DsTone _dsTone(TagTone tone) => switch (tone) {
+      TagTone.brand => DsTone.ac,
+      TagTone.warn => DsTone.warn,
+      TagTone.good => DsTone.good,
+      TagTone.neutral => DsTone.neutral,
+    };
+
+/// A small status tag: "Direct", "Regular", "IDCW", "Waiting for NAV".
 class FundTag extends StatelessWidget {
   const FundTag(this.label, {super.key, this.tone = TagTone.neutral});
 
@@ -30,23 +38,7 @@ class FundTag extends StatelessWidget {
   final TagTone tone;
 
   @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    final (background, foreground) = switch (tone) {
-      TagTone.brand => (c.brand50, c.brandDark),
-      TagTone.warn => (c.warnBg, c.warn),
-      TagTone.good => (c.credit50, c.credit),
-      TagTone.neutral => (c.chipNeutral, c.ink70),
-    };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(color: background, borderRadius: BorderRadius.circular(4)),
-      child: Text(
-        label,
-        style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 0.3, color: foreground),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => DsBadge(label, tone: _dsTone(tone));
 }
 
 /// The plan and option tags for a scheme.
@@ -56,7 +48,8 @@ List<Widget> schemeTags({required bool isDirect, required bool isRegular, requir
       FundTag(isGrowth ? 'Growth' : 'IDCW'),
     ];
 
-/// "FUNDS  4", with something on the right when given.
+/// A section title (17/24 600) with an optional count and something on
+/// the right.
 class FundSectionHeader extends StatelessWidget {
   const FundSectionHeader({super.key, required this.title, this.count, this.trailing});
 
@@ -71,18 +64,15 @@ class FundSectionHeader extends StatelessWidget {
       children: [
         Flexible(
           child: Text(
-            title.toUpperCase(),
+            title,
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 1.1, color: c.muted),
+            style: TextStyle(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx),
           ),
         ),
         if (count != null) ...[
           const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
-            decoration: BoxDecoration(color: c.chipNeutral, borderRadius: BorderRadius.circular(100)),
-            child: Text('$count', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: c.ink70)),
-          ),
+          DsBadge('$count'),
         ],
         if (trailing != null) ...[const Spacer(), trailing!],
       ],
@@ -90,28 +80,20 @@ class FundSectionHeader extends StatelessWidget {
   }
 }
 
-/// A white card with the app's border, full width.
+/// A flat card: `sf`, 1 px `ln`, radius 14, full width.
 class FundCard extends StatelessWidget {
-  const FundCard({super.key, required this.child, this.onTap, this.padding = const EdgeInsets.all(14)});
+  const FundCard({super.key, required this.child, this.onTap, this.padding = const EdgeInsets.all(16)});
 
   final Widget child;
   final VoidCallback? onTap;
   final EdgeInsets padding;
 
   @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    return Material(
-      color: c.surface,
-      shape: RoundedRectangleBorder(side: BorderSide(color: c.line), borderRadius: BorderRadius.circular(T.rMd)),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(onTap: onTap, child: Padding(padding: padding, child: child)),
-    );
-  }
+  Widget build(BuildContext context) => DsCard(onTap: onTap, padding: padding, child: child);
 }
 
-/// A tinted strip across the page: stale prices, payments to link, ranks
-/// still coming.
+/// A callout across the page: stale prices, payments to link, ranks still
+/// coming. [icon] is a [DsGlyph] or an [IconData].
 class FundBanner extends StatelessWidget {
   const FundBanner({
     super.key,
@@ -122,7 +104,7 @@ class FundBanner extends StatelessWidget {
     this.actionLabel,
   });
 
-  final IconData icon;
+  final Object icon;
   final String text;
   final TagTone tone;
   final VoidCallback? onTap;
@@ -131,36 +113,41 @@ class FundBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final (background, foreground) = switch (tone) {
-      TagTone.brand => (c.brand50, c.brandDark),
-      TagTone.warn => (c.warnBg, c.warn),
-      TagTone.good => (c.credit50, c.credit),
-      TagTone.neutral => (c.chipNeutral, c.ink70),
+    final t = _dsTone(tone);
+    final strong = c.strong(t);
+    // Info and neutral callouts keep their text in ink; the others in their own colour.
+    final textColor = switch (t) {
+      DsTone.ac => c.tx,
+      DsTone.neutral => c.tx2,
+      _ => strong,
     };
+    final linkColor = t == DsTone.neutral ? c.ac : strong;
     return Material(
-      color: background,
-      borderRadius: BorderRadius.circular(T.rSm),
+      color: c.soft(t),
+      borderRadius: BorderRadius.circular(Ds.rLg),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(T.rSm),
+        borderRadius: BorderRadius.circular(Ds.rLg),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Padding(padding: const EdgeInsets.only(top: 1), child: Icon(icon, size: 16, color: foreground)),
-              const SizedBox(width: 9),
+              dsIconOf(icon, size: 20, color: strong),
+              const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   text,
-                  style: TextStyle(fontSize: 12.5, height: 1.4, fontWeight: FontWeight.w600, color: foreground),
+                  style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: textColor),
                 ),
               ),
               if (actionLabel != null) ...[
+                const SizedBox(width: 12),
+                Text(actionLabel!, style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w600, color: linkColor)),
+              ] else if (onTap != null) ...[
                 const SizedBox(width: 8),
-                Text(actionLabel!, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: foreground)),
-              ] else if (onTap != null)
-                Icon(Icons.chevron_right, size: 16, color: foreground),
+                DsIcon(DsIcons.chevronRight, size: 18, color: linkColor),
+              ],
             ],
           ),
         ),
@@ -169,7 +156,7 @@ class FundBanner extends StatelessWidget {
   }
 }
 
-/// A label over a figure, for the stat grids.
+/// A label over a figure, for the stat grids: `12/600 tx2` over `17/600`.
 class StatCell extends StatelessWidget {
   const StatCell({super.key, required this.label, required this.value, this.color, this.sub});
 
@@ -185,7 +172,7 @@ class StatCell extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: c.muted)),
+        Text(label, style: TextStyle(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w600, color: c.tx2)),
         const SizedBox(height: 2),
         FittedBox(
           fit: BoxFit.scaleDown,
@@ -193,11 +180,19 @@ class StatCell extends StatelessWidget {
           child: Text(
             value,
             maxLines: 1,
-            style: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w800, color: color ?? c.ink),
+            style: kNum.copyWith(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: color ?? c.tx),
           ),
         ),
         if (sub != null)
-          Text(sub!, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: color ?? c.muted)),
+          Text(
+            sub!,
+            style: kNum.copyWith(
+              fontSize: 12,
+              height: 16 / 12,
+              fontWeight: color == null ? FontWeight.w400 : FontWeight.w600,
+              color: color ?? c.tx3,
+            ),
+          ),
       ],
     );
   }
@@ -214,12 +209,12 @@ class StatGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final rows = <Widget>[];
     for (var i = 0; i < cells.length; i += columns) {
-      if (rows.isNotEmpty) rows.add(const SizedBox(height: 12));
+      if (rows.isNotEmpty) rows.add(const SizedBox(height: 16));
       rows.add(Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           for (var j = 0; j < columns; j++) ...[
-            if (j > 0) const SizedBox(width: 12),
+            if (j > 0) const SizedBox(width: 16),
             Expanded(child: i + j < cells.length ? cells[i + j] : const SizedBox.shrink()),
           ],
         ],
@@ -241,33 +236,33 @@ class FlagNote extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final icon = switch (flag) {
+    final Object icon = switch (flag) {
       FundFlag.laggingCategory => Icons.trending_down,
       FundFlag.lowXirr => Icons.hourglass_bottom,
-      _ => Icons.swap_horiz,
+      _ => DsIcons.transfer,
     };
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(color: c.warnBg, borderRadius: BorderRadius.circular(T.rSm)),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(color: c.warnSoft, borderRadius: BorderRadius.circular(Ds.rLg)),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(padding: const EdgeInsets.only(top: 1), child: Icon(icon, size: 15, color: c.warn)),
-          const SizedBox(width: 8),
+          Padding(padding: const EdgeInsets.only(top: 1), child: dsIconOf(icon, size: 16, color: c.warn)),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   flagReason(holding, flag),
-                  style: TextStyle(fontSize: 12.5, height: 1.35, fontWeight: FontWeight.w700, color: c.warn),
+                  style: TextStyle(fontSize: 13, height: 18 / 13, fontWeight: FontWeight.w600, color: c.warn),
                 ),
                 if (explain) ...[
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 4),
                   Text(
                     flagExplainer(flag, rules),
-                    style: TextStyle(fontSize: 11.5, height: 1.4, color: c.ink70),
+                    style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx2),
                   ),
                 ],
               ],
@@ -279,7 +274,8 @@ class FlagNote extends StatelessWidget {
   }
 }
 
-/// The portfolio split by asset class, as one stacked bar and a legend.
+/// The portfolio split by asset class: a 12 h stacked bar (radius 6, 2 px
+/// gaps) in the chart palette, and a legend of 10×10 swatches.
 class AllocationBar extends StatelessWidget {
   const AllocationBar({super.key, required this.slices});
 
@@ -295,13 +291,13 @@ class AllocationBar extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         ClipRRect(
-          borderRadius: BorderRadius.circular(100),
+          borderRadius: BorderRadius.circular(6),
           child: SizedBox(
             height: 12,
             child: Row(
               children: [
                 for (final (i, slice) in shown.indexed) ...[
-                  if (i > 0) Container(width: 2, color: c.surface),
+                  if (i > 0) const SizedBox(width: 2),
                   Expanded(
                     // Flex wants integers; tenths of a percent keep a 0.4% sliver visible.
                     flex: math.max(1, (slice.percent * 10).round()),
@@ -312,9 +308,9 @@ class AllocationBar extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 12),
         Wrap(
-          spacing: 14,
+          spacing: 16,
           runSpacing: 6,
           children: [
             for (final slice in shown)
@@ -322,8 +318,8 @@ class AllocationBar extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
-                    width: 9,
-                    height: 9,
+                    width: 10,
+                    height: 10,
                     decoration: BoxDecoration(
                       color: assetClassColor(c, slice.assetClass),
                       borderRadius: BorderRadius.circular(3),
@@ -332,10 +328,10 @@ class AllocationBar extends StatelessWidget {
                   const SizedBox(width: 6),
                   Text(
                     '${assetClassLabel(slice.assetClass)} ${fundPercent(slice.percent, digits: slice.percent >= 10 ? 0 : 1)}',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.ink70),
+                    style: kNum.copyWith(fontSize: 13, height: 18 / 13, fontWeight: FontWeight.w600, color: c.tx),
                   ),
                   const SizedBox(width: 4),
-                  Text(formatMoneyShort(slice.valueMinor), style: kNum.copyWith(fontSize: 11.5, color: c.muted)),
+                  Text(formatMoneyShort(slice.valueMinor), style: kNum.copyWith(fontSize: 12, color: c.tx3)),
                 ],
               ),
           ],
@@ -345,7 +341,8 @@ class AllocationBar extends StatelessWidget {
   }
 }
 
-/// A year of NAVs as a line, with a soft fill beneath it.
+/// A year of NAVs as an accent line (1.75, round joins), with the year's
+/// starting level dashed so up or down reads at a glance.
 class NavSparkline extends StatelessWidget {
   const NavSparkline({super.key, required this.points, this.height = 96});
 
@@ -358,18 +355,18 @@ class NavSparkline extends StatelessWidget {
     if (points.length < 2) {
       return SizedBox(
         height: height,
-        child: Center(child: Text('Not enough NAV history yet', style: TextStyle(fontSize: 12, color: c.muted))),
+        child: Center(child: Text('Not enough NAV history yet', style: TextStyle(fontSize: 12, color: c.tx3))),
       );
     }
-    final up = points.last.nav >= points.first.nav;
     return SizedBox(
       height: height,
       width: double.infinity,
       child: CustomPaint(
         painter: _SparklinePainter(
           values: [for (final point in points) point.nav],
-          line: up ? c.credit : c.debit,
-          baseline: c.line,
+          line: c.ac,
+          baseline: c.ln2,
+          grid: c.ln,
         ),
       ),
     );
@@ -377,19 +374,29 @@ class NavSparkline extends StatelessWidget {
 }
 
 class _SparklinePainter extends CustomPainter {
-  _SparklinePainter({required this.values, required this.line, required this.baseline});
+  _SparklinePainter({required this.values, required this.line, required this.baseline, required this.grid});
 
   final List<double> values;
   final Color line;
   final Color baseline;
+  final Color grid;
 
   @override
   void paint(Canvas canvas, Size size) {
     final low = values.reduce(math.min);
     final high = values.reduce(math.max);
     final span = high - low == 0 ? 1.0 : high - low;
-    const pad = 4.0;
+    const pad = 5.0;
     final height = size.height - pad * 2;
+
+    // Light gridlines, top, middle and bottom.
+    final gridPaint = Paint()
+      ..color = grid
+      ..strokeWidth = 1;
+    for (final f in [0.0, 0.5, 1.0]) {
+      final y = pad + height * f;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+    }
 
     Offset at(int i) => Offset(
           size.width * i / (values.length - 1),
@@ -402,21 +409,7 @@ class _SparklinePainter extends CustomPainter {
       path.lineTo(point.dx, point.dy);
     }
 
-    final fill = Path.from(path)
-      ..lineTo(size.width, size.height)
-      ..lineTo(0, size.height)
-      ..close();
-    canvas.drawPath(
-      fill,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [line.withValues(alpha: .22), line.withValues(alpha: .02)],
-        ).createShader(Offset.zero & size),
-    );
-
-    // Where the year started, dashed, so up or down reads at a glance.
+    // Where the year started, dashed.
     final startY = at(0).dy;
     final dash = Paint()
       ..color = baseline
@@ -430,16 +423,17 @@ class _SparklinePainter extends CustomPainter {
       Paint()
         ..color = line
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 2
+        ..strokeWidth = 1.75
         ..strokeJoin = StrokeJoin.round
         ..strokeCap = StrokeCap.round,
     );
     final last = at(values.length - 1);
-    canvas.drawCircle(last, 3.2, Paint()..color = line);
+    canvas.drawCircle(last, 3.5, Paint()..color = line);
   }
 
   @override
-  bool shouldRepaint(_SparklinePainter old) => old.values != values || old.line != line || old.baseline != baseline;
+  bool shouldRepaint(_SparklinePainter old) =>
+      old.values != values || old.line != line || old.baseline != baseline || old.grid != grid;
 }
 
 /// "Category ranks coming": the peer table isn't built yet.
@@ -448,7 +442,7 @@ class RanksComingNote extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => const FundBanner(
-        icon: Icons.leaderboard_outlined,
+        icon: DsIcons.barChart,
         tone: TagTone.neutral,
         text: 'Category ranks coming — every fund\'s 1- and 3-year returns are still being gathered to compare '
             'yours against. Check back in a little while.',
@@ -485,7 +479,6 @@ class HoldingCard extends StatelessWidget {
 
     return FundCard(
       onTap: onTap,
-      padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -497,12 +490,12 @@ class HoldingCard extends StatelessWidget {
                   shortSchemeName(h.schemeName),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 14.5, height: 1.3, fontWeight: FontWeight.w800, color: c.ink),
+                  style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
                 ),
               ),
               if (h.isRegular) ...[
                 const SizedBox(width: 8),
-                const Padding(padding: EdgeInsets.only(top: 2), child: FundTag('Regular', tone: TagTone.warn)),
+                const FundTag('Regular', tone: TagTone.warn),
               ],
             ],
           ),
@@ -511,50 +504,69 @@ class HoldingCard extends StatelessWidget {
             [if (h.fundHouse != null) h.fundHouse!, h.categoryLabel].join(' · '),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 12, color: c.muted),
+            style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Expanded(
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    formatMoneyShort(h.valueMinor),
-                    style: kNum.copyWith(fontSize: 20, fontWeight: FontWeight.w800, color: c.ink),
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        formatMoneyShort(h.valueMinor),
+                        style: kNum.copyWith(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx),
+                      ),
+                    ),
+                    Text(
+                      'Invested ${formatMoneyShort(h.investedMinor)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(width: 8),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    '${signedMoneyShort(h.gainMinor)} (${fundPercent(h.gainPercent, signed: true)})',
-                    style: kNum.copyWith(fontSize: 12.5, fontWeight: FontWeight.w800, color: gainColor(c, h.gainMinor)),
-                  ),
-                  Text(
-                    h.xirrPercent == null ? 'XIRR after 3 months' : 'XIRR ${fundPercent(h.xirrPercent)}',
-                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: c.muted),
-                  ),
-                ],
+              Flexible(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        '${signedMoneyShort(h.gainMinor)} (${fundPercent(h.gainPercent, signed: true)})',
+                        style: kNum.copyWith(
+                          fontSize: 14,
+                          height: 20 / 14,
+                          fontWeight: FontWeight.w600,
+                          color: gainColor(c, h.gainMinor),
+                        ),
+                      ),
+                    ),
+                    Text(
+                      h.xirrPercent == null ? 'XIRR after 3 months' : 'XIRR ${fundPercent(h.xirrPercent)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 2),
-          Text(
-            'Invested ${formatMoneyShort(h.investedMinor)}',
-            style: TextStyle(fontSize: 11.5, color: c.muted),
-          ),
           if (meta.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(meta.join(' · '), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.ink70)),
+            const SizedBox(height: 10),
+            Text(meta.join(' · '), style: TextStyle(fontSize: 13, height: 18 / 13, fontWeight: FontWeight.w500, color: c.tx2)),
           ],
           if (returns.isNotEmpty) ...[
-            const SizedBox(height: 3),
-            Text(returns.join(' · '), style: TextStyle(fontSize: 12, color: c.ink70)),
+            const SizedBox(height: 2),
+            Text(returns.join(' · '), style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx2)),
           ],
           for (final flag in h.flags) ...[
             const SizedBox(height: 8),

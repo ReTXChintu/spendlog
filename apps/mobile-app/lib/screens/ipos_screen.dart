@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/ipo_models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import '../widgets/ds/ds.dart';
 import '../utils/format.dart';
 import '../widgets/state_block.dart';
 
@@ -90,11 +90,8 @@ class _IposScreenState extends State<IposScreen> {
     final c = context.c;
 
     return Scaffold(
-      backgroundColor: c.paper,
-      appBar: AppBar(
-        title: Text('IPOs', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: c.ink)),
-        shape: Border(bottom: BorderSide(color: c.line)),
-      ),
+      backgroundColor: c.bg,
+      appBar: AppBar(title: const Text('IPOs')),
       body: _body(),
     );
   }
@@ -114,7 +111,7 @@ class _IposScreenState extends State<IposScreen> {
     }
 
     final data = _data;
-    if (data == null) return const Center(child: CircularProgressIndicator());
+    if (data == null) return const Center(child: DsSpinner());
 
     if (!data.available) {
       return const StateBlock(
@@ -155,43 +152,46 @@ class _IposScreenState extends State<IposScreen> {
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+        padding: kPagePad,
         children: [
           if (data.stale || data.error != null) ...[
             _StaleBanner(fetchedAt: data.fetchedAt, failed: data.error != null),
             const SizedBox(height: 12),
           ],
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _BoardChip(label: 'All', on: _board == _Board.all, onTap: () => setState(() => _board = _Board.all)),
-              _BoardChip(
-                label: 'Mainboard',
-                on: _board == _Board.mainboard,
-                onTap: () => setState(() => _board = _Board.mainboard),
-              ),
-              _BoardChip(label: 'SME', on: _board == _Board.sme, onTap: () => setState(() => _board = _Board.sme)),
-            ],
+          // Chips scroll sideways rather than wrap on a phone.
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _BoardChip(label: 'All', on: _board == _Board.all, onTap: () => setState(() => _board = _Board.all)),
+                const SizedBox(width: 8),
+                _BoardChip(
+                  label: 'Mainboard',
+                  on: _board == _Board.mainboard,
+                  onTap: () => setState(() => _board = _Board.mainboard),
+                ),
+                const SizedBox(width: 8),
+                _BoardChip(label: 'SME', on: _board == _Board.sme, onTap: () => setState(() => _board = _Board.sme)),
+              ],
+            ),
           ),
           if (nothingShown)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 28),
-              child: Text(
-                _board == _Board.sme
+              padding: const EdgeInsets.only(top: 16),
+              child: DsEmpty(
+                icon: DsIcons.trendingUp,
+                message: _board == _Board.sme
                     ? 'No SME IPOs open or coming up right now.'
                     : 'No mainboard IPOs open or coming up right now.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 13, color: c.muted),
               ),
             ),
           for (final (title, rows) in sections)
             if (rows.isNotEmpty) ...[
-              const SizedBox(height: 18),
+              const SizedBox(height: 20),
               _SectionHeader(title: title, count: rows.length),
               const SizedBox(height: 8),
               for (final (i, ipo) in rows.indexed) ...[
-                if (i > 0) const SizedBox(height: 10),
+                if (i > 0) const SizedBox(height: kCardGap),
                 IpoCard(ipo: ipo, onTap: ipo.webUrl == null ? null : () => _openPage(ipo)),
               ],
             ],
@@ -199,7 +199,7 @@ class _IposScreenState extends State<IposScreen> {
           Text(
             'Grey market premium (GMP) is unofficial and changes daily. These figures are simple '
             'arithmetic on today\'s GMP, not a forecast or advice. Data: ${data.sourceName}.',
-            style: TextStyle(fontSize: 11.5, height: 1.5, color: c.muted),
+            style: TextStyle(fontSize: 12, height: 17 / 12, color: c.tx3),
           ),
         ],
       ),
@@ -207,7 +207,7 @@ class _IposScreenState extends State<IposScreen> {
   }
 }
 
-/// "OPEN NOW  3"
+/// "Open now  3": a section title with a neutral count badge.
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader({required this.title, required this.count});
 
@@ -220,16 +220,18 @@ class _SectionHeader extends StatelessWidget {
     return Row(
       children: [
         Text(
-          title.toUpperCase(),
-          style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 1.1, color: c.muted),
+          title,
+          style: TextStyle(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx),
         ),
         const SizedBox(width: 8),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
-          decoration: BoxDecoration(color: c.chipNeutral, borderRadius: BorderRadius.circular(100)),
+          constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+          padding: const EdgeInsets.symmetric(horizontal: 7),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(color: c.sunk, borderRadius: BorderRadius.circular(Ds.rSm)),
           child: Text(
             '$count',
-            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: c.ink70),
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.tx2, fontFeatures: Ds.tabular),
           ),
         ),
       ],
@@ -245,28 +247,11 @@ class _BoardChip extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
-        decoration: BoxDecoration(
-          color: on ? c.brand50 : c.surface,
-          border: Border.all(color: on ? c.brand : c.lineStrong),
-          borderRadius: BorderRadius.circular(100),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: on ? c.brandDark : c.ink70),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => DsChip(label: label, selected: on, onTap: onTap);
 }
 
 /// The server kept its last good rows after a refresh failed, or has not
-/// refreshed in longer than it means to.
+/// refreshed in longer than it means to: the neutral stale-data callout.
 class _StaleBanner extends StatelessWidget {
   const _StaleBanner({required this.fetchedAt, required this.failed});
 
@@ -275,28 +260,16 @@ class _StaleBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.c;
     final at = fetchedAt;
     final text = [
       at == null ? 'Showing older data' : 'Showing data from ${_ago(at)}',
       if (failed) "couldn't refresh",
     ].join(' · ');
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: BoxDecoration(color: c.warnBg, borderRadius: BorderRadius.circular(T.rSm)),
-      child: Row(
-        children: [
-          Icon(Icons.schedule, size: 16, color: c.warn),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(text, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.warn)),
-          ),
-        ],
-      ),
-    );
+    return DsCallout(title: text, tone: DsTone.neutral, icon: DsIcons.refresh);
   }
 }
+
 
 /// "7h ago", from the server's fetch time.
 String _ago(DateTime at) {
@@ -335,6 +308,14 @@ String ipoDateLine(Ipo ipo) {
   }
 }
 
+
+/// The status tag on a card: what stage the issue is at.
+(String, DsTone) _statusBadge(Ipo ipo) => switch (ipo.status) {
+      'OPEN' => ('Bidding open', DsTone.good),
+      'CLOSED' => ('Awaiting listing', DsTone.neutral),
+      _ => ('Opens soon', DsTone.ac),
+    };
+
 /// One IPO, full width: what it is, when, what a lot costs, and what
 /// today's premium would make of that lot.
 class IpoCard extends StatelessWidget {
@@ -351,6 +332,7 @@ class IpoCard extends StatelessWidget {
     final lotSize = ipo.lotSize;
     final minimum = ipo.minInvestmentMinor;
     final subscribed = ipo.subscriptionTimes;
+    final (statusLabel, statusTone) = _statusBadge(ipo);
 
     final smallPrint = [
       if (ipo.priceBand != null) 'Price band ${ipo.priceBand}',
@@ -359,84 +341,104 @@ class IpoCard extends StatelessWidget {
       if (minimum != null && lotCost != null && minimum > lotCost) 'Minimum ${formatMoneyShort(minimum)}',
     ];
 
-    return Material(
-      color: c.surface,
-      shape: RoundedRectangleBorder(
-        side: BorderSide(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+    return DsCard(
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Text(
+              DsMonogram(ipo.name, tone: ipo.isSme ? DsTone.warn : DsTone.ac),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
                       ipo.name,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: c.ink),
+                      style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
                     ),
-                  ),
-                  if (ipo.isSme) ...[
-                    const SizedBox(width: 8),
-                    Container(
-                      margin: const EdgeInsets.only(top: 2),
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(color: c.chipNeutral, borderRadius: BorderRadius.circular(4)),
-                      child: Text(
-                        'SME',
-                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 0.5, color: c.ink70),
-                      ),
+                    const SizedBox(height: 2),
+                    Text(
+                      ipoDateLine(ipo),
+                      style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        DsBadge(statusLabel, tone: statusTone),
+                        if (ipo.isSme) const DsBadge('SME', outline: true),
+                      ],
                     ),
                   ],
-                  if (onTap != null) ...[
-                    const SizedBox(width: 4),
-                    Icon(Icons.open_in_new, size: 15, color: c.mutedLight),
-                  ],
-                ],
-              ),
-              const SizedBox(height: 3),
-              Text(ipoDateLine(ipo), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.ink70)),
-              const SizedBox(height: 10),
-              Text(
-                lotSize == null
-                    ? 'Lot size not announced yet'
-                    : [
-                        '1 lot',
-                        '$lotSize ${lotSize == 1 ? 'share' : 'shares'}',
-                        if (lotCost != null) formatMoneyShort(lotCost),
-                      ].join(' · '),
-                style: TextStyle(fontSize: 12.5, color: lotSize == null ? c.muted : c.ink70),
-              ),
-              const SizedBox(height: 6),
-              _GmpLine(ipo: ipo),
-              if (smallPrint.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(smallPrint.join(' · '), style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted)),
-              ],
-              if (ipo.isSme) ...[
-                const SizedBox(height: 6),
-                Text(
-                  'SME: small, thinly traded; minimum application is often more than 1 lot',
-                  style: TextStyle(fontSize: 11.5, height: 1.4, fontStyle: FontStyle.italic, color: c.muted),
                 ),
+              ),
+              if (onTap != null) ...[
+                const SizedBox(width: 8),
+                DsIcon(DsIcons.arrowUpRight, size: 18, color: c.tx3),
               ],
             ],
           ),
-        ),
+          const SizedBox(height: 14),
+          const DsLabel('Lot'),
+          const SizedBox(height: 2),
+          Text(
+            lotSize == null
+                ? 'Lot size not announced yet'
+                : [
+                    '1 lot',
+                    '$lotSize ${lotSize == 1 ? 'share' : 'shares'}',
+                    if (lotCost != null) formatMoneyShort(lotCost),
+                  ].join(' · '),
+            style: TextStyle(
+              fontSize: 15,
+              height: 20 / 15,
+              fontWeight: lotSize == null ? FontWeight.w400 : FontWeight.w600,
+              color: lotSize == null ? c.tx3 : c.tx,
+              fontFeatures: Ds.tabular,
+            ),
+          ),
+          const SizedBox(height: 12),
+          _GmpLine(ipo: ipo),
+          if (smallPrint.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              smallPrint.join(' · '),
+              style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3, fontFeatures: Ds.tabular),
+            ),
+          ],
+          if (ipo.isSme) ...[
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: DsIcon(DsIcons.alertTriangle, size: 14, color: c.warn),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'SME: small, thinly traded; minimum application is often more than 1 lot',
+                    style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx2),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
       ),
     );
   }
 }
 
-/// The figure the card is for: today's premium on one lot.
+/// The figure the card is for: today's premium on one lot, in a band
+/// tinted by what it says (green for a premium, red for a discount).
 class _GmpLine extends StatelessWidget {
   const _GmpLine({required this.ipo});
 
@@ -447,57 +449,79 @@ class _GmpLine extends StatelessWidget {
     final c = context.c;
     final perLot = ipo.perLot;
     final gmp = ipo.gmp;
-    final lead = TextStyle(fontSize: 13, color: c.ink70);
+
+    Widget band(DsTone tone, Widget child) => Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(color: c.soft(tone), borderRadius: BorderRadius.circular(Ds.rLg)),
+          child: child,
+        );
 
     // A premium without a lot size to multiply it by: say it per share.
     if (perLot == null && gmp != null) {
-      final colour = gmp.premiumMinor > 0 ? c.credit : (gmp.premiumMinor < 0 ? c.debit : c.ink);
-      return Text.rich(
-        TextSpan(children: [
-          TextSpan(text: 'GMP ', style: lead),
-          TextSpan(
-            text: _signedMoney(gmp.premiumMinor),
-            style: kNum.copyWith(fontSize: 17, fontWeight: FontWeight.w800, color: colour),
-          ),
-          if (gmp.percent != null)
+      final up = gmp.premiumMinor > 0;
+      final down = gmp.premiumMinor < 0;
+      final colour = up ? c.good : (down ? c.crit : c.tx);
+      final lead = TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: colour);
+      return band(
+        up ? DsTone.good : (down ? DsTone.crit : DsTone.neutral),
+        Text.rich(
+          TextSpan(children: [
+            TextSpan(text: 'GMP ', style: lead),
             TextSpan(
-              text: ' (${_signedPercent(gmp.percent!)})',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: colour),
+              text: _signedMoney(gmp.premiumMinor),
+              style: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w600, color: colour),
             ),
-          TextSpan(text: ' a share', style: lead),
-        ]),
+            if (gmp.percent != null)
+              TextSpan(
+                text: ' (${_signedPercent(gmp.percent!)})',
+                style: kNum.copyWith(fontSize: 14, fontWeight: FontWeight.w600, color: colour),
+              ),
+            TextSpan(text: ' a share', style: lead),
+          ]),
+        ),
       );
     }
 
     if (perLot == null) {
-      return Text('No GMP yet', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: c.muted));
+      return band(
+        DsTone.neutral,
+        Text('No GMP yet', style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx3)),
+      );
     }
 
     final gain = perLot.gainMinor;
     if (gain == 0) {
-      return Text(
-        'GMP ₹0 · no premium today',
-        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: c.ink),
+      return band(
+        DsTone.neutral,
+        Text(
+          'GMP ₹0 · no premium today',
+          style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx),
+        ),
       );
     }
 
-    final colour = gain > 0 ? c.credit : c.debit;
+    final colour = gain > 0 ? c.good : c.crit;
+    final lead = TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: colour);
     final percent = perLot.gainPercent ?? (perLot.costMinor > 0 ? gain * 100 / perLot.costMinor : null);
 
-    return Text.rich(
-      TextSpan(children: [
-        TextSpan(text: "At today's GMP ", style: lead),
-        TextSpan(
-          text: _signedMoney(gain),
-          style: kNum.copyWith(fontSize: 19, fontWeight: FontWeight.w800, color: colour),
-        ),
-        if (percent != null)
+    return band(
+      gain > 0 ? DsTone.good : DsTone.crit,
+      Text.rich(
+        TextSpan(children: [
+          TextSpan(text: "At today's GMP ", style: lead),
           TextSpan(
-            text: ' (${_signedPercent(percent)})',
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: colour),
+            text: _signedMoney(gain),
+            style: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w600, color: colour),
           ),
-        TextSpan(text: ' per lot', style: lead),
-      ]),
+          if (percent != null)
+            TextSpan(
+              text: ' (${_signedPercent(percent)})',
+              style: kNum.copyWith(fontSize: 14, fontWeight: FontWeight.w600, color: colour),
+            ),
+          TextSpan(text: ' per lot', style: lead),
+        ]),
+      ),
     );
   }
 }

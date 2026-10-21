@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../../services/api_client.dart';
 import '../../services/kid_service.dart';
 import '../../services/theme_service.dart';
-import '../../theme.dart';
+import '../../widgets/ds/ds.dart';
 import '../../version.dart';
 
 /// All a kid can change: their password, light or dark, and signing out.
@@ -32,68 +32,58 @@ class KidSettingsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
 
-    Widget card(List<Widget> children) => Container(
-          decoration: BoxDecoration(
-            color: c.surface,
-            borderRadius: BorderRadius.circular(T.rMd),
-            border: Border.all(color: c.line),
-          ),
+    Widget card(List<Widget> children) => DsCard(
+          padding: EdgeInsets.zero,
+          clip: true,
           child: Column(children: children),
         );
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+      padding: kPagePad,
       children: [
         card([
           ListTile(
-            leading: Icon(Icons.lock_outline, color: c.brand),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            leading: const DsIconTile(DsIcons.lock, tone: DsTone.ac),
             title: const Text('Change password'),
-            trailing: const Icon(Icons.chevron_right),
+            trailing: DsIcon(DsIcons.chevronRight, size: 18, color: c.tx3),
             onTap: () => showDialog<void>(context: context, builder: (_) => const KidPasswordDialog()),
           ),
         ]),
-        const SizedBox(height: 12),
+        const SizedBox(height: kCardGap),
         card([
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text('Theme', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: c.ink)),
-            ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
+            child: DsSectionHeader('Theme'),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
             child: AnimatedBuilder(
               animation: ThemeService.instance,
-              builder: (context, _) => SizedBox(
-                width: double.infinity,
-                child: SegmentedButton<ThemeMode>(
-                  segments: const [
-                    ButtonSegment(value: ThemeMode.light, label: Text('Light'), icon: Icon(Icons.light_mode_outlined)),
-                    ButtonSegment(value: ThemeMode.dark, label: Text('Dark'), icon: Icon(Icons.dark_mode_outlined)),
-                    ButtonSegment(
-                      value: ThemeMode.system,
-                      label: Text('Phone'),
-                      icon: Icon(Icons.brightness_auto_outlined),
-                    ),
-                  ],
-                  selected: {ThemeService.instance.mode},
-                  onSelectionChanged: (value) => ThemeService.instance.set(value.first),
-                ),
+              builder: (context, _) => DsSegmented<ThemeMode>(
+                height: 40,
+                segments: const [
+                  (ThemeMode.light, 'Light'),
+                  (ThemeMode.dark, 'Dark'),
+                  (ThemeMode.system, 'Phone'),
+                ],
+                selected: ThemeService.instance.mode,
+                onChanged: ThemeService.instance.set,
               ),
             ),
           ),
         ]),
-        const SizedBox(height: 12),
+        const SizedBox(height: kCardGap),
         card([
           ListTile(
-            leading: Icon(Icons.logout, color: c.debit),
-            title: Text('Sign out', style: TextStyle(color: c.debit, fontWeight: FontWeight.w600)),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            leading: const DsIconTile(Icons.logout, tone: DsTone.crit),
+            title: Text('Sign out', style: TextStyle(color: c.crit, fontWeight: FontWeight.w600)),
             onTap: () => _signOut(context),
           ),
         ]),
-        const SizedBox(height: 18),
-        Center(child: Text('SpendLog $appVersion', style: TextStyle(fontSize: 11.5, color: c.mutedLight))),
+        const SizedBox(height: 20),
+        Center(child: Text('SpendLog $appVersion', style: TextStyle(fontSize: 12, color: c.tx3))),
       ],
     );
   }
@@ -120,6 +110,9 @@ class _KidPasswordDialogState extends State<KidPasswordDialog> {
   final _confirm = TextEditingController();
   bool _saving = false;
   String? _error;
+
+  /// Which of the three fields are showing what was typed.
+  final _shown = <int>{};
 
   @override
   void dispose() {
@@ -158,22 +151,45 @@ class _KidPasswordDialogState extends State<KidPasswordDialog> {
   Widget build(BuildContext context) {
     final c = context.c;
 
-    InputDecoration field(String label) => InputDecoration(labelText: label, border: const OutlineInputBorder());
+    // Every password field gets the eye; revealed, it switches to Plex Mono.
+    Widget field(int i, TextEditingController controller, String label) {
+      final shown = _shown.contains(i);
+      return TextField(
+        controller: controller,
+        obscureText: !shown,
+        autocorrect: false,
+        enableSuggestions: false,
+        style: shown ? kMono.copyWith(fontSize: 15, color: c.tx) : null,
+        decoration: InputDecoration(
+          labelText: label,
+          suffixIcon: DsEyeButton(
+            obscured: !shown,
+            onPressed: () => setState(() => shown ? _shown.remove(i) : _shown.add(i)),
+          ),
+        ),
+      );
+    }
 
     return AlertDialog(
-      title: const Text('Change password'),
+      title: const Row(
+        children: [
+          DsIconTile(DsIcons.lock, tone: DsTone.ac),
+          SizedBox(width: 12),
+          Expanded(child: Text('Change password')),
+        ],
+      ),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(controller: _current, obscureText: true, decoration: field('Current password')),
-            const SizedBox(height: 10),
-            TextField(controller: _next, obscureText: true, decoration: field('New password')),
-            const SizedBox(height: 10),
-            TextField(controller: _confirm, obscureText: true, decoration: field('New password again')),
+            field(0, _current, 'Current password'),
+            const SizedBox(height: 12),
+            field(1, _next, 'New password'),
+            const SizedBox(height: 12),
+            field(2, _confirm, 'New password again'),
             if (_error != null) ...[
-              const SizedBox(height: 10),
-              Text(_error!, style: TextStyle(fontSize: 12.5, color: c.debit)),
+              const SizedBox(height: 12),
+              DsCallout(tone: DsTone.crit, title: _error!),
             ],
           ],
         ),

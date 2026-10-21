@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
-import '../theme.dart';
+import 'ds/ds.dart';
 import 'home/monthly_budget_card.dart';
 
 /// The pace the strip can warn about: the monthly budget's, and only for
@@ -48,13 +48,13 @@ class CardStrip extends StatelessWidget {
           for (final card in warnings)
             _Row(
               state: card.state,
-              icon: Icons.error_outline,
+              icon: DsIcons.alertTriangle,
               text: cardCreditWarning(card),
             ),
           if (paceWarning != null)
             _Row(
               state: paceWarning.isOver ? 'over' : 'close',
-              icon: Icons.trending_up,
+              icon: DsIcons.trendingUp,
               text: paceMessage(paceWarning),
             ),
         ],
@@ -63,39 +63,24 @@ class CardStrip extends StatelessWidget {
   }
 }
 
+/// One warning: a callout, crit when over, warn when close.
 class _Row extends StatelessWidget {
   final String state;
-  final IconData icon;
+  final DsGlyph icon;
   final String text;
 
   const _Row({required this.state, required this.icon, required this.text});
 
   @override
   Widget build(BuildContext context) {
-    final c = context.c;
-    final (background, foreground) = switch (state) {
-      'over' => (c.debit50, c.debit),
-      'close' => (c.warnBg, c.warn),
-      _ => (c.brand50, c.brandDark),
+    final tone = switch (state) {
+      'over' => DsTone.crit,
+      'close' => DsTone.warn,
+      _ => DsTone.ac,
     };
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: BoxDecoration(color: background, borderRadius: BorderRadius.circular(T.rMd)),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 15, color: foreground),
-          const SizedBox(width: 9),
-          Expanded(
-            child: Text(
-              text,
-              style: TextStyle(fontSize: 12.5, height: 1.45, color: foreground),
-            ),
-          ),
-        ],
-      ),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: DsCallout(tone: tone, icon: icon, title: text),
     );
   }
 }

@@ -3,8 +3,8 @@ import '../../models/kid_models.dart';
 import '../../models/models.dart';
 import '../../services/api_client.dart';
 import '../../services/kid_service.dart';
-import '../../theme.dart';
 import '../../utils/format.dart';
+import '../../widgets/ds/ds.dart';
 import '../../widgets/kid_transaction_sheet.dart';
 import '../../widgets/pocket_money.dart';
 import '../../widgets/state_block.dart';
@@ -25,30 +25,39 @@ class KidMonthBar extends StatelessWidget {
     final month = months[index];
     final label = month.label.isNotEmpty ? readableMonth(month.label) : readableMonth(month.month);
 
+    final earlier = index < months.length - 1;
+    final later = index > 0;
+    // The period stepper: 40 h, radius 12, ln2 border, 36 px chevrons.
     return Container(
+      height: 48,
+      padding: const EdgeInsets.symmetric(horizontal: 2),
       decoration: BoxDecoration(
-        color: c.surface,
-        borderRadius: BorderRadius.circular(T.rMd),
-        border: Border.all(color: c.line),
+        color: c.sf,
+        borderRadius: BorderRadius.circular(Ds.rLg),
+        border: Border.all(color: c.ln2),
       ),
       child: Row(
         children: [
           IconButton(
             tooltip: 'Earlier month',
-            icon: const Icon(Icons.chevron_left),
-            onPressed: index < months.length - 1 ? () => onChanged(index + 1) : null,
+            style: IconButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Ds.rMd))),
+            icon: DsIcon(DsIcons.chevronLeft, size: 20, color: earlier ? c.tx2 : c.ln2),
+            onPressed: earlier ? () => onChanged(index + 1) : null,
           ),
           Expanded(
             child: Text(
               index == 0 ? '$label · now' : label,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: c.ink),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: kNum.copyWith(fontSize: 14, fontWeight: FontWeight.w600, color: c.tx),
             ),
           ),
           IconButton(
             tooltip: 'Later month',
-            icon: const Icon(Icons.chevron_right),
-            onPressed: index > 0 ? () => onChanged(index - 1) : null,
+            style: IconButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Ds.rMd))),
+            icon: DsIcon(DsIcons.chevronRight, size: 20, color: later ? c.tx2 : c.ln2),
+            onPressed: later ? () => onChanged(index - 1) : null,
           ),
         ],
       ),
@@ -72,12 +81,12 @@ class KidAccountChips extends StatelessWidget {
       child: Row(
         children: [
           Padding(
-            padding: const EdgeInsets.only(right: 6),
+            padding: const EdgeInsets.only(right: 8),
             child: ChoiceChip(label: const Text('All'), selected: selected == null, onSelected: (_) => onChanged(null)),
           ),
           for (final account in accounts)
             Padding(
-              padding: const EdgeInsets.only(right: 6),
+              padding: const EdgeInsets.only(right: 8),
               child: ChoiceChip(
                 label: Text(account.label),
                 selected: selected == account.id,
@@ -268,7 +277,7 @@ class KidMoneyScreenState extends State<KidMoneyScreen> {
   Widget build(BuildContext context) {
     final profile = _profile;
 
-    if (_loading && profile == null) return const Center(child: CircularProgressIndicator());
+    if (_loading && profile == null) return const Center(child: DsSpinner());
     if (profile == null) {
       return StateBlock(
         icon: Icons.cloud_off_outlined,
@@ -299,7 +308,7 @@ class KidMoneyScreenState extends State<KidMoneyScreen> {
     return Scaffold(
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openSheet(),
-        icon: const Icon(Icons.add),
+        icon: const DsIcon(DsIcons.plus, size: 20),
         label: const Text('Add'),
       ),
       body: RefreshIndicator(
@@ -307,11 +316,10 @@ class KidMoneyScreenState extends State<KidMoneyScreen> {
         child: ListView(
           controller: _scroll,
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 96),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
           children: [
             for (final account in profile.accounts)
-              Padding(padding: const EdgeInsets.only(bottom: 10), child: _AccountCard(account: account)),
-            const SizedBox(height: 4),
+              Padding(padding: const EdgeInsets.only(bottom: kCardGap), child: _AccountCard(account: account)),
             KidAccountChips(
               accounts: profile.accounts,
               selected: _accountId,
@@ -320,7 +328,7 @@ class KidMoneyScreenState extends State<KidMoneyScreen> {
                 _reloadList();
               },
             ),
-            if (profile.accounts.length > 1) const SizedBox(height: 10),
+            if (profile.accounts.length > 1) const SizedBox(height: 12),
             KidMonthBar(
               months: _months,
               index: _monthIndex,
@@ -332,17 +340,13 @@ class KidMoneyScreenState extends State<KidMoneyScreen> {
             const SizedBox(height: 12),
             if (_error != null)
               Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Text(_error!, style: TextStyle(fontSize: 12.5, color: context.c.debit)),
+                padding: const EdgeInsets.only(bottom: 12),
+                child: DsCallout(tone: DsTone.crit, title: _error!),
               ),
             if (_days.isEmpty && !_loading)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 30),
-                child: Text(
-                  'Nothing in this month yet. Tap Add to put something in.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 13, color: context.c.muted),
-                ),
+              const DsEmpty(
+                icon: DsIcons.list,
+                message: 'Nothing in this month yet. Tap Add to put something in.',
               ),
             for (final day in _days) _DaySection(day: day, onTap: _openSheet),
             if (_hasMore) _LoadMoreFooter(onVisible: _loadMore),
@@ -364,40 +368,39 @@ class _AccountCard extends StatelessWidget {
     final c = context.c;
     final pocket = account.pocket;
 
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: c.surface,
-        borderRadius: BorderRadius.circular(T.rMd),
-        border: Border.all(color: c.line),
-      ),
+    return DsCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.savings_outlined, size: 17, color: c.brand),
-              const SizedBox(width: 8),
+              const DsIconTile(DsIcons.piggyBank, tone: DsTone.ac, size: 36),
+              const SizedBox(width: 12),
               Expanded(
-                child: Text(
-                  account.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: c.ink),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      account.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
+                    ),
+                    if (pocket != null)
+                      Text(
+                        pocketRenews(pocket),
+                        style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
+                      ),
+                  ],
                 ),
               ),
-              if (pocket != null)
-                Text(pocketRenews(pocket), style: TextStyle(fontSize: 11.5, color: c.muted)),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           if (pocket == null)
-            Text("This month's figures aren't ready yet.", style: TextStyle(fontSize: 12.5, color: c.muted))
+            Text("This month's figures aren't ready yet.", style: TextStyle(fontSize: 13, color: c.tx3))
           else ...[
-            Text(
-              'Monthly limit ${formatMoney(pocket.limitMinor)}',
-              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: c.muted),
-            ),
+            DsLabel('Monthly limit ${formatMoney(pocket.limitMinor)}'),
             const SizedBox(height: 6),
             PocketMeter(status: pocket),
           ],
@@ -416,46 +419,35 @@ class _DaySection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    const net = TextStyle(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w600, fontFeatures: Ds.tabular);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    formatDayLabel(day.date),
-                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: c.ink70),
-                  ),
+      padding: const EdgeInsets.only(bottom: kCardGap),
+      child: DsCard(
+        padding: EdgeInsets.zero,
+        clip: true,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            DsDayHeader(
+              label: formatDayLabel(day.date),
+              trailing: Text.rich(
+                TextSpan(
+                  style: net.copyWith(color: c.tx2),
+                  children: [
+                    if (day.spendMinor > 0) TextSpan(text: '−${formatMoney(day.spendMinor)}'),
+                    if (day.spendMinor > 0 && day.incomeMinor > 0) const TextSpan(text: ' · '),
+                    if (day.incomeMinor > 0)
+                      TextSpan(text: '+${formatMoney(day.incomeMinor)}', style: TextStyle(color: c.good)),
+                  ],
                 ),
-                if (day.spendMinor > 0)
-                  Text('−${formatMoney(day.spendMinor)}', style: kNum.copyWith(fontSize: 12, color: c.muted)),
-                if (day.incomeMinor > 0) ...[
-                  const SizedBox(width: 8),
-                  Text('+${formatMoney(day.incomeMinor)}', style: kNum.copyWith(fontSize: 12, color: c.credit)),
-                ],
-              ],
+              ),
             ),
-          ),
-          Container(
-            decoration: BoxDecoration(
-              color: c.surface,
-              borderRadius: BorderRadius.circular(T.rMd),
-              border: Border.all(color: c.line),
-            ),
-            child: Column(
-              children: [
-                for (var i = 0; i < day.transactions.length; i++) ...[
-                  if (i > 0) const Divider(height: 1),
-                  _KidTransactionRow(transaction: day.transactions[i], onTap: onTap),
-                ],
-              ],
-            ),
-          ),
-        ],
+            for (var i = 0; i < day.transactions.length; i++) ...[
+              if (i > 0) const Divider(height: 1),
+              _KidTransactionRow(transaction: day.transactions[i], onTap: onTap),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -473,21 +465,20 @@ class _KidTransactionRow extends StatelessWidget {
     final t = transaction;
     final category = t.category;
     final isDebit = t.type == 'DEBIT';
-    final tint = parseHexColor(category?.color, fallback: c.muted);
+    final tint = parseHexColor(category?.color, fallback: c.tx3);
     final title = (t.merchant?.trim().isNotEmpty ?? false) ? t.merchant!.trim() : (category?.name ?? 'Something');
     final detail = [formatTime(t.occurredAt), if (category != null) category.name, if (t.note?.isNotEmpty ?? false) t.note!];
 
     return InkWell(
       onTap: () => onTap(t),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: [
-            Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(color: tint.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(10)),
-              child: Icon(categoryIcon(category?.icon), size: 18, color: tint),
+            DsIconTile(
+              categoryIcon(category?.icon),
+              color: tint,
+              background: tint.withValues(alpha: 0.14),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -498,14 +489,14 @@ class _KidTransactionRow extends StatelessWidget {
                     title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: c.ink),
+                    style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w500, color: c.tx),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     detail.join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 11.5, color: c.muted),
+                    style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
                   ),
                 ],
               ),
@@ -513,7 +504,7 @@ class _KidTransactionRow extends StatelessWidget {
             const SizedBox(width: 8),
             Text(
               '${isDebit ? '−' : '+'}${formatMoney(t.amountMinor)}',
-              style: kNum.copyWith(fontSize: 13.5, fontWeight: FontWeight.w700, color: isDebit ? c.ink : c.credit),
+              style: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w600, color: isDebit ? c.tx : c.good),
             ),
           ],
         ),
@@ -534,7 +525,7 @@ class _LoadMoreFooter extends StatelessWidget {
     WidgetsBinding.instance.addPostFrameCallback((_) => onVisible());
     return const Padding(
       padding: EdgeInsets.all(16),
-      child: Center(child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))),
+      child: Center(child: DsSpinner(size: 22)),
     );
   }
 }

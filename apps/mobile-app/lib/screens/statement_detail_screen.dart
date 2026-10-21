@@ -4,7 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import '../widgets/ds/ds.dart';
 import '../utils/format.dart';
 import '../widgets/state_block.dart';
 
@@ -205,12 +205,25 @@ class _StatementDetailScreenState extends State<StatementDetailScreen> with Sing
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        bottom: TabBar(
-          controller: _tabs,
-          tabs: [
-            Tab(text: 'Transactions${detail == null ? '' : ' (${detail.lines.length})'}'),
-            const Tab(text: 'What was read'),
-          ],
+        // The system has one tab style: a segmented control. The pages
+        // still swipe; the control follows them.
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(60),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+            child: AnimatedBuilder(
+              animation: _tabs,
+              builder: (context, _) => DsSegmented<int>(
+                height: 32,
+                selected: _tabs.index,
+                onChanged: (i) => _tabs.animateTo(i),
+                segments: [
+                  (0, 'Transactions${detail == null ? '' : ' (${detail.lines.length})'}'),
+                  (1, 'What was read'),
+                ],
+              ),
+            ),
+          ),
         ),
         actions: [
           if (detail?.hasFile ?? false)
@@ -218,16 +231,16 @@ class _StatementDetailScreenState extends State<StatementDetailScreen> with Sing
               tooltip: 'Open the PDF',
               onPressed: _openingFile ? null : _openFile,
               icon: _openingFile
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const DsSpinner(size: 18)
                   : const Icon(Icons.picture_as_pdf_outlined),
             ),
         ],
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Padding(padding: kPagePad, child: DsSkeletonRows(count: 6, caption: 'Opening the statement…'))
           : detail == null
               ? const StateBlock(
-                  icon: Icons.error_outline,
+                  icon: DsIcons.alertTriangle,
                   title: 'Could not open it',
                   body: 'The statement could not be loaded.',
                 )
@@ -236,15 +249,15 @@ class _StatementDetailScreenState extends State<StatementDetailScreen> with Sing
                     if (_summary(detail).isNotEmpty)
                       Container(
                         width: double.infinity,
-                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-                        color: c.paper,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        decoration: BoxDecoration(color: c.sf2, border: Border(bottom: BorderSide(color: c.ln))),
                         child: Text(
                           _summary(detail),
-                          style: TextStyle(fontSize: 12, color: c.muted, height: 1.45),
+                          style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx2),
                         ),
                       ),
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                       child: _BillEditor(
                         statementId: widget.statementId,
                         detail: detail,
@@ -253,7 +266,7 @@ class _StatementDetailScreenState extends State<StatementDetailScreen> with Sing
                     ),
                     if (detail.totalDueMinor != null)
                       Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
                         child: _WaiveBanner(
                           statementId: widget.statementId,
                           detail: detail,
@@ -282,7 +295,7 @@ class _StatementDetailScreenState extends State<StatementDetailScreen> with Sing
   Widget _linesPane(_Detail detail) {
     if (detail.lines.isEmpty) {
       return const StateBlock(
-        icon: Icons.receipt_long_outlined,
+        icon: DsIcons.list,
         title: 'Nothing on it',
         body: 'No transactions were read off this statement.',
       );
@@ -290,60 +303,89 @@ class _StatementDetailScreenState extends State<StatementDetailScreen> with Sing
 
     final c = context.c;
 
-    return ListView.separated(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+    return ListView.builder(
+      padding: const EdgeInsets.only(top: 4, bottom: 24),
       itemCount: detail.lines.length,
-      separatorBuilder: (_, __) => Divider(height: 1, color: c.line),
       itemBuilder: (_, index) {
         final line = detail.lines[index];
         final busy = _busyLine == line.id;
+        final skipped = line.resolution == 'SKIPPED';
+        final tone = switch (line.resolution) {
+          'MATCHED' => DsTone.good,
+          'ADDED' => DsTone.ac,
+          'UNCERTAIN' => DsTone.warn,
+          _ => DsTone.neutral,
+        };
+        // Spend in ink with a true minus, money in green, and a line that
+        // is left out in tx3 with no sign.
+        final kind = skipped ? MoneyKind.neutral : (line.isCredit ? MoneyKind.inflow : MoneyKind.out);
 
-        return Opacity(
-          opacity: line.resolution == 'SKIPPED' ? 0.6 : 1,
-          child: ListTile(
-            dense: true,
-            title: Text(
-              line.description.isEmpty ? '—' : line.description,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13.3, fontWeight: FontWeight.w600),
-            ),
-            subtitle: Text(
-              [
-                _day(line.date),
-                line.label,
-                if (line.matchedTo != null) line.matchedTo!,
-                if (line.kind != 'SPEND') line.kind.toLowerCase(),
-              ].join(' · '),
-              style: TextStyle(fontSize: 11.5, color: c.muted),
-            ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  '${line.isCredit ? '+' : ''}${formatMoney(line.amountMinor)}',
-                  style: kNum.copyWith(
-                    fontSize: 13,
-                    color: line.isCredit ? c.credit : c.ink,
-                  ),
-                ),
-                PopupMenuButton<String>(
-                  enabled: !busy,
-                  icon: const Icon(Icons.more_vert, size: 18),
-                  onSelected: (action) => _resolve(line, action),
-                  itemBuilder: (_) => [
-                    // A line SpendLog thinks it already has, that it does
-                    // not. The usual cause is a merchant renamed by hand.
-                    if (line.resolution == 'MATCHED' || line.resolution == 'SKIPPED')
-                      const PopupMenuItem(value: 'add', child: Text("SpendLog doesn't have this — add it")),
-                    if (line.resolution != 'SKIPPED')
-                      const PopupMenuItem(value: 'ignore', child: Text('Leave it out')),
-                    if (line.resolution != 'MATCHED')
-                      const PopupMenuItem(value: 'reset', child: Text('Work it out again')),
+        return Container(
+          constraints: const BoxConstraints(minHeight: 64),
+          padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
+          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: c.ln))),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // What the bank printed: a machine string, in Mono.
+                    Text(
+                      line.description.isEmpty ? '—' : line.description,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: kMono.copyWith(fontSize: 13, height: 18 / 13, color: skipped ? c.tx3 : c.tx),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        DsBadge(line.label, tone: tone),
+                        Text(
+                          [
+                            _day(line.date),
+                            if (line.matchedTo != null) line.matchedTo!,
+                            if (line.kind != 'SPEND') line.kind.toLowerCase(),
+                          ].join(' · '),
+                          style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx3),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 8),
+              Padding(
+                padding: const EdgeInsets.only(top: 1),
+                child: DsMoney(
+                  line.amountMinor,
+                  kind: kind,
+                  short: false,
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+              ),
+              PopupMenuButton<String>(
+                enabled: !busy,
+                tooltip: 'More',
+                icon: const DsIcon(DsIcons.moreVertical, size: 18),
+                padding: EdgeInsets.zero,
+                onSelected: (action) => _resolve(line, action),
+                itemBuilder: (_) => [
+                  // A line SpendLog thinks it already has, that it does
+                  // not. The usual cause is a merchant renamed by hand.
+                  if (line.resolution == 'MATCHED' || line.resolution == 'SKIPPED')
+                    const PopupMenuItem(value: 'add', child: Text("SpendLog doesn't have this — add it")),
+                  if (line.resolution != 'SKIPPED')
+                    const PopupMenuItem(value: 'ignore', child: Text('Leave it out')),
+                  if (line.resolution != 'MATCHED')
+                    const PopupMenuItem(value: 'reset', child: Text('Work it out again')),
+                ],
+              ),
+            ],
           ),
         );
       },
@@ -361,32 +403,48 @@ class _StatementDetailScreenState extends State<StatementDetailScreen> with Sing
 
     final c = context.c;
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(14),
-      itemCount: detail.rows.length,
-      itemBuilder: (_, index) => Padding(
-        padding: const EdgeInsets.only(bottom: 3),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 30,
-              child: Text(
-                '$index',
-                textAlign: TextAlign.right,
-                style: TextStyle(fontSize: 10.5, fontFamily: 'monospace', color: c.mutedLight),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                detail.rows[index],
-                style: TextStyle(fontSize: 11, fontFamily: 'monospace', height: 1.5, color: c.ink70),
-              ),
-            ),
-          ],
+    // The raw text as read: Mono on a raised panel, with row numbers.
+    return ListView(
+      padding: kPagePad,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: c.sf2,
+            border: Border.all(color: c.ln),
+            borderRadius: BorderRadius.circular(Ds.rLg),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var index = 0; index < detail.rows.length; index++)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: 28,
+                        child: Text(
+                          '$index',
+                          textAlign: TextAlign.right,
+                          style: kMono.copyWith(fontSize: 11, height: 18 / 11, color: c.tx3),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          detail.rows[index],
+                          style: kMono.copyWith(fontSize: 12, height: 18 / 12, color: c.tx2),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
         ),
-      ),
+      ],
     );
   }
 
@@ -455,7 +513,7 @@ class _BillEditorState extends State<_BillEditor> {
         alignment: Alignment.centerLeft,
         child: TextButton.icon(
           onPressed: () => setState(() => _editing = true),
-          icon: const Icon(Icons.edit_outlined, size: 16),
+          icon: const DsIcon(DsIcons.pencil, size: 16),
           label: const Text("This statement's bill total wasn't read — enter it"),
           style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 4)),
         ),
@@ -464,26 +522,26 @@ class _BillEditorState extends State<_BillEditor> {
 
     if (!_editing) {
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+        padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
         margin: const EdgeInsets.only(bottom: 8),
         decoration: BoxDecoration(
-          color: c.paper,
-          border: Border.all(color: c.line),
-          borderRadius: BorderRadius.circular(T.rSm),
+          color: c.sf,
+          border: Border.all(color: c.ln),
+          borderRadius: BorderRadius.circular(Ds.rLg),
         ),
         child: Row(
           children: [
-            Icon(
-              widget.detail.totalDueIsManual ? Icons.edit_outlined : Icons.receipt_long_outlined,
-              size: 16,
-              color: c.muted,
+            DsIcon(
+              widget.detail.totalDueIsManual ? DsIcons.pencil : DsIcons.list,
+              size: 18,
+              color: c.tx2,
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 10),
             Expanded(
               child: Text(
                 '${formatMoney(total!)} bill total'
                 '${widget.detail.totalDueIsManual ? ', entered by hand' : ', read from the statement'}',
-                style: TextStyle(fontSize: 12.5, color: c.ink70),
+                style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx2),
               ),
             ),
             TextButton(
@@ -495,31 +553,26 @@ class _BillEditorState extends State<_BillEditor> {
       );
     }
 
-    return Container(
-      padding: const EdgeInsets.all(11),
+    return DsCard(
       margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(border: Border.all(color: c.line), borderRadius: BorderRadius.circular(T.rMd)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            total == null
+          DsField(
+            label: 'Bill total',
+            help: total == null
                 ? "Nothing here was found in the statement's own summary. Type the total from the bill."
                 : 'Overrides what was read, on this statement only. Worth checking against the PDF '
                     'itself first.',
-            style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
+            error: _error,
+            child: TextField(
+              controller: _amount,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: kNum.copyWith(fontSize: 15, color: c.tx),
+              decoration: const InputDecoration(prefixText: '₹ '),
+            ),
           ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: _amount,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: 'Bill total', prefixText: '₹ '),
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: 6),
-            Text(_error!, style: TextStyle(fontSize: 12, color: c.debit)),
-          ],
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           Row(
             children: [
               FilledButton(
@@ -535,7 +588,8 @@ class _BillEditorState extends State<_BillEditor> {
               if (widget.detail.totalDueIsManual)
                 TextButton(
                   onPressed: _saving ? null : () => _save(null),
-                  child: Text('Forget it', style: TextStyle(color: c.debit)),
+                  style: TextButton.styleFrom(foregroundColor: c.crit),
+                  child: const Text('Forget it'),
                 ),
               const Spacer(),
               TextButton(
@@ -622,22 +676,22 @@ class _WaiveBannerState extends State<_WaiveBanner> {
 
     if (!_editing) {
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+        padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
         margin: const EdgeInsets.only(bottom: 8),
         decoration: BoxDecoration(
-          color: c.credit.withValues(alpha: .08),
-          borderRadius: BorderRadius.circular(T.rSm),
+          color: c.goodSoft,
+          borderRadius: BorderRadius.circular(Ds.rLg),
         ),
         child: Row(
           children: [
-            Icon(Icons.check_circle_outline, size: 16, color: c.credit),
-            const SizedBox(width: 8),
+            DsIcon(DsIcons.check, size: 18, color: c.good),
+            const SizedBox(width: 10),
             Expanded(
               child: Text(
                 '${formatMoney(waived!)} covered'
                 '${widget.detail.waivedNote != null ? ' — ${widget.detail.waivedNote}' : ''}, '
                 'not still owed',
-                style: TextStyle(fontSize: 12.5, color: c.ink70),
+                style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx2),
               ),
             ),
             TextButton(
@@ -649,34 +703,36 @@ class _WaiveBannerState extends State<_WaiveBanner> {
       );
     }
 
-    return Container(
-      padding: const EdgeInsets.all(11),
+    return DsCard(
       margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(border: Border.all(color: c.line), borderRadius: BorderRadius.circular(T.rMd)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             'The amount covered by cashback, reward points, or a fee the bank waived - the part of '
             'the bill that a payment was never going to cover, because it was never money.',
-            style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
+            style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2),
           ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: _amount,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: 'Covered', prefixText: '₹ '),
+          const SizedBox(height: 12),
+          DsField(
+            label: 'Covered',
+            child: TextField(
+              controller: _amount,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: kNum.copyWith(fontSize: 15, color: c.tx),
+              decoration: const InputDecoration(prefixText: '₹ '),
+            ),
           ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _note,
-            decoration: const InputDecoration(labelText: 'Note', hintText: 'Cashback used at checkout'),
+          const SizedBox(height: 12),
+          DsField(
+            label: 'Note',
+            error: _error,
+            child: TextField(
+              controller: _note,
+              decoration: const InputDecoration(hintText: 'Cashback used at checkout'),
+            ),
           ),
-          if (_error != null) ...[
-            const SizedBox(height: 6),
-            Text(_error!, style: TextStyle(fontSize: 12, color: c.debit)),
-          ],
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           Row(
             children: [
               FilledButton(
@@ -692,7 +748,8 @@ class _WaiveBannerState extends State<_WaiveBanner> {
               if (widget.detail.waivedMinor != null)
                 TextButton(
                   onPressed: _saving ? null : () => _save(null),
-                  child: Text('Remove', style: TextStyle(color: c.debit)),
+                  style: TextButton.styleFrom(foregroundColor: c.crit),
+                  child: const Text('Remove'),
                 ),
               const Spacer(),
               TextButton(

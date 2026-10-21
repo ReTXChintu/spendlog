@@ -9,7 +9,7 @@ import '../utils/format.dart';
 /// next one, so for a month the two differ - "₹2,000 this month · ₹3,000
 /// from next" - and saying only one of them would be wrong about the other.
 class CommitmentAmount extends StatelessWidget {
-  const CommitmentAmount({super.key, required this.commitment, this.fontSize = 12.8});
+  const CommitmentAmount({super.key, required this.commitment, this.fontSize = 13});
 
   final FixedCommitment commitment;
   final double fontSize;
@@ -21,7 +21,7 @@ class CommitmentAmount extends StatelessWidget {
     if (!commitment.changesNextPeriod) {
       return Text(
         formatMoney(commitment.amountMinor),
-        style: kNum.copyWith(fontSize: fontSize, color: c.ink70),
+        style: kNum.copyWith(fontSize: fontSize, fontWeight: FontWeight.w600, color: c.tx),
       );
     }
 
@@ -31,11 +31,11 @@ class CommitmentAmount extends StatelessWidget {
       children: [
         Text(
           '${formatMoneyShort(commitment.thisPeriodAmountMinor)} this month',
-          style: kNum.copyWith(fontSize: fontSize, color: c.ink70),
+          style: kNum.copyWith(fontSize: fontSize, fontWeight: FontWeight.w600, color: c.tx),
         ),
         Text(
           '${formatMoneyShort(commitment.amountMinor)} from next',
-          style: TextStyle(fontSize: fontSize - 1.8, color: c.muted),
+          style: kNum.copyWith(fontSize: fontSize - 1, color: c.tx3),
         ),
       ],
     );

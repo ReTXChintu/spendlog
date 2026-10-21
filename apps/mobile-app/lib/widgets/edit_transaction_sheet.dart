@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import 'ds/ds.dart';
 import '../utils/format.dart';
 import '../utils/loan_tab.dart';
 import '../utils/split.dart';
@@ -77,9 +77,9 @@ Future<bool?> showEditTransactionSheet(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
-    backgroundColor: context.c.surface,
+    backgroundColor: context.c.sf,
     shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(T.rLg)),
+      borderRadius: BorderRadius.vertical(top: Radius.circular(Ds.r3xl)),
     ),
     builder: (_) => Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
@@ -1066,271 +1066,288 @@ class _EditSheetState extends State<_EditSheet> {
 
   // ---- Build ---------------------------------------------------------
 
+  /// Not counted either way: moved between own accounts, a card bill, or
+  /// money set aside. Drawn in tx3 with no sign, like everywhere else.
+  bool get _neutralKind => _kind == _Kind.transfer || _kind == _Kind.cardBill || _kind == _Kind.earmark;
+
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final tone = _isDebit ? c.debit : c.credit;
 
+    // The side panel of the web editor, as a full-height sheet: a header,
+    // the form scrolling, and the actions pinned to the bottom.
     return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 38,
-                height: 4,
-                decoration: BoxDecoration(color: c.lineStrong, borderRadius: BorderRadius.circular(100)),
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            // Title and direction share one line: direction is the first
-            // thing to get right, and it does not need a row of its own.
-            Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const DsDragHandle(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 4, 8),
+            child: Row(
               children: [
                 Expanded(
                   child: Text(
                     _isNew ? 'Add transaction' : 'Edit transaction',
-                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: c.ink),
+                    style: TextStyle(fontSize: 19, height: 24 / 19, fontWeight: FontWeight.w600, color: c.tx),
                   ),
                 ),
-                _directionToggle(),
-              ],
-            ),
-            const SizedBox(height: 12),
-
-            _amountField(tone),
-            if (_cardWarning != null) ...[const SizedBox(height: 8), _cardWarningBanner()],
-            const SizedBox(height: 12),
-
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  flex: 11,
-                  child: TextField(
-                    controller: _merchant,
-                    textCapitalization: TextCapitalization.words,
-                    onChanged: (_) => setState(() => _merchantTyped = true),
-                    style: TextStyle(color: c.ink, fontSize: 14),
-                    decoration: _inputDecoration(context, label: _isDebit ? 'Paid to' : 'From'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(flex: 10, child: _categoryPicker()),
-              ],
-            ),
-            _personRow(),
-            _presetRow(),
-            const SizedBox(height: 10),
-
-            Row(
-              children: [
-                Expanded(
-                  child: _PickerButton(
-                    icon: Icons.calendar_today_outlined,
-                    label: DateFormat('EEE, d MMM yyyy').format(_occurredAt),
-                    onTap: _pickDate,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _PickerButton(
-                    icon: Icons.schedule,
-                    label: TimeOfDay.fromDateTime(_occurredAt).format(context),
-                    onTap: _pickTime,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-
-            // A transfer has two sides; everything else has one account.
-            if (_kind == _Kind.transfer)
-              Row(
-                children: [
-                  Expanded(child: _accountPicker(label: 'From', value: _fromId, onChanged: _setFrom,
-                      rowSide: _isDebit)),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Icon(Icons.arrow_forward, size: 16, color: c.muted),
-                  ),
-                  Expanded(child: _accountPicker(label: 'To', value: _toId, onChanged: _setTo,
-                      rowSide: !_isDebit)),
-                ],
-              )
-            else
-              _accountPicker(
-                label: 'Account',
-                value: _accountId,
-                onChanged: (id) => setState(() => _accountId = id),
-                rowSide: true,
-              ),
-            if (_unknownAccount && !_accountPicked)
-              const Padding(
-                padding: EdgeInsets.only(top: 6),
-                child: _Hint(
-                  'The message named no account, so this is not in any balance yet. Pick the account it '
-                  'was on, or say it was cash.',
-                ),
-              ),
-            const SizedBox(height: 10),
-
-            TextField(
-              controller: _note,
-              style: TextStyle(color: c.ink, fontSize: 14),
-              decoration: _inputDecoration(context, label: 'Note (optional)'),
-            ),
-            const SizedBox(height: 16),
-
-            _kindPicker(),
-            AnimatedSize(
-              duration: const Duration(milliseconds: 180),
-              alignment: Alignment.topCenter,
-              child: _kindPanel() ?? const SizedBox(width: double.infinity),
-            ),
-
-            _moreSection(),
-
-            if (_error != null) ...[
-              const SizedBox(height: 10),
-              Text(_error!, style: TextStyle(fontSize: 12.5, color: c.debit)),
-            ],
-
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                if (!_isNew)
-                  TextButton.icon(
-                    onPressed: _saving
-                        ? null
-                        : () => _confirmDelete ? _delete() : setState(() => _confirmDelete = true),
-                    style: TextButton.styleFrom(foregroundColor: c.debit),
-                    icon: const Icon(Icons.delete_outline, size: 18),
-                    label: Text(_confirmDelete ? 'Really delete?' : 'Delete'),
-                  ),
-                const Spacer(),
-                TextButton(
+                IconButton(
+                  tooltip: 'Close',
                   onPressed: _saving ? null : () => Navigator.of(context).pop(false),
-                  style: TextButton.styleFrom(foregroundColor: c.muted),
+                  icon: DsIcon(DsIcons.x, size: 20, color: c.tx2),
+                ),
+              ],
+            ),
+          ),
+          Divider(height: 1, color: c.ln),
+          Flexible(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _amountField(),
+                  if (_cardWarning != null) ...[const SizedBox(height: 12), _cardWarningBanner()],
+                  const SizedBox(height: 18),
+
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        flex: 11,
+                        child: DsField(
+                          label: _isDebit ? 'Paid to' : 'From',
+                          child: TextField(
+                            controller: _merchant,
+                            textCapitalization: TextCapitalization.words,
+                            onChanged: (_) => setState(() => _merchantTyped = true),
+                            style: TextStyle(color: c.tx, fontSize: 15),
+                            decoration: _inputDecoration(context),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(flex: 10, child: DsField(label: 'Category', child: _categoryPicker())),
+                    ],
+                  ),
+                  _personRow(),
+                  _presetRow(),
+                  const SizedBox(height: 18),
+
+                  _kindPicker(),
+                  AnimatedSize(
+                    duration: Ds.dur,
+                    curve: Ds.ease,
+                    alignment: Alignment.topCenter,
+                    child: _kindPanel() ?? const SizedBox(width: double.infinity),
+                  ),
+                  const SizedBox(height: 18),
+
+                  // A transfer has two sides; everything else has one account.
+                  if (_kind == _Kind.transfer)
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: DsField(
+                            label: 'From',
+                            child: _accountPicker(label: 'From', value: _fromId, onChanged: _setFrom, rowSide: _isDebit),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: DsField(
+                            label: 'To',
+                            child: _accountPicker(label: 'To', value: _toId, onChanged: _setTo, rowSide: !_isDebit),
+                          ),
+                        ),
+                      ],
+                    )
+                  else
+                    DsField(
+                      label: 'Account',
+                      child: _accountPicker(
+                        label: 'Account',
+                        value: _accountId,
+                        onChanged: (id) => setState(() => _accountId = id),
+                        rowSide: true,
+                      ),
+                    ),
+                  if (_unknownAccount && !_accountPicked)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 12),
+                      child: DsCallout(
+                        tone: DsTone.ac,
+                        title: 'The message named no account, so this is not in any balance yet. Pick the account it '
+                            'was on, or say it was cash.',
+                      ),
+                    ),
+                  const SizedBox(height: 18),
+
+                  const DsLabel('Date & time'),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: _PickerButton(
+                          icon: DsIcons.calendar,
+                          label: DateFormat('EEE, d MMM yyyy').format(_occurredAt),
+                          onTap: _pickDate,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: _PickerButton(
+                          icon: Icons.schedule,
+                          label: TimeOfDay.fromDateTime(_occurredAt).format(context),
+                          onTap: _pickTime,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+
+                  DsField(
+                    label: 'Note',
+                    child: TextField(
+                      controller: _note,
+                      style: TextStyle(color: c.tx, fontSize: 15),
+                      decoration: _inputDecoration(context, hint: 'Note (optional)'),
+                    ),
+                  ),
+
+                  _moreSection(),
+
+                  if (_error != null) ...[
+                    const SizedBox(height: 16),
+                    DsCallout(tone: DsTone.crit, title: _error!),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          _footer(),
+        ],
+      ),
+    );
+  }
+
+  /// Delete on the left, Cancel and Save on the right, on `sf2`.
+  Widget _footer() {
+    final c = context.c;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      decoration: BoxDecoration(color: c.sf2, border: Border(top: BorderSide(color: c.ln))),
+      child: Row(
+        children: [
+          if (!_isNew)
+            OutlinedButton.icon(
+              onPressed: _saving
+                  ? null
+                  : () => _confirmDelete ? _delete() : setState(() => _confirmDelete = true),
+              style: OutlinedButton.styleFrom(
+                // The final "really" is the filled destructive confirm.
+                backgroundColor: _confirmDelete ? c.critFill : Colors.transparent,
+                foregroundColor: _confirmDelete ? Colors.white : c.crit,
+                side: BorderSide(color: _confirmDelete ? c.critFill : c.critSoft),
+                minimumSize: const Size(48, 48),
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+              ),
+              icon: const DsIcon(DsIcons.trash, size: 18),
+              label: Text(_confirmDelete ? 'Really delete?' : 'Delete'),
+            ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: OverflowBar(
+              alignment: MainAxisAlignment.end,
+              overflowAlignment: OverflowBarAlignment.end,
+              spacing: 8,
+              overflowSpacing: 8,
+              children: [
+                OutlinedButton(
+                  onPressed: _saving ? null : () => Navigator.of(context).pop(false),
+                  style: OutlinedButton.styleFrom(minimumSize: const Size(64, 48)),
                   child: const Text('Cancel'),
                 ),
-                const SizedBox(width: 8),
                 FilledButton(
                   onPressed: _saving ? null : _save,
+                  style: FilledButton.styleFrom(textStyle: const TextStyle(fontFamily: Ds.sans, fontSize: 15, fontWeight: FontWeight.w600)),
                   child: Text(_saving ? 'Saving…' : (_isNew ? 'Add' : 'Save')),
                 ),
               ],
             ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _directionToggle() {
-    final c = context.c;
-    final on = _isDebit ? c.debit : c.credit;
-    final onBg = _isDebit ? c.debit50 : c.credit50;
-    return SegmentedButton<String>(
-      segments: const [
-        ButtonSegment(
-          value: 'DEBIT',
-          label: Text('Debit'),
-          icon: Icon(Icons.north_east, size: 14),
-          tooltip: 'Money out',
-        ),
-        ButtonSegment(
-          value: 'CREDIT',
-          label: Text('Credit'),
-          icon: Icon(Icons.south_west, size: 14),
-          tooltip: 'Money in',
-        ),
-      ],
-      selected: {_type},
-      showSelectedIcon: false,
-      onSelectionChanged: (selected) => _setType(selected.first),
-      style: ButtonStyle(
-        visualDensity: VisualDensity.compact,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 10)),
-        textStyle: const WidgetStatePropertyAll(TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
-        side: WidgetStatePropertyAll(BorderSide(color: c.lineStrong)),
-        backgroundColor: WidgetStateProperty.resolveWith(
-          (states) => states.contains(WidgetState.selected) ? onBg : c.surface,
-        ),
-        foregroundColor: WidgetStateProperty.resolveWith(
-          (states) => states.contains(WidgetState.selected) ? on : c.muted,
-        ),
-      ),
-    );
-  }
-
-  Widget _amountField(Color tone) {
-    final c = context.c;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(
-        color: _isDebit ? c.debit50 : c.credit50,
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
-      child: Row(
-        children: [
-          Text(
-            _isDebit ? '−₹' : '+₹',
-            style: kNum.copyWith(fontSize: 26, fontWeight: FontWeight.w800, color: tone),
           ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: TextField(
-              controller: _amount,
-              autofocus: _isNew,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              onChanged: (_) => setState(() {
-                if (_kind == _Kind.settlement && _autoSettle) _resplitSettlement();
-              }),
-              style: kNum.copyWith(fontSize: 30, fontWeight: FontWeight.w800, color: c.ink),
-              decoration: InputDecoration.collapsed(
-                hintText: '0.00',
-                hintStyle: kNum.copyWith(fontSize: 30, fontWeight: FontWeight.w800, color: c.mutedLight),
+        ],
+      ),
+    );
+  }
+
+  /// The figure at 34/40, signed the way the list will show it, beside the
+  /// Out / In switch.
+  Widget _amountField() {
+    final c = context.c;
+    final signColor = _neutralKind ? c.tx3 : (_isDebit ? c.moneyOut : c.moneyIn);
+    final sign = _neutralKind ? '₹' : (_isDebit ? '−₹' : '+₹');
+    const big = TextStyle(
+      fontSize: 34,
+      height: 40 / 34,
+      fontWeight: FontWeight.w600,
+      letterSpacing: -0.68,
+      fontFeatures: Ds.tabular,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Text(sign, style: big.copyWith(color: signColor)),
+            const SizedBox(width: 2),
+            Expanded(
+              child: TextField(
+                controller: _amount,
+                autofocus: _isNew,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                onChanged: (_) => setState(() {
+                  if (_kind == _Kind.settlement && _autoSettle) _resplitSettlement();
+                }),
+                style: big.copyWith(color: c.tx),
+                decoration: InputDecoration.collapsed(
+                  hintText: '0.00',
+                  hintStyle: big.copyWith(color: c.ln2),
+                ),
               ),
             ),
-          ),
-          Text(
-            _isDebit ? 'money out' : 'money in',
-            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: tone),
-          ),
-        ],
-      ),
+            const SizedBox(width: 12),
+            SizedBox(width: 132, child: _directionToggle()),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          _isDebit ? 'Money out' : 'Money in',
+          style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
+        ),
+      ],
     );
   }
 
+  Widget _directionToggle() => DsSegmented<String>(
+        segments: const [('DEBIT', 'Out'), ('CREDIT', 'In')],
+        selected: _type,
+        onChanged: _setType,
+        height: 32,
+      );
+
   Widget _cardWarningBanner() {
-    final c = context.c;
     final card = _cardWarning!;
-    final over = card.state == 'over';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: over ? c.debit50 : c.warnBg,
-        borderRadius: BorderRadius.circular(T.rSm),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.error_outline, size: 15, color: over ? c.debit : c.warn),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              cardCreditWarning(card),
-              style: TextStyle(fontSize: 12, height: 1.4, color: over ? c.debit : c.warn),
-            ),
-          ),
-        ],
-      ),
+    return DsCallout(
+      tone: card.state == 'over' ? DsTone.crit : DsTone.warn,
+      icon: DsIcons.creditCard,
+      title: cardCreditWarning(card),
     );
   }
 
@@ -1355,9 +1372,11 @@ class _EditSheetState extends State<_EditSheet> {
       key: ValueKey('category-$shown'),
       initialValue: shown,
       isExpanded: true,
-      decoration: _inputDecoration(context, label: 'Category'),
-      dropdownColor: c.surface,
-      style: TextStyle(fontSize: 14, color: c.ink),
+      icon: DsIcon(DsIcons.chevronDown, size: 20, color: c.tx2),
+      decoration: _inputDecoration(context),
+      dropdownColor: c.sf,
+      borderRadius: BorderRadius.circular(Ds.rLg),
+      style: TextStyle(fontFamily: Ds.sans, fontSize: 15, color: c.tx, fontFeatures: Ds.tabular),
       items: [
         const DropdownMenuItem<String?>(value: null, child: Text('Uncategorized')),
         for (final category in options)
@@ -1366,11 +1385,11 @@ class _EditSheetState extends State<_EditSheet> {
             child: Row(
               children: [
                 Container(
-                  width: 8,
-                  height: 8,
+                  width: 10,
+                  height: 10,
                   decoration: BoxDecoration(
-                    color: category.color != null ? parseHexColor(category.color) : c.lineStrong,
-                    borderRadius: BorderRadius.circular(2),
+                    color: category.color != null ? parseHexColor(category.color) : c.ln2,
+                    borderRadius: BorderRadius.circular(Ds.rXs),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1404,10 +1423,12 @@ class _EditSheetState extends State<_EditSheet> {
       key: ValueKey('$label-$shown-$_type-$_kind'),
       initialValue: shown,
       isExpanded: true,
-      hint: Text('Choose', style: TextStyle(color: c.mutedLight)),
-      decoration: _inputDecoration(context, label: label),
-      dropdownColor: c.surface,
-      style: TextStyle(fontSize: 14, color: c.ink),
+      icon: DsIcon(DsIcons.chevronDown, size: 20, color: c.tx2),
+      hint: Text('Choose', style: TextStyle(color: c.tx3)),
+      decoration: _inputDecoration(context),
+      dropdownColor: c.sf,
+      borderRadius: BorderRadius.circular(Ds.rLg),
+      style: TextStyle(fontFamily: Ds.sans, fontSize: 15, color: c.tx, fontFeatures: Ds.tabular),
       items: [
         if (unplaced)
           DropdownMenuItem<String?>(
@@ -1415,9 +1436,9 @@ class _EditSheetState extends State<_EditSheet> {
             enabled: false,
             child: Row(
               children: [
-                Icon(Icons.help_outline, size: 16, color: c.muted),
+                DsIcon(DsIcons.info, size: 16, color: c.tx3),
                 const SizedBox(width: 8),
-                Expanded(child: Text('No account yet', style: TextStyle(color: c.mutedLight))),
+                Expanded(child: Text('No account yet', style: TextStyle(color: c.tx3))),
               ],
             ),
           ),
@@ -1426,11 +1447,7 @@ class _EditSheetState extends State<_EditSheet> {
             value: id,
             child: Row(
               children: [
-                Icon(
-                  name == 'Cash' ? Icons.payments_outlined : Icons.account_balance_wallet_outlined,
-                  size: 16,
-                  color: c.muted,
-                ),
+                DsIcon(name == 'Cash' ? DsIcons.banknote : DsIcons.bank, size: 16, color: c.tx3),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -1456,7 +1473,6 @@ class _EditSheetState extends State<_EditSheet> {
   /// then any containing it. Picking one makes it money between the user
   /// and them - see [_pickPerson].
   Widget _personRow() {
-    final c = context.c;
     final typed = _merchant.text.trim().toLowerCase();
     if (typed.isEmpty || _contacts.isEmpty) return const SizedBox.shrink();
     int rank(Contact contact) => contact.name.toLowerCase().startsWith(typed) ? 0 : 1;
@@ -1473,16 +1489,16 @@ class _EditSheetState extends State<_EditSheet> {
           children: [
             for (final contact in matches.take(4))
               Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: ActionChip(
-                  avatar: Icon(Icons.person_outline, size: 15, color: c.brandDark),
-                  label: Text(contact.name),
-                  labelStyle: TextStyle(fontSize: 11.5, color: c.ink, fontWeight: FontWeight.w600),
-                  visualDensity: VisualDensity.compact,
-                  side: BorderSide(color: contact.id == picked ? c.brand : c.lineStrong),
-                  backgroundColor: contact.id == picked ? c.brand50 : c.surface,
-                  tooltip: 'Money between you and ${contact.name} - not spending or income',
-                  onPressed: () => _pickPerson(contact),
+                padding: const EdgeInsets.only(right: 8),
+                child: Tooltip(
+                  message: 'Money between you and ${contact.name} - not spending or income',
+                  child: DsChip(
+                    label: contact.name,
+                    icon: DsIcons.users,
+                    selected: contact.id == picked,
+                    height: 32,
+                    onTap: () => _pickPerson(contact),
+                  ),
                 ),
               ),
           ],
@@ -1508,7 +1524,7 @@ class _EditSheetState extends State<_EditSheet> {
           children: [
             for (final preset in _presets)
               Padding(
-                padding: const EdgeInsets.only(right: 6),
+                padding: const EdgeInsets.only(right: 8),
                 child: _PresetChip(
                   preset: preset,
                   isCurrent: preset.merchant.toLowerCase() == typed.toLowerCase(),
@@ -1518,12 +1534,13 @@ class _EditSheetState extends State<_EditSheet> {
               ),
             if (canSave)
               ActionChip(
-                avatar: Icon(Icons.bookmark_add_outlined, size: 15, color: c.brand),
+                avatar: DsIcon(DsIcons.plus, size: 14, color: c.ac),
                 label: const Text('Save as a shortcut'),
-                labelStyle: TextStyle(fontSize: 11.5, color: c.brand, fontWeight: FontWeight.w600),
+                labelStyle: TextStyle(fontSize: 13, color: c.ac, fontWeight: FontWeight.w600),
                 visualDensity: VisualDensity.compact,
-                side: BorderSide(color: c.brand100),
-                backgroundColor: c.surface,
+                side: BorderSide(color: c.acLine),
+                backgroundColor: c.sf,
+                shape: const StadiumBorder(),
                 onPressed: _savePreset,
               ),
           ],
@@ -1540,74 +1557,43 @@ class _EditSheetState extends State<_EditSheet> {
     final hasLoans = _loans.isNotEmpty || _savedLoanSplits.isNotEmpty;
     final hasCommitments = _commitments.isNotEmpty || _commitmentId != null;
 
-    // (label, icon, selected, onTap)
-    final options = <(String, IconData, bool, VoidCallback)>[
+    // (label, selected, onTap). Radio-as-chips: the chosen one is
+    // ink-filled with a check, like every selected chip.
+    final options = <(String, bool, VoidCallback)>[
       if (_isDebit) ...[
-        ('Spending', Icons.shopping_bag_outlined, _kind == _Kind.normal, () => _selectKind(_Kind.normal)),
-        ('Split', Icons.call_split, _kind == _Kind.split && _includeMe, () => _selectKind(_Kind.split)),
-        ('Lent', Icons.handshake_outlined, _isLend, () => _selectKind(_Kind.split, includeMe: false)),
-        ('To own account', Icons.swap_horiz, _kind == _Kind.transfer, () => _selectKind(_Kind.transfer)),
-        if (hasCards)
-          ('Card bill', Icons.credit_card, _kind == _Kind.cardBill, () => _selectKind(_Kind.cardBill)),
-        if (hasLoans)
-          ('Loan repayment', Icons.account_balance_outlined, _kind == _Kind.loan,
-              () => _selectKind(_Kind.loan)),
-        ('Settling up', Icons.replay, _kind == _Kind.settlement, () => _selectKind(_Kind.settlement)),
+        ('Spending', _kind == _Kind.normal, () => _selectKind(_Kind.normal)),
+        ('Split', _kind == _Kind.split && _includeMe, () => _selectKind(_Kind.split)),
+        ('Lent', _isLend, () => _selectKind(_Kind.split, includeMe: false)),
+        ('To own account', _kind == _Kind.transfer, () => _selectKind(_Kind.transfer)),
+        if (hasCards) ('Card bill', _kind == _Kind.cardBill, () => _selectKind(_Kind.cardBill)),
+        if (hasLoans) ('Loan repayment', _kind == _Kind.loan, () => _selectKind(_Kind.loan)),
+        ('Settling up', _kind == _Kind.settlement, () => _selectKind(_Kind.settlement)),
       ] else ...[
-        ('Income', Icons.south_west, _kind == _Kind.normal, () => _selectKind(_Kind.normal)),
-        ('Salary', Icons.work_outline, _kind == _Kind.salary, () => _selectKind(_Kind.salary)),
-        ('Refund…', Icons.undo, _kind == _Kind.refund, () => _selectKind(_Kind.refund)),
-        ('For a future purchase', Icons.savings_outlined, _kind == _Kind.earmark,
-            () => _selectKind(_Kind.earmark)),
-        ('From own account', Icons.swap_horiz, _kind == _Kind.transfer, () => _selectKind(_Kind.transfer)),
-        ('Paid back', Icons.replay, _kind == _Kind.settlement, () => _selectKind(_Kind.settlement)),
-        ("Part someone else's", Icons.call_split, _kind == _Kind.split,
-            () => _selectKind(_Kind.split, includeMe: _includeMe)),
+        ('Income', _kind == _Kind.normal, () => _selectKind(_Kind.normal)),
+        ('Salary', _kind == _Kind.salary, () => _selectKind(_Kind.salary)),
+        ('Refund…', _kind == _Kind.refund, () => _selectKind(_Kind.refund)),
+        ('For a future purchase', _kind == _Kind.earmark, () => _selectKind(_Kind.earmark)),
+        ('From own account', _kind == _Kind.transfer, () => _selectKind(_Kind.transfer)),
+        ('Paid back', _kind == _Kind.settlement, () => _selectKind(_Kind.settlement)),
+        ("Part someone else's", _kind == _Kind.split, () => _selectKind(_Kind.split, includeMe: _includeMe)),
       ],
     ];
-
-    Widget toggle(String label, IconData icon, bool on, ValueChanged<bool> onChanged) => FilterChip(
-          avatar: on ? null : Icon(icon, size: 15, color: c.muted),
-          label: Text(label),
-          selected: on,
-          onSelected: onChanged,
-          visualDensity: VisualDensity.compact,
-          labelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: on ? c.brandDark : c.ink70),
-          selectedColor: c.brand50,
-          checkmarkColor: c.brandDark,
-          backgroundColor: c.surface,
-          side: BorderSide(color: on ? c.brand : c.line),
-        );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('What kind is it?', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: c.muted)),
+        const DsLabel('What kind is it?'),
         const SizedBox(height: 6),
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
+          clipBehavior: Clip.none,
           child: Row(
             children: [
-              for (final (label, icon, selected, onTap) in options)
+              for (final (label, selected, onTap) in options)
                 Padding(
                   key: selected ? _selectedChipKey : null,
-                  padding: const EdgeInsets.only(right: 6),
-                  child: ChoiceChip(
-                    avatar: Icon(icon, size: 15, color: selected ? c.brandDark : c.muted),
-                    label: Text(label),
-                    selected: selected,
-                    showCheckmark: false,
-                    onSelected: (_) => onTap(),
-                    visualDensity: VisualDensity.compact,
-                    labelStyle: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                      color: selected ? c.brandDark : c.ink70,
-                    ),
-                    selectedColor: c.brand50,
-                    backgroundColor: c.surface,
-                    side: BorderSide(color: selected ? c.brand : c.lineStrong),
-                  ),
+                  padding: const EdgeInsets.only(right: 8),
+                  child: DsChip(label: label, selected: selected, onTap: onTap),
                 ),
             ],
           ),
@@ -1616,18 +1602,29 @@ class _EditSheetState extends State<_EditSheet> {
         // a fixed cost. A payment has no one-off toggle: one-offs count
         // against the monthly budget like everything else.
         if (!_isDebit || hasCommitments) ...[
-          const SizedBox(height: 6),
+          const SizedBox(height: 10),
           Wrap(
-            spacing: 6,
-            runSpacing: 4,
+            spacing: 8,
+            runSpacing: 6,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Text('Also:', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: c.mutedLight)),
+              Text('Also', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.tx3)),
               if (_isDebit)
-                toggle('Fixed cost', Icons.event_repeat, _isFixed, (on) => setState(() => _isFixed = on))
+                DsChip(
+                  label: 'Fixed cost',
+                  icon: DsIcons.repeat,
+                  selected: _isFixed,
+                  height: 32,
+                  onTap: () => setState(() => _isFixed = !_isFixed),
+                )
               else
-                toggle('Keep out of savings bucket', Icons.savings_outlined, _isSpecial,
-                    (on) => setState(() => _isSpecial = on)),
+                DsChip(
+                  label: 'Keep out of savings bucket',
+                  icon: DsIcons.piggyBank,
+                  selected: _isSpecial,
+                  height: 32,
+                  onTap: () => setState(() => _isSpecial = !_isSpecial),
+                ),
             ],
           ),
         ],
@@ -1644,11 +1641,13 @@ class _EditSheetState extends State<_EditSheet> {
       _Kind.transfer => const _Hint(
           'Moved between your own accounts - left out of spending and income. Cash counts as '
           'an account.',
+          info: true,
         ),
       _Kind.cardBill => _cardBillPanel(),
       _Kind.loan => _loanPanel(),
       _Kind.salary => const _Hint(
           'Starts the spending period here, and uses this amount rather than the one in Settings.',
+          info: true,
         ),
       _Kind.refund => _refundPanel(),
       _Kind.earmark => _earmarkPanel(),
@@ -1662,20 +1661,29 @@ class _EditSheetState extends State<_EditSheet> {
     ];
     if (parts.isEmpty) return null;
 
+    // A lone explainer is an info callout; anything with controls sits in
+    // an inner panel on sf2.
+    if (parts.length == 1 && parts.single is _Hint && (parts.single as _Hint).info) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: DsCallout(tone: DsTone.ac, title: (parts.single as _Hint).text),
+      );
+    }
+
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(top: 10),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: c.paper,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
+        color: c.sf2,
+        border: Border.all(color: c.ln),
+        borderRadius: BorderRadius.circular(Ds.rLg),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           for (var i = 0; i < parts.length; i++) ...[
-            if (i > 0) Divider(height: 20, color: c.line),
+            if (i > 0) Divider(height: 24, color: c.ln),
             parts[i],
           ],
         ],
@@ -1708,9 +1716,10 @@ class _EditSheetState extends State<_EditSheet> {
           children: [
             Expanded(
               child: Text(_peopleTitle,
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: c.ink)),
+                  style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx)),
             ),
-            Text('Include me', style: TextStyle(fontSize: 12, color: c.ink70)),
+            Text('Include me', style: TextStyle(fontSize: 13, color: c.tx2)),
+            const SizedBox(width: 6),
             Switch(
               value: _includeMe,
               onChanged: (on) => setState(() {
@@ -1722,39 +1731,30 @@ class _EditSheetState extends State<_EditSheet> {
             ),
           ],
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 8),
         Row(
           children: [
-            SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(value: false, label: Text('Equal')),
-                ButtonSegment(value: true, label: Text('Custom')),
-              ],
-              selected: {_custom},
-              showSelectedIcon: false,
-              onSelectionChanged: (selected) => _setCustom(selected.first),
-              style: const ButtonStyle(
-                visualDensity: VisualDensity.compact,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+            SizedBox(
+              width: 168,
+              child: DsSegmented<bool>(
+                segments: const [(false, 'Equal'), (true, 'Custom')],
+                selected: _custom,
+                onChanged: _setCustom,
+                height: 32,
               ),
             ),
             const Spacer(),
             TextButton.icon(
               onPressed: _saving ? null : _addPeople,
-              icon: const Icon(Icons.person_add_alt, size: 16),
+              icon: const DsIcon(DsIcons.plus, size: 16),
               label: const Text('Add people'),
             ),
           ],
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         if (_includeMe)
           _ShareRow(
-            leading: CircleAvatar(
-              radius: 13,
-              backgroundColor: c.brand,
-              child: Text('Me', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: c.surface)),
-            ),
+            leading: const _MeAvatar(),
             name: 'My share',
             amount: _custom && _people.isEmpty
                 ? _AmountBox(controller: _myShareManual, onChanged: () => setState(() {}))
@@ -1762,7 +1762,7 @@ class _EditSheetState extends State<_EditSheet> {
           ),
         for (var i = 0; i < _people.length; i++)
           _ShareRow(
-            leading: PersonAvatar(name: _people[i].name, radius: 13),
+            leading: PersonAvatar(name: _people[i].name, radius: 14),
             name: _people[i].name,
             onRemove: () => _removePerson(_people[i]),
             amount: _custom
@@ -1772,38 +1772,35 @@ class _EditSheetState extends State<_EditSheet> {
         if (_people.isEmpty)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Text(
+            child: _Hint(
               _includeMe
                   ? 'Add who it was shared with from your contacts - each gets a running balance. '
                       'Or just type your share.'
                   : 'Add who you lent it to - their balance goes up by their part.',
-              style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
             ),
           ),
         if (_custom && _people.isNotEmpty && !_includeMe && result.myShareMinor > 0)
           Text(
             "${formatMoney(result.myShareMinor)} isn't put down to anyone - it counts as yours.",
-            style: TextStyle(fontSize: 11.5, color: c.warn),
+            style: TextStyle(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w500, color: c.warn),
           ),
         if (result.isOver)
           Text(
             'The parts add up to ${formatMoney(result.overByMinor)} more than the total.',
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.debit),
+            style: TextStyle(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w600, color: c.crit),
           )
         else
           Padding(
             padding: const EdgeInsets.only(top: 2),
-            child: Text(_owedHint(result.myShareMinor),
-                style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted)),
+            child: _Hint(_owedHint(result.myShareMinor)),
           ),
-        const SizedBox(height: 10),
-        TextField(
-          controller: _groupLabel,
-          style: TextStyle(color: c.ink, fontSize: 13.5),
-          decoration: _inputDecoration(
-            context,
-            label: 'What for (optional)',
-            hint: _isDebit ? 'Goa trip' : 'Roommate reimbursement',
+        const SizedBox(height: 12),
+        DsField(
+          label: 'What for (optional)',
+          child: TextField(
+            controller: _groupLabel,
+            style: TextStyle(color: c.tx, fontSize: 15),
+            decoration: _inputDecoration(context, hint: _isDebit ? 'Goa trip' : 'Roommate reimbursement'),
           ),
         ),
       ],
@@ -1823,25 +1820,24 @@ class _EditSheetState extends State<_EditSheet> {
           children: [
             Expanded(
               child: Text(_peopleTitle,
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: c.ink)),
+                  style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx)),
             ),
             TextButton.icon(
               onPressed: _saving ? null : _addPeople,
-              icon: const Icon(Icons.person_add_alt, size: 16),
+              icon: const DsIcon(DsIcons.plus, size: 16),
               label: const Text('Add people'),
             ),
           ],
         ),
-        Text(
+        _Hint(
           _isDebit
               ? 'For bills already recorded - this squares your balance with them.'
               : 'Money back for bills already recorded - not counted as income.',
-          style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         for (final person in _people)
           _ShareRow(
-            leading: PersonAvatar(name: person.name, radius: 13),
+            leading: PersonAvatar(name: person.name, radius: 14),
             name: person.name,
             onRemove: () => _removePerson(person),
             amount: _AmountBox(
@@ -1861,14 +1857,19 @@ class _EditSheetState extends State<_EditSheet> {
             ),
           ),
         if (_people.isNotEmpty)
-          Text(
-            over
-                ? "${formatMoney(settled)} is more than the ${formatMoney(total)} that moved."
-                : '${formatMoney(settled)} of ${formatMoney(total)} put down to people',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: over ? c.debit : (settled == total ? c.credit : c.muted),
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              over
+                  ? "${formatMoney(settled)} is more than the ${formatMoney(total)} that moved."
+                  : '${formatMoney(settled)} of ${formatMoney(total)} put down to people',
+              style: TextStyle(
+                fontSize: 12,
+                height: 16 / 12,
+                fontWeight: FontWeight.w600,
+                color: over ? c.crit : (settled == total ? c.good : c.tx3),
+                fontFeatures: Ds.tabular,
+              ),
             ),
           ),
       ],
@@ -1883,25 +1884,30 @@ class _EditSheetState extends State<_EditSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        DropdownButtonFormField<String?>(
-          initialValue: _cardPaymentFor,
-          isExpanded: true,
-          hint: Text('Which card?', style: TextStyle(color: c.mutedLight)),
-          decoration: _inputDecoration(context, label: 'Bill paid for'),
-          dropdownColor: c.surface,
-          style: TextStyle(fontSize: 14, color: c.ink),
-          items: [
-            for (final card in _cardAccounts)
-              DropdownMenuItem<String?>(
-                value: card.id,
-                child: Text(card.label, overflow: TextOverflow.ellipsis),
-              ),
-            if (_cardPaymentFor != null && !_cardAccounts.any((card) => card.id == _cardPaymentFor))
-              DropdownMenuItem<String?>(value: _cardPaymentFor, child: const Text('A card no longer listed')),
-          ],
-          onChanged: (value) => setState(() => _cardPaymentFor = value),
+        DsField(
+          label: 'Bill paid for',
+          child: DropdownButtonFormField<String?>(
+            initialValue: _cardPaymentFor,
+            isExpanded: true,
+            icon: DsIcon(DsIcons.chevronDown, size: 20, color: c.tx2),
+            hint: Text('Which card?', style: TextStyle(color: c.tx3)),
+            decoration: _inputDecoration(context),
+            dropdownColor: c.sf,
+            borderRadius: BorderRadius.circular(Ds.rLg),
+            style: TextStyle(fontFamily: Ds.sans, fontSize: 15, color: c.tx, fontFeatures: Ds.tabular),
+            items: [
+              for (final card in _cardAccounts)
+                DropdownMenuItem<String?>(
+                  value: card.id,
+                  child: Text(card.label, overflow: TextOverflow.ellipsis),
+                ),
+              if (_cardPaymentFor != null && !_cardAccounts.any((card) => card.id == _cardPaymentFor))
+                DropdownMenuItem<String?>(value: _cardPaymentFor, child: const Text('A card no longer listed')),
+            ],
+            onChanged: (value) => setState(() => _cardPaymentFor = value),
+          ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         const _Hint('Counts as nothing - the purchases on that card were already counted.'),
       ],
     );
@@ -1926,14 +1932,16 @@ class _EditSheetState extends State<_EditSheet> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         for (final (loan, part) in rows) _loanRow(loan, part),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         Text(
           loanAssignedLine(assignedMinor: assigned, totalMinor: total),
           key: const ValueKey('loan-assigned-line'),
           style: TextStyle(
-            fontSize: 12.5,
+            fontSize: 13,
+            height: 18 / 13,
             fontWeight: FontWeight.w600,
-            color: assigned == total ? c.ink70 : c.warn,
+            color: assigned == total ? c.tx2 : c.warn,
+            fontFeatures: Ds.tabular,
           ),
         ),
         Wrap(
@@ -1942,13 +1950,13 @@ class _EditSheetState extends State<_EditSheet> {
             if (hasDues)
               TextButton(
                 onPressed: _fillLoanDues,
-                style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 36)),
                 child: const Text('Fill dues'),
               ),
             if (_pickedLoanParts.length > 1)
               TextButton(
                 onPressed: _splitLoansEvenly,
-                style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                style: TextButton.styleFrom(minimumSize: const Size(0, 36)),
                 child: const Text('Split evenly'),
               ),
           ],
@@ -1964,7 +1972,7 @@ class _EditSheetState extends State<_EditSheet> {
   Widget _loanRow(Loan loan, _LoanPart part) {
     final c = context.c;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
           Checkbox(
@@ -1976,6 +1984,7 @@ class _EditSheetState extends State<_EditSheet> {
               part.picked = value ?? false;
             }),
           ),
+          const SizedBox(width: 4),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1984,13 +1993,19 @@ class _EditSheetState extends State<_EditSheet> {
                   loan.label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: c.ink),
+                  style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx),
                 ),
                 Text(
                   loanTabShort(loan.balanceMinor),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 11.5, color: loan.balanceMinor < 0 ? c.warn : c.muted),
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 16 / 12,
+                    color: loan.balanceMinor < 0 ? c.warn : c.tx3,
+                    fontWeight: loan.balanceMinor < 0 ? FontWeight.w500 : FontWeight.w400,
+                    fontFeatures: Ds.tabular,
+                  ),
                 ),
               ],
             ),
@@ -2002,8 +2017,9 @@ class _EditSheetState extends State<_EditSheet> {
               key: ValueKey('loan-amount-${loan.id}'),
               controller: part.amount,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              style: kNum.copyWith(fontSize: 14, color: c.ink),
-              decoration: _inputDecoration(context, hint: '0.00').copyWith(prefixText: '₹ '),
+              textAlign: TextAlign.right,
+              style: kNum.copyWith(fontSize: 14, fontWeight: FontWeight.w600, color: c.tx),
+              decoration: _inputDecoration(context, hint: '0.00', compact: true).copyWith(prefixText: '₹ '),
               // Typing an amount means the payment went there.
               onChanged: (_) => setState(() {
                 _error = null;
@@ -2024,26 +2040,31 @@ class _EditSheetState extends State<_EditSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        DropdownButtonFormField<String?>(
-          initialValue: _commitments.any((x) => x.id == _commitmentId) ? _commitmentId : null,
-          isExpanded: true,
-          hint: Text('Which fixed cost?', style: TextStyle(color: c.mutedLight)),
-          decoration: _inputDecoration(context, label: 'Fixed monthly cost'),
-          dropdownColor: c.surface,
-          style: TextStyle(fontSize: 14, color: c.ink),
-          items: [
-            for (final commitment in _commitments)
-              DropdownMenuItem<String?>(
-                value: commitment.id,
-                child: Text(
-                  '${commitment.name} - ${formatMoney(commitment.amountMinor)} a month',
-                  overflow: TextOverflow.ellipsis,
+        DsField(
+          label: 'Fixed monthly cost',
+          child: DropdownButtonFormField<String?>(
+            initialValue: _commitments.any((x) => x.id == _commitmentId) ? _commitmentId : null,
+            isExpanded: true,
+            icon: DsIcon(DsIcons.chevronDown, size: 20, color: c.tx2),
+            hint: Text('Which fixed cost?', style: TextStyle(color: c.tx3)),
+            decoration: _inputDecoration(context),
+            dropdownColor: c.sf,
+            borderRadius: BorderRadius.circular(Ds.rLg),
+            style: TextStyle(fontFamily: Ds.sans, fontSize: 15, color: c.tx, fontFeatures: Ds.tabular),
+            items: [
+              for (final commitment in _commitments)
+                DropdownMenuItem<String?>(
+                  value: commitment.id,
+                  child: Text(
+                    '${commitment.name} - ${formatMoney(commitment.amountMinor)} a month',
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-              ),
-          ],
-          onChanged: _pickCommitment,
+            ],
+            onChanged: _pickCommitment,
+          ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         const _Hint('Still counts as spending, against your monthly budget like everything else. Sending '
             'less than usual is fine - the dashboard says what went short rather than calling it unpaid.'),
       ],
@@ -2065,12 +2086,18 @@ class _EditSheetState extends State<_EditSheet> {
                 ? 'Not linked to a purchase yet. Linked money stops counting as income.'
                 : '${formatMoney(linked)} linked to ${t.refundOf.length} '
                     '${t.refundOf.length == 1 ? 'purchase' : 'purchases'}.',
-            style: TextStyle(fontSize: 12, height: 1.4, color: c.ink70),
+            style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2, fontFeatures: Ds.tabular),
           ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 12),
         OutlinedButton(
           onPressed: _saving ? null : () => _openLinked(() => showRefundSheet(context, refund: t)),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size(0, 36),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Ds.rMd)),
+            textStyle: const TextStyle(fontFamily: Ds.sans, fontSize: 13, fontWeight: FontWeight.w600),
+          ),
           child: Text(t.refundOf.isEmpty ? 'Pick purchases' : 'Change'),
         ),
       ],
@@ -2082,7 +2109,7 @@ class _EditSheetState extends State<_EditSheet> {
     final t = widget.transaction;
     const explainer = 'Not counted as income. When you buy the thing, link the purchase to this money.';
     // Only once saved as earmarked is there anything to link or release.
-    if (t == null || !t.isEarmarked || _isDebit) return const _Hint(explainer);
+    if (t == null || !t.isEarmarked || _isDebit) return const _Hint(explainer, info: true);
 
     final spent = t.refundOf.fold<int>(0, (sum, a) => sum + a.amountMinor);
     final left = (t.amountMinor - spent).clamp(0, t.amountMinor);
@@ -2090,33 +2117,48 @@ class _EditSheetState extends State<_EditSheet> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.hourglass_bottom, size: 15, color: c.brandDark),
-            const SizedBox(width: 6),
+            const DsIconTile(DsIcons.piggyBank, tone: DsTone.ac, size: 36),
+            const SizedBox(width: 12),
             Expanded(
               child: Text(
                 spent == 0
                     ? 'Waiting for the purchase - ${formatMoney(t.amountMinor)} set aside.'
                     : '${formatMoney(spent)} spent on purchases, ${formatMoney(left)} still set aside.',
-                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: c.ink),
+                style: TextStyle(
+                  fontSize: 14,
+                  height: 20 / 14,
+                  fontWeight: FontWeight.w500,
+                  color: c.tx,
+                  fontFeatures: Ds.tabular,
+                ),
               ),
             ),
           ],
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 8),
         const _Hint(explainer),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             OutlinedButton.icon(
               onPressed: _saving ? null : () => _openLinked(() => showRefundSheet(context, refund: t)),
-              icon: const Icon(Icons.link, size: 16),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(0, 36),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Ds.rMd)),
+                textStyle: const TextStyle(fontFamily: Ds.sans, fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+              icon: const DsIcon(DsIcons.link, size: 16),
               label: const Text('What did this pay for?'),
             ),
             TextButton(
               onPressed: _saving ? null : _releaseEarmark,
+              style: TextButton.styleFrom(minimumSize: const Size(0, 36)),
               child: const Text('No longer needed - count as income'),
             ),
           ],
@@ -2136,6 +2178,22 @@ class _EditSheetState extends State<_EditSheet> {
     });
   }
 
+  SwitchListTile _switchRow({
+    required bool value,
+    required ValueChanged<bool> onChanged,
+    required String title,
+    required String subtitle,
+  }) {
+    final c = context.c;
+    return SwitchListTile(
+      value: value,
+      onChanged: onChanged,
+      contentPadding: EdgeInsets.zero,
+      title: Text(title, style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx)),
+      subtitle: Text(subtitle, style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3)),
+    );
+  }
+
   /// The rare things, out of the way until asked for.
   Widget _moreSection() {
     final c = context.c;
@@ -2144,81 +2202,68 @@ class _EditSheetState extends State<_EditSheet> {
     final items = <Widget>[
       if (t?.tripId == null && _pickedTrip == null && _isDebit)
         _MoreTile(
-          icon: Icons.luggage_outlined,
+          icon: DsIcons.briefcase,
           title: 'Add to a trip',
           subtitle: 'Tickets or a booking paid before it started.',
           onTap: _saving ? null : _pickTrip,
         ),
       if (_pickedTrip != null && _isDebit)
-        SwitchListTile(
+        _switchRow(
           value: true,
           // Off forgets the pick, and "Add to a trip" is offered again.
           onChanged: (_) => setState(() {
             _pickedTrip = null;
             _tripJustMine = false;
           }),
-          contentPadding: EdgeInsets.zero,
-          dense: true,
-          title: Text('On ${_pickedTrip!.name}', style: TextStyle(fontSize: 13, color: c.ink)),
-          subtitle: Text(
-            'Goes onto the trip when you save, and stays on whatever its date.',
-            style: TextStyle(fontSize: 11.5, color: c.muted),
-          ),
+          title: 'On ${_pickedTrip!.name}',
+          subtitle: 'Goes onto the trip when you save, and stays on whatever its date.',
         ),
       if (t?.tripName != null)
-        SwitchListTile(
+        _switchRow(
           value: _onTrip,
           onChanged: (on) => setState(() => _onTrip = on),
-          contentPadding: EdgeInsets.zero,
-          dense: true,
-          title: Text('On ${t!.tripName}', style: TextStyle(fontSize: 13, color: c.ink)),
-          subtitle: Text(
-            _onTrip
-                ? 'Switch off to take it off the trip. It stays off, even when the trip re-scans.'
-                : 'Comes off the trip when you save, and stays off.',
-            style: TextStyle(fontSize: 11.5, color: c.muted),
-          ),
+          title: 'On ${t!.tripName}',
+          subtitle: _onTrip
+              ? 'Switch off to take it off the trip. It stays off, even when the trip re-scans.'
+              : 'Comes off the trip when you save, and stays off.',
         ),
       if (t != null && _isDebit && ((t.tripName != null && _onTrip) || _pickedTrip != null))
-        SwitchListTile(
+        _switchRow(
           value: _tripJustMine,
           onChanged: (on) => setState(() => _tripJustMine = on),
-          contentPadding: EdgeInsets.zero,
-          dense: true,
-          title: Text('Just mine on $tripName', style: TextStyle(fontSize: 13, color: c.ink)),
-          subtitle: Text('Leave it out of who owes whom on the trip.',
-              style: TextStyle(fontSize: 11.5, color: c.muted)),
+          title: 'Just mine on $tripName',
+          subtitle: 'Leave it out of who owes whom on the trip.',
         ),
       if (t != null && _isDebit && t.type == 'DEBIT' && t.emiPlanId == null)
         _MoreTile(
-          icon: Icons.calendar_month_outlined,
+          icon: DsIcons.calendar,
           title: 'Convert to EMI',
           subtitle: 'Paid in monthly instalments instead.',
           onTap: _saving ? null : () => _openLinked(() => showEmiSheet(context, transaction: t)),
         ),
       if (t != null && t.emiPlanId != null)
         _MoreTile(
-          icon: Icons.calendar_month_outlined,
+          icon: DsIcons.calendar,
           title: t.emiRole == 'PARENT' ? 'On an EMI plan' : 'An EMI instalment',
           subtitle: 'Managed from the EMI plan itself.',
         ),
       if (t != null && (t.rawText != null || t.sources.isNotEmpty))
         _MoreTile(
-          icon: Icons.sms_outlined,
+          icon: DsIcons.message,
           title: 'See the original message',
           subtitle: 'What the bank actually said.',
           onTap: () => showRawMessageSheet(context, t),
         ),
       if (t != null && t.wasReportedTwice)
         _MoreTile(
-          icon: Icons.call_split,
+          icon: DsIcons.undo,
           title: 'Split back into ${t.sources.length} rows',
           subtitle: 'These messages were merged into one - undo that.',
           onTap: _saving ? null : _unmerge,
         ),
       if (t != null && !t.wasReportedTwice)
         const _MoreTile(
-          icon: Icons.merge_type,
+          icon: DsIcons.link,
           title: 'Merge with another row',
           subtitle: 'Long-press it in the transactions list, then pick the others.',
         ),
@@ -2226,22 +2271,37 @@ class _EditSheetState extends State<_EditSheet> {
     if (items.isEmpty) return const SizedBox(height: 4);
 
     return Padding(
-      padding: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.only(top: 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          InkWell(
-            onTap: () => setState(() => _showMore = !_showMore),
-            borderRadius: BorderRadius.circular(T.rSm),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Row(
-                children: [
-                  Text('More', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: c.muted)),
-                  Icon(_showMore ? Icons.expand_less : Icons.expand_more, size: 18, color: c.muted),
-                  const SizedBox(width: 6),
-                  Expanded(child: Divider(color: c.line)),
-                ],
+          Semantics(
+            button: true,
+            expanded: _showMore,
+            child: InkWell(
+              onTap: () => setState(() => _showMore = !_showMore),
+              borderRadius: BorderRadius.circular(Ds.rMd),
+              child: Container(
+                constraints: const BoxConstraints(minHeight: 40),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    Text(
+                      'More',
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 16 / 12,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.24,
+                        color: c.tx2,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    DsIcon(_showMore ? DsIcons.chevronUp : DsIcons.chevronDown, size: 16, color: c.tx2),
+                    const SizedBox(width: 8),
+                    Expanded(child: Divider(color: c.ln)),
+                  ],
+                ),
               ),
             ),
           ),
@@ -2252,41 +2312,31 @@ class _EditSheetState extends State<_EditSheet> {
   }
 }
 
-InputDecoration _inputDecoration(BuildContext context, {String? label, String? hint}) {
-  final c = context.c;
+/// Inputs take their look from the theme (52 h, radius 10, `ln2`, 2 px
+/// `ac` on focus); labels sit above them in a [DsField].
+InputDecoration _inputDecoration(BuildContext context, {String? hint, bool compact = false}) {
   return InputDecoration(
-    labelText: label,
     hintText: hint,
-    labelStyle: TextStyle(fontSize: 13, color: c.muted),
-    floatingLabelStyle: TextStyle(fontSize: 13, color: c.brandDark, fontWeight: FontWeight.w600),
-    hintStyle: TextStyle(color: c.mutedLight),
-    isDense: true,
-    filled: true,
-    fillColor: c.surface,
-    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(T.rSm),
-      borderSide: BorderSide(color: c.lineStrong),
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(T.rSm),
-      borderSide: BorderSide(color: c.brand),
-    ),
+    isDense: compact,
+    contentPadding: compact ? const EdgeInsets.symmetric(horizontal: 12, vertical: 12) : null,
   );
 }
 
+/// An explainer line: 12/17 `tx3`. [info] ones become an info callout
+/// when they are all a kind's panel has to say.
 class _Hint extends StatelessWidget {
   final String text;
-  const _Hint(this.text);
+  final bool info;
+  const _Hint(this.text, {this.info = false});
 
   @override
   Widget build(BuildContext context) =>
-      Text(text, style: TextStyle(fontSize: 11.5, height: 1.4, color: context.c.muted));
+      Text(text, style: TextStyle(fontSize: 12, height: 17 / 12, color: context.c.tx3));
 }
 
-/// Date or time, as a compact tappable field.
+/// Date or time, as a select-styled field: 52 h, radius 10, `ln2` border.
 class _PickerButton extends StatelessWidget {
-  final IconData icon;
+  final Object icon;
   final String label;
   final VoidCallback onTap;
 
@@ -2295,27 +2345,51 @@ class _PickerButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(T.rSm),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        decoration: BoxDecoration(
-          color: c.surface,
-          border: Border.all(color: c.lineStrong),
-          borderRadius: BorderRadius.circular(T.rSm),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 16, color: c.muted),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(label,
-                  overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13.5, color: c.ink)),
-            ),
-          ],
+    return Material(
+      color: c.sf,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(Ds.rMd),
+        side: BorderSide(color: c.ln2),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          height: 52,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Row(
+            children: [
+              dsIconOf(icon, size: 18, color: c.tx3),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 15, color: c.tx, fontFeatures: Ds.tabular),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
+    );
+  }
+}
+
+/// "Me" in the split: the user's own avatar, in the accent tint.
+class _MeAvatar extends StatelessWidget {
+  const _MeAvatar();
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Container(
+      width: 28,
+      height: 28,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(color: c.acSoft, shape: BoxShape.circle),
+      child: Text('Me', style: TextStyle(fontSize: 11, height: 1, fontWeight: FontWeight.w600, color: c.ac)),
     );
   }
 }
@@ -2332,20 +2406,22 @@ class _ShareRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+    return Container(
+      constraints: const BoxConstraints(minHeight: 48),
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: c.ln))),
       child: Row(
         children: [
           leading,
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Expanded(
             child: Text(name,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: c.ink)),
+                style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx)),
           ),
           SizedBox(width: 112, child: Align(alignment: Alignment.centerRight, child: amount)),
           SizedBox(
-            width: 32,
+            width: 36,
             child: onRemove == null
                 ? null
                 : IconButton(
@@ -2353,7 +2429,7 @@ class _ShareRow extends StatelessWidget {
                     tooltip: 'Take $name off',
                     padding: EdgeInsets.zero,
                     visualDensity: VisualDensity.compact,
-                    icon: Icon(Icons.close, size: 16, color: c.muted),
+                    icon: DsIcon(DsIcons.x, size: 16, color: c.tx3),
                   ),
           ),
         ],
@@ -2371,9 +2447,9 @@ class _AmountText extends StatelessWidget {
   Widget build(BuildContext context) => Text(
         formatMoney(minor),
         style: kNum.copyWith(
-          fontSize: 13.5,
-          fontWeight: strong ? FontWeight.w800 : FontWeight.w600,
-          color: strong ? context.c.brandDark : context.c.ink,
+          fontSize: 14,
+          fontWeight: strong ? FontWeight.w600 : FontWeight.w500,
+          color: strong ? context.c.tx : context.c.tx2,
         ),
       );
 }
@@ -2391,18 +2467,20 @@ class _AmountBox extends StatelessWidget {
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
       textAlign: TextAlign.right,
       onChanged: (_) => onChanged(),
-      style: kNum.copyWith(fontSize: 13.5, fontWeight: FontWeight.w700, color: c.ink),
-      decoration: _inputDecoration(context, hint: '0.00').copyWith(
+      style: kNum.copyWith(fontSize: 14, fontWeight: FontWeight.w600, color: c.tx),
+      decoration: _inputDecoration(context, hint: '0.00', compact: true).copyWith(
         prefixText: '₹ ',
-        prefixStyle: TextStyle(color: c.muted, fontWeight: FontWeight.w600),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        prefixStyle: TextStyle(fontSize: 14, color: c.tx3, fontWeight: FontWeight.w500),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       ),
     );
   }
 }
 
+/// A "More" link row: a 20 px icon, a 14 title over a 12 sub-line, and a
+/// chevron when it goes somewhere.
 class _MoreTile extends StatelessWidget {
-  final IconData icon;
+  final Object icon;
   final String title;
   final String subtitle;
   final VoidCallback? onTap;
@@ -2412,15 +2490,33 @@ class _MoreTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    return ListTile(
+    return InkWell(
       onTap: onTap,
-      contentPadding: EdgeInsets.zero,
-      dense: true,
-      visualDensity: VisualDensity.compact,
-      leading: Icon(icon, size: 19, color: onTap == null ? c.mutedLight : c.ink70),
-      title: Text(title, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.ink)),
-      subtitle: Text(subtitle, style: TextStyle(fontSize: 11.5, color: c.muted)),
-      trailing: onTap == null ? null : Icon(Icons.chevron_right, size: 18, color: c.mutedLight),
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 56),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(border: Border(bottom: BorderSide(color: c.ln))),
+        child: Row(
+          children: [
+            dsIconOf(icon, size: 20, color: onTap == null ? c.ln2 : c.tx2),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx)),
+                  const SizedBox(height: 2),
+                  Text(subtitle, style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3)),
+                ],
+              ),
+            ),
+            if (onTap != null) ...[
+              const SizedBox(width: 8),
+              DsIcon(DsIcons.chevronRight, size: 18, color: c.tx3),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }
@@ -2442,41 +2538,44 @@ class _PresetChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
 
-    return GestureDetector(
-      onTap: onTap,
-      // Removing is deliberately the long press: the tap has to stay the
-      // thing you do fifty times, not the one you undo.
-      onLongPress: onRemove,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: isCurrent ? c.brand50 : c.surface,
-          border: Border.all(color: isCurrent ? c.brand : c.lineStrong),
-          borderRadius: BorderRadius.circular(100),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (preset.category?.color != null) ...[
-              Container(
-                width: 7,
-                height: 7,
-                decoration: BoxDecoration(
-                  color: parseHexColor(preset.category!.color),
-                  borderRadius: BorderRadius.circular(2),
+    // The quick-pick chip: 32 h pill, ink-filled when it is what the form
+    // already says.
+    return Material(
+      color: isCurrent ? c.tx : c.sf,
+      shape: StadiumBorder(side: BorderSide(color: isCurrent ? c.tx : c.ln2)),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        // Removing is deliberately the long press: the tap has to stay the
+        // thing you do fifty times, not the one you undo.
+        onLongPress: onRemove,
+        child: Container(
+          height: 32,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (preset.category?.color != null) ...[
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: parseHexColor(preset.category!.color),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 6),
+              ],
+              Text(
+                preset.merchant,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: isCurrent ? c.bg : c.tx,
                 ),
               ),
-              const SizedBox(width: 6),
             ],
-            Text(
-              preset.merchant,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: isCurrent ? c.brandDark : c.ink70,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

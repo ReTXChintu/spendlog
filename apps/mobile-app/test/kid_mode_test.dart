@@ -91,6 +91,7 @@ void main() {
 
     testWidgets('will not save without an amount', (tester) async {
       await tester.pumpWidget(_sheet());
+      await tester.ensureVisible(find.widgetWithText(FilledButton, 'Add'));
       await tester.tap(find.widgetWithText(FilledButton, 'Add'));
       await tester.pump();
       expect(find.text('Enter how much it was.'), findsOneWidget);

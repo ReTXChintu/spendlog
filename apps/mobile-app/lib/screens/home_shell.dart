@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/api_client.dart';
 import '../services/push_service.dart';
 import '../services/sms_service.dart';
-import '../theme.dart';
+import '../widgets/ds/ds.dart';
 import 'ask_screen.dart';
 import 'dashboard_screen.dart';
 import 'home_screen.dart';
@@ -109,18 +109,19 @@ class _HomeShellState extends State<HomeShell> {
       SettingsScreen(key: _settings),
     ];
 
+    final c = context.c;
     return Scaffold(
       appBar: AppBar(
         title: Row(
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(7),
-              child: Image.asset('assets/app_icon.png', width: 26, height: 26),
-            ),
-            const SizedBox(width: 10),
-            Text(
-              _titles[_index],
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: context.c.ink),
+            const DsLogoMark(size: 28),
+            const SizedBox(width: 12),
+            Flexible(
+              child: Text(
+                _titles[_index],
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 22, height: 28 / 22, fontWeight: FontWeight.w600, color: c.tx),
+              ),
             ),
           ],
         ),
@@ -129,52 +130,40 @@ class _HomeShellState extends State<HomeShell> {
             IconButton(
               tooltip: 'IPOs',
               onPressed: _openIpos,
-              icon: Icon(Icons.show_chart, color: context.c.brand),
+              icon: DsIcon(DsIcons.trendingUp, size: 22, color: c.tx2),
             ),
           if (_index == 0)
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: TextButton.icon(
                 onPressed: _openAsk,
-                icon: Icon(Icons.auto_awesome_outlined, size: 18, color: context.c.brand),
+                icon: DsIcon(DsIcons.sparkles, size: 18, color: c.ac),
                 label: Text(
                   'Ask AI',
-                  style: TextStyle(fontWeight: FontWeight.w700, color: context.c.brandDark),
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: c.ac),
                 ),
               ),
             ),
         ],
-        shape: Border(bottom: BorderSide(color: context.c.line)),
+        shape: Border(bottom: BorderSide(color: c.ln)),
       ),
       body: IndexedStack(index: _index, children: screens),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) {
-          setState(() => _index = i);
-          if (i == 0) _dashboard.currentState?.load();
-        },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.receipt_long_outlined),
-            selectedIcon: Icon(Icons.receipt_long),
-            label: 'Transactions',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.luggage_outlined),
-            selectedIcon: Icon(Icons.luggage),
-            label: 'Trips',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings),
-            label: 'Settings',
-          ),
-        ],
+      bottomNavigationBar: DecoratedBox(
+        // The bar sits on the surface with a hairline above it (§6.3).
+        decoration: BoxDecoration(border: Border(top: BorderSide(color: c.ln))),
+        child: NavigationBar(
+          selectedIndex: _index,
+          onDestinationSelected: (i) {
+            setState(() => _index = i);
+            if (i == 0) _dashboard.currentState?.load();
+          },
+          destinations: const [
+            NavigationDestination(icon: DsIcon(DsIcons.home), label: 'Home'),
+            NavigationDestination(icon: DsIcon(DsIcons.list), label: 'Transactions'),
+            NavigationDestination(icon: DsIcon(DsIcons.briefcase), label: 'Trips'),
+            NavigationDestination(icon: DsIcon(DsIcons.sliders), label: 'Settings'),
+          ],
+        ),
       ),
     );
   }

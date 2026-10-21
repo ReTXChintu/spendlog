@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../../models/models.dart';
 import '../../screens/ask_screen.dart' show SimpleMarkdown;
 import '../../services/api_client.dart';
-import '../../theme.dart';
+import '../ds/ds.dart';
 import '../../utils/format.dart';
 
 /// When an AI answer was written, said the way a person would.
@@ -17,37 +17,38 @@ class AiCardFrame extends StatelessWidget {
   const AiCardFrame({super.key, required this.title, required this.icon, required this.child, this.trailing});
 
   final String title;
-  final IconData icon;
+
+  /// A [DsGlyph] or a Material [IconData].
+  final Object icon;
   final Widget child;
   final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    return Container(
+    return SizedBox(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      decoration: BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 17, color: c.brand),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(title, style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: c.ink)),
-              ),
-              if (trailing != null) trailing!,
-            ],
-          ),
-          const SizedBox(height: 10),
-          child,
-        ],
+      child: DsCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                DsIconTile(icon, tone: DsTone.ac, size: 36),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx),
+                  ),
+                ),
+                if (trailing != null) trailing!,
+              ],
+            ),
+            const SizedBox(height: 12),
+            child,
+          ],
+        ),
       ),
     );
   }
@@ -68,13 +69,13 @@ class AiNeedsKey extends StatelessWidget {
       children: [
         Text(
           'Add your Gemini key in Settings and SpendLog can $what.',
-          style: TextStyle(fontSize: 12.8, height: 1.45, color: c.muted),
+          style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx2),
         ),
         if (onOpenSettings != null) ...[
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           OutlinedButton.icon(
             onPressed: onOpenSettings,
-            icon: const Icon(Icons.key_outlined, size: 16),
+            icon: const DsIcon(DsIcons.lock, size: 18),
             label: const Text('Open Settings'),
           ),
         ],
@@ -96,7 +97,7 @@ class AiWaiting extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         children: [
-          SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: c.brand)),
+          const DsSpinner(size: 18),
           const SizedBox(width: 12),
           Expanded(
             child: AnimatedSwitcher(
@@ -104,7 +105,7 @@ class AiWaiting extends StatelessWidget {
               child: Text(
                 text,
                 key: ValueKey(text),
-                style: TextStyle(fontSize: 12.8, height: 1.45, color: c.muted),
+                style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
               ),
             ),
           ),
@@ -195,14 +196,14 @@ class _AiInsightsCardState extends State<AiInsightsCard> {
       body = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(_error!, style: TextStyle(fontSize: 12.8, color: c.muted)),
+          Text(_error!, style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3)),
           TextButton(onPressed: _load, child: const Text('Try again')),
         ],
       );
     } else if (insight == null) {
       body = Text(
         'Nothing written yet. Ask for one below.',
-        style: TextStyle(fontSize: 12.8, color: c.muted),
+        style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
       );
     } else {
       body = Column(
@@ -212,24 +213,24 @@ class _AiInsightsCardState extends State<AiInsightsCard> {
           const SizedBox(height: 8),
           Text(
             ['Made ${madeWhen(insight.updatedAt)}', if (insight.model != null) insight.model!].join(' · '),
-            style: TextStyle(fontSize: 11, color: c.mutedLight),
+            style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
           ),
           if (_error != null)
-            Text(_error!, style: TextStyle(fontSize: 11.5, color: c.debit)),
+            Text(_error!, style: TextStyle(fontSize: 12, height: 16 / 12, color: c.crit)),
         ],
       );
     }
 
     return AiCardFrame(
       title: 'AI insights',
-      icon: Icons.auto_awesome_outlined,
+      icon: DsIcons.sparkles,
       trailing: _loading || (_noKey && insight == null)
           ? null
           : TextButton.icon(
               onPressed: _refreshing ? null : () => _load(fresh: true),
               icon: _refreshing
-                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.refresh, size: 16),
+                  ? const DsSpinner(size: 14)
+                  : const DsIcon(DsIcons.refresh, size: 16),
               label: Text(_refreshing ? 'Writing…' : 'New insight'),
             ),
       child: _refreshing

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import '../widgets/ds/ds.dart';
 import '../utils/format.dart';
 import '../widgets/state_block.dart';
 
@@ -130,24 +130,24 @@ class StartFreshScreenState extends State<StartFreshScreen> {
   Widget build(BuildContext context) {
     final c = context.c;
     return Scaffold(
-      backgroundColor: c.paper,
-      appBar: AppBar(
-        title: Text('Start fresh from today', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: c.ink)),
-        shape: Border(bottom: BorderSide(color: c.line)),
-      ),
+      backgroundColor: c.bg,
+      appBar: AppBar(title: const Text('Start fresh from today')),
       body: _body(),
       bottomNavigationBar: _accounts == null || _accounts!.isEmpty
           ? null
-          : SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                child: FilledButton(
-                  onPressed: _filled.isEmpty || _saving ? null : _confirm,
-                  child: Text(_saving
-                      ? 'Starting fresh…'
-                      : _filled.isEmpty
-                          ? 'Fill in at least one account'
-                          : 'Start ${_filled.length == 1 ? '1 account' : '${_filled.length} accounts'} fresh'),
+          : DecoratedBox(
+              decoration: BoxDecoration(color: c.sf, border: Border(top: BorderSide(color: c.ln))),
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                  child: FilledButton(
+                    onPressed: _filled.isEmpty || _saving ? null : _confirm,
+                    child: Text(_saving
+                        ? 'Starting fresh…'
+                        : _filled.isEmpty
+                            ? 'Fill in at least one account'
+                            : 'Start ${_filled.length == 1 ? '1 account' : '${_filled.length} accounts'} fresh'),
+                  ),
                 ),
               ),
             ),
@@ -155,7 +155,6 @@ class StartFreshScreenState extends State<StartFreshScreen> {
   }
 
   Widget _body() {
-    final c = context.c;
     final accounts = _accounts;
     if (accounts == null) {
       if (_error != null) {
@@ -168,7 +167,10 @@ class StartFreshScreenState extends State<StartFreshScreen> {
           onAction: _load,
         );
       }
-      return const Center(child: CircularProgressIndicator());
+      return ListView(
+        padding: kPagePad,
+        children: const [DsSkeletonRows(count: 4, caption: 'Loading your accounts…')],
+      );
     }
     if (accounts.isEmpty) {
       return const StateBlock(
@@ -179,33 +181,18 @@ class StartFreshScreenState extends State<StartFreshScreen> {
     }
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+      padding: kPagePad,
       children: [
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: c.brand50,
-            borderRadius: BorderRadius.circular(T.rMd),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(Icons.restart_alt, size: 18, color: c.brandDark),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Your transactions and spending stay as they are. Only the balances start again from these '
-                  'figures. Leave an account empty to keep it as it is.',
-                  style: TextStyle(fontSize: 12.8, height: 1.45, color: c.ink70),
-                ),
-              ),
-            ],
-          ),
+        const DsCallout(
+          tone: DsTone.ac,
+          icon: DsIcons.refresh,
+          title: 'Your transactions and spending stay as they are. Only the balances start again from these '
+              'figures. Leave an account empty to keep it as it is.',
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 16),
         for (final account in accounts) ...[
           _row(account),
-          const SizedBox(height: 10),
+          const SizedBox(height: kCardGap),
         ],
       ],
     );
@@ -217,56 +204,54 @@ class StartFreshScreenState extends State<StartFreshScreen> {
     final expected = account.expectedMinor;
     final controller = _inputs[account.accountId]!;
 
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
+    return DsCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(
-                account.isSavings
-                    ? Icons.lock_outline
-                    : (account.isCash ? Icons.payments_outlined : Icons.account_balance_outlined),
-                size: 17,
-                color: c.muted,
+              DsIconTile(
+                account.isSavings ? DsIcons.lock : (account.isCash ? DsIcons.banknote : DsIcons.bank),
+                size: 36,
+                tone: account.isSavings ? DsTone.neutral : DsTone.ac,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   account.isCash ? 'Cash' : account.label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: c.ink),
+                  style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 10),
           if (masked)
             InkWell(
               key: ValueKey('reveal-${account.accountId}'),
               onTap: () => setState(() => _revealed.add(account.accountId)),
-              borderRadius: BorderRadius.circular(T.rSm),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 10),
+              borderRadius: BorderRadius.circular(Ds.rMd),
+              child: Container(
+                constraints: const BoxConstraints(minHeight: 48),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(color: c.sf2, borderRadius: BorderRadius.circular(Ds.rMd)),
                 child: Row(
                   children: [
-                    Text('₹ • • • •', style: kNum.copyWith(fontSize: 16, fontWeight: FontWeight.w800, color: c.muted)),
+                    Text(
+                      '₹ • • • •',
+                      style: kNum.copyWith(fontSize: 17, fontWeight: FontWeight.w600, color: c.tx3),
+                    ),
                     const SizedBox(width: 10),
-                    Flexible(
+                    Expanded(
                       child: Text(
                         'Savings · tap to show',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 12, color: c.mutedLight),
+                        style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
                       ),
                     ),
+                    DsIcon(DsIcons.eye, size: 20, color: c.tx2),
                   ],
                 ),
               ),
@@ -277,21 +262,19 @@ class StartFreshScreenState extends State<StartFreshScreen> {
                   ? 'Not tracked yet'
                   : 'SpendLog shows ${formatMoney(expected)}'
                       '${account.provisionalMinor > 0 ? ' (incl. ${formatMoney(account.provisionalMinor)} not yet explained)' : ''}',
-              style: TextStyle(fontSize: 12, height: 1.4, color: c.muted),
+              style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3, fontFeatures: Ds.tabular),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             TextField(
               key: ValueKey('input-${account.accountId}'),
               controller: controller,
               keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
               inputFormatters: [_signedAmount],
-              style: kNum.copyWith(fontSize: 16, fontWeight: FontWeight.w700, color: c.ink),
+              style: kNum.copyWith(fontSize: 17, fontWeight: FontWeight.w600, color: c.tx),
               decoration: InputDecoration(
                 labelText: account.isCash ? 'What your wallet holds now' : 'What your bank shows now',
                 helperText: account.prefillMinor != null ? "From the bank's message today" : null,
                 prefixText: '₹ ',
-                isDense: true,
-                border: const OutlineInputBorder(),
               ),
               onChanged: (_) => setState(() {}),
             ),

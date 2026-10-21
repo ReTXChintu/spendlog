@@ -10,16 +10,20 @@ class DonutSegment {
   final String label;
 }
 
-/// A ring of shares with a figure in the middle. Segments are separated by
-/// a thin gap in the surface colour so neighbouring colours never blur
-/// together, in either theme.
+/// A ring of shares with a figure in the middle (§7.13).
+///
+/// Proportions follow the design's 168 box: radius 52 and a 16 px stroke,
+/// scaled to [size]. It starts at 12 o'clock with ~2 px gaps between
+/// segments, left unpainted so the card shows through in either theme.
+/// The centre reads like the spec: the small `tx3` label ([centerBottom],
+/// e.g. "spent") over the 17/600 figure ([centerTop]).
 class DonutChart extends StatelessWidget {
   const DonutChart({
     super.key,
     required this.segments,
     required this.centerTop,
     required this.centerBottom,
-    this.size = 140,
+    this.size = 168,
   });
 
   final List<DonutSegment> segments;
@@ -30,24 +34,34 @@ class DonutChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final scale = size / 168;
+    // The hole is the ring's inner diameter, less a little air.
+    final hole = (52 - 8) * 2 * scale - 8;
     return SizedBox(
       width: size,
       height: size,
       child: CustomPaint(
-        painter: _DonutPainter(segments: segments, track: c.track, gap: c.surface),
+        painter: _DonutPainter(segments: segments, track: c.sunk),
         child: Center(
-          child: Padding(
-            padding: EdgeInsets.all(size * 0.2),
+          child: SizedBox(
+            width: math.max(hole, 24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                Text(
+                  centerBottom,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11, height: 14 / 11, color: c.tx3),
+                ),
                 FittedBox(
+                  fit: BoxFit.scaleDown,
                   child: Text(
                     centerTop,
-                    style: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w800, color: c.ink),
+                    maxLines: 1,
+                    style: kNum.copyWith(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx),
                   ),
                 ),
-                Text(centerBottom, style: TextStyle(fontSize: 10.5, color: c.muted)),
               ],
             ),
           ),
@@ -58,30 +72,32 @@ class DonutChart extends StatelessWidget {
 }
 
 class _DonutPainter extends CustomPainter {
-  _DonutPainter({required this.segments, required this.track, required this.gap});
+  _DonutPainter({required this.segments, required this.track});
 
   final List<DonutSegment> segments;
   final Color track;
-  final Color gap;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final stroke = size.shortestSide * 0.15;
-    final rect = Rect.fromCircle(
-      center: size.center(Offset.zero),
-      radius: size.shortestSide / 2 - stroke / 2,
-    );
+    final scale = size.shortestSide / 168;
+    final stroke = 16 * scale;
+    final radius = 52 * scale;
+    final rect = Rect.fromCircle(center: size.center(Offset.zero), radius: radius);
     final base = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = stroke;
-
-    canvas.drawArc(rect, 0, math.pi * 2, false, base..color = track);
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.butt;
 
     final total = segments.fold<int>(0, (sum, s) => sum + s.value);
-    if (total <= 0) return;
+    if (total <= 0) {
+      canvas.drawArc(rect, 0, math.pi * 2, false, base..color = track);
+      return;
+    }
 
     var start = -math.pi / 2;
-    final separator = segments.length > 1 ? 0.025 : 0.0;
+    final live = segments.where((s) => s.value > 0).length;
+    // About 2 px of arc at the ring's centre line.
+    final separator = live > 1 ? 2 / radius : 0.0;
     for (final segment in segments) {
       final sweep = segment.value / total * math.pi * 2;
       if (sweep <= 0) continue;

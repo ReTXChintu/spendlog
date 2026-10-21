@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/fund_models.dart';
-import '../../theme.dart';
+import '../ds/ds.dart';
 import 'fund_text.dart';
 import 'fund_widgets.dart';
 
@@ -26,9 +26,9 @@ class GoalCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     final (tone, barColour) = switch (goal.status) {
-      GoalStatus.done => (TagTone.good, c.credit),
-      GoalStatus.behind => (TagTone.warn, c.warn),
-      _ => (TagTone.brand, c.brand),
+      GoalStatus.done => (TagTone.good, c.good),
+      GoalStatus.behind => (TagTone.warn, c.warnFill),
+      _ => (TagTone.good, c.ac),
     };
     final linked = [
       for (final holding in holdings)
@@ -51,95 +51,97 @@ class GoalCard extends StatelessWidget {
                   goal.name,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800, color: c.ink),
+                  style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
                 ),
               ),
               const SizedBox(width: 8),
               FundTag(goalStatusLabel(goal.status), tone: tone),
             ],
           ),
-          const SizedBox(height: 3),
+          const SizedBox(height: 4),
           Text(
             '${goalTargetLine(goal)} · ${monthsLeftLabel(goal.monthsLeft)}',
-            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: c.ink70),
+            style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx2),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(100),
-                  child: LinearProgressIndicator(
-                    value: (goal.progress.percent / 100).clamp(0.0, 1.0),
-                    minHeight: 7,
-                    backgroundColor: c.track,
-                    valueColor: AlwaysStoppedAnimation(barColour),
-                  ),
+                child: DsMeter(
+                  value: (goal.progress.percent / 100).clamp(0.0, 1.0),
+                  color: barColour,
+                  height: 6,
                 ),
               ),
               const SizedBox(width: 10),
               Text(
                 fundPercent(goal.progress.percent, digits: 0),
-                style: kNum.copyWith(fontSize: 12.5, fontWeight: FontWeight.w800, color: c.ink),
+                style: kNum.copyWith(fontSize: 13, fontWeight: FontWeight.w600, color: c.tx),
               ),
             ],
           ),
-          const SizedBox(height: 4),
-          Text(goalSoFarLine(goal), style: TextStyle(fontSize: 11.5, color: c.muted)),
+          const SizedBox(height: 6),
+          Text(goalSoFarLine(goal), style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3)),
           const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-            decoration: BoxDecoration(
-              color: goal.status == GoalStatus.done ? c.credit50 : c.brand50,
-              borderRadius: BorderRadius.circular(T.rSm),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  goalPlanLine(goal),
-                  style: kNum.copyWith(
-                    fontSize: 16.5,
-                    fontWeight: FontWeight.w800,
-                    color: goal.status == GoalStatus.done ? c.credit : c.brandDark,
-                  ),
-                ),
-                if (actual != null) ...[
-                  const SizedBox(height: 2),
-                  Text(actual, style: TextStyle(fontSize: 12, height: 1.35, color: c.ink70)),
-                ],
-              ],
+          Text(
+            goalPlanLine(goal),
+            style: kNum.copyWith(
+              fontSize: 15,
+              height: 20 / 15,
+              fontWeight: FontWeight.w600,
+              color: goal.status == GoalStatus.done ? c.good : c.tx,
             ),
           ),
+          if (actual != null) ...[
+            const SizedBox(height: 2),
+            Text(actual, style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx2)),
+          ],
           if (goal.warning != null && goal.status != GoalStatus.done) ...[
             const SizedBox(height: 8),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Padding(padding: const EdgeInsets.only(top: 1), child: Icon(Icons.error_outline, size: 15, color: c.warn)),
-                const SizedBox(width: 6),
+                Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: DsIcon(DsIcons.alertTriangle, size: 16, color: c.warn),
+                ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     goal.warning!,
-                    style: TextStyle(fontSize: 12.5, height: 1.4, fontWeight: FontWeight.w600, color: c.warn),
+                    style: kNum.copyWith(fontSize: 13, height: 18 / 13, fontWeight: FontWeight.w500, color: c.warn),
                   ),
                 ),
               ],
             ),
           ],
-          if (suggestion != null) ...[
-            const SizedBox(height: 10),
-            Text(suggestion, style: TextStyle(fontSize: 12, height: 1.45, color: c.ink70)),
+          if (suggestion != null || showExamples) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+              decoration: BoxDecoration(
+                color: c.sf2,
+                border: Border.all(color: c.ln),
+                borderRadius: BorderRadius.circular(Ds.rLg),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (suggestion != null) ...[
+                    Text(suggestion, style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx2)),
+                    const SizedBox(height: 4),
+                  ],
+                  if (showExamples)
+                    for (final fund in goal.exampleFunds)
+                      _ExampleFundRow(fund: fund, onTap: onExampleFund == null ? null : () => onExampleFund!(fund)),
+                ],
+              ),
+            ),
           ],
-          if (showExamples) ...[
-            const SizedBox(height: 8),
-            for (final fund in goal.exampleFunds)
-              _ExampleFundRow(fund: fund, onTap: onExampleFund == null ? null : () => onExampleFund!(fund)),
-          ],
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Text(
             linked.isEmpty ? 'No funds counted towards it yet. Tap to pick some.' : 'Counting: ${linked.join(', ')}',
-            style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
+            style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
           ),
         ],
       ),
@@ -162,12 +164,12 @@ class _ExampleFundRow extends StatelessWidget {
     ].join(' · ');
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(T.rSm),
+      borderRadius: BorderRadius.circular(Ds.rMd),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Row(
           children: [
-            Icon(Icons.north_east, size: 14, color: c.mutedLight),
+            DsIcon(DsIcons.arrowUpRight, size: 16, color: c.tx3),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
@@ -177,13 +179,13 @@ class _ExampleFundRow extends StatelessWidget {
                     shortSchemeName(fund.name),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: c.ink),
+                    style: TextStyle(fontSize: 13, height: 18 / 13, fontWeight: FontWeight.w600, color: c.tx),
                   ),
-                  if (returns.isNotEmpty) Text(returns, style: kNum.copyWith(fontSize: 11.5, color: c.muted)),
+                  if (returns.isNotEmpty) Text(returns, style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3)),
                 ],
               ),
             ),
-            if (onTap != null) Icon(Icons.add_circle_outline, size: 19, color: c.brand),
+            if (onTap != null) DsIcon(DsIcons.plus, size: 20, color: c.ac),
           ],
         ),
       ),
@@ -205,42 +207,50 @@ class AssumptionsCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('How the plans are worked out', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: c.ink)),
+          Text(
+            'How the plans are worked out',
+            style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
+          ),
           const SizedBox(height: 4),
           Text(
             'What a goal can safely be in depends on how long there is. Each plan assumes a steady, middle-of-the-'
             'road return for that kind of fund - a guide to the monthly figure, not a promise.',
-            style: TextStyle(fontSize: 12, height: 1.45, color: c.muted),
+            style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
           ),
-          for (final assumption in assumptions) ...[
-            const SizedBox(height: 10),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: 92,
-                  child: Text(
-                    assumptionRange(assumption),
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: c.ink70),
+          for (final (i, assumption) in assumptions.indexed)
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              decoration: BoxDecoration(
+                border: i == 0 ? null : Border(top: BorderSide(color: c.ln)),
+              ),
+              margin: EdgeInsets.only(top: i == 0 ? 6 : 0),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 96,
+                    child: Text(
+                      assumptionRange(assumption),
+                      style: TextStyle(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w600, color: c.tx2),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${assumption.category} · ~${fundPercent(assumption.annualReturnPercent)} a year',
-                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: c.ink),
-                      ),
-                      if (assumption.why.isNotEmpty)
-                        Text(assumption.why, style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted)),
-                    ],
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${assumption.category} · ~${fundPercent(assumption.annualReturnPercent)} a year',
+                          style: kNum.copyWith(fontSize: 13, height: 18 / 13, fontWeight: FontWeight.w600, color: c.tx),
+                        ),
+                        if (assumption.why.isNotEmpty)
+                          Text(assumption.why, style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3)),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ],
         ],
       ),
     );

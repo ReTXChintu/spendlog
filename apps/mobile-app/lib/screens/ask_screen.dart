@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import '../widgets/ds/ds.dart';
 import '../widgets/state_block.dart';
 
 /// Questions about your own money, answered by Gemini with your own key.
@@ -172,17 +172,18 @@ class _AskScreenState extends State<AskScreen> {
     final c = context.c;
 
     return Scaffold(
-      backgroundColor: c.paper,
+      backgroundColor: c.bg,
       appBar: AppBar(
         title: const Text('Ask AI'),
-        shape: Border(bottom: BorderSide(color: c.line)),
+        shape: Border(bottom: BorderSide(color: c.ln)),
         actions: [
           if (_messages.isNotEmpty)
             IconButton(
               tooltip: 'Start over',
               onPressed: _thinking ? null : _startOver,
-              icon: const Icon(Icons.refresh),
+              icon: const DsIcon(DsIcons.refresh, size: 22),
             ),
+          const SizedBox(width: 4),
         ],
       ),
       body: _body(context),
@@ -201,11 +202,11 @@ class _AskScreenState extends State<AskScreen> {
     }
 
     final settings = _settings;
-    if (settings == null) return const Center(child: CircularProgressIndicator());
+    if (settings == null) return const Center(child: DsSpinner());
 
     if (!settings.hasKey) {
       return StateBlock(
-        icon: Icons.key_outlined,
+        icon: DsIcons.lock,
         title: 'Add a Gemini key first',
         body: 'The assistant runs on Google Gemini with a key of your own. Get one free from Google '
             'AI Studio, then paste it under Settings → You → AI assistant.',
@@ -227,63 +228,54 @@ class _AskScreenState extends State<AskScreen> {
     final c = context.c;
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+      padding: kPagePad,
       children: [
-        Row(
-          children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(color: c.brand50, borderRadius: BorderRadius.circular(10)),
-              child: Icon(Icons.auto_awesome_outlined, size: 20, color: c.brand),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Ask about your money',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: c.ink),
+        DsCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const DsIconTile(DsIcons.sparkles, tone: DsTone.ac),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Ask about your money',
+                      style: TextStyle(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx),
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Text(
-          'Answers are worked out from your own transactions, budget and loans. Your question and '
-          'the figures needed to answer it go to Google under your key; nothing here is saved once '
-          'you leave this screen.',
-          style: TextStyle(fontSize: 13, height: 1.5, color: c.ink70),
+              const SizedBox(height: 12),
+              Text(
+                'Answers are worked out from your own transactions, budget and loans. Your question and '
+                'the figures needed to answer it go to Google under your key; nothing here is saved once '
+                'you leave this screen.',
+                style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx2),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 20),
-        Text(
-          'TRY ONE OF THESE',
-          style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 1.1, color: c.muted),
-        ),
-        const SizedBox(height: 10),
+        const DsLabel('Try one of these'),
+        const SizedBox(height: 8),
         for (final suggestion in _suggestions)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
-            child: InkWell(
+            child: DsCard(
               onTap: () => _send(suggestion),
-              borderRadius: BorderRadius.circular(T.rMd),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                decoration: BoxDecoration(
-                  color: c.surface,
-                  border: Border.all(color: c.line),
-                  borderRadius: BorderRadius.circular(T.rMd),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        suggestion,
-                        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: c.ink70),
-                      ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      suggestion,
+                      style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx),
                     ),
-                    const SizedBox(width: 8),
-                    Icon(Icons.north_east, size: 16, color: c.mutedLight),
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: 8),
+                  DsIcon(DsIcons.arrowUpRight, size: 16, color: c.ac),
+                ],
               ),
             ),
           ),
@@ -314,12 +306,14 @@ class _AskScreenState extends State<AskScreen> {
   Widget _composer(BuildContext context) {
     final c = context.c;
 
+    final canSend = !_thinking && _input.text.trim().isNotEmpty;
+
     return Container(
       decoration: BoxDecoration(
-        color: c.surface,
-        border: Border(top: BorderSide(color: c.line)),
+        color: c.sf,
+        border: Border(top: BorderSide(color: c.ln)),
       ),
-      padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: SafeArea(
         top: false,
         child: Row(
@@ -338,17 +332,23 @@ class _AskScreenState extends State<AskScreen> {
                 decoration: const InputDecoration(
                   hintText: 'Ask about your spending…',
                   counterText: '',
-                  border: InputBorder.none,
-                  isDense: true,
-                  contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 12),
+                  contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 ),
               ),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: 8),
             IconButton.filled(
               tooltip: 'Send',
-              onPressed: _thinking || _input.text.trim().isEmpty ? null : () => _send(),
-              icon: const Icon(Icons.arrow_upward),
+              onPressed: canSend ? () => _send() : null,
+              style: IconButton.styleFrom(
+                backgroundColor: c.ac,
+                foregroundColor: c.acTx,
+                disabledBackgroundColor: c.sunk,
+                disabledForegroundColor: c.tx3,
+                minimumSize: const Size(48, 48),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Ds.rLg)),
+              ),
+              icon: DsIcon(DsIcons.arrowUpRight, size: 20, color: canSend ? c.acTx : c.tx3),
             ),
           ],
         ),
@@ -374,14 +374,20 @@ class _Question extends StatelessWidget {
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.82),
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: c.brand50,
-              borderRadius: BorderRadius.circular(T.rMd),
+              color: c.acSoft,
+              border: Border.all(color: c.acLine),
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(Ds.rXl),
+                topRight: Radius.circular(Ds.rXl),
+                bottomLeft: Radius.circular(Ds.rXl),
+                bottomRight: Radius.circular(Ds.rSm),
+              ),
             ),
             child: SelectableText(
               text,
-              style: TextStyle(fontSize: 13.8, height: 1.45, color: c.brandDark, fontWeight: FontWeight.w500),
+              style: TextStyle(fontSize: 15, height: 22 / 15, color: c.tx, fontWeight: FontWeight.w500),
             ),
           ),
         ),
@@ -405,46 +411,52 @@ class _Answer extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: failed ? c.debit50 : c.surface,
-          border: Border.all(color: failed ? c.debit.withValues(alpha: .35) : c.line),
-          borderRadius: BorderRadius.circular(T.rMd),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (failed) ...[
-              Row(
+      child: failed
+          ? DsAlertCard(
+              title: 'No answer',
+              body: message.text,
+              action: onRetry == null
+                  ? null
+                  : OutlinedButton(
+                      onPressed: onRetry,
+                      style: OutlinedButton.styleFrom(minimumSize: const Size(64, 40)),
+                      child: const Text('Try again'),
+                    ),
+            )
+          : Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: c.sf,
+                border: Border.all(color: c.ln),
+                borderRadius: BorderRadius.circular(Ds.rXl),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.error_outline, size: 15, color: c.debit),
-                  const SizedBox(width: 6),
-                  Text(
-                    'No answer',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: c.debit),
-                  ),
+                  SelectionArea(child: SimpleMarkdown(text: message.text)),
+                  if (message.lookups.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(top: 1),
+                          child: DsIcon(DsIcons.sparkles, size: 14, color: c.tx3),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Looked at: ${message.lookups.join(' · ')}',
+                            style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
-              const SizedBox(height: 6),
-              Text(message.text, style: TextStyle(fontSize: 13.5, height: 1.5, color: c.debit)),
-              if (onRetry != null) ...[
-                const SizedBox(height: 8),
-                OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
-              ],
-            ] else
-              SelectionArea(child: SimpleMarkdown(text: message.text)),
-            if (!failed && message.lookups.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Text(
-                'Looked at: ${message.lookups.join(' · ')}',
-                style: TextStyle(fontSize: 11, height: 1.4, color: c.mutedLight),
-              ),
-            ],
-          ],
-        ),
-      ),
+            ),
     );
   }
 }
@@ -460,24 +472,20 @@ class _Thinking extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 12),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: c.surface,
-          border: Border.all(color: c.line),
-          borderRadius: BorderRadius.circular(T.rMd),
+          color: c.sf,
+          border: Border.all(color: c.ln),
+          borderRadius: BorderRadius.circular(Ds.rXl),
         ),
         child: Row(
           children: [
-            SizedBox(
-              width: 15,
-              height: 15,
-              child: CircularProgressIndicator(strokeWidth: 2, color: c.brand),
-            ),
-            const SizedBox(width: 10),
+            const DsSpinner(size: 20),
+            const SizedBox(width: 12),
             Expanded(
               child: Text(
                 'Thinking… looking through your figures can take up to half a minute.',
-                style: TextStyle(fontSize: 12.8, height: 1.4, color: c.muted),
+                style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2),
               ),
             ),
           ],
@@ -504,7 +512,7 @@ class SimpleMarkdown extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final base = TextStyle(fontSize: 13.8, height: 1.5, color: c.ink);
+    final base = TextStyle(fontSize: 15, height: 22 / 15, color: c.tx);
     final lines = text.replaceAll('\r\n', '\n').split('\n');
 
     final children = <Widget>[];
@@ -525,7 +533,7 @@ class SimpleMarkdown extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SizedBox(width: 16, child: Text('•', style: base.copyWith(color: c.muted))),
+                SizedBox(width: 16, child: Text('•', style: base.copyWith(color: c.tx3))),
                 Expanded(
                   child: Text.rich(TextSpan(children: inlineSpans(line.substring(bullet.end), base))),
                 ),
@@ -538,7 +546,7 @@ class SimpleMarkdown extends StatelessWidget {
 
       final heading = _heading.firstMatch(line);
       if (heading != null) {
-        final style = base.copyWith(fontWeight: FontWeight.w800);
+        final style = base.copyWith(fontWeight: FontWeight.w600);
         children.add(Text.rich(TextSpan(children: inlineSpans(line.substring(heading.end), style))));
         continue;
       }

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import 'ds/ds.dart';
 import '../utils/format.dart';
 
 /// Says which purchases a credit gives money back from, and how much of it
@@ -14,9 +14,9 @@ Future<bool?> showRefundSheet(BuildContext context, {required Transaction refund
   return showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: context.c.surface,
+    backgroundColor: context.c.sf,
     shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(T.rLg)),
+      borderRadius: BorderRadius.vertical(top: Radius.circular(Ds.r3xl)),
     ),
     // Lifted over the keyboard, which the search box now brings up.
     builder: (sheetContext) => Padding(
@@ -90,23 +90,18 @@ class _RefundSheetState extends State<_RefundSheet> {
         _query = value;
         _filter();
       }),
-      style: TextStyle(fontSize: 13.5, color: c.ink),
+      style: TextStyle(fontSize: 14, color: c.tx),
+      // The in-page search: 44 h, a leading 20 px icon in tx3.
       decoration: InputDecoration(
         hintText: 'Search by merchant, note or amount',
-        hintStyle: TextStyle(color: c.mutedLight),
-        prefixIcon: Icon(Icons.search, size: 18, color: c.muted),
+        hintStyle: TextStyle(fontSize: 14, color: c.tx3),
+        prefixIcon: Padding(
+          padding: const EdgeInsets.only(left: 12, right: 8),
+          child: DsIcon(DsIcons.search, size: 20, color: c.tx3),
+        ),
+        prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 44),
         isDense: true,
-        filled: true,
-        fillColor: c.surface,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(T.rSm),
-          borderSide: BorderSide(color: c.lineStrong),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(T.rSm),
-          borderSide: BorderSide(color: c.brand),
-        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       ),
     );
   }
@@ -185,227 +180,259 @@ class _RefundSheetState extends State<_RefundSheet> {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final earmarked = widget.refund.isEarmarked;
 
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 38,
-                height: 4,
-                decoration: BoxDecoration(color: c.lineStrong, borderRadius: BorderRadius.circular(100)),
-              ),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              widget.refund.isEarmarked ? 'What did this money pay for?' : 'What is this a refund of?',
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: c.ink),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '${widget.refund.merchant ?? 'This credit'} · '
-              '${formatMoney(widget.refund.amountMinor)} '
-              '${widget.refund.isEarmarked ? 'set aside' : 'back'} · pick as many as it covers',
-              style: TextStyle(fontSize: 12.5, color: c.muted),
-            ),
-            const SizedBox(height: 14),
-            if (_candidates == null)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 24),
-                child: Center(child: CircularProgressIndicator()),
-              )
-            else if (_candidates!.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                child: Text(
-                  // Either side, because money can arrive first and be
-                  // spent afterwards - a deposit back before the new booking.
-                  widget.refund.isEarmarked
-                      ? 'No payment since this money came in to match it against yet.'
-                      : 'No payment in the 30 days either side of this credit to match it against.',
-                  style: TextStyle(fontSize: 12.5, height: 1.45, color: c.muted),
-                ),
-              )
-            else ...[
-              _searchField(),
-              const SizedBox(height: 8),
-              if (_hiddenPicks > 0)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Text(
-                    '$_hiddenPicks ticked ${_hiddenPicks == 1 ? 'purchase is' : 'purchases are'} '
-                    'hidden by the search, and still counted.',
-                    style: TextStyle(fontSize: 11.5, color: c.brandDark),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const DsDragHandle(),
+          Flexible(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  DsSheetHeader(
+                    icon: earmarked ? DsIcons.piggyBank : DsIcons.undo,
+                    tone: DsTone.good,
+                    title: earmarked ? 'What did this money pay for?' : 'What is this a refund of?',
+                    subtitle: '${widget.refund.merchant ?? 'This credit'} · '
+                        '${formatMoney(widget.refund.amountMinor)} '
+                        '${earmarked ? 'set aside' : 'back'} · pick as many as it covers',
                   ),
-                ),
-              if (_visible.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  child: Text(
-                    'Nothing here matches "${_query.trim()}".',
-                    style: TextStyle(fontSize: 12.5, height: 1.45, color: c.muted),
-                  ),
-                )
-              else
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 300),
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: _visible.length,
-                    itemBuilder: (context, i) {
-                      final candidate = _visible[i];
-                      final isPicked = _picked.containsKey(candidate.id);
-                      return GestureDetector(
-                        onTap: () => _toggle(candidate),
-                        child: Container(
-                          margin: const EdgeInsets.only(bottom: 6),
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: isPicked ? c.brand50 : c.surface,
-                            border: Border.all(color: isPicked ? c.brand : c.line),
-                            borderRadius: BorderRadius.circular(T.rMd),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                isPicked ? Icons.check_circle : Icons.circle_outlined,
-                                size: 18,
-                                color: isPicked ? c.brand : c.mutedLight,
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      candidate.merchant ?? 'Unknown',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 13.4,
-                                        color: c.ink,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      formatDateTime(candidate.occurredAt),
-                                      style: TextStyle(fontSize: 11.8, color: c.muted),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Text(
-                                isPicked
-                                    ? formatMoney(_picked[candidate.id]!)
-                                    : formatMoney(candidate.amountMinor),
-                                style: kNum.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 13.4,
-                                  color: isPicked ? c.brandDark : c.ink,
-                                ),
-                              ),
-                            ],
-                          ),
+                  const SizedBox(height: 16),
+                  if (_candidates == null)
+                    const DsSkeletonRows(count: 3)
+                  else if (_candidates!.isEmpty)
+                    DsEmpty(
+                      icon: DsIcons.search,
+                      // Either side, because money can arrive first and be
+                      // spent afterwards - a deposit back before the new booking.
+                      message: earmarked
+                          ? 'No payment since this money came in to match it against yet.'
+                          : 'No payment in the 30 days either side of this credit to match it against.',
+                    )
+                  else ...[
+                    _searchField(),
+                    const SizedBox(height: 8),
+                    if (_hiddenPicks > 0)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          '$_hiddenPicks ticked ${_hiddenPicks == 1 ? 'purchase is' : 'purchases are'} '
+                          'hidden by the search, and still counted.',
+                          style: TextStyle(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w500, color: c.ac),
                         ),
-                      );
-                    },
-                  ),
-                ),
-            ],
-            if (_picked.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                decoration: BoxDecoration(color: c.credit50, borderRadius: BorderRadius.circular(T.rMd)),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    _Stat(
-                      label: _picked.length == 1 ? 'Covering 1' : 'Covering ${_picked.length}',
-                      value: formatMoneyShort(_allocated),
-                    ),
-                    _Stat(
-                      label: widget.refund.isEarmarked ? 'Paid by you' : 'Never came back',
-                      value: formatMoneyShort(_lost),
-                    ),
-                    _Stat(
-                      label: _unallocated < 0
-                          ? 'Over'
-                          : (widget.refund.isEarmarked ? 'Still set aside' : 'Left as income'),
-                      value: formatMoneyShort(_unallocated.abs()),
+                      ),
+                    if (_visible.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        child: Text(
+                          'Nothing here matches "${_query.trim()}".',
+                          style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
+                        ),
+                      )
+                    else
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 300),
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: _visible.length,
+                          itemBuilder: (context, i) {
+                            final candidate = _visible[i];
+                            final isPicked = _picked.containsKey(candidate.id);
+                            return _CandidateRow(
+                              candidate: candidate,
+                              picked: isPicked,
+                              amountMinor: isPicked ? _picked[candidate.id]! : candidate.amountMinor,
+                              onTap: () => _toggle(candidate),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                  if (_picked.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: c.sf2,
+                        border: Border.all(color: c.ln),
+                        borderRadius: BorderRadius.circular(Ds.rLg),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: DsInlineStat(
+                              compact: true,
+                              label: _picked.length == 1 ? 'Covering 1' : 'Covering ${_picked.length}',
+                              value: formatMoneyShort(_allocated),
+                            ),
+                          ),
+                          Expanded(
+                            child: DsInlineStat(
+                              compact: true,
+                              label: earmarked ? 'Paid by you' : 'Never came back',
+                              value: formatMoneyShort(_lost),
+                            ),
+                          ),
+                          Expanded(
+                            child: DsInlineStat(
+                              compact: true,
+                              label: _unallocated < 0
+                                  ? 'Over'
+                                  : (earmarked ? 'Still set aside' : 'Left as income'),
+                              value: formatMoneyShort(_unallocated.abs()),
+                              valueColor: _unallocated < 0 ? c.crit : null,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
-                ),
+                  const SizedBox(height: 12),
+                  Text(
+                    earmarked
+                        ? 'Each purchase picked is paid for by this money, so it stops counting as your own '
+                            'spending.'
+                        : 'Whatever is allocated stops counting as income, and each purchase costs whatever '
+                            'did not come back.',
+                    style: TextStyle(fontSize: 12, height: 17 / 12, color: c.tx3),
+                  ),
+                  if (_error != null) ...[
+                    const SizedBox(height: 12),
+                    DsCallout(tone: DsTone.crit, title: _error!),
+                  ],
+                ],
               ),
-            ],
-            const SizedBox(height: 12),
-            Text(
-              widget.refund.isEarmarked
-                  ? 'Each purchase picked is paid for by this money, so it stops counting as your own '
-                      'spending.'
-                  : 'Whatever is allocated stops counting as income, and each purchase costs whatever '
-                      'did not come back.',
-              style: TextStyle(fontSize: 11.8, height: 1.45, color: c.mutedLight),
             ),
-            if (_error != null) ...[
-              const SizedBox(height: 12),
-              Text(_error!, style: TextStyle(fontSize: 12.5, color: c.debit)),
-            ],
-            const SizedBox(height: 16),
-            Row(
+          ),
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            decoration: BoxDecoration(color: c.sf2, border: Border(top: BorderSide(color: c.ln))),
+            child: Row(
               children: [
                 if (widget.refund.refundOf.isNotEmpty)
-                  TextButton(
-                    onPressed: _saving ? null : () => _save([]),
-                    child: Text(widget.refund.isEarmarked ? 'Unlink all' : 'Not a refund'),
+                  Flexible(
+                    child: TextButton(
+                      onPressed: _saving ? null : () => _save([]),
+                      style: TextButton.styleFrom(foregroundColor: c.crit),
+                      child: Text(earmarked ? 'Unlink all' : 'Not a refund'),
+                    ),
                   ),
-                const Spacer(),
-                TextButton(
-                  onPressed: _saving ? null : () => Navigator.of(context).pop(false),
-                  child: const Text('Cancel'),
-                ),
                 const SizedBox(width: 8),
-                FilledButton(
-                  onPressed: _saving || _picked.isEmpty || _unallocated < 0
-                      ? null
-                      : () => _save([
-                            for (final entry in _picked.entries)
-                              {'transactionId': entry.key, 'amountMinor': entry.value},
-                          ]),
-                  child: Text(_saving ? 'Saving…' : (widget.refund.isEarmarked ? 'Link' : 'Link refund')),
+                Expanded(
+                  child: OverflowBar(
+                    alignment: MainAxisAlignment.end,
+                    overflowAlignment: OverflowBarAlignment.end,
+                    spacing: 8,
+                    overflowSpacing: 8,
+                    children: [
+                      OutlinedButton(
+                        onPressed: _saving ? null : () => Navigator.of(context).pop(false),
+                        style: OutlinedButton.styleFrom(minimumSize: const Size(64, 48)),
+                        child: const Text('Cancel'),
+                      ),
+                      FilledButton(
+                        onPressed: _saving || _picked.isEmpty || _unallocated < 0
+                            ? null
+                            : () => _save([
+                                  for (final entry in _picked.entries)
+                                    {'transactionId': entry.key, 'amountMinor': entry.value},
+                                ]),
+                        child: Text(_saving ? 'Saving…' : (earmarked ? 'Link' : 'Link refund')),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _Stat extends StatelessWidget {
-  final String label;
-  final String value;
+/// One purchase the credit could be for: a check square, the merchant and
+/// when, and the amount. Picked rows are the selected-list-item style.
+class _CandidateRow extends StatelessWidget {
+  final Transaction candidate;
+  final bool picked;
+  final int amountMinor;
+  final VoidCallback onTap;
 
-  const _Stat({required this.label, required this.value});
+  const _CandidateRow({
+    required this.candidate,
+    required this.picked,
+    required this.amountMinor,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: c.muted)),
-        const SizedBox(height: 2),
-        Text(value, style: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w800, color: c.ink)),
-      ],
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(Ds.rLg),
+      side: BorderSide(color: picked ? c.acLine : c.ln),
+    );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: picked ? c.acSoft : c.sf,
+        shape: shape,
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 56),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                Container(
+                  width: 22,
+                  height: 22,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: picked ? c.ac : c.sf,
+                    borderRadius: BorderRadius.circular(6),
+                    border: picked ? null : Border.all(color: c.ln2, width: 1.5),
+                  ),
+                  child: picked ? DsIcon(DsIcons.check, size: 14, color: c.acTx) : null,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        candidate.merchant ?? 'Unknown',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        formatDateTime(candidate.occurredAt),
+                        style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  formatMoney(amountMinor),
+                  style: kNum.copyWith(fontSize: 14, fontWeight: FontWeight.w600, color: picked ? c.ac : c.tx),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

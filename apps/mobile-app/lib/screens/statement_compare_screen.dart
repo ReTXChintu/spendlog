@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import '../widgets/ds/ds.dart';
 import '../utils/format.dart';
 import '../widgets/edit_transaction_sheet.dart';
 import '../widgets/state_block.dart';
@@ -52,28 +52,27 @@ class _StatementCompareScreenState extends State<StatementCompareScreen> {
   Widget build(BuildContext context) {
     final c = context.c;
     return Scaffold(
-      backgroundColor: c.paper,
+      backgroundColor: c.bg,
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Compare with app', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: c.ink)),
+            const Text('Compare with app'),
             Text(
               widget.title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: c.muted),
+              style: TextStyle(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w400, color: c.tx3),
             ),
           ],
         ),
-        shape: Border(bottom: BorderSide(color: c.line)),
       ),
       body: _body(),
     );
   }
 
   Widget _body() {
-    final c = context.c;
     final comparison = _comparison;
     if (comparison == null) {
       if (_error != null) {
@@ -86,7 +85,10 @@ class _StatementCompareScreenState extends State<StatementCompareScreen> {
           onAction: _load,
         );
       }
-      return const Center(child: CircularProgressIndicator());
+      return const Padding(
+        padding: kPagePad,
+        child: DsSkeletonRows(count: 5, caption: 'Checking the statement against SpendLog…'),
+      );
     }
 
     final missing = comparison.onStatementNotInApp;
@@ -97,85 +99,58 @@ class _StatementCompareScreenState extends State<StatementCompareScreen> {
       onRefresh: _load,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 32),
+        padding: kPagePad,
         children: [
           if (comparison.isBank) _Closing(comparison: comparison),
           _Summary(comparison: comparison),
-          const SizedBox(height: 18),
+          const SizedBox(height: 16),
           if (clean)
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(color: c.credit50, borderRadius: BorderRadius.circular(T.rMd)),
-              child: Row(
-                children: [
-                  Icon(Icons.check_circle, color: c.credit, size: 20),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Every line on the statement has a row in SpendLog, and nothing in SpendLog is missing from it.',
-                      style: TextStyle(fontSize: 13, height: 1.45, color: c.ink70),
-                    ),
-                  ),
-                ],
-              ),
+            const DsCallout(
+              tone: DsTone.good,
+              title: 'Every line on the statement has a row in SpendLog, and nothing in SpendLog is missing from it.',
             ),
           if (missing.isNotEmpty) ...[
-            _SectionTitle(
-              'On the statement, not in SpendLog',
+            _Section(
+              title: 'On the statement, not in SpendLog',
               count: missing.length,
               hint: 'Add these from the statement\'s own page.',
+              children: [
+                for (var i = 0; i < missing.length; i++)
+                  _LineTile(
+                    date: missing[i].date,
+                    title: missing[i].description,
+                    // What the bank printed is a machine string.
+                    mono: true,
+                    amountMinor: missing[i].amountMinor,
+                    isDebit: missing[i].isDebit,
+                    note: missing[i].addedTransactionId != null ? 'added by this statement' : null,
+                    last: i == missing.length - 1,
+                  ),
+              ],
             ),
-            Container(
-              decoration: _panel(c),
-              child: Column(
-                children: [
-                  for (var i = 0; i < missing.length; i++)
-                    _LineTile(
-                      date: missing[i].date,
-                      title: missing[i].description,
-                      amountMinor: missing[i].amountMinor,
-                      isDebit: missing[i].isDebit,
-                      note: missing[i].addedTransactionId != null ? 'added by this statement' : null,
-                      last: i == missing.length - 1,
-                    ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 16),
           ],
-          if (extra.isNotEmpty) ...[
-            _SectionTitle(
-              'In SpendLog, not on the statement',
+          if (extra.isNotEmpty)
+            _Section(
+              title: 'In SpendLog, not on the statement',
               count: extra.length,
               hint: 'Tap one to open it. A row the bank does not show may be a duplicate, or on another account.',
+              children: [
+                for (var i = 0; i < extra.length; i++)
+                  _LineTile(
+                    date: extra[i].occurredAt,
+                    title: extra[i].merchant ?? 'Unknown',
+                    amountMinor: extra[i].amountMinor,
+                    isDebit: extra[i].isDebit,
+                    last: i == extra.length - 1,
+                    onTap: () => _openRow(extra[i]),
+                  ),
+              ],
             ),
-            Container(
-              decoration: _panel(c),
-              child: Column(
-                children: [
-                  for (var i = 0; i < extra.length; i++)
-                    _LineTile(
-                      date: extra[i].occurredAt,
-                      title: extra[i].merchant ?? 'Unknown',
-                      amountMinor: extra[i].amountMinor,
-                      isDebit: extra[i].isDebit,
-                      last: i == extra.length - 1,
-                      onTap: () => _openRow(extra[i]),
-                    ),
-                ],
-              ),
-            ),
-          ],
         ],
       ),
     );
   }
-
-  BoxDecoration _panel(SpendColors c) => BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      );
 }
 
 /// The statement's closing balance against the app's running balance at
@@ -193,23 +168,15 @@ class _Closing extends StatelessWidget {
     final difference = comparison.differenceMinor;
     final on = comparison.closingOn;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
+    return DsCard(
+      margin: const EdgeInsets.only(bottom: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            on == null ? 'AT THE CLOSE' : 'AT THE CLOSE · ${formatShortDate(on).toUpperCase()}',
-            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: c.muted),
-          ),
-          const SizedBox(height: 8),
+          DsLabel(on == null ? 'At the close' : 'At the close · ${formatShortDate(on)}'),
+          const SizedBox(height: 10),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
                 child: _Figure(label: 'Statement closes at', value: closing == null ? '—' : formatMoney(closing)),
@@ -220,41 +187,28 @@ class _Closing extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           if (!comparison.hasClosingComparison || difference == null)
             Text(
               expected == null
                   ? 'Set a starting balance on the account and SpendLog can check its figure against the close.'
                   : 'The statement did not give a closing balance to check against.',
-              style: TextStyle(fontSize: 12, height: 1.4, color: c.muted),
+              style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
             )
           else if (!driftIsOff(difference))
-            Row(
-              children: [
-                Icon(Icons.check_circle_outline, size: 16, color: c.credit),
-                const SizedBox(width: 6),
-                Text('Within a rupee of the statement', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: c.credit)),
-              ],
-            )
+            const DsBadge('Within a rupee of the statement', tone: DsTone.good, icon: DsIcons.check)
           else
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                  decoration: BoxDecoration(color: c.debit50, borderRadius: BorderRadius.circular(100)),
-                  child: Text(
-                    '${formatMoney(difference.abs())} off',
-                    style: kNum.copyWith(fontSize: 12.5, fontWeight: FontWeight.w800, color: c.debit),
-                  ),
-                ),
+                DsBadge('${formatMoney(difference.abs())} off', tone: DsTone.crit),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     difference < 0
                         ? 'SpendLog shows more than the statement at the close.'
                         : 'The statement shows more than SpendLog at the close.',
-                    style: TextStyle(fontSize: 12, height: 1.4, color: c.muted),
+                    style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2),
                   ),
                 ),
               ],
@@ -265,6 +219,7 @@ class _Closing extends StatelessWidget {
   }
 }
 
+/// Label over a bank-balance figure (2 decimals, tabular).
 class _Figure extends StatelessWidget {
   const _Figure({required this.label, required this.value});
 
@@ -277,12 +232,20 @@ class _Figure extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: c.muted)),
-        const SizedBox(height: 3),
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w600, color: c.tx2),
+        ),
+        const SizedBox(height: 2),
         FittedBox(
           fit: BoxFit.scaleDown,
           alignment: Alignment.centerLeft,
-          child: Text(value, style: kNum.copyWith(fontSize: 18, fontWeight: FontWeight.w800, color: c.ink)),
+          child: Text(
+            value,
+            style: kNum.copyWith(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx),
+          ),
         ),
       ],
     );
@@ -302,43 +265,61 @@ class _Summary extends StatelessWidget {
       '${comparison.onStatementNotInApp.length} only on the statement',
       '${comparison.inAppNotOnStatement.length} only in SpendLog',
     ];
-    return Text(parts.join(' · '), style: TextStyle(fontSize: 12, height: 1.45, color: c.muted));
+    return Text(parts.join(' · '), style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx2));
   }
 }
 
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle(this.title, {required this.count, required this.hint});
+/// One of the two lists: a section card with a header, a count that says
+/// these disagree (crit), a hint, and the rows.
+class _Section extends StatelessWidget {
+  const _Section({required this.title, required this.count, required this.hint, required this.children});
 
   final String title;
   final int count;
   final String hint;
+  final List<Widget> children;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+    return DsCard(
+      padding: EdgeInsets.zero,
+      clip: true,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Expanded(child: Text(title, style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: c.ink))),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(color: c.chipNeutral, borderRadius: BorderRadius.circular(100)),
-                child: Text('$count', style: kNum.copyWith(fontSize: 11.5, fontWeight: FontWeight.w800, color: c.ink70)),
-              ),
-            ],
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: TextStyle(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    DsBadge('$count', tone: DsTone.crit),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(hint, style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3)),
+              ],
+            ),
           ),
-          const SizedBox(height: 3),
-          Text(hint, style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted)),
+          Divider(height: 1, color: c.ln),
+          ...children,
         ],
       ),
     );
   }
 }
 
+/// A phone transaction row: date, the name, and the amount signed and
+/// coloured by direction.
 class _LineTile extends StatelessWidget {
   const _LineTile({
     required this.date,
@@ -347,6 +328,7 @@ class _LineTile extends StatelessWidget {
     required this.isDebit,
     this.note,
     this.last = false,
+    this.mono = false,
     this.onTap,
   });
 
@@ -356,6 +338,7 @@ class _LineTile extends StatelessWidget {
   final bool isDebit;
   final String? note;
   final bool last;
+  final bool mono;
   final VoidCallback? onTap;
 
   @override
@@ -364,31 +347,45 @@ class _LineTile extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
-        decoration: BoxDecoration(border: last ? null : Border(bottom: BorderSide(color: c.line))),
+        constraints: const BoxConstraints(minHeight: 56),
+        padding: EdgeInsets.fromLTRB(16, 12, onTap != null ? 10 : 16, 12),
+        decoration: BoxDecoration(border: last ? null : Border(bottom: BorderSide(color: c.ln))),
         child: Row(
           children: [
             SizedBox(
-              width: 48,
-              child: Text(formatShortDate(date), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: c.muted)),
+              width: 52,
+              child: Text(
+                formatShortDate(date),
+                style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx3),
+              ),
             ),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13.3, fontWeight: FontWeight.w600, color: c.ink)),
-                  if (note != null) Text(note!, style: TextStyle(fontSize: 11, color: c.mutedLight)),
+                  Text(
+                    title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: mono
+                        ? kMono.copyWith(fontSize: 13, height: 18 / 13, color: c.tx)
+                        : TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w500, color: c.tx),
+                  ),
+                  if (note != null)
+                    Text(note!, style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3)),
                 ],
               ),
             ),
             const SizedBox(width: 10),
-            Text(
-              '${isDebit ? '−' : '+'}${formatMoney(amountMinor)}',
-              style: kNum.copyWith(fontSize: 13.5, fontWeight: FontWeight.w700, color: isDebit ? c.debit : c.credit),
+            DsMoney(
+              amountMinor,
+              kind: isDebit ? MoneyKind.out : MoneyKind.inflow,
+              short: false,
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
             ),
             if (onTap != null) ...[
               const SizedBox(width: 4),
-              Icon(Icons.chevron_right, size: 18, color: c.mutedLight),
+              DsIcon(DsIcons.chevronRight, size: 18, color: c.tx3),
             ],
           ],
         ),

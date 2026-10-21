@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../models/fund_models.dart';
 import '../../services/api_client.dart';
-import '../../theme.dart';
+import '../../widgets/ds/ds.dart';
 import '../../utils/format.dart';
 import '../../widgets/funds/fund_form.dart';
 import '../../widgets/funds/fund_text.dart';
@@ -132,7 +132,7 @@ class _GoalEditorScreenState extends State<GoalEditorScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: context.c.debit),
+            style: FilledButton.styleFrom(backgroundColor: context.c.critFill, foregroundColor: Colors.white),
             onPressed: () => Navigator.of(context).pop(true),
             child: const Text('Delete'),
           ),
@@ -149,94 +149,115 @@ class _GoalEditorScreenState extends State<GoalEditorScreen> {
     }
   }
 
+
   @override
   Widget build(BuildContext context) {
     final c = context.c;
     final today = DateTime.parse(istToday());
     return Scaffold(
-      backgroundColor: c.paper,
+      backgroundColor: c.bg,
       appBar: AppBar(
-        title: Text(
-          _goal == null ? 'New goal' : 'Edit goal',
-          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: c.ink),
-        ),
-        shape: Border(bottom: BorderSide(color: c.line)),
+        title: Text(_goal == null ? 'New goal' : 'Edit goal'),
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 32),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
         children: [
-          TextField(
-            key: const ValueKey('goal-name'),
-            controller: _name,
-            autofocus: _goal == null,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(labelText: 'What for', hintText: 'Laptop'),
-          ),
-          const SizedBox(height: 10),
-          TextField(
-            key: const ValueKey('goal-target'),
-            controller: _target,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: 'It will cost about', prefixText: '₹ ', hintText: '200000'),
-          ),
-          const SizedBox(height: 10),
-          DateField(
-            label: 'Needed by',
-            value: _targetOn,
-            onPick: () async {
-              final picked = await pickIsoDate(
-                context,
-                initial: _targetOn ?? isoDay(DateTime(today.year + 1, today.month, today.day)),
-                first: _goal == null ? today.add(const Duration(days: 1)) : DateTime(2000),
-                last: DateTime(today.year + 40),
-              );
-              if (picked != null) setState(() => _targetOn = picked);
-            },
-          ),
-          const SizedBox(height: 10),
-          TextField(
-            key: const ValueKey('goal-saved'),
-            controller: _saved,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: 'Already saved elsewhere (optional)',
-              prefixText: '₹ ',
-              helperText: 'Money put aside outside these funds - a deposit, a savings account.',
-              helperMaxLines: 2,
+          DsCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                DsField(
+                  label: 'What for',
+                  child: TextField(
+                    key: const ValueKey('goal-name'),
+                    controller: _name,
+                    autofocus: _goal == null,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: const InputDecoration(hintText: 'Laptop'),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                DsField(
+                  label: 'It will cost about',
+                  child: TextField(
+                    key: const ValueKey('goal-target'),
+                    controller: _target,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    style: kNum.copyWith(fontSize: 15, color: c.tx),
+                    decoration: const InputDecoration(prefixText: '₹ ', hintText: '200000'),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                DateField(
+                  label: 'Needed by',
+                  value: _targetOn,
+                  onPick: () async {
+                    final picked = await pickIsoDate(
+                      context,
+                      initial: _targetOn ?? isoDay(DateTime(today.year + 1, today.month, today.day)),
+                      first: _goal == null ? today.add(const Duration(days: 1)) : DateTime(2000),
+                      last: DateTime(today.year + 40),
+                    );
+                    if (picked != null) setState(() => _targetOn = picked);
+                  },
+                ),
+                const SizedBox(height: 14),
+                DsField(
+                  label: 'Already saved elsewhere (optional)',
+                  help: 'Money put aside outside these funds - a deposit, a savings account.',
+                  child: TextField(
+                    key: const ValueKey('goal-saved'),
+                    controller: _saved,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    style: kNum.copyWith(fontSize: 15, color: c.tx),
+                    decoration: const InputDecoration(prefixText: '₹ '),
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 24),
           Text(
-            'FUNDS COUNTED TOWARDS IT',
-            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 1.1, color: c.muted),
+            'Funds counted towards it',
+            style: TextStyle(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 12),
           if (widget.holdings.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text(
-                'No funds yet. The plan still says how much to put in each month, and where.',
-                style: TextStyle(fontSize: 12.5, height: 1.4, color: c.muted),
-              ),
+            const DsEmpty(
+              icon: DsIcons.piggyBank,
+              message: 'No funds yet. The plan still says how much to put in each month, and where.',
             )
           else
-            for (final holding in widget.holdings)
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                value: _holdingIds.contains(holding.id),
-                onChanged: (on) => setState(() => on == true ? _holdingIds.add(holding.id) : _holdingIds.remove(holding.id)),
-                title: Text(shortSchemeName(holding.schemeName), style: TextStyle(fontSize: 14, color: c.ink)),
-                subtitle: Text(
-                  '${formatMoneyShort(holding.valueMinor)} · ${holding.categoryLabel}',
-                  style: TextStyle(fontSize: 12, color: c.muted),
-                ),
+            DsCard(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+              child: Column(
+                children: [
+                  for (final (i, holding) in widget.holdings.indexed) ...[
+                    if (i > 0) Divider(height: 1, indent: 12, endIndent: 12, color: c.ln),
+                    CheckboxListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                      controlAffinity: ListTileControlAffinity.leading,
+                      value: _holdingIds.contains(holding.id),
+                      onChanged: (on) =>
+                          setState(() => on == true ? _holdingIds.add(holding.id) : _holdingIds.remove(holding.id)),
+                      title: Text(
+                        shortSchemeName(holding.schemeName),
+                        style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w500, color: c.tx),
+                      ),
+                      subtitle: Text(
+                        '${formatMoneyShort(holding.valueMinor)} · ${holding.categoryLabel}',
+                        style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx3),
+                      ),
+                    ),
+                  ],
+                ],
               ),
+            ),
           if (_error != null) ...[
             const SizedBox(height: 12),
-            Text(_error!, style: TextStyle(fontSize: 12.5, height: 1.4, color: c.debit)),
+            DsCallout(tone: DsTone.crit, title: _error!),
           ],
-          const SizedBox(height: 18),
+          const SizedBox(height: 20),
           FilledButton(
             onPressed: _saving ? null : _save,
             child: _saving
@@ -245,10 +266,11 @@ class _GoalEditorScreenState extends State<GoalEditorScreen> {
           ),
           if (_goal != null) ...[
             const SizedBox(height: 8),
-            TextButton(
-              style: TextButton.styleFrom(foregroundColor: c.debit),
+            TextButton.icon(
+              style: TextButton.styleFrom(foregroundColor: c.crit, minimumSize: const Size(48, 48)),
               onPressed: _saving ? null : _delete,
-              child: const Text('Delete goal'),
+              icon: const DsIcon(DsIcons.trash, size: 18),
+              label: const Text('Delete goal'),
             ),
           ],
         ],

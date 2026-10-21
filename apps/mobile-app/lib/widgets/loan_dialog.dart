@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
 import '../utils/format.dart';
+import 'ds/ds.dart';
 
 /// Add a loan, or change anything about one already added.
 ///
@@ -229,7 +229,13 @@ class _LoanDialogState extends State<LoanDialog> {
 
     return AlertDialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-      title: Text(_isNew ? 'Add a loan' : 'Edit loan'),
+      title: Row(
+        children: [
+          const DsIconTile(DsIcons.banknote, tone: DsTone.ac),
+          const SizedBox(width: 12),
+          Expanded(child: Text(_isNew ? 'Add a loan' : 'Edit loan')),
+        ],
+      ),
       content: SizedBox(
         width: double.maxFinite,
         child: SingleChildScrollView(
@@ -241,9 +247,9 @@ class _LoanDialogState extends State<LoanDialog> {
                 Text(
                   '${loan.paidCount} of ${loan.months} paid, ${formatMoney(loan.remainingMinor)} left.'
                   '${loan.status == 'CLOSED' ? ' Closed.' : ''}',
-                  style: TextStyle(fontSize: 12.5, height: 1.4, color: c.ink70),
+                  style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx2),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 12),
               ],
               TextField(
                 controller: _label,
@@ -253,21 +259,21 @@ class _LoanDialogState extends State<LoanDialog> {
                   hintText: 'HDFC personal loan',
                 ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               TextField(
                 controller: _principal,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 decoration: const InputDecoration(labelText: 'Amount borrowed', prefixText: '₹ '),
                 onChanged: (_) => setState(() {}),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               TextField(
                 controller: _months,
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(labelText: 'Months', hintText: '24'),
                 onChanged: (_) => setState(() {}),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               TextField(
                 controller: _monthly,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -277,14 +283,14 @@ class _LoanDialogState extends State<LoanDialog> {
                   hintText: computed > 0 ? (computed / 100).toStringAsFixed(2) : null,
                 ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               TextField(
                 controller: _rate,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 decoration: const InputDecoration(labelText: 'Interest rate (% a year)', hintText: 'Optional'),
                 onChanged: (_) => setState(() {}),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               TextField(
                 controller: _paid,
                 keyboardType: TextInputType.number,
@@ -297,27 +303,35 @@ class _LoanDialogState extends State<LoanDialog> {
                   helperMaxLines: 3,
                 ),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 12),
               ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('First instalment'),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(Ds.rMd),
+                  side: BorderSide(color: c.ln2),
+                ),
+                title: Text('First instalment', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.tx2)),
                 // Already IST's calendar date, so formatted as it stands
                 // rather than shifted again by formatShortDate.
-                subtitle: Text(DateFormat('d MMM yyyy').format(_startDate)),
-                trailing: const Icon(Icons.calendar_today_outlined, size: 18),
+                subtitle: Text(
+                  DateFormat('d MMM yyyy').format(_startDate),
+                  style: kNum.copyWith(fontSize: 15, height: 22 / 15, color: c.tx),
+                ),
+                trailing: DsIcon(DsIcons.calendar, size: 20, color: c.tx2),
                 onTap: _pickStartDate,
               ),
+              const SizedBox(height: 10),
               Text(
                 _isNew
                     ? 'Take the monthly figure off the paperwork if you can — a calculated one rarely '
                         "lands to the rupee once the lender's own rounding is in it."
                     : 'A new term, start or monthly figure re-lays the schedule. Anything already paid '
                         'stays paid.',
-                style: TextStyle(fontSize: 11.5, height: 1.4, color: c.mutedLight),
+                style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
               ),
               if (_error != null) ...[
-                const SizedBox(height: 8),
-                Text(_error!, style: TextStyle(fontSize: 12, height: 1.4, color: c.debit)),
+                const SizedBox(height: 12),
+                DsCallout(tone: DsTone.crit, title: _error!),
               ],
             ],
           ),
@@ -326,6 +340,7 @@ class _LoanDialogState extends State<LoanDialog> {
       actions: [
         if (loan != null && loan.status == 'ACTIVE')
           TextButton(
+            style: TextButton.styleFrom(foregroundColor: c.crit),
             onPressed: _saving ? null : () => _setStatus('CLOSED'),
             child: const Text('Close early'),
           ),

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
-import '../theme.dart';
 import '../utils/format.dart';
+import 'ds/ds.dart';
 
 /// "Rahul's pocket money" - or "James' pocket money" for a name ending in s.
 String pocketTitle(String holder) {
@@ -32,7 +32,9 @@ class PocketMeter extends StatelessWidget {
     final used = limit > 0 ? (status.spentMinor / limit).clamp(0.0, 1.0) : 0.0;
     final over = status.over;
     final close = !over && used >= 0.8;
-    final tint = over ? c.debit : (close ? c.warn : c.brand);
+    // Spending is ink; amber once it gets close, red only once it is over.
+    final fill = over ? c.critFill : (close ? c.warnFill : c.tx);
+    final note = over ? c.crit : (close ? c.warn : c.tx3);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -47,35 +49,33 @@ class PocketMeter extends StatelessWidget {
             children: [
               Text(
                 compact ? formatMoneyShort(status.spentMinor) : formatMoney(status.spentMinor),
-                style: kNum.copyWith(fontSize: compact ? 19 : 21, fontWeight: FontWeight.w800, color: c.ink),
+                style: kNum.copyWith(
+                  fontSize: compact ? 17 : 22,
+                  height: compact ? 24 / 17 : 28 / 22,
+                  fontWeight: FontWeight.w600,
+                  color: c.tx,
+                ),
               ),
               const SizedBox(width: 6),
               Text(
                 'of ${formatMoneyShort(limit)}',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.muted),
+                style: kNum.copyWith(fontSize: 13, fontWeight: FontWeight.w500, color: c.tx3),
               ),
             ],
           ),
         ),
         const SizedBox(height: 8),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(100),
-          child: LinearProgressIndicator(
-            value: used,
-            minHeight: 6,
-            backgroundColor: c.track,
-            valueColor: AlwaysStoppedAnimation(tint),
-          ),
-        ),
+        DsMeter(value: used, height: compact ? 6 : 10, color: fill),
         const SizedBox(height: 6),
         Text(
           over
               ? '${formatMoney(status.spentMinor - limit)} over the limit'
               : '${formatMoney(status.leftMinor)} left',
-          style: TextStyle(
-            fontSize: 11.5,
-            fontWeight: over ? FontWeight.w700 : FontWeight.w500,
-            color: over || close ? tint : c.muted,
+          style: kNum.copyWith(
+            fontSize: 12,
+            height: 16 / 12,
+            fontWeight: over || close ? FontWeight.w600 : FontWeight.w400,
+            color: note,
           ),
         ),
       ],
@@ -144,7 +144,13 @@ class _PocketMoneyDialogState extends State<_PocketMoneyDialog> {
     final c = context.c;
 
     return AlertDialog(
-      title: Text(widget.current == null ? 'Make this pocket money' : 'Change pocket money'),
+      title: Row(
+        children: [
+          const DsIconTile(DsIcons.piggyBank, tone: DsTone.ac),
+          const SizedBox(width: 12),
+          Expanded(child: Text(widget.current == null ? 'Make this pocket money' : 'Change pocket money')),
+        ],
+      ),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -157,7 +163,7 @@ class _PocketMoneyDialogState extends State<_PocketMoneyDialog> {
               textCapitalization: TextCapitalization.words,
               decoration: const InputDecoration(labelText: 'Whose is it?', hintText: 'Rahul', counterText: ''),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             TextField(
               controller: _limit,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -167,7 +173,7 @@ class _PocketMoneyDialogState extends State<_PocketMoneyDialog> {
             Row(
               children: [
                 Expanded(
-                  child: Text('Renews on day', style: TextStyle(fontSize: 13.5, color: c.ink70)),
+                  child: Text('Renews on day', style: TextStyle(fontSize: 14, color: c.tx2)),
                 ),
                 DropdownButton<int>(
                   value: _day,
@@ -183,11 +189,11 @@ class _PocketMoneyDialogState extends State<_PocketMoneyDialog> {
             Text(
               'On that day, top the account up by whatever was spent the month before. '
               'A short month renews on its last day.',
-              style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
+              style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
             ),
             if (_problem != null) ...[
-              const SizedBox(height: 8),
-              Text(_problem!, style: TextStyle(fontSize: 12, color: c.debit)),
+              const SizedBox(height: 12),
+              DsCallout(tone: DsTone.crit, title: _problem!),
             ],
           ],
         ),

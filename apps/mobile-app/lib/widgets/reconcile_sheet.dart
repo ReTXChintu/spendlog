@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import 'ds/ds.dart';
 import '../utils/format.dart';
 
 /// Why an account is off from the bank, and the one tap that puts each
@@ -21,10 +21,6 @@ Future<bool?> showReconcileSheet(BuildContext context, {required String accountI
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
-    backgroundColor: context.c.surface,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(T.rLg)),
-    ),
     builder: (_) => ReconcileSheet(accountId: accountId),
   );
 }
@@ -152,64 +148,53 @@ class _ReconcileSheetState extends State<ReconcileSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            const DsDragHandle(),
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 18, 8, 0),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Find the cause', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: c.ink)),
-                        if (reconcile != null)
-                          Text(reconcile.account.label, style: TextStyle(fontSize: 12.5, color: c.muted)),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Close',
-                    onPressed: () => Navigator.of(context).pop(_changed),
-                    icon: Icon(Icons.close, color: c.muted),
-                  ),
-                ],
+              padding: const EdgeInsets.fromLTRB(16, 0, 4, 0),
+              child: DsSheetHeader(
+                title: 'Find the cause',
+                subtitle: reconcile?.account.label,
+                onClose: () => Navigator.of(context).pop(_changed),
               ),
             ),
             Flexible(
               child: reconcile == null
                   ? Padding(
-                      padding: const EdgeInsets.all(32),
-                      child: Center(
-                        child: _error == null
-                            ? const CircularProgressIndicator()
-                            : Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(_error!, textAlign: TextAlign.center, style: TextStyle(color: c.ink70)),
-                                  const SizedBox(height: 12),
-                                  OutlinedButton(onPressed: _load, child: const Text('Try again')),
-                                ],
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                      child: _error == null
+                          ? const DsSkeletonRows(count: 3, caption: 'Looking for what went wrong…')
+                          : DsAlertCard(
+                              title: _error!,
+                              icon: Icons.wifi_off,
+                              action: OutlinedButton(
+                                onPressed: _load,
+                                style: OutlinedButton.styleFrom(minimumSize: const Size(0, 40)),
+                                child: const Text('Try again'),
                               ),
-                      ),
+                            ),
                     )
                   : ListView(
                       shrinkWrap: true,
-                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                       children: [
                         _Gap(reconcile: reconcile, closedMinor: _closedMinor),
                         const SizedBox(height: 16),
                         if (reconcile.suspects.isEmpty)
                           _NothingFound(reconcile: reconcile)
                         else ...[
-                          Text(
-                            reconcile.suspects.length == 1 ? 'ONE THING TO LOOK AT' : 'LIKELIEST FIRST',
-                            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: c.muted),
+                          DsLabel(
+                            reconcile.suspects.length == 1
+                                ? 'One thing to look at'
+                                : 'Ranked by how well each one explains the gap',
                           ),
                           const SizedBox(height: 8),
-                          for (final suspect in reconcile.suspects)
+                          for (final (index, suspect) in reconcile.suspects.indexed)
                             Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
+                              padding: const EdgeInsets.only(bottom: 12),
                               child: _SuspectCard(
                                 suspect: suspect,
+                                rank: index + 1,
+                                likeliest: index == 0 && reconcile.suspects.length > 1,
                                 busy: _applying == suspect.fix?.path,
                                 enabled: _applying == null && !_adjusting,
                                 onApply: () => _apply(suspect),
@@ -220,14 +205,14 @@ class _ReconcileSheetState extends State<ReconcileSheet> {
                         // writing the gap in hides the mistake rather than
                         // fixing it.
                         if (!reconcile.settled) ...[
-                          const SizedBox(height: 18),
-                          Divider(color: c.line),
-                          const SizedBox(height: 6),
+                          const SizedBox(height: 8),
+                          Divider(color: c.ln),
+                          const SizedBox(height: 4),
                           Align(
                             alignment: Alignment.centerLeft,
                             child: TextButton(
                               onPressed: _adjusting || _applying != null ? null : _recordDifference,
-                              style: TextButton.styleFrom(foregroundColor: c.muted),
+                              style: TextButton.styleFrom(foregroundColor: c.tx2, padding: EdgeInsets.zero),
                               child: Text(_adjusting ? 'Recording…' : 'None of these? Record the difference'),
                             ),
                           ),
@@ -258,21 +243,25 @@ class _Gap extends StatelessWidget {
 
     if (reconcile.settled && closedMinor != null) {
       return Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(color: c.credit50, borderRadius: BorderRadius.circular(T.rMd)),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: c.goodSoft, borderRadius: BorderRadius.circular(Ds.rXl)),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.check_circle, color: c.credit, size: 22),
-            const SizedBox(width: 10),
+            const DsIconTile(DsIcons.check, tone: DsTone.good, onTinted: true, size: 36),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Fixed it', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: c.credit)),
+                  Text(
+                    'Fixed it',
+                    style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.good),
+                  ),
                   const SizedBox(height: 2),
                   Text(
                     'SpendLog now matches the bank at ${formatMoney(reconcile.expectedMinor)}.',
-                    style: TextStyle(fontSize: 12.5, height: 1.4, color: c.ink70),
+                    style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2, fontFeatures: Ds.tabular),
                   ),
                 ],
               ),
@@ -282,71 +271,59 @@ class _Gap extends StatelessWidget {
       );
     }
 
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: c.paper,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(child: _Figure(label: 'SpendLog expects', value: formatMoney(reconcile.expectedMinor))),
-              const SizedBox(width: 12),
-              Expanded(
-                child: stated == null
-                    ? const _Figure(label: 'Bank said', value: '—')
-                    : _Figure(label: 'Bank said · ${formatShortDate(stated.at)}', value: formatMoney(stated.minor)),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          if (difference == null)
-            Text(
-              'The bank has not put a figure on this account, so there is no gap to measure. These are the '
-              'things that usually go wrong.',
-              style: TextStyle(fontSize: 12.5, height: 1.45, color: c.muted),
-            )
-          else if (!driftIsOff(difference))
-            Row(
-              children: [
-                Icon(Icons.check_circle_outline, size: 16, color: c.credit),
-                const SizedBox(width: 6),
-                Text('Within a rupee of the bank', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: c.credit)),
-              ],
-            )
-          else
-            Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(child: _Figure(label: 'SpendLog expects', value: formatMoney(reconcile.expectedMinor))),
+            const SizedBox(width: 12),
+            Expanded(
+              child: stated == null
+                  ? const _Figure(label: 'Bank said', value: '—')
+                  : _Figure(label: 'Bank said · ${formatShortDate(stated.at)}', value: formatMoney(stated.minor)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (difference == null)
+          Text(
+            'The bank has not put a figure on this account, so there is no gap to measure. These are the '
+            'things that usually go wrong.',
+            style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2),
+          )
+        else if (!driftIsOff(difference))
+          const DsCallout(tone: DsTone.good, title: 'Within a rupee of the bank')
+        else
+          // A mismatch is a problem: the critical tint.
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(color: c.critSoft, borderRadius: BorderRadius.circular(Ds.rXl)),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                  decoration: BoxDecoration(color: c.debit50, borderRadius: BorderRadius.circular(100)),
-                  child: Text(
-                    '${formatMoney(difference.abs())} off',
-                    style: kNum.copyWith(fontSize: 12.5, fontWeight: FontWeight.w800, color: c.debit),
-                  ),
+                const DsLabel('Difference'),
+                const SizedBox(height: 2),
+                Text(
+                  '${formatMoney(difference.abs())} off',
+                  style: kNum.copyWith(fontSize: 22, height: 28 / 22, fontWeight: FontWeight.w600, color: c.crit),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    difference < 0
-                        ? 'SpendLog shows more than the bank. A payment is probably missing, or money in is counted twice.'
-                        : 'The bank shows more than SpendLog. Money in is probably missing, or a payment is counted twice.',
-                    style: TextStyle(fontSize: 12, height: 1.4, color: c.muted),
-                  ),
+                const SizedBox(height: 4),
+                Text(
+                  difference < 0
+                      ? 'SpendLog shows more than the bank. A payment is probably missing, or money in is counted twice.'
+                      : 'The bank shows more than SpendLog. Money in is probably missing, or a payment is counted twice.',
+                  style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2),
                 ),
               ],
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 }
 
+/// A figure in an inner tile: label, then a 2-decimal balance.
 class _Figure extends StatelessWidget {
   const _Figure({required this.label, required this.value});
 
@@ -356,27 +333,53 @@ class _Figure extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: c.muted)),
-        const SizedBox(height: 3),
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Text(value, style: kNum.copyWith(fontSize: 18, fontWeight: FontWeight.w800, color: c.ink)),
-        ),
-      ],
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: c.sf2,
+        border: Border.all(color: c.ln),
+        borderRadius: BorderRadius.circular(Ds.rXl),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w600, color: c.tx2),
+          ),
+          const SizedBox(height: 4),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              style: kNum.copyWith(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
-/// One likely cause: what it is, in words, and the one tap that would put
-/// it right - or where to look when there is no such tap.
+/// One likely cause: its rank, what it is, in words, and the one tap that
+/// would put it right - or where to look when there is no such tap. The
+/// likeliest is ringed in the accent and its fix is the primary button.
 class _SuspectCard extends StatelessWidget {
-  const _SuspectCard({required this.suspect, required this.busy, required this.enabled, required this.onApply});
+  const _SuspectCard({
+    required this.suspect,
+    required this.rank,
+    required this.likeliest,
+    required this.busy,
+    required this.enabled,
+    required this.onApply,
+  });
 
   final Suspect suspect;
+  final int rank;
+  final bool likeliest;
   final bool busy;
   final bool enabled;
   final VoidCallback onApply;
@@ -392,54 +395,99 @@ class _SuspectCard extends StatelessWidget {
             : formatShortDate(suspect.on!);
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
+        color: c.sf,
+        border: Border.all(color: likeliest ? c.ac : c.ln, width: likeliest ? 2 : 1),
+        borderRadius: BorderRadius.circular(Ds.rXl),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            children: [
+              Container(
+                constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: likeliest ? c.ac : c.sunk,
+                  borderRadius: BorderRadius.circular(Ds.rSm),
+                ),
+                child: Text(
+                  '$rank',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: likeliest ? c.acTx : c.tx2,
+                    fontFeatures: Ds.tabular,
+                  ),
+                ),
+              ),
+              if (likeliest) ...[
+                const SizedBox(width: 8),
+                const DsBadge('Most likely', tone: DsTone.ac),
+              ],
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Text(suspect.title, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: c.ink)),
+                child: Text(
+                  suspect.title,
+                  style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
+                ),
               ),
               const SizedBox(width: 10),
               Text(
                 formatMoney(suspect.amountMinor),
-                style: kNum.copyWith(fontSize: 13.5, fontWeight: FontWeight.w800, color: c.ink),
+                style: kNum.copyWith(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
               ),
             ],
           ),
           if (when != null)
             Padding(
-              padding: const EdgeInsets.only(top: 1),
-              child: Text(when, style: TextStyle(fontSize: 11.5, color: c.mutedLight)),
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(when, style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3)),
             ),
           const SizedBox(height: 6),
-          Text(suspect.explanation, style: TextStyle(fontSize: 12.8, height: 1.45, color: c.ink70)),
-          const SizedBox(height: 10),
+          Text(suspect.explanation, style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2)),
+          const SizedBox(height: 12),
           if (fix != null)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: FilledButton.tonal(
-                onPressed: enabled ? onApply : null,
-                child: Text(busy ? 'Applying…' : fix.label),
-              ),
-            )
+            likeliest
+                ? SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: enabled ? onApply : null,
+                      child: Text(busy ? 'Applying…' : fix.label),
+                    ),
+                  )
+                : Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton(
+                      onPressed: enabled ? onApply : null,
+                      style: OutlinedButton.styleFrom(minimumSize: const Size(0, 40)),
+                      child: Text(busy ? 'Applying…' : fix.label),
+                    ),
+                  )
           else
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(Icons.phone_android_outlined, size: 14, color: c.muted),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(suspect.whatToCheck, style: TextStyle(fontSize: 11.8, height: 1.4, color: c.muted)),
-                ),
-              ],
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(color: c.sunk, borderRadius: BorderRadius.circular(Ds.rLg)),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 1),
+                    child: Icon(Icons.phone_android_outlined, size: 16, color: c.tx2),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(suspect.whatToCheck, style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2)),
+                  ),
+                ],
+              ),
             ),
         ],
       ),
@@ -454,30 +502,17 @@ class _NothingFound extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.c;
     final since = reconcile.firstDrift?.on;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: c.chipNeutral, borderRadius: BorderRadius.circular(T.rMd)),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.search_off, size: 18, color: c.muted),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              reconcile.settled
-                  ? 'Nothing to find: SpendLog is within a rupee of the bank.'
-                  : since == null
-                      ? 'Nothing obvious in the rows. Check the bank app against the passbook, and add by hand '
-                          'anything SpendLog does not have.'
-                      : 'Nothing obvious in the rows. Open the bank app at ${formatShortDate(since)} and the days '
-                          'after it, and add by hand anything SpendLog does not have.',
-              style: TextStyle(fontSize: 12.8, height: 1.45, color: c.ink70),
-            ),
-          ),
-        ],
-      ),
+    return DsCallout(
+      tone: reconcile.settled ? DsTone.good : DsTone.neutral,
+      icon: reconcile.settled ? DsIcons.check : DsIcons.search,
+      title: reconcile.settled
+          ? 'Nothing to find: SpendLog is within a rupee of the bank.'
+          : since == null
+              ? 'Nothing obvious in the rows. Check the bank app against the passbook, and add by hand '
+                  'anything SpendLog does not have.'
+              : 'Nothing obvious in the rows. Open the bank app at ${formatShortDate(since)} and the days '
+                  'after it, and add by hand anything SpendLog does not have.',
     );
   }
 }
@@ -528,7 +563,7 @@ class _AdjustDialogState extends State<_AdjustDialog> {
             'This adds an "Unexplained difference" to the account so its balance matches ${widget.isCash ? 'your wallet' : 'the bank'}. '
             'It counts as ${gap == null || gap < 0 ? 'spending' : 'money in'} like any other row, and stays in your '
             'to-dos until you say what it was.',
-            style: TextStyle(fontSize: 13, height: 1.45, color: c.ink70),
+            style: TextStyle(fontSize: 15, height: 22 / 15, color: c.tx2),
           ),
           const SizedBox(height: 14),
           TextField(
@@ -536,11 +571,10 @@ class _AdjustDialogState extends State<_AdjustDialog> {
             autofocus: true,
             keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
             inputFormatters: [_signedAmount],
-            style: kNum.copyWith(fontSize: 18, fontWeight: FontWeight.w700, color: c.ink),
+            style: kNum.copyWith(fontSize: 17, fontWeight: FontWeight.w600, color: c.tx),
             decoration: InputDecoration(
               labelText: widget.isCash ? 'What your wallet holds' : 'What the bank shows',
               prefixText: '₹ ',
-              border: const OutlineInputBorder(),
             ),
             onChanged: (_) => setState(() {}),
           ),
@@ -552,7 +586,7 @@ class _AdjustDialogState extends State<_AdjustDialog> {
                     ? 'That is what SpendLog expects already - nothing to record.'
                     : 'SpendLog expects ${formatMoney(widget.expectedMinor)}, so ${formatMoney(gap.abs())} '
                         '${gap < 0 ? 'out' : 'in'} will be written in.',
-            style: TextStyle(fontSize: 12, height: 1.4, color: c.muted),
+            style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
           ),
         ],
       ),

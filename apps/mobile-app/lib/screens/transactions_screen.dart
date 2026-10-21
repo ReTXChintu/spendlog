@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
 import '../services/sms_service.dart';
-import '../theme.dart';
+import '../widgets/ds/ds.dart';
 import '../utils/format.dart';
 import '../widgets/card_strip.dart';
 import '../widgets/edit_transaction_sheet.dart';
@@ -313,11 +313,19 @@ class TransactionsScreenState extends State<TransactionsScreen> {
   Widget _sheetOption<V>(BuildContext sheetContext, {required String label, required V value, required bool on}) {
     final c = context.c;
     return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+      minTileHeight: 52,
+      tileColor: on ? c.acSoft : null,
       title: Text(
         label,
-        style: TextStyle(fontSize: 14, fontWeight: on ? FontWeight.w700 : FontWeight.w500, color: c.ink),
+        style: kNum.copyWith(
+          fontSize: 15,
+          height: 20 / 15,
+          fontWeight: on ? FontWeight.w600 : FontWeight.w500,
+          color: on ? c.ac : c.tx,
+        ),
       ),
-      trailing: on ? Icon(Icons.check, size: 18, color: c.brand) : null,
+      trailing: on ? DsIcon(DsIcons.check, size: 20, color: c.ac) : null,
       onTap: () => Navigator.of(sheetContext).pop(value),
     );
   }
@@ -624,24 +632,23 @@ class TransactionsScreenState extends State<TransactionsScreen> {
         _needsExplanation = false;
       });
 
-  Widget _searchField(SpendColors c) => TextField(
-        onChanged: _search,
-        style: TextStyle(color: c.ink),
-        decoration: InputDecoration(
-          hintText: 'Merchant or note',
-          hintStyle: TextStyle(color: c.mutedLight),
-          prefixIcon: Icon(Icons.search, size: 18, color: c.mutedLight),
-          isDense: true,
-          filled: true,
-          fillColor: c.surface,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(T.rSm),
-            borderSide: BorderSide(color: c.lineStrong),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(T.rSm),
-            borderSide: BorderSide(color: c.brand),
+  /// The in-page search: a 44 px field with a leading search icon (§7.2).
+  Widget _searchField(DsColors c) => SizedBox(
+        height: 44,
+        child: TextField(
+          onChanged: _search,
+          style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx),
+          textAlignVertical: TextAlignVertical.center,
+          decoration: InputDecoration(
+            hintText: 'Merchant or note',
+            hintStyle: TextStyle(fontSize: 14, color: c.tx3),
+            prefixIcon: Padding(
+              padding: const EdgeInsets.only(left: 12, right: 8),
+              child: DsIcon(DsIcons.search, size: 20, color: c.tx3),
+            ),
+            prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 44),
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           ),
         ),
       );
@@ -652,30 +659,25 @@ class TransactionsScreenState extends State<TransactionsScreen> {
     final uncategorized = _summary?.byCategory.where((x) => x.categoryId == null).toList() ?? const <CategorySpend>[];
 
     return Scaffold(
-      backgroundColor: c.paper,
+      backgroundColor: c.bg,
       // Only as a pushed page; as a tab the shell's own chrome is enough.
-      appBar: widget.isPushed
-          ? AppBar(
-              title: Text('Transactions', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: c.ink)),
-              shape: Border(bottom: BorderSide(color: c.line)),
-            )
-          : null,
+      appBar: widget.isPushed ? AppBar(title: const Text('Transactions')) : null,
       floatingActionButton: _selecting
           ? null
           : FloatingActionButton(
               onPressed: () => _openEditor(),
               tooltip: 'Add a transaction by hand',
-              child: const Icon(Icons.add),
+              child: const DsIcon(DsIcons.plus, size: 24),
             ),
       // Replaces the search box while picking, so the bar that appears is
       // about the one thing being done.
       bottomNavigationBar: _selecting
           ? SafeArea(
               child: Container(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
                 decoration: BoxDecoration(
-                  color: c.surface,
-                  border: Border(top: BorderSide(color: c.line)),
+                  color: c.sf2,
+                  border: Border(top: BorderSide(color: c.ln)),
                 ),
                 child: Row(
                   children: [
@@ -684,11 +686,11 @@ class TransactionsScreenState extends State<TransactionsScreen> {
                         _selectedIds.length < 2
                             ? 'Pick the rows that are the same payment'
                             : '${_selectedIds.length} selected',
-                        style: TextStyle(fontSize: 12.8, color: c.muted, fontWeight: FontWeight.w600),
+                        style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx2, fontWeight: FontWeight.w600),
                       ),
                     ),
                     TextButton(onPressed: _stopSelecting, child: const Text('Cancel')),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 8),
                     FilledButton(
                       onPressed: _selectedIds.length < 2 || _merging ? null : _mergeSelected,
                       child: Text(_merging ? 'Merging…' : 'Merge'),
@@ -702,20 +704,21 @@ class TransactionsScreenState extends State<TransactionsScreen> {
         children: [
           // On top of everything: which month this is decides what the rest
           // of the screen is about.
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           _monthBar(c),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 2, 16, 10),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: Row(
               children: [
                 Expanded(child: _searchField(c)),
-                const SizedBox(width: 10),
+                const SizedBox(width: 8),
                 _SyncButton(busy: _syncing, onTap: _syncEverything),
               ],
             ),
           ),
+          // Chips scroll sideways on a phone rather than wrap (§6.3).
           SizedBox(
-            height: 38,
+            height: 36,
             child: ListView(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -766,7 +769,7 @@ class TransactionsScreenState extends State<TransactionsScreen> {
               ],
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 12),
           if (_accountId != null) _cycleBar(c),
           CardStrip(cards: _cards, pace: currentMonthPace(_budget)),
           Expanded(child: _buildBody(uncategorized)),
@@ -778,7 +781,7 @@ class TransactionsScreenState extends State<TransactionsScreen> {
   /// Which month the list is showing, stepped one at a time. An account's
   /// own dates take its place, and then the bar says so and offers the way
   /// back.
-  Widget _monthBar(SpendColors c) {
+  Widget _monthBar(DsColors c) {
     final String title;
     final String note;
     if (_ownRange) {
@@ -809,58 +812,82 @@ class TransactionsScreenState extends State<TransactionsScreen> {
 
     final budget = _ownRange ? null : _budget;
 
+    Widget stepButton({required bool back, required bool enabled}) => SizedBox(
+          width: 36,
+          height: 36,
+          child: IconButton(
+            onPressed: enabled ? () => _goToMonth(back ? _monthIndex + 1 : _monthIndex - 1) : null,
+            icon: DsIcon(back ? DsIcons.chevronLeft : DsIcons.chevronRight, size: 20, color: enabled ? c.tx : c.ln2),
+            tooltip: back ? 'The month before' : 'The month after',
+            padding: EdgeInsets.zero,
+            style: IconButton.styleFrom(
+              minimumSize: const Size(36, 36),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Ds.rMd)),
+            ),
+          ),
+        );
+
+    final label = Column(
+      crossAxisAlignment: _ownRange ? CrossAxisAlignment.start : CrossAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: kNum.copyWith(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w600, color: c.tx),
+        ),
+        if (note.isNotEmpty)
+          Text(note, style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3)),
+      ],
+    );
+
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 2, 16, 8),
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       decoration: BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
+        color: c.sf,
+        border: Border.all(color: c.ln),
+        borderRadius: BorderRadius.circular(Ds.rXl),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              if (!_ownRange)
-                IconButton(
-                  onPressed: canGoBack ? () => _goToMonth(_monthIndex + 1) : null,
-                  icon: const Icon(Icons.chevron_left),
-                  color: c.ink,
-                  disabledColor: c.mutedLight,
-                  tooltip: 'The month before',
-                  visualDensity: VisualDensity.compact,
-                )
-              else
-                const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: _ownRange ? CrossAxisAlignment.start : CrossAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: c.ink),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+            child: Row(
+              children: [
+                if (!_ownRange) ...[
+                  // The period stepper (§6.1): one bordered 40 px control.
+                  Expanded(
+                    child: Container(
+                      height: 44,
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      decoration: BoxDecoration(
+                        color: c.sf,
+                        border: Border.all(color: c.ln2),
+                        borderRadius: BorderRadius.circular(Ds.rLg),
+                      ),
+                      child: Row(
+                        children: [
+                          stepButton(back: true, enabled: canGoBack),
+                          Expanded(child: label),
+                          stepButton(back: false, enabled: canGoForward),
+                        ],
+                      ),
                     ),
-                    if (note.isNotEmpty)
-                      Text(note, style: TextStyle(fontSize: 11, color: c.muted, fontWeight: FontWeight.w600)),
+                  ),
+                  if (!_onCurrentMonth) ...[
+                    const SizedBox(width: 4),
+                    TextButton(onPressed: () => _goToMonth(_currentMonthIndex), child: const Text('This month')),
                   ],
-                ),
-              ),
-              if (!_ownRange)
-                IconButton(
-                  onPressed: canGoForward ? () => _goToMonth(_monthIndex - 1) : null,
-                  icon: const Icon(Icons.chevron_right),
-                  color: c.ink,
-                  disabledColor: c.mutedLight,
-                  tooltip: 'The month after',
-                  visualDensity: VisualDensity.compact,
-                ),
-              if (_ownRange)
-                TextButton(onPressed: _backToMonths, child: const Text('Back to months'))
-              else if (!_onCurrentMonth)
-                TextButton(onPressed: () => _goToMonth(_currentMonthIndex), child: const Text('This month')),
-            ],
+                ] else ...[
+                  const SizedBox(width: 8),
+                  Expanded(child: label),
+                  TextButton(onPressed: _backToMonths, child: const Text('Back to months')),
+                ],
+              ],
+            ),
           ),
           if (budget != null && budget.configured) _monthBudget(c, budget),
         ],
@@ -870,12 +897,21 @@ class TransactionsScreenState extends State<TransactionsScreen> {
 
   /// The month on show against its budget: a bar, what went, and what is
   /// left - or, once the month is over, what it put into savings.
-  Widget _monthBudget(SpendColors c, MonthlyBudgetStatus budget) {
+  Widget _monthBudget(DsColors c, MonthlyBudgetStatus budget) {
     final total = budget.budgetMinor ?? 0;
     final left = budget.leftMinor ?? total - budget.spentMinor;
     final over = left < 0;
-    final tint = over ? c.debit : ((budget.pace?.isHigh ?? false) ? c.warn : c.brand);
+    final pace = budget.pace;
     final fraction = total > 0 ? (budget.spentMinor / total).clamp(0.0, 1.0) : 0.0;
+    // Promised: fixed costs still to go out this month, hatched after the
+    // ink. Only a month still running has any; a closed one is what it was.
+    final promised = total > 0 && pace != null && !budget.month.isClosed
+        ? (pace.fixedStillDueMinor / total).clamp(0.0, 1.0)
+        : 0.0;
+    // Where the spend should be by today, as the cobalt tick.
+    final today = total > 0 && pace != null && budget.month.isCurrent && pace.expectedSpentMinor > 0
+        ? (pace.expectedSpentMinor / total).clamp(0.0, 1.0)
+        : null;
 
     final String outcome;
     if (over) {
@@ -887,31 +923,46 @@ class TransactionsScreenState extends State<TransactionsScreen> {
     }
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(100),
-            child: LinearProgressIndicator(
-              value: fraction,
-              minHeight: 5,
-              backgroundColor: c.track,
-              valueColor: AlwaysStoppedAnimation(tint),
-            ),
+          // The signature pace bar, compact: ink spent, hatched promised,
+          // the cobalt tick where today should be. Red only once it's over.
+          DsPaceBar(
+            spent: fraction,
+            promised: promised,
+            today: today,
+            height: 10,
+            spentColor: over ? c.critFill : null,
+            semanticsLabel: '${formatMoneyShort(budget.spentMinor)} of ${formatMoneyShort(total)} budget, $outcome',
           ),
-          const SizedBox(height: 5),
+          const SizedBox(height: 6),
           Row(
             children: [
               Expanded(
-                child: Text(
-                  '${formatMoneyShort(budget.spentMinor)} of ${formatMoneyShort(total)} budget',
-                  style: kNum.copyWith(fontSize: 11.5, color: c.muted),
+                child: Text.rich(
+                  TextSpan(
+                    style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx2),
+                    children: [
+                      TextSpan(
+                        text: formatMoneyShort(budget.spentMinor),
+                        style: TextStyle(fontWeight: FontWeight.w600, color: c.tx),
+                      ),
+                      TextSpan(text: ' of ${formatMoneyShort(total)} budget'),
+                    ],
+                  ),
                 ),
               ),
+              const SizedBox(width: 8),
               Text(
                 outcome,
-                style: kNum.copyWith(fontSize: 11.5, fontWeight: FontWeight.w700, color: over ? c.debit : c.ink70),
+                style: kNum.copyWith(
+                  fontSize: 13,
+                  height: 18 / 13,
+                  fontWeight: FontWeight.w600,
+                  color: over ? c.crit : c.tx2,
+                ),
               ),
             ],
           ),
@@ -921,7 +972,7 @@ class TransactionsScreenState extends State<TransactionsScreen> {
   }
 
   /// Which stretch of the picked account is showing, and what it came to.
-  Widget _cycleBar(SpendColors c) {
+  Widget _cycleBar(DsColors c) {
     final cycles = _cycles;
     final cycle = _cycle;
     final String value;
@@ -939,30 +990,41 @@ class TransactionsScreenState extends State<TransactionsScreen> {
     }
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Text(
-                cycles?.byStatement == false ? 'Month' : 'Statement cycle',
-                style: TextStyle(fontSize: 12, color: c.muted, fontWeight: FontWeight.w600),
-              ),
+              DsLabel(cycles?.byStatement == false ? 'Month' : 'Statement cycle'),
               const SizedBox(width: 10),
               // No cycles came back (or none yet): nothing to switch between.
               if (cycles != null && cycles.cycles.isNotEmpty)
-                _FilterChip(label: value, on: cycle != null, dropdown: true, onTap: _chooseCycle)
+                Flexible(
+                  child: DsChip(
+                    label: value,
+                    selected: cycle != null,
+                    showCheck: false,
+                    dropdown: true,
+                    height: 32,
+                    onTap: _chooseCycle,
+                  ),
+                )
               else
-                Text(value, style: TextStyle(fontSize: 12, color: c.ink70, fontWeight: FontWeight.w600)),
+                Flexible(
+                  child: Text(
+                    value,
+                    style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx2, fontWeight: FontWeight.w600),
+                  ),
+                ),
             ],
           ),
           if (cycle != null) ...[
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Text(
               '${formatMoney(cycle.spentMinor)} spent across ${cycle.count} '
               '${cycle.count == 1 ? 'payment' : 'payments'}',
-              style: kNum.copyWith(fontSize: 11.5, color: c.muted),
+              style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3),
             ),
           ],
         ],
@@ -985,7 +1047,15 @@ class TransactionsScreenState extends State<TransactionsScreen> {
       );
     }
 
-    if (_days == null) return const Center(child: CircularProgressIndicator());
+    if (_days == null) {
+      // Skeleton rows rather than a lone spinner: the list's shape arrives
+      // before its figures.
+      return ListView(
+        physics: const NeverScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+        children: const [DsSkeletonRows(count: 6, caption: 'Loading your transactions…')],
+      );
+    }
 
     final month = _month;
     final monthBefore = !_ownRange && _monthIndex + 1 < _months.length ? _monthIndex + 1 : null;
@@ -1049,7 +1119,7 @@ class TransactionsScreenState extends State<TransactionsScreen> {
         // The pull-to-refresh and the near-the-end check both need it to
         // scroll even when a short week does not fill the screen.
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.only(top: 10, bottom: 90),
+        padding: const EdgeInsets.only(top: 0, bottom: 96),
         children: [
           if (_summary != null && !_filtersActive) _MonthRollup(summary: _summary!, current: _onCurrentMonth),
           if (uncategorized.isNotEmpty && _categoryId != 'none')
@@ -1058,7 +1128,7 @@ class TransactionsScreenState extends State<TransactionsScreen> {
               onReview: () => _setFilter(() => _categoryId = 'none'),
             ),
           for (final day in _days!) ...[
-            _DayHeader(day: day),
+            _DayHeader(day: day, first: identical(day, _days!.first)),
             for (final transaction in day.transactions)
               TransactionTile(
                 transaction: transaction,
@@ -1070,12 +1140,12 @@ class TransactionsScreenState extends State<TransactionsScreen> {
                 onToggleSelected: () => _toggleSelected(transaction),
                 onLongPress: _selecting ? null : () => _startSelecting(transaction),
               ),
-            const SizedBox(height: 22),
           ],
+          const SizedBox(height: 12),
           if (_hasMore && _loadMoreFailed)
             _EndRow(
               text: "Couldn't load the week before. Tap to try again",
-              icon: Icons.refresh,
+              icon: DsIcons.refresh,
               onTap: _loadMore,
             )
           else if (_hasMore)
@@ -1085,7 +1155,7 @@ class TransactionsScreenState extends State<TransactionsScreen> {
               text: monthBefore == null
                   ? "That's all for $_monthLabel."
                   : "That's all for $_monthLabel. Go to the month before",
-              icon: monthBefore == null ? null : Icons.chevron_left,
+              icon: monthBefore == null ? null : DsIcons.chevronLeft,
               onTap: monthBefore == null ? null : () => _goToMonth(monthBefore),
             ),
         ],
@@ -1105,15 +1175,11 @@ class _LoadingMoreRow extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          SizedBox(
-            width: 14,
-            height: 14,
-            child: CircularProgressIndicator(strokeWidth: 2, color: context.c.muted),
-          ),
+          const DsSpinner(size: 16),
           const SizedBox(width: 10),
           Text(
             'Loading the week before…',
-            style: TextStyle(fontSize: 12, color: context.c.muted, fontWeight: FontWeight.w600),
+            style: TextStyle(fontSize: 12, height: 16 / 12, color: context.c.tx2, fontWeight: FontWeight.w600),
           ),
         ],
       ),
@@ -1125,7 +1191,7 @@ class _LoadingMoreRow extends StatelessWidget {
 /// one before, or a retry when the next week failed to load.
 class _EndRow extends StatelessWidget {
   final String text;
-  final IconData? icon;
+  final DsGlyph? icon;
   final VoidCallback? onTap;
 
   const _EndRow({required this.text, this.icon, this.onTap});
@@ -1137,14 +1203,15 @@ class _EndRow extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(T.rSm),
-        child: Padding(
+        borderRadius: BorderRadius.circular(Ds.rLg),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 48),
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               if (icon != null) ...[
-                Icon(icon, size: 16, color: c.brandDark),
+                DsIcon(icon!, size: 16, color: c.ac),
                 const SizedBox(width: 6),
               ],
               Flexible(
@@ -1152,9 +1219,10 @@ class _EndRow extends StatelessWidget {
                   text,
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    color: onTap == null ? c.muted : c.brandDark,
+                    fontSize: onTap == null ? 13 : 14,
+                    height: onTap == null ? 18 / 13 : 20 / 14,
+                    fontWeight: onTap == null ? FontWeight.w400 : FontWeight.w600,
+                    color: onTap == null ? c.tx3 : c.ac,
                   ),
                 ),
               ),
@@ -1166,6 +1234,8 @@ class _EndRow extends StatelessWidget {
   }
 }
 
+/// The month's money in three plain figures: out in ink with a true minus,
+/// in in green with a plus (§3.2).
 class _MonthRollup extends StatelessWidget {
   final AnalyticsSummary summary;
 
@@ -1176,6 +1246,7 @@ class _MonthRollup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
     // The rollup names the month it covers: "Spent (Sep)" for a calendar
     // month, "Spent since 15 Sep" for one that runs pay day to pay day -
     // calling that one "Oct" on the 2nd would be wrong.
@@ -1190,26 +1261,29 @@ class _MonthRollup extends StatelessWidget {
     } else {
       spentLabel = 'Spent since ${formatIsoShortDate(from)}';
     }
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+    return DsCard(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color: context.c.surface,
-        border: Border.all(color: context.c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _RollupItem(
-            label: spentLabel,
-            value: formatMoneyShort(summary.totalSpendMinor),
-            color: context.c.debit,
+          Expanded(
+            child: DsInlineStat(
+              label: spentLabel,
+              value: moneyText(summary.totalSpendMinor, summary.totalSpendMinor > 0 ? MoneyKind.out : MoneyKind.plain),
+              valueColor: c.moneyOut,
+            ),
           ),
-          _RollupItem(
-            label: 'Received',
-            value: formatMoneyShort(summary.totalIncomeMinor),
-            color: context.c.credit,
+          const SizedBox(width: 16),
+          Expanded(
+            child: DsInlineStat(
+              label: 'Received',
+              value: moneyText(
+                summary.totalIncomeMinor,
+                summary.totalIncomeMinor > 0 ? MoneyKind.inflow : MoneyKind.plain,
+              ),
+              valueColor: c.moneyIn,
+            ),
           ),
         ],
       ),
@@ -1217,26 +1291,7 @@ class _MonthRollup extends StatelessWidget {
   }
 }
 
-class _RollupItem extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color color;
-
-  const _RollupItem({required this.label, required this.value, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: TextStyle(fontSize: 11, color: context.c.muted, fontWeight: FontWeight.w600)),
-        const SizedBox(height: 2),
-        Text(value, style: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w800, color: color)),
-      ],
-    );
-  }
-}
-
+/// The money that still needs a category, as an info callout with one verb.
 class _NudgeStrip extends StatelessWidget {
   final int amountMinor;
   final VoidCallback onReview;
@@ -1245,82 +1300,65 @@ class _NudgeStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
-      decoration: BoxDecoration(
-        color: context.c.brand50,
-        border: Border.all(color: context.c.brand100),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+      decoration: BoxDecoration(color: c.acSoft, borderRadius: BorderRadius.circular(Ds.rLg)),
       child: Row(
         children: [
-          Icon(Icons.help_outline, size: 16, color: context.c.brandDark),
-          const SizedBox(width: 10),
+          DsIcon(DsIcons.tag, size: 20, color: c.ac),
+          const SizedBox(width: 12),
           Expanded(
             child: Text(
               '${formatMoneyShort(amountMinor)} needs a category',
-              style: TextStyle(fontSize: 12, color: context.c.ink70),
+              style: kNum.copyWith(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx),
             ),
           ),
-          GestureDetector(
-            onTap: onReview,
-            child: Text(
-              'Review',
-              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: context.c.brandDark),
-            ),
-          ),
+          TextButton(onPressed: onReview, child: const Text('Review')),
         ],
       ),
     );
   }
 }
 
+/// A day's strip over its rows: `sf2`, 12/600 `tx2`, the day's net on the
+/// right with the money-in part in green.
 class _DayHeader extends StatelessWidget {
   final DayGroup day;
-  const _DayHeader({required this.day});
+
+  /// The first day sits right under the month card, so it needs no line
+  /// above it to separate it from a row.
+  final bool first;
+  const _DayHeader({required this.day, this.first = false});
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
+    final style = kNum.copyWith(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w600, color: c.tx2);
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: context.c.ink, width: 2)),
+        color: c.sf2,
+        border: Border(
+          top: BorderSide(color: c.ln),
+          bottom: BorderSide(color: c.ln),
+        ),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            formatDayLabel(day.date),
-            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: context.c.ink),
-          ),
-          Row(
-            children: [
-              if (day.spendMinor > 0)
-                Text(
-                  '−${formatMoney(day.spendMinor)}',
-                  style: kNum.copyWith(fontSize: 12.8, fontWeight: FontWeight.w700, color: context.c.debit),
-                ),
-              if (day.spendMinor > 0 && day.incomeMinor > 0)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: Text('·', style: TextStyle(color: context.c.mutedLight)),
-                ),
-              if (day.incomeMinor > 0)
-                Text(
-                  '+${formatMoney(day.incomeMinor)}',
-                  style: kNum.copyWith(fontSize: 12.8, fontWeight: FontWeight.w700, color: context.c.credit),
-                ),
-            ],
-          ),
+          Expanded(child: Text(formatDayLabel(day.date), style: style)),
+          if (day.spendMinor > 0) Text('$kMinus${formatMoney(day.spendMinor)}', style: style),
+          if (day.spendMinor > 0 && day.incomeMinor > 0) Text(' · ', style: style.copyWith(color: c.tx3)),
+          if (day.incomeMinor > 0) Text('+${formatMoney(day.incomeMinor)}', style: style.copyWith(color: c.good)),
         ],
       ),
     );
   }
 }
 
+/// A filter chip: a 36 px pill, ink-filled when on (§7.4). A category's
+/// own colour shows as a small swatch before its name.
 class _FilterChip extends StatelessWidget {
   final String label;
   final bool on;
@@ -1334,50 +1372,32 @@ class _FilterChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final swatch = color == null
+        ? null
+        : Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3)),
+          );
     return Padding(
       padding: const EdgeInsets.only(right: 8),
-      child: GestureDetector(
+      child: DsChip(
+        label: label,
+        selected: on,
         onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
-          decoration: BoxDecoration(
-            color: on ? context.c.brand50 : context.c.surface,
-            border: Border.all(color: on ? context.c.brand : context.c.lineStrong),
-            borderRadius: BorderRadius.circular(100),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (color != null) ...[
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2)),
-                ),
-                const SizedBox(width: 6),
-              ],
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: on ? context.c.brandDark : context.c.ink70,
-                ),
-              ),
-              if (dropdown) ...[
-                const SizedBox(width: 2),
-                Icon(Icons.arrow_drop_down, size: 16, color: on ? context.c.brandDark : context.c.muted),
-              ],
-            ],
-          ),
-        ),
+        dropdown: dropdown,
+        // A dropdown says what it holds; a tick there would read as a toggle.
+        showCheck: !dropdown,
+        icon: swatch,
       ),
     );
   }
 }
 
 /// Scans the inbox and the mailbox together — from the outside it is one
-/// question, "have I missed anything?", so it is one button.
+/// question, "have I missed anything?", so it is one button. A square
+/// secondary button on a phone, where "Check messages" would not fit beside
+/// the search.
 class _SyncButton extends StatelessWidget {
   final bool busy;
   final VoidCallback onTap;
@@ -1388,22 +1408,25 @@ class _SyncButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
 
-    return GestureDetector(
-      onTap: busy ? null : onTap,
-      child: Container(
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          color: c.surface,
-          border: Border.all(color: c.lineStrong),
-          borderRadius: BorderRadius.circular(T.rSm),
+    return Tooltip(
+      message: 'Check messages',
+      child: Material(
+        color: c.sf,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(Ds.rLg),
+          side: BorderSide(color: c.ln2),
         ),
-        child: busy
-            ? Padding(
-                padding: const EdgeInsets.all(13),
-                child: CircularProgressIndicator(strokeWidth: 2, color: c.muted),
-              )
-            : Icon(Icons.sync, size: 19, color: c.ink70),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: busy ? null : onTap,
+          child: SizedBox(
+            width: 44,
+            height: 44,
+            child: Center(
+              child: busy ? const DsSpinner(size: 18) : DsIcon(DsIcons.refresh, size: 20, color: c.tx),
+            ),
+          ),
+        ),
       ),
     );
   }

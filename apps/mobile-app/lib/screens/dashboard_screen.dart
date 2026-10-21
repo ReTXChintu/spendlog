@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/fund_models.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import '../widgets/ds/ds.dart';
 import '../utils/format.dart';
 import '../utils/loan_tab.dart';
 import '../services/reminder_service.dart';
@@ -254,7 +254,7 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
     }
 
     final data = _data;
-    if (data == null) return const Center(child: CircularProgressIndicator());
+    if (data == null) return const Center(child: DsSpinner());
 
     final fixed = data.fixedCosts;
     // Pocket money already shows on its account's tile in the wallet; a
@@ -265,13 +265,23 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
     return RefreshIndicator(
       onRefresh: load,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+        padding: kPagePad,
         children: [
           // First on the screen because it is the thing you open the app
           // standing up to use. Everything else can wait for a scroll.
           _AskBar(onTap: _openPerks),
-          const SizedBox(height: 16),
+          const SizedBox(height: kCardGap),
 
+          // Above the money, because a broken rule is the one thing here
+          // meant to change what you do next.
+          PlanWarnings(warnings: data.planWarnings, onOpenPlan: widget.onOpenPlan ?? () {}),
+
+          // The month against its budget: the "Free to spend" hero. The
+          // pace line is the one thing on this screen that should change
+          // what you spend today.
+          MonthlyBudgetCard(budget: data.budget, onEdit: _editBudget),
+
+          // The jobs: a calm queue, each with one verb.
           _Todos(
             data: data,
             onOpenTransactions: widget.onOpenTransactions,
@@ -284,14 +294,6 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
             onOpenMissingCredit: _openMissingCredit,
             onOpenStatementDue: _openStatementDue,
           ),
-
-          // Above the money, because a broken rule is the one thing here
-          // meant to change what you do next.
-          PlanWarnings(warnings: data.planWarnings, onOpenPlan: widget.onOpenPlan ?? () {}),
-
-          // The month against its budget, first: the pace line is the one
-          // thing on this screen that should change what you spend today.
-          MonthlyBudgetCard(budget: data.budget, onEdit: _editBudget),
 
           // Every card and account, so where one stands is here rather
           // than two screens in.
@@ -321,15 +323,15 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
             GridItem(
               HomeTile(
                 label: 'Which card today',
-                icon: Icons.credit_score_outlined,
+                icon: DsIcons.creditCard,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       'The card that gives you longest before the money actually has to leave.',
-                      style: TextStyle(fontSize: 11.5, height: 1.4, color: context.c.muted),
+                      style: TextStyle(fontSize: 13, height: 18 / 13, color: context.c.tx3),
                     ),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 12),
                     CardPicker(picks: data.picks, onOpenAccounts: widget.onOpenSettings),
                   ],
                 ),
@@ -347,7 +349,7 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
             if (data.emiCount > 0)
               GridItem(HomeTile(
                 label: 'EMIs running',
-                icon: Icons.event_repeat_outlined,
+                icon: DsIcons.repeat,
                 child: _TileBody(
                   figure: formatMoney(data.emiMonthlyMinor),
                   sub: 'a month across ${data.emiCount == 1 ? 'one plan' : '${data.emiCount} plans'} · '
@@ -360,7 +362,7 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
             if (data.loans.isEmpty && data.loanCount > 0)
               GridItem(HomeTile(
                 label: 'Loans',
-                icon: Icons.account_balance_outlined,
+                icon: DsIcons.bank,
                 child: _TileBody(
                   figure: formatMoney(data.loanMonthlyMinor),
                   sub: 'a month across ${data.loanCount == 1 ? 'one loan' : '${data.loanCount} loans'} · '
@@ -390,8 +392,8 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
   }
 }
 
-/// A label between runs of sections: Today, Cards, This month. So figures
-/// on different timescales stop reading as one list.
+/// A heading between runs of sections: Wallet, Today, This month. So
+/// figures on different timescales stop reading as one list.
 class _Group extends StatelessWidget {
   const _Group(this.title);
 
@@ -399,21 +401,7 @@ class _Group extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.c;
-    return Padding(
-      padding: const EdgeInsets.only(top: 26, bottom: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title.toUpperCase(),
-            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 1.1, color: c.muted),
-          ),
-          const SizedBox(height: 6),
-          Divider(height: 1, color: c.line),
-        ],
-      ),
-    );
+    return DsSectionHeader(title, padding: const EdgeInsets.only(top: 24, bottom: 12));
   }
 }
 
@@ -427,31 +415,49 @@ class _AskBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
 
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(T.rMd),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        decoration: BoxDecoration(color: c.brand50, borderRadius: BorderRadius.circular(T.rMd)),
-        child: Row(
-          children: [
-            Icon(Icons.local_offer_outlined, size: 19, color: c.brandDark),
-            const SizedBox(width: 11),
-            Expanded(
-              child: Text(
-                'Where are you? Check for a coupon or cashback',
-                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: c.brandDark),
+    return Material(
+      color: c.sf,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(Ds.rMd),
+        side: BorderSide(color: c.ln2),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 48),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              DsIcon(DsIcons.tag, size: 20, color: c.ac),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Where are you? Check for a coupon or cashback',
+                  style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx2),
+                ),
               ),
-            ),
-            Icon(Icons.chevron_right, size: 19, color: c.brandDark),
-          ],
+              const SizedBox(width: 8),
+              DsIcon(DsIcons.chevronRight, size: 18, color: c.tx3),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-/// The jobs, across the top.
+/// One job in the "Needs you" queue.
+typedef _Job = ({
+  DsGlyph icon,
+  DsTone tone,
+  String text,
+  String? meta,
+  String verb,
+  VoidCallback? onTap,
+});
+
+/// The jobs: the "Needs you" queue.
 ///
 /// Renders nothing when there is nothing to do — a row that is always on
 /// screen stops being read, and then so does the real one.
@@ -493,45 +499,57 @@ class _Todos extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final jobs = <({IconData icon, String text, bool urgent, VoidCallback? onTap})>[];
+    final jobs = <_Job>[];
+    String? meta(String body) => body.trim().isEmpty ? null : body;
 
     // Money the app and the bank disagree about comes first: everything
-    // else on this screen is built on the balances being right.
+    // else on this screen is built on the balances being right. The tone
+    // of each tile says how much it matters: red only for a problem.
     for (final todo in data.todos) {
       if (todo.isAlert && todo.accountId != null) {
         jobs.add((
-          icon: Icons.call_split,
+          icon: DsIcons.bank,
+          tone: DsTone.crit,
           text: todo.title,
-          urgent: true,
+          meta: meta(todo.body),
+          verb: 'Find the cause',
           onTap: () => onOpenPassbook(todo.accountId!, alertId: todo.alertId, reconcile: true),
         ));
       } else if (todo.isMissingCredit) {
         final credit = todo.missingCredit!;
         jobs.add((
-          icon: Icons.south_west,
-          text: '${todo.title}. ${todo.body}',
-          urgent: true,
+          icon: DsIcons.arrowDownLeft,
+          tone: DsTone.warn,
+          text: todo.title,
+          meta: meta(todo.body),
+          verb: 'Answer',
           onTap: () => onOpenMissingCredit(credit),
         ));
       } else if (todo.isStatementDue) {
         jobs.add((
-          icon: Icons.receipt_long_outlined,
+          icon: DsIcons.mail,
+          tone: DsTone.neutral,
           text: todo.title,
-          urgent: false,
+          meta: meta(todo.body),
+          verb: 'Get the statement',
           onTap: () => onOpenStatementDue(todo),
         ));
       } else if (todo.isUnexplained && todo.transactionId != null) {
         jobs.add((
-          icon: Icons.help_outline,
+          icon: DsIcons.info,
+          tone: DsTone.warn,
           text: todo.title,
-          urgent: false,
+          meta: meta(todo.body),
+          verb: 'Say what it was',
           onTap: () => onOpenUnexplained(todo.transactionId!),
         ));
       } else if (todo.isUnknownAccount) {
         jobs.add((
-          icon: Icons.account_balance_wallet_outlined,
+          icon: DsIcons.info,
+          tone: DsTone.ac,
           text: todo.title,
-          urgent: false,
+          meta: meta(todo.body),
+          verb: 'Pick account',
           onTap: onOpenUnknownAccount,
         ));
       }
@@ -540,26 +558,33 @@ class _Todos extends StatelessWidget {
     if (data.needsCategoryYesterday > 0) {
       final count = data.needsCategoryYesterday;
       jobs.add((
-        icon: Icons.help_outline,
+        icon: DsIcons.tag,
+        tone: DsTone.warn,
         text: '$count from yesterday ${count == 1 ? 'needs' : 'need'} a category',
-        urgent: true,
+        meta: null,
+        verb: 'Pick categories',
         onTap: onOpenTransactions,
       ));
     } else if (data.needsCategoryMonth > 0) {
       final count = data.needsCategoryMonth;
       jobs.add((
-        icon: Icons.help_outline,
+        icon: DsIcons.tag,
+        tone: DsTone.ac,
         text: '$count this month still ${count == 1 ? 'needs' : 'need'} a category',
-        urgent: false,
+        meta: null,
+        verb: 'Pick categories',
         onTap: onOpenTransactions,
       ));
     }
 
     for (final bill in data.bills) {
+      final soon = (bill.daysUntilDue ?? 99) <= 3;
       jobs.add((
-        icon: Icons.account_balance_wallet_outlined,
+        icon: DsIcons.creditCard,
+        tone: soon ? DsTone.warn : DsTone.neutral,
         text: '${bill.cardName} bill ${formatMoney(bill.totalDueMinor)}${bill.whenDue}',
-        urgent: (bill.daysUntilDue ?? 99) <= 3,
+        meta: null,
+        verb: 'See payments',
         onTap: onOpenTransactions,
       ));
     }
@@ -567,9 +592,11 @@ class _Todos extends StatelessWidget {
     // Only until the money goes in: a top-up seen on the account clears it.
     for (final pocket in data.pocketMoney.where((p) => p.topUpDue)) {
       jobs.add((
-        icon: Icons.savings_outlined,
+        icon: DsIcons.piggyBank,
+        tone: DsTone.warn,
         text: 'Top up ${pocketTitle(pocket.holder)} ${formatMoney(pocket.lastMonthSpentMinor)} today',
-        urgent: true,
+        meta: null,
+        verb: 'Open account',
         onTap: onOpenAccounts,
       ));
     }
@@ -577,9 +604,11 @@ class _Todos extends StatelessWidget {
     if (data.stuckStatements.isNotEmpty) {
       final count = data.stuckStatements.length;
       jobs.add((
-        icon: Icons.error_outline,
+        icon: DsIcons.alertTriangle,
+        tone: DsTone.crit,
         text: '$count ${count == 1 ? 'statement' : 'statements'} could not be read',
-        urgent: true,
+        meta: null,
+        verb: 'Open settings',
         onTap: onOpenSettings,
       ));
     }
@@ -587,53 +616,89 @@ class _Todos extends StatelessWidget {
     if (data.expiringPerks.isNotEmpty) {
       final count = data.expiringPerks.length;
       jobs.add((
-        icon: Icons.local_offer_outlined,
+        icon: DsIcons.tag,
+        tone: DsTone.ac,
         text: '$count ${count == 1 ? 'perk' : 'perks'} expiring soon',
-        urgent: false,
+        meta: null,
+        verb: 'See perks',
         onTap: onOpenPerks,
       ));
     }
 
     if (jobs.isEmpty) return const SizedBox.shrink();
 
-    final c = context.c;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Column(
-        children: [
-          for (final job in jobs)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: InkWell(
-                onTap: job.onTap,
-                borderRadius: BorderRadius.circular(T.rSm),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-                  decoration: BoxDecoration(
-                    color: job.urgent ? c.warnBg : c.chipNeutral,
-                    borderRadius: BorderRadius.circular(T.rSm),
+      padding: const EdgeInsets.only(top: kCardGap),
+      child: DsCard(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            DsSectionHeader('Needs you', badge: DsCountBadge(jobs.length)),
+            const SizedBox(height: 4),
+            for (var i = 0; i < jobs.length; i++) _JobRow(job: jobs[i], last: i == jobs.length - 1),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A "Needs you" row: a 40 icon tile, the title, a meta line, and one
+/// verb-led accent action. The whole row is the tap target.
+class _JobRow extends StatelessWidget {
+  const _JobRow({required this.job, required this.last});
+
+  final _Job job;
+  final bool last;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return InkWell(
+      onTap: job.onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(border: last ? null : Border(bottom: BorderSide(color: c.ln))),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            DsIconTile(job.icon, tone: job.tone),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    job.text,
+                    style: kNum.copyWith(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
                   ),
-                  child: Row(
-                    children: [
-                      Icon(job.icon, size: 16, color: job.urgent ? c.warn : c.muted),
-                      const SizedBox(width: 9),
-                      Expanded(
-                        child: Text(
-                          job.text,
-                          style: TextStyle(
-                            fontSize: 12.8,
-                            fontWeight: FontWeight.w600,
-                            color: job.urgent ? c.warn : c.ink70,
+                  if (job.meta != null) ...[
+                    const SizedBox(height: 2),
+                    Text(job.meta!, style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx3)),
+                  ],
+                  if (job.onTap != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              job.verb,
+                              style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w600, color: c.ac),
+                            ),
                           ),
-                        ),
+                          const SizedBox(width: 4),
+                          DsIcon(DsIcons.chevronRight, size: 16, color: c.ac),
+                        ],
                       ),
-                      Icon(Icons.chevron_right, size: 16, color: job.urgent ? c.warn : c.mutedLight),
-                    ],
-                  ),
-                ),
+                    ),
+                ],
               ),
             ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -654,7 +719,7 @@ class _TileBody extends StatelessWidget {
       children: [
         TileFigure(figure, color: colour),
         const SizedBox(height: 4),
-        Text(sub, style: TextStyle(fontSize: 11.5, height: 1.4, color: context.c.muted)),
+        Text(sub, style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: context.c.tx3)),
       ],
     );
   }
@@ -671,26 +736,25 @@ class _SoFarTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     final change = month.changeMinor;
-    final colour = change > 0 ? c.debit : (change < 0 ? c.credit : c.muted);
+    // More spend than last time is the bad delta (§3.2); less is good.
+    final colour = change > 0 ? c.crit : (change < 0 ? c.good : c.tx3);
 
     return HomeTile(
       label: 'So far',
-      icon: Icons.calendar_month_outlined,
+      icon: DsIcons.calendar,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           TileFigure(formatMoney(month.spentMinor)),
-          const SizedBox(height: 5),
+          const SizedBox(height: 6),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Padding(
-                padding: const EdgeInsets.only(top: 1),
-                child: Icon(
-                  change > 0 ? Icons.arrow_upward : (change < 0 ? Icons.arrow_downward : Icons.remove),
-                  size: 13,
-                  color: colour,
-                ),
+                padding: const EdgeInsets.only(top: 2),
+                child: change == 0
+                    ? Icon(Icons.remove, size: 12, color: colour)
+                    : DsIcon(change > 0 ? DsIcons.arrowUpRight : DsIcons.arrowDownLeft, size: 12, color: colour),
               ),
               const SizedBox(width: 4),
               Expanded(
@@ -699,7 +763,7 @@ class _SoFarTile extends StatelessWidget {
                       ? 'Level with this point last month'
                       : '${formatMoneyShort(change.abs())} ${change > 0 ? 'more' : 'less'} than this point '
                           'last month',
-                  style: TextStyle(fontSize: 11.5, height: 1.35, fontWeight: FontWeight.w600, color: colour),
+                  style: kNum.copyWith(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w600, color: colour),
                 ),
               ),
             ],
@@ -711,7 +775,7 @@ class _SoFarTile extends StatelessWidget {
             month.label.isEmpty
                 ? 'Day ${month.dayOfMonth} of your month'
                 : 'Day ${month.dayOfMonth} · ${month.label}',
-            style: TextStyle(fontSize: 11, color: c.mutedLight),
+            style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3),
           ),
         ],
       ),
@@ -736,7 +800,7 @@ class _FixedCostsTile extends StatelessWidget {
       label: fixed.commitmentsRemainingMinor > 0
           ? 'Fixed each month · ${formatMoneyShort(fixed.commitmentsRemainingMinor)} still to go out'
           : 'Fixed each month',
-      icon: Icons.checklist_outlined,
+      icon: DsIcons.listChecks,
       child: Column(
         children: [
           for (final commitment in fixed.commitments)
@@ -751,9 +815,10 @@ class _FixedCostsTile extends StatelessWidget {
                 commitment.isPartial
                     ? '${commitment.name}  ·  ${formatMoneyShort(commitment.shortfallMinor)} short'
                     : commitment.name,
-                style: TextStyle(
-                  fontSize: 12.8,
-                  color: commitment.isPaid ? c.mutedLight : (commitment.isPartial ? c.warn : c.ink70),
+                style: kNum.copyWith(
+                  fontSize: 14,
+                  height: 20 / 14,
+                  color: commitment.isPaid ? c.tx3 : (commitment.isPartial ? c.warn : c.tx),
                   decoration: commitment.isPaid ? TextDecoration.lineThrough : null,
                 ),
               ),
@@ -764,7 +829,7 @@ class _FixedCostsTile extends StatelessWidget {
                   ? Text(
                       '${formatMoneyShort(commitment.paidMinor)}/'
                       '${formatMoneyShort(commitment.thisPeriodAmountMinor)}',
-                      style: kNum.copyWith(fontSize: 12.8, color: c.ink70),
+                      style: kNum.copyWith(fontSize: 13, fontWeight: FontWeight.w600, color: c.tx),
                     )
                   : CommitmentAmount(commitment: commitment),
             ),
@@ -791,20 +856,22 @@ class _PeopleTile extends StatelessWidget {
     final owed = people?.owedToYouMinor ?? 0;
     final owe = people?.youOweMinor ?? 0;
 
+    // Owed to you is money coming in (green); what you owe is ink - money
+    // going out, not a problem.
     final String figure;
     final String sub;
     Color? colour;
     if (owed > 0) {
       figure = formatMoney(owed);
-      colour = c.credit;
+      colour = c.good;
       sub = owe > 0 ? 'owed to you · you owe ${formatMoney(owe)}' : 'owed to you';
     } else if (owe > 0) {
       figure = formatMoney(owe);
-      colour = c.debit;
+      colour = c.tx;
       sub = 'you owe';
     } else if (splitBalanceMinor != 0) {
       figure = formatMoney(splitBalanceMinor.abs());
-      colour = splitBalanceMinor > 0 ? c.credit : c.debit;
+      colour = splitBalanceMinor > 0 ? c.good : c.tx;
       sub = '${splitBalanceMinor > 0 ? 'owed to you' : 'you owe'} on split bills - say who, on each one';
     } else {
       figure = '';
@@ -813,15 +880,18 @@ class _PeopleTile extends StatelessWidget {
 
     return HomeTile(
       label: 'People',
-      icon: Icons.people_outline,
+      icon: DsIcons.users,
       onTap: onTap,
       child: figure.isEmpty
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Who owes what', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: c.ink)),
+                Text(
+                  'Who owes what',
+                  style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
+                ),
                 const SizedBox(height: 4),
-                Text(sub, style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted)),
+                Text(sub, style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3)),
               ],
             )
           : _TileBody(figure: figure, sub: sub, colour: colour),
@@ -846,30 +916,23 @@ class _LoanTile extends StatelessWidget {
     // paid and never matched. Worth a different colour either way.
     final overdue = next != null &&
         istWallClock(next.dueDate).toIso8601String().substring(0, 10).compareTo(istToday()) < 0;
+    final meta = kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3);
 
     return HomeTile(
       label: loan.label,
-      icon: Icons.account_balance_outlined,
+      icon: DsIcons.bank,
       onTap: onTap,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           TileFigure(formatMoney(loan.monthlyAmountMinor), size: 19),
-          Text('a month', style: TextStyle(fontSize: 11.5, color: c.muted)),
-          const SizedBox(height: 8),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(100),
-            child: LinearProgressIndicator(
-              value: progress,
-              minHeight: 5,
-              backgroundColor: c.track,
-              valueColor: AlwaysStoppedAnimation(c.brand),
-            ),
-          ),
+          Text('a month', style: meta),
+          const SizedBox(height: 10),
+          DsMeter(value: progress, color: c.ac),
           const SizedBox(height: 6),
           Text(
             '${loan.paidCount} of ${loan.months} paid · ${formatMoneyShort(loan.remainingMinor)} left',
-            style: TextStyle(fontSize: 11.5, color: c.muted),
+            style: meta,
           ),
           // Ahead or behind on what has fallen due: the figure a single
           // payment across every loan each month most needs checking.
@@ -878,10 +941,9 @@ class _LoanTile extends StatelessWidget {
               loanTabShort(loan.balanceMinor),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w700,
-                color: loan.balanceMinor < 0 ? c.warn : c.credit,
+              style: meta.copyWith(
+                fontWeight: FontWeight.w600,
+                color: loan.balanceMinor < 0 ? c.warn : c.good,
               ),
             ),
           if (next != null)
@@ -890,10 +952,9 @@ class _LoanTile extends StatelessWidget {
               overdue
                   ? '${formatMoneyShort(next.shortMinor)} was due ${formatShortDate(next.dueDate)}'
                   : 'Next ${formatMoneyShort(next.shortMinor)} on ${formatShortDate(next.dueDate)}',
-              style: TextStyle(
-                fontSize: 11.5,
-                fontWeight: overdue ? FontWeight.w700 : FontWeight.w600,
-                color: overdue ? c.warn : c.ink70,
+              style: meta.copyWith(
+                fontWeight: overdue ? FontWeight.w600 : FontWeight.w500,
+                color: overdue ? c.warn : c.tx2,
               ),
             ),
         ],
@@ -917,23 +978,24 @@ class _PocketTile extends StatelessWidget {
 
     return HomeTile(
       label: pocketTitle(pocket.holder),
-      icon: Icons.savings_outlined,
+      icon: DsIcons.piggyBank,
       onTap: onTap,
-      background: due ? c.warnBg : null,
+      background: due ? c.warnSoft : null,
       accent: due ? c.warn : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           PocketMeter(status: pocket, compact: true),
-          const SizedBox(height: 2),
+          const SizedBox(height: 4),
           Text(
             due ? 'Top up ${formatMoneyShort(pocket.lastMonthSpentMinor)} today' : pocketRenews(pocket),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 11.5,
-              fontWeight: due ? FontWeight.w700 : FontWeight.w600,
-              color: due ? c.warn : c.ink70,
+            style: kNum.copyWith(
+              fontSize: 12,
+              height: 16 / 12,
+              fontWeight: due ? FontWeight.w600 : FontWeight.w500,
+              color: due ? c.warn : c.tx2,
             ),
           ),
         ],
@@ -954,9 +1016,12 @@ class _Heading extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: c.ink)),
-        const SizedBox(height: 3),
-        Text(sub, style: TextStyle(fontSize: 12, height: 1.45, color: c.muted)),
+        Text(
+          title,
+          style: kNum.copyWith(fontSize: 22, height: 28 / 22, fontWeight: FontWeight.w600, color: c.tx),
+        ),
+        const SizedBox(height: 4),
+        Text(sub, style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx3)),
       ],
     );
   }

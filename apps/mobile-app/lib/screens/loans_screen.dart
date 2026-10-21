@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import '../widgets/ds/ds.dart';
 import '../utils/format.dart';
 import '../utils/loan_tab.dart';
 import '../widgets/loan_dialog.dart';
@@ -87,13 +87,10 @@ class _LoansScreenState extends State<LoansScreen> {
         if (!didPop) Navigator.of(context).pop(_changed);
       },
       child: Scaffold(
-        backgroundColor: c.paper,
-        appBar: AppBar(
-          title: const Text('Loans'),
-          shape: Border(bottom: BorderSide(color: c.line)),
-        ),
+        backgroundColor: c.bg,
+        appBar: AppBar(title: const Text('Loans')),
         body: _loading
-            ? const Center(child: CircularProgressIndicator())
+            ? const Center(child: DsSpinner())
             : _failed
                 ? StateBlock(
                     icon: Icons.wifi_off,
@@ -105,11 +102,11 @@ class _LoansScreenState extends State<LoansScreen> {
                 : RefreshIndicator(
                     onRefresh: _load,
                     child: ListView(
-                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 32),
+                      padding: kPagePad,
                       children: [
                         if (running.isNotEmpty) ...[
-                          _TotalLine(balanceMinor: _totals.balanceMinor),
-                          const SizedBox(height: 12),
+                          _TotalLine(balanceMinor: _totals.balanceMinor, running: running),
+                          const SizedBox(height: kCardGap),
                         ],
                         for (final loan in running) ...[
                           _LoanCard(
@@ -117,26 +114,17 @@ class _LoansScreenState extends State<LoansScreen> {
                             expanded: loan.id == widget.focusLoanId || running.length == 1,
                             onEdit: () => _edit(loan),
                           ),
-                          const SizedBox(height: 12),
+                          const SizedBox(height: kCardGap),
                         ],
                         if (finished.isNotEmpty) ...[
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(2, 8, 2, 8),
-                            child: Text(
-                              'Closed',
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: c.muted),
-                            ),
-                          ),
+                          const DsLabel('Closed', padding: EdgeInsets.fromLTRB(2, 8, 2, 8)),
                           for (final loan in finished) ...[
                             _LoanCard(loan: loan, expanded: loan.id == widget.focusLoanId, onEdit: () => _edit(loan)),
-                            const SizedBox(height: 12),
+                            const SizedBox(height: kCardGap),
                           ],
                         ],
                         if (_loans.isEmpty)
-                          Text(
-                            'No loans yet. Add one from Settings.',
-                            style: TextStyle(fontSize: 13, color: c.muted),
-                          ),
+                          const DsEmpty(icon: DsIcons.banknote, message: 'No loans yet. Add one from Settings.'),
                       ],
                     ),
                   ),
@@ -145,36 +133,68 @@ class _LoansScreenState extends State<LoansScreen> {
   }
 }
 
-/// "₹1,200 ahead overall", across every running loan.
+/// "₹1,200 ahead overall", across every running loan, with the month's
+/// figures beside it.
 class _TotalLine extends StatelessWidget {
   final int balanceMinor;
+  final List<Loan> running;
 
-  const _TotalLine({required this.balanceMinor});
+  const _TotalLine({required this.balanceMinor, required this.running});
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
     final behind = balanceMinor < 0;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: behind ? c.warnBg : c.surface,
-        borderRadius: BorderRadius.circular(T.rMd),
-        border: Border.all(color: behind ? c.warn : c.line),
-      ),
+    final ahead = balanceMinor > 0;
+    final monthly = running.fold<int>(0, (sum, loan) => sum + loan.monthlyAmountMinor);
+    final left = running.fold<int>(0, (sum, loan) => sum + loan.remainingMinor);
+    return DsCard(
+      color: behind ? c.warnSoft : null,
+      borderColor: behind ? c.warnSoft : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            loanTotalLine(balanceMinor),
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: behind ? c.warn : c.ink),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              DsIconTile(
+                behind ? DsIcons.alertTriangle : DsIcons.check,
+                tone: behind ? DsTone.warn : (ahead ? DsTone.good : DsTone.neutral),
+                onTinted: behind,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      loanTotalLine(balanceMinor),
+                      style: kNum.copyWith(
+                        fontSize: 19,
+                        height: 24 / 19,
+                        fontWeight: FontWeight.w600,
+                        color: behind ? c.warn : (ahead ? c.good : c.tx),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Everything paid towards your loans, against everything that has fallen due so far. '
+                      'Extra counts towards the next instalments; it does not shorten the loan.',
+                      style: TextStyle(fontSize: 13, height: 18 / 13, color: behind ? c.tx2 : c.tx3),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 3),
-          Text(
-            'Everything paid towards your loans, against everything that has fallen due so far. '
-            'Extra counts towards the next instalments; it does not shorten the loan.',
-            style: TextStyle(fontSize: 12, height: 1.45, color: c.muted),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 24,
+            runSpacing: 10,
+            children: [
+              DsInlineStat(label: 'EMIs a month', value: formatMoneyShort(monthly)),
+              DsInlineStat(label: 'Still to pay', value: formatMoneyShort(left)),
+            ],
           ),
         ],
       ),
@@ -194,24 +214,40 @@ class _LoanCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final behind = loan.balanceMinor < 0 && loan.status == 'ACTIVE';
+    final active = loan.status == 'ACTIVE';
+    final behind = loan.balanceMinor < 0 && active;
+    final ahead = loan.balanceMinor > 0;
+    final today = istToday();
+    final fallenDue = loan.instalments
+        .where((row) => istWallClock(row.dueDate).toIso8601String().substring(0, 10).compareTo(today) <= 0)
+        .length;
+    final paidShare = loan.months == 0 ? 0.0 : loan.paidCount / loan.months;
+    final dueShare = loan.months == 0 || loan.instalments.isEmpty ? null : fallenDue / loan.months;
+
+    final (tabTone, tabFill, tabText) = behind
+        ? (DsTone.warn, c.warnSoft, c.warn)
+        : ahead
+            ? (DsTone.good, c.goodSoft, c.good)
+            : (DsTone.neutral, c.sunk, c.tx2);
 
     // A Material rather than a decorated box, so the sections' ink shows.
     return Material(
-      color: c.surface,
+      color: c.sf,
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(T.rMd),
-        side: BorderSide(color: c.line),
+        borderRadius: BorderRadius.circular(Ds.rXl),
+        side: BorderSide(color: behind ? c.warnFill : c.ln),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 4, 0),
+            padding: const EdgeInsets.fromLTRB(16, 14, 4, 0),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                DsMonogram(loan.label),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -220,35 +256,75 @@ class _LoanCard extends StatelessWidget {
                         loan.label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: c.ink),
+                        style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
                       ),
                       const SizedBox(height: 2),
                       Text(
                         '${formatMoney(loan.monthlyAmountMinor)} a month · ${loan.paidCount} of '
                         '${loan.months} paid · ${formatMoneyShort(loan.remainingMinor)} left',
-                        style: TextStyle(fontSize: 12, color: c.muted),
+                        style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx3),
                       ),
                     ],
                   ),
                 ),
                 IconButton(
                   tooltip: 'Edit loan',
-                  icon: Icon(Icons.edit_outlined, size: 18, color: c.muted),
+                  icon: DsIcon(DsIcons.pencil, size: 18, color: c.tx2),
                   onPressed: onEdit,
                 ),
               ],
             ),
           ),
-          if (loan.status == 'ACTIVE')
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: formatMoneyShort(loan.monthlyAmountMinor),
+                    style: TextStyle(fontSize: 22, height: 28 / 22, fontWeight: FontWeight.w600, color: c.tx),
+                  ),
+                  TextSpan(
+                    text: ' /month',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: c.tx3),
+                  ),
+                ],
+              ),
+              style: kNum,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: DsMeter(
+              value: paidShare,
+              height: 10,
+              color: c.tx,
+              today: active ? dueShare : null,
+            ),
+          ),
+          if (active)
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 6, 14, 2),
-              child: Text(
-                loanTabLine(loan),
-                key: ValueKey('loan-tab-${loan.id}'),
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: behind ? c.warn : (loan.balanceMinor > 0 ? c.credit : c.ink70),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 2),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(color: tabFill, borderRadius: BorderRadius.circular(Ds.rLg)),
+                child: Row(
+                  children: [
+                    DsIcon(
+                      behind ? DsIcons.alertTriangle : (ahead ? DsIcons.arrowUpRight : DsIcons.check),
+                      size: 18,
+                      color: c.strong(tabTone),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        loanTabLine(loan),
+                        key: ValueKey('loan-tab-${loan.id}'),
+                        style: kNum.copyWith(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w600, color: tabText),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -259,32 +335,37 @@ class _LoanCard extends StatelessWidget {
               children: [
                 ExpansionTile(
                   initiallyExpanded: expanded,
-                  tilePadding: const EdgeInsets.symmetric(horizontal: 14),
-                  childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+                  tilePadding: const EdgeInsets.symmetric(horizontal: 16),
+                  childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                   title: Text(
                     'Instalments',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: c.ink),
+                    style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
                   ),
                   children: [
-                    for (final row in loan.instalments) _InstalmentRow(row: row),
+                    for (final (i, row) in loan.instalments.indexed)
+                      _InstalmentRow(row: row, last: i == loan.instalments.length - 1),
                     if (loan.instalments.isEmpty)
-                      Text('No schedule yet.', style: TextStyle(fontSize: 12, color: c.muted)),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text('No schedule yet.', style: TextStyle(fontSize: 13, color: c.tx3)),
+                      ),
                   ],
                 ),
+                Divider(indent: 16, endIndent: 16, color: c.ln),
                 ExpansionTile(
                   initiallyExpanded: expanded,
-                  tilePadding: const EdgeInsets.symmetric(horizontal: 14),
-                  childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+                  tilePadding: const EdgeInsets.symmetric(horizontal: 16),
+                  childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
                   title: Text(
                     loan.payments.isEmpty ? 'Payments' : 'Payments (${loan.payments.length})',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: c.ink),
+                    style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
                   ),
                   children: [
                     for (final payment in loan.payments) _PaymentRow(payment: payment),
                     if (loan.payments.isEmpty)
                       Text(
                         'None linked yet. Mark a payment as a loan repayment from the transaction itself.',
-                        style: TextStyle(fontSize: 12, height: 1.4, color: c.muted),
+                        style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
                       ),
                   ],
                 ),
@@ -297,11 +378,13 @@ class _LoanCard extends StatelessWidget {
   }
 }
 
-/// One instalment: when, how much, and how much of it is paid.
+/// One instalment on the schedule's timeline: a filled accent dot when it
+/// is paid, a dashed ring while it is still to come.
 class _InstalmentRow extends StatelessWidget {
   final LoanInstalmentRow row;
+  final bool last;
 
-  const _InstalmentRow({required this.row});
+  const _InstalmentRow({required this.row, this.last = false});
 
   @override
   Widget build(BuildContext context) {
@@ -310,43 +393,86 @@ class _InstalmentRow extends StatelessWidget {
         row.status != 'SKIPPED' &&
         istWallClock(row.dueDate).toIso8601String().substring(0, 10).compareTo(istToday()) <= 0;
 
-    final (label, colour, background) = switch (row.status) {
-      'PAID' => ('Paid', c.credit, c.credit50),
-      'PARTIAL' => ('Part paid', c.warn, c.warnBg),
-      'SKIPPED' => ('Skipped', c.muted, c.chipNeutral),
-      _ => (overdue ? 'Due' : 'To come', overdue ? c.warn : c.muted, overdue ? c.warnBg : c.chipNeutral),
+    final (label, tone) = switch (row.status) {
+      'PAID' => ('Paid', DsTone.good),
+      'PARTIAL' => ('Part paid', DsTone.warn),
+      'SKIPPED' => ('Skipped', DsTone.neutral),
+      _ => (overdue ? 'Due' : 'To come', overdue ? DsTone.warn : DsTone.neutral),
     };
     final detail = row.status == 'PARTIAL'
         ? '${loanMoney(row.paidMinor)} of ${loanMoney(row.amountMinor)} · ${loanMoney(row.shortMinor)} short'
         : loanMoney(row.amountMinor);
+    final done = row.status == 'PAID';
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+    return IntrinsicHeight(
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           SizedBox(
-            width: 74,
-            child: Text(
-              DateFormat('d MMM yy').format(istWallClock(row.dueDate)),
-              style: kNum.copyWith(fontSize: 12, color: c.ink70),
+            width: 18,
+            child: Column(
+              children: [
+                const SizedBox(height: 15),
+                _TimelineDot(done: done),
+                if (!last)
+                  Expanded(child: Container(width: 1, color: c.ln2))
+                else
+                  const Spacer(),
+              ],
             ),
           ),
+          const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              detail,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: kNum.copyWith(fontSize: 12.5, color: c.ink),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 72,
+                    child: Text(
+                      DateFormat('d MMM yy').format(istWallClock(row.dueDate)),
+                      style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx2),
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      detail,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: kNum.copyWith(fontSize: 13, height: 18 / 13, fontWeight: FontWeight.w500, color: c.tx),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  DsBadge(label, tone: tone),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: 6),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(color: background, borderRadius: BorderRadius.circular(100)),
-            child: Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: colour)),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 10 px: a filled accent dot for done, a dashed accent ring for to come.
+class _TimelineDot extends StatelessWidget {
+  final bool done;
+
+  const _TimelineDot({required this.done});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    if (done) {
+      return Container(width: 10, height: 10, decoration: BoxDecoration(color: c.ac, shape: BoxShape.circle));
+    }
+    return DsDashedBorder(
+      radius: 5,
+      color: c.ac,
+      strokeWidth: 1.5,
+      dash: 2,
+      gap: 2,
+      child: const SizedBox(width: 10, height: 10),
     );
   }
 }
@@ -363,18 +489,30 @@ class _PaymentRow extends StatelessWidget {
     final c = context.c;
     final merchant = payment.merchant?.trim();
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Column(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(loanShareLine(payment), style: TextStyle(fontSize: 12.5, color: c.ink)),
-          if (merchant != null && merchant.isNotEmpty)
-            Text(
-              merchant,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11.5, color: c.muted),
+          const DsIconTile(DsIcons.banknote, size: 36),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  loanShareLine(payment),
+                  style: kNum.copyWith(fontSize: 14, height: 20 / 14, color: c.tx),
+                ),
+                if (merchant != null && merchant.isNotEmpty)
+                  Text(
+                    merchant,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
+                  ),
+              ],
             ),
+          ),
         ],
       ),
     );

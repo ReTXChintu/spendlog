@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import 'ds/ds.dart';
 
 // CARD is a credit card and DEBIT a debit card. They differ everywhere it
 // matters: a credit card has a cycle, a limit, a due date and a statement
@@ -26,10 +26,6 @@ Future<bool?> showEditAccountSheet(
   return showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: context.c.surface,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(T.rLg)),
-    ),
     builder: (_) => Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: _EditAccountSheet(account: account, accounts: accounts),
@@ -65,8 +61,6 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
   late bool _isActive;
   late bool _noCreditAlerts;
 
-  /// Whether the statement password is shown as typed.
-  bool _showPassword = false;
   String? _mergeInto;
 
   bool _saving = false;
@@ -233,298 +227,298 @@ class _EditAccountSheetState extends State<_EditAccountSheet> {
     final others = widget.accounts.where((a) => a.id != widget.account?.id).toList();
 
     return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 38,
-                height: 4,
-                decoration: BoxDecoration(color: c.lineStrong, borderRadius: BorderRadius.circular(100)),
-              ),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              _isNew ? 'Add an account' : 'Edit account',
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: c.ink),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              _isNew
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const DsDragHandle(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+            child: DsSheetHeader(
+              title: _isNew ? 'Add an account' : 'Edit account',
+              subtitle: _isNew
                   ? "For anything your bank doesn't text you about."
                   : 'The name is yours to choose; the bank name is what incoming messages are matched against.',
-              style: TextStyle(fontSize: 12.5, height: 1.45, color: c.muted),
             ),
-            const SizedBox(height: 18),
+          ),
+          Flexible(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _Field(label: 'Name it', controller: _nickname, hint: 'Salary account'),
+                  const SizedBox(height: 16),
 
-            _Field(label: 'Name it', controller: _nickname, hint: 'Salary account'),
-            const SizedBox(height: 14),
+                  const DsLabel('Type'),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final (value, label) in _types)
+                        DsChip(
+                          label: label,
+                          selected: _type == value,
+                          onTap: () => setState(() => _type = value),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
 
-            Text('Type', style: _labelStyle(c)),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                for (final (value, label) in _types)
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => setState(() => _type = value),
-                      child: Container(
-                        margin: const EdgeInsets.only(right: 8),
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: _type == value ? c.brand50 : c.surface,
-                          border: Border.all(color: _type == value ? c.brand : c.lineStrong),
-                          borderRadius: BorderRadius.circular(T.rSm),
+                  if (_type != 'CASH') ...[
+                    _Field(label: 'Bank name', controller: _bankName, hint: 'HDFC Bank'),
+                    const SizedBox(height: 16),
+                    _Field(label: 'Last digits', controller: _last4, hint: '1377', numeric: true),
+                  ],
+
+                  // What a debit card draws on. Its spending is that account's
+                  // money, so it is counted there and shows on that account's
+                  // statement - and a debit card whose account SpendLog has
+                  // never seen stands on its own, the way cash does.
+                  if (_type == 'DEBIT') ...[
+                    const SizedBox(height: 16),
+                    const DsLabel('Draws on'),
+                    const SizedBox(height: 6),
+                    DropdownButtonFormField<String?>(
+                      initialValue: _linkedAccountId,
+                      isExpanded: true,
+                      icon: DsIcon(DsIcons.chevronDown, color: c.tx2),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('Nothing — it stands on its own')),
+                        for (final bank in widget.accounts.where((a) => a.accountType == 'BANK'))
+                          DropdownMenuItem(value: bank.id, child: Text(bank.label)),
+                      ],
+                      onChanged: (value) => setState(() => _linkedAccountId = value),
+                    ),
+                  ],
+
+                  // Two cards from one bank often draw on a single limit: spend on
+                  // either and the other has less. The card named holds the
+                  // limit; this one's own is then ignored. Only cards not
+                  // themselves drawing on a third are offered - the server
+                  // flattens a chain, but offering its head is clearer.
+                  if (_type == 'CARD' &&
+                      widget.accounts.any((a) =>
+                          a.accountType == 'CARD' && a.id != widget.account?.id && a.sharesLimitWith == null)) ...[
+                    const SizedBox(height: 16),
+                    const DsLabel('Shares its limit with'),
+                    const SizedBox(height: 6),
+                    DropdownButtonFormField<String?>(
+                      initialValue: _sharesLimitWith,
+                      isExpanded: true,
+                      icon: DsIcon(DsIcons.chevronDown, color: c.tx2),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('Nothing — a limit of its own')),
+                        for (final holder in widget.accounts.where((a) =>
+                            a.accountType == 'CARD' && a.id != widget.account?.id && a.sharesLimitWith == null))
+                          DropdownMenuItem(value: holder.id, child: Text(holder.label)),
+                      ],
+                      onChanged: (value) => setState(() => _sharesLimitWith = value),
+                    ),
+                  ],
+
+                  // The network is a card thing rather than a credit-card thing:
+                  // a debit card gets suggested at a till on the same grounds.
+                  if (_type == 'CARD' || _type == 'DEBIT') ...[
+                    const SizedBox(height: 16),
+                    _Field(label: 'Network', controller: _cardNetwork, hint: 'Visa, Mastercard, RuPay'),
+                  ],
+
+                  if (_type == 'CARD') ...[
+                    const SizedBox(height: 16),
+                    _Field(label: 'Credit limit (₹)', controller: _creditLimit, hint: '200000', numeric: true),
+                    const SizedBox(height: 16),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: _Field(label: 'Statement day', controller: _statementDay, hint: '18', numeric: true),
                         ),
-                        child: Text(
-                          label,
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w700,
-                            color: _type == value ? c.brandDark : c.ink70,
-                          ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _Field(label: 'Due day', controller: _dueDay, hint: '7', numeric: true),
                         ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    // The one thing every figure on the card hangs off. Each card
+                    // bills on its own day, so nothing here borrows the salary
+                    // month - without it the card simply has no cycle yet.
+                    Text(
+                      "Statement day is when the bill is drawn. This card's cycle, what it owes and what is left "
+                      'of its limit all count from it. A statement read for this card fills both in.',
+                      style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // The one field the statement reader cannot work without.
+                    // Every card's password is tried against every statement, so
+                    // one is often enough for all of them.
+                    const DsLabel('Statement password'),
+                    const SizedBox(height: 6),
+                    DsPasswordField(
+                      controller: _statementPassword,
+                      decoration: InputDecoration(
+                        hintText: widget.account?.hasStatementPassword == true
+                            ? 'Already set - type a new one to replace it'
+                            : 'Opens the PDF this card emails',
+                        helperText: 'Stored encrypted and never sent back to this screen. Issuers build it '
+                            'from a date of birth, so it usually opens more than this one card.',
+                        helperMaxLines: 4,
                       ),
                     ),
+                  ],
+
+                  // Some banks text every payment out and none in. Said once
+                  // here, a gap on the account is read as money in first, and
+                  // its statement is asked for every month to catch the rest.
+                  if (_type == 'BANK') ...[
+                    const SizedBox(height: 12),
+                    SwitchListTile(
+                      key: const ValueKey('no-credit-alerts'),
+                      value: _noCreditAlerts,
+                      onChanged: (value) => setState(() => _noCreditAlerts = value),
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        "This bank doesn't text me about money coming in",
+                        style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx),
+                      ),
+                      subtitle: Text(
+                        'SpendLog then reads a gap as a credit it missed, and asks for the statement monthly.',
+                        style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
+                      ),
+                    ),
+                    if (!_noCreditAlerts && widget.account?.suggestNoCreditAlerts == true)
+                      DsCallout(tone: DsTone.warn, title: _suggestionText(widget.account!)),
+                  ],
+
+                  const SizedBox(height: 8),
+                  CheckboxListTile(
+                    value: !_isActive,
+                    onChanged: (v) => setState(() => _isActive = !(v ?? false)),
+                    controlAffinity: ListTileControlAffinity.leading,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                      'Closed — keep its history, but hide it when picking an account',
+                      style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx2),
+                    ),
                   ),
-              ],
-            ),
-            const SizedBox(height: 14),
 
-            if (_type != 'CASH') ...[
-              _Field(label: 'Bank name', controller: _bankName, hint: 'HDFC Bank'),
-              const SizedBox(height: 14),
-              _Field(label: 'Last digits', controller: _last4, hint: '1377', numeric: true),
-            ],
+                  if (!_isNew && widget.account!.aliases.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      'Also recognised as ${widget.account!.aliases.map((a) => a.bankName).join(', ')}',
+                      style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
+                    ),
+                  ],
 
-            // What a debit card draws on. Its spending is that account's
-            // money, so it is counted there and shows on that account's
-            // statement - and a debit card whose account SpendLog has
-            // never seen stands on its own, the way cash does.
-            if (_type == 'DEBIT') ...[
-              const SizedBox(height: 14),
-              Text('Draws on', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: c.muted)),
-              const SizedBox(height: 6),
-              DropdownButtonFormField<String?>(
-                initialValue: _linkedAccountId,
-                items: [
-                  const DropdownMenuItem(value: null, child: Text('Nothing — it stands on its own')),
-                  for (final bank in widget.accounts.where((a) => a.accountType == 'BANK'))
-                    DropdownMenuItem(value: bank.id, child: Text(bank.label)),
-                ],
-                onChanged: (value) => setState(() => _linkedAccountId = value),
-              ),
-            ],
-
-            // Two cards from one bank often draw on a single limit: spend on
-            // either and the other has less. The card named holds the
-            // limit; this one's own is then ignored. Only cards not
-            // themselves drawing on a third are offered - the server
-            // flattens a chain, but offering its head is clearer.
-            if (_type == 'CARD' &&
-                widget.accounts.any((a) =>
-                    a.accountType == 'CARD' && a.id != widget.account?.id && a.sharesLimitWith == null)) ...[
-              const SizedBox(height: 14),
-              Text('Shares its limit with',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: c.muted)),
-              const SizedBox(height: 6),
-              DropdownButtonFormField<String?>(
-                initialValue: _sharesLimitWith,
-                items: [
-                  const DropdownMenuItem(value: null, child: Text('Nothing — a limit of its own')),
-                  for (final holder in widget.accounts.where((a) =>
-                      a.accountType == 'CARD' && a.id != widget.account?.id && a.sharesLimitWith == null))
-                    DropdownMenuItem(value: holder.id, child: Text(holder.label)),
-                ],
-                onChanged: (value) => setState(() => _sharesLimitWith = value),
-              ),
-            ],
-
-            // The network is a card thing rather than a credit-card thing:
-            // a debit card gets suggested at a till on the same grounds.
-            if (_type == 'CARD' || _type == 'DEBIT') ...[
-              const SizedBox(height: 14),
-              _Field(label: 'Network', controller: _cardNetwork, hint: 'Visa, Mastercard, RuPay'),
-            ],
-
-            if (_type == 'CARD') ...[
-              const SizedBox(height: 14),
-              _Field(label: 'Credit limit (₹)', controller: _creditLimit, hint: '200000', numeric: true),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: _Field(label: 'Statement day', controller: _statementDay, hint: '18', numeric: true),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _Field(label: 'Due day', controller: _dueDay, hint: '7', numeric: true),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              // The one thing every figure on the card hangs off. Each card
-              // bills on its own day, so nothing here borrows the salary
-              // month - without it the card simply has no cycle yet.
-              Text(
-                "Statement day is when the bill is drawn. This card's cycle, what it owes and what is left "
-                'of its limit all count from it. A statement read for this card fills both in.',
-                style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
-              ),
-              const SizedBox(height: 14),
-
-              // The one field the statement reader cannot work without.
-              // Every card's password is tried against every statement, so
-              // one is often enough for all of them.
-              TextField(
-                controller: _statementPassword,
-                obscureText: !_showPassword,
-                autocorrect: false,
-                enableSuggestions: false,
-                style: TextStyle(color: context.c.ink),
-                decoration: InputDecoration(
-                  labelText: 'Statement password',
-                  hintText: widget.account?.hasStatementPassword == true
-                      ? 'Already set - type a new one to replace it'
-                      : 'Opens the PDF this card emails',
-                  helperText: 'Stored encrypted and never sent back to this screen. Issuers build it '
-                      'from a date of birth, so it usually opens more than this one card.',
-                  helperMaxLines: 4,
-                  isDense: true,
-                  suffixIcon: IconButton(
-                    tooltip: _showPassword ? 'Hide password' : 'Show password',
-                    icon: Icon(_showPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 19),
-                    onPressed: () => setState(() => _showPassword = !_showPassword),
-                  ),
-                ),
-              ),
-            ],
-
-            // Some banks text every payment out and none in. Said once
-            // here, a gap on the account is read as money in first, and
-            // its statement is asked for every month to catch the rest.
-            if (_type == 'BANK') ...[
-              const SizedBox(height: 10),
-              SwitchListTile(
-                key: const ValueKey('no-credit-alerts'),
-                value: _noCreditAlerts,
-                onChanged: (value) => setState(() => _noCreditAlerts = value),
-                contentPadding: EdgeInsets.zero,
-                title: Text(
-                  "This bank doesn't text me about money coming in",
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.ink),
-                ),
-                subtitle: Text(
-                  'SpendLog then reads a gap as a credit it missed, and asks for the statement monthly.',
-                  style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
-                ),
-              ),
-              if (!_noCreditAlerts && widget.account?.suggestNoCreditAlerts == true)
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  decoration: BoxDecoration(color: c.warnBg, borderRadius: BorderRadius.circular(T.rSm)),
-                  child: Text(
-                    _suggestionText(widget.account!),
-                    style: TextStyle(fontSize: 12, height: 1.4, color: c.warn, fontWeight: FontWeight.w600),
-                  ),
-                ),
-            ],
-
-            const SizedBox(height: 6),
-            CheckboxListTile(
-              value: !_isActive,
-              onChanged: (v) => setState(() => _isActive = !(v ?? false)),
-              controlAffinity: ListTileControlAffinity.leading,
-              contentPadding: EdgeInsets.zero,
-              title: Text(
-                'Closed — keep its history, but hide it when picking an account',
-                style: TextStyle(fontSize: 12.8, color: c.ink70),
-              ),
-            ),
-
-            if (!_isNew && widget.account!.aliases.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text(
-                'Also recognised as ${widget.account!.aliases.map((a) => a.bankName).join(', ')}',
-                style: TextStyle(fontSize: 12, color: c.muted),
-              ),
-            ],
-
-            if (!_isNew && others.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              Text('Same account as', style: _labelStyle(c)),
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      initialValue: _mergeInto,
-                      isExpanded: true,
-                      decoration: _inputDecoration(c),
-                      hint: Text('Merge this into…', style: TextStyle(fontSize: 13, color: c.mutedLight)),
-                      items: [
-                        for (final a in others)
-                          DropdownMenuItem(
-                            value: a.id,
-                            child: Text(a.label, style: TextStyle(fontSize: 13, color: c.ink)),
+                  if (!_isNew && others.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    const DsLabel('Same account as'),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            initialValue: _mergeInto,
+                            isExpanded: true,
+                            icon: DsIcon(DsIcons.chevronDown, color: c.tx2),
+                            hint: Text('Merge this into…', style: TextStyle(fontSize: 15, color: c.tx3)),
+                            items: [
+                              for (final a in others)
+                                DropdownMenuItem(
+                                  value: a.id,
+                                  child: Text(a.label, style: TextStyle(fontSize: 15, color: c.tx)),
+                                ),
+                            ],
+                            onChanged: (v) => setState(() => _mergeInto = v),
                           ),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton(
+                          onPressed: _mergeInto == null || _saving ? null : _merge,
+                          style: OutlinedButton.styleFrom(minimumSize: const Size(0, 52)),
+                          child: const Text('Merge'),
+                        ),
                       ],
-                      onChanged: (v) => setState(() => _mergeInto = v),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton(
-                    onPressed: _mergeInto == null || _saving ? null : _merge,
-                    child: const Text('Merge'),
-                  ),
+                  ],
+
+                  if (_error != null) ...[
+                    const SizedBox(height: 16),
+                    DsCallout(tone: DsTone.crit, title: _error!),
+                  ],
                 ],
               ),
-            ],
+            ),
+          ),
 
-            if (_error != null) ...[
-              const SizedBox(height: 14),
-              Text(_error!, style: TextStyle(fontSize: 12.5, color: c.debit)),
-            ],
-
-            const SizedBox(height: 20),
-            Row(
+          // The footer, pinned: destructive on the left, then Cancel and Save.
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            decoration: BoxDecoration(color: c.sf2, border: Border(top: BorderSide(color: c.ln))),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (!_isNew)
-                  if (_confirmDelete) ...[
+                if (!_isNew && _confirmDelete) ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _saving ? null : () => _delete(unassign: true),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: c.crit,
+                            backgroundColor: Colors.transparent,
+                            side: BorderSide(color: c.critSoft),
+                          ),
+                          icon: const DsIcon(DsIcons.trash, size: 18),
+                          label: const Text('Delete anyway'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton(
+                        onPressed: () => setState(() => _confirmDelete = false),
+                        child: const Text('Keep it'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                Row(
+                  children: [
+                    if (!_isNew && !_confirmDelete)
+                      OutlinedButton.icon(
+                        onPressed: _saving ? null : () => setState(() => _confirmDelete = true),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: c.crit,
+                          backgroundColor: Colors.transparent,
+                          side: BorderSide(color: c.critSoft),
+                          minimumSize: const Size(0, 48),
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                        ),
+                        icon: const DsIcon(DsIcons.trash, size: 18),
+                        label: const Text('Delete'),
+                      ),
+                    const Spacer(),
                     TextButton(
-                      onPressed: _saving ? null : () => _delete(unassign: true),
-                      style: TextButton.styleFrom(foregroundColor: c.debit),
-                      child: const Text('Delete anyway'),
+                      onPressed: _saving ? null : () => Navigator.of(context).pop(false),
+                      style: TextButton.styleFrom(minimumSize: const Size(0, 48)),
+                      child: const Text('Cancel'),
                     ),
-                    TextButton(
-                      onPressed: () => setState(() => _confirmDelete = false),
-                      child: const Text('Keep it'),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      onPressed: _saving ? null : _save,
+                      child: Text(_saving ? 'Saving…' : (_isNew ? 'Add' : 'Save')),
                     ),
-                  ] else
-                    TextButton(
-                      onPressed: _saving ? null : () => setState(() => _confirmDelete = true),
-                      style: TextButton.styleFrom(foregroundColor: c.debit),
-                      child: const Text('Delete'),
-                    ),
-                const Spacer(),
-                TextButton(
-                  onPressed: _saving ? null : () => Navigator.of(context).pop(false),
-                  child: const Text('Cancel'),
-                ),
-                const SizedBox(width: 8),
-                FilledButton(
-                  onPressed: _saving ? null : _save,
-                  child: Text(_saving ? 'Saving…' : (_isNew ? 'Add' : 'Save')),
+                  ],
                 ),
               ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -539,26 +533,7 @@ String _suggestionText(Account account) {
       '${account.textDays} days — turn this on?';
 }
 
-TextStyle _labelStyle(SpendColors c) =>
-    TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: c.muted);
-
-InputDecoration _inputDecoration(SpendColors c, {String? hint}) => InputDecoration(
-      hintText: hint,
-      hintStyle: TextStyle(color: c.mutedLight, fontSize: 13),
-      isDense: true,
-      filled: true,
-      fillColor: c.surface,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(T.rSm),
-        borderSide: BorderSide(color: c.lineStrong),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(T.rSm),
-        borderSide: BorderSide(color: c.brand),
-      ),
-    );
-
+/// A labelled text field: `12/16 600` label, 6 px gap, the themed 52 px input.
 class _Field extends StatelessWidget {
   final String label;
   final TextEditingController controller;
@@ -570,18 +545,14 @@ class _Field extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: _labelStyle(c)),
-        const SizedBox(height: 6),
-        TextField(
-          controller: controller,
-          keyboardType: numeric ? TextInputType.number : TextInputType.text,
-          style: TextStyle(fontSize: 13.5, color: c.ink),
-          decoration: _inputDecoration(c, hint: hint),
-        ),
-      ],
+    return DsField(
+      label: label,
+      child: TextField(
+        controller: controller,
+        keyboardType: numeric ? TextInputType.number : TextInputType.text,
+        style: (numeric ? kNum : const TextStyle()).copyWith(fontSize: 15, color: c.tx),
+        decoration: InputDecoration(hintText: hint),
+      ),
     );
   }
 }

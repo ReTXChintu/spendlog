@@ -1,12 +1,20 @@
 import 'package:intl/intl.dart';
 
+/// The true minus sign (U+2212) the design uses for money out; a hyphen
+/// is narrower than the digits and reads as a dash.
+const String kMinus = '−';
+
+/// intl writes a negative as "-₹1,234"; the design wants "−₹1,234".
+String _trueMinus(String formatted) =>
+    formatted.startsWith('-') ? '$kMinus${formatted.substring(1)}' : formatted;
+
 /// Amounts are stored in paise and always shown with Indian grouping.
 String formatMoney(int amountMinor, [String currency = 'INR']) {
   final formatter = NumberFormat.currency(
     locale: 'en_IN',
     symbol: currency == 'INR' ? '₹' : '$currency ',
   );
-  return formatter.format(amountMinor / 100);
+  return _trueMinus(formatter.format(amountMinor / 100));
 }
 
 /// Rupees as typed - "1,499.50", "₹ 2000", "-350" - to paise. Null when it
@@ -28,7 +36,7 @@ String formatMoneyShort(int amountMinor, [String currency = 'INR']) {
     symbol: currency == 'INR' ? '₹' : '$currency ',
     decimalDigits: 0,
   );
-  return formatter.format(amountMinor / 100);
+  return _trueMinus(formatter.format(amountMinor / 100));
 }
 
 /// Everything is shown in IST, whatever the phone's own timezone says.
@@ -84,9 +92,12 @@ String formatDayLabel(String isoDate) {
   return DateFormat('EEE, d MMM').format(DateTime.parse(isoDate));
 }
 
-String formatTime(DateTime dateTime) => DateFormat('h:mm a').format(_ist(dateTime));
+/// The design writes times as "8:52 pm": lower-case am/pm.
+String _lowerAmPm(String s) => s.replaceAll('AM', 'am').replaceAll('PM', 'pm');
 
-String formatDateTime(DateTime dateTime) => DateFormat('EEE, d MMM, h:mm a').format(_ist(dateTime));
+String formatTime(DateTime dateTime) => _lowerAmPm(DateFormat('h:mm a').format(_ist(dateTime)));
+
+String formatDateTime(DateTime dateTime) => _lowerAmPm(DateFormat('EEE, d MMM, h:mm a').format(_ist(dateTime)));
 
 /// "September 2026" for the analytics month picker.
 String formatMonthLabel(String month) {

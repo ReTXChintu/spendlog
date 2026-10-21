@@ -453,7 +453,7 @@ void main() {
         await tester.pumpAndSettle();
 
         // The header: what the app expects, what the bank said, the gap.
-        expect(find.text('SPENDLOG EXPECTS'), findsOneWidget);
+        expect(find.text('SpendLog expects'), findsOneWidget);
         expect(find.text('₹47,450.00'), findsWidgets);
         expect(_richTextContaining('Bank said ₹44,450.00 on 14 Oct'), findsOneWidget);
         expect(find.text('₹3,000.00 off'), findsOneWidget);
@@ -500,7 +500,7 @@ void main() {
         await _pump(tester, const PassbookScreen(accountId: _acc));
         await tester.pumpAndSettle();
 
-        final tinted = find.byWidgetPredicate((w) => w is Material && w.color == SpendColors.light.brand50);
+        final tinted = find.byWidgetPredicate((w) => w is Material && w.color == DsColors.light.acSoft);
         expect(tinted, findsNothing);
         await tester.tap(find.text('Jump to it'));
         await tester.pumpAndSettle();
@@ -832,7 +832,7 @@ void main() {
       await http.runWithClient(() async {
         await _pump(tester, const StatementCompareScreen(statementId: _statement, title: 'Amex Sep'));
         await tester.pumpAndSettle();
-        expect(find.text('AT THE CLOSE'), findsNothing);
+        expect(find.text('At the close'), findsNothing);
         expect(find.text('On the statement, not in SpendLog'), findsOneWidget);
       }, () => _server({
             ..._routes(),

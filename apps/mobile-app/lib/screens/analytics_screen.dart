@@ -2,14 +2,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
 import '../utils/format.dart';
 import '../widgets/charts/chart_utils.dart';
 import '../widgets/charts/column_chart.dart';
 import '../widgets/charts/daily_spend_chart.dart';
 import '../widgets/charts/donut_chart.dart';
+import '../widgets/ds/ds.dart';
 import '../widgets/home/ai_insights_card.dart';
-import '../widgets/home/home_grid.dart';
 import '../widgets/home/savings_plan_card.dart';
 
 /// The Analytics tab of Home: how the month went, and what to do about it.
@@ -190,9 +189,9 @@ class AnalyticsScreenState extends State<AnalyticsScreen> with AutomaticKeepAliv
   Future<void> _refresh() => Future.wait([_loadSummary(), _loadRest()]);
 
   Color _colorFor(String? categoryId) {
-    if (categoryId == null) return context.c.mutedLight;
+    if (categoryId == null) return context.c.ln2;
     final match = _categories.where((c) => c.id == categoryId);
-    return match.isEmpty ? context.c.muted : parseHexColor(match.first.color);
+    return match.isEmpty ? context.c.tx3 : parseHexColor(match.first.color);
   }
 
   /// Where the month being looked at sits in [_months]; -1 when unknown.
@@ -227,12 +226,12 @@ class AnalyticsScreenState extends State<AnalyticsScreen> with AutomaticKeepAliv
   Future<void> _pickAccount() async {
     final picked = await _pick('Account', [
       (value: null, label: 'All accounts', icon: Icons.all_inclusive),
-      (value: 'cash', label: 'Cash', icon: Icons.payments_outlined),
+      (value: 'cash', label: 'Cash', icon: DsIcons.banknote),
       for (final a in _accounts)
         (
           value: a.id,
           label: a.label,
-          icon: a.accountType == 'CARD' ? Icons.credit_card : Icons.account_balance_outlined,
+          icon: a.accountType == 'CARD' ? DsIcons.creditCard : DsIcons.bank,
         ),
     ], _accountFilter);
     if (picked == null || picked.value == _accountFilter) return;
@@ -244,7 +243,7 @@ class AnalyticsScreenState extends State<AnalyticsScreen> with AutomaticKeepAliv
     final sorted = [..._categories]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     final picked = await _pick('Category', [
       (value: null, label: 'All categories', icon: Icons.all_inclusive),
-      (value: 'none', label: 'Uncategorised', icon: Icons.help_outline),
+      (value: 'none', label: 'Uncategorised', icon: DsIcons.tag),
       for (final c in sorted) (value: c.id, label: c.name, icon: categoryIcon(c.icon)),
     ], _categoryFilter);
     if (picked == null || picked.value == _categoryFilter) return;
@@ -256,36 +255,60 @@ class AnalyticsScreenState extends State<AnalyticsScreen> with AutomaticKeepAliv
   /// told apart from the sheet being dismissed).
   Future<({String? value})?> _pick(
     String title,
-    List<({String? value, String label, IconData icon})> options,
+    List<({String? value, String label, Object icon})> options,
     String? current,
   ) {
-    final c = context.c;
     return showModalBottomSheet<({String? value})>(
       context: context,
-      showDragHandle: true,
       isScrollControlled: true,
-      builder: (context) => SafeArea(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.7),
-          child: ListView(
-            shrinkWrap: true,
-            padding: const EdgeInsets.only(bottom: 12),
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                child: Text(title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: c.ink)),
-              ),
-              for (final option in options)
-                ListTile(
-                  leading: Icon(option.icon, size: 20, color: c.muted),
-                  title: Text(option.label, style: TextStyle(fontSize: 14, color: c.ink)),
-                  trailing: option.value == current ? Icon(Icons.check, color: c.brand) : null,
-                  onTap: () => Navigator.of(context).pop((value: option.value)),
+      builder: (context) {
+        final c = context.c;
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.7),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const DsDragHandle(),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                  child: Text(
+                    title,
+                    style: TextStyle(fontSize: 19, height: 24 / 19, fontWeight: FontWeight.w600, color: c.tx),
+                  ),
                 ),
-            ],
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
+                    children: [
+                      for (final option in options)
+                        ListTile(
+                          minTileHeight: 48,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Ds.rMd)),
+                          selected: option.value == current,
+                          selectedTileColor: c.acSoft,
+                          leading: dsIconOf(option.icon, size: 20, color: option.value == current ? c.ac : c.tx2),
+                          title: Text(
+                            option.label,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: option.value == current ? FontWeight.w600 : FontWeight.w500,
+                              color: option.value == current ? c.ac : c.tx,
+                            ),
+                          ),
+                          trailing: option.value == current ? DsIcon(DsIcons.check, size: 20, color: c.ac) : null,
+                          onTap: () => Navigator.of(context).pop((value: option.value)),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -335,17 +358,17 @@ class AnalyticsScreenState extends State<AnalyticsScreen> with AutomaticKeepAliv
             // the bottom exists to be scrolled to from a Dashboard warning.
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 32),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   if (filtered)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.only(bottom: 12),
                       child: Text(
-                        'Filters apply to the figures, daily and weekday charts and merchants - not to the '
+                        'Filters apply to the figures, daily and weekday charts and merchants — not to the '
                         'comparison or the 6-month trend.',
-                        style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
+                        style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
                       ),
                     ),
                   if (_failed && summary == null)
@@ -356,11 +379,11 @@ class AnalyticsScreenState extends State<AnalyticsScreen> with AutomaticKeepAliv
                   else if (summary == null)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 40),
-                      child: Center(child: CircularProgressIndicator()),
+                      child: Center(child: DsSpinner()),
                     )
                   else if (summary.transactionCount == 0)
                     _Message(
-                      icon: Icons.trending_up,
+                      icon: DsIcons.barChart,
                       text: filtered
                           ? 'Nothing this month matches these filters.'
                           : 'Nothing to analyse yet. Once a few payments come in from SMS or Gmail, '
@@ -369,9 +392,9 @@ class AnalyticsScreenState extends State<AnalyticsScreen> with AutomaticKeepAliv
                   else
                     ..._monthContent(summary),
 
-                  const SizedBox(height: 26),
+                  const SizedBox(height: 20),
                   AiInsightsCard(onOpenSettings: widget.onOpenSettings),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: kCardGap),
                   KeyedSubtree(
                     key: _planAnchor,
                     child: SavingsPlanCard(key: _plan, onOpenSettings: widget.onOpenSettings),
@@ -398,105 +421,119 @@ class AnalyticsScreenState extends State<AnalyticsScreen> with AutomaticKeepAliv
     final top = summary.byCategory.isEmpty ? null : summary.byCategory.first;
 
     return [
-      HomeGrid(squareness: 0, items: [
-        GridItem(_Kpi(label: 'Spent', value: formatMoneyShort(summary.totalSpendMinor), colour: c.debit)),
-        GridItem(_Kpi(label: 'Received', value: formatMoneyShort(summary.totalIncomeMinor), colour: c.credit)),
-        GridItem(_Kpi(
+      _TileGrid(children: [
+        // Spending is ink; only money in is green.
+        DsStatTile(label: 'Spent', value: formatMoneyShort(summary.totalSpendMinor)),
+        DsStatTile(label: 'Received', value: formatMoneyShort(summary.totalIncomeMinor), valueColor: c.good),
+        DsStatTile(
           label: 'Net',
           value: '${net >= 0 ? '+' : '−'}${formatMoneyShort(net.abs())}',
-          colour: net >= 0 ? c.credit : c.debit,
-          sub: net >= 0 ? 'more in than out' : 'more out than in',
-        )),
-        GridItem(_Kpi(label: 'Average a day', value: formatMoneyShort(perDay), sub: 'over $days ${days == 1 ? 'day' : 'days'}')),
-        GridItem(_Kpi(label: 'Transactions', value: '${summary.transactionCount}')),
-        GridItem(_Kpi(
+          valueColor: net >= 0 ? c.good : c.tx,
+          foot: net >= 0 ? 'more in than out' : 'more out than in',
+        ),
+        DsStatTile(
+          label: 'Average a day',
+          value: formatMoneyShort(perDay),
+          foot: 'over $days ${days == 1 ? 'day' : 'days'}',
+        ),
+        DsStatTile(label: 'Transactions', value: '${summary.transactionCount}'),
+        DsStatTile(
           label: 'Top category',
           value: top?.name ?? '—',
-          sub: top == null ? null : formatMoneyShort(top.amountMinor),
-          text: true,
-        )),
+          foot: top == null ? null : formatMoneyShort(top.amountMinor),
+        ),
       ]),
-      const SizedBox(height: 12),
-      HomeGrid(squareness: 0, items: [
-        if (_daily.isNotEmpty)
-          GridItem(
-            HomeTile(label: 'Spending day by day', icon: Icons.show_chart, child: DailySpendChart(days: _daily)),
-            span: 2,
+      const SizedBox(height: kCardGap),
+      if (_daily.isNotEmpty) ...[
+        _ChartCard(title: 'Spending day by day', child: DailySpendChart(days: _daily)),
+        const SizedBox(height: kCardGap),
+      ],
+      if (summary.byCategory.isNotEmpty) ...[
+        _donut(summary),
+        const SizedBox(height: kCardGap),
+      ],
+      if (_weekday.isNotEmpty) ...[
+        _ChartCard(
+          title: 'By weekday',
+          meta: 'Average spent on each',
+          child: ColumnChart(
+            values: _weekday.map((w) => w.averageMinor).toList(),
+            labels: _weekday.map((w) => w.day.length > 2 ? w.day.substring(0, 2) : w.day).toList(),
+            // Ink is the data colour; the busiest day is the one in full ink.
+            color: c.ln2,
+            highlight: c.tx,
           ),
-        if (summary.byCategory.isNotEmpty) GridItem(_donut(summary), span: 2),
-        if (_weekday.isNotEmpty)
-          GridItem(HomeTile(
-            label: 'By weekday',
-            icon: Icons.view_week_outlined,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Average spent on each', style: TextStyle(fontSize: 11, color: c.muted)),
-                const SizedBox(height: 8),
-                ColumnChart(
-                  values: _weekday.map((w) => w.averageMinor).toList(),
-                  labels: _weekday.map((w) => w.day.length > 2 ? w.day.substring(0, 2) : w.day).toList(),
-                  color: c.brand100,
-                  highlight: c.brand,
-                ),
-              ],
-            ),
-          )),
-        if (_byAccount.isNotEmpty) GridItem(_accountsTile()),
-      ]),
-      const SizedBox(height: 22),
-      SegmentedButton<String>(
+        ),
+        const SizedBox(height: kCardGap),
+      ],
+      if (_byAccount.isNotEmpty) ...[
+        _accountsTile(),
+        const SizedBox(height: kCardGap),
+      ],
+      const SizedBox(height: 8),
+      DsSegmented<String>(
         segments: const [
-          ButtonSegment(value: 'categories', label: Text('Category')),
-          ButtonSegment(value: 'merchants', label: Text('Merchant')),
-          ButtonSegment(value: 'compare', label: Text('vs last')),
+          ('categories', 'Category'),
+          ('merchants', 'Merchant'),
+          ('compare', 'vs last'),
         ],
-        selected: {_view},
-        showSelectedIcon: false,
-        onSelectionChanged: (selection) => setState(() => _view = selection.first),
+        selected: _view,
+        onChanged: (view) => setState(() => _view = view),
       ),
-      const SizedBox(height: 18),
-      if (_view == 'categories') ...[
-        const _SectionTitle(
-          title: 'Spend by category',
-          sub: "Transfers, settlements and the part of a split bill that wasn't yours are excluded.",
+      const SizedBox(height: kCardGap),
+      if (_view == 'categories')
+        DsCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const _SectionTitle(
+                title: 'Spend by category',
+                sub: "Transfers, settlements and the part of a split bill that wasn't yours are excluded.",
+              ),
+              const SizedBox(height: 16),
+              ...summary.byCategory.map((entry) {
+                final pct = summary.totalSpendMinor == 0 ? 0.0 : entry.amountMinor / summary.totalSpendMinor;
+                return _CategoryBar(
+                  name: entry.name,
+                  amountMinor: entry.amountMinor,
+                  fraction: pct,
+                  color: _colorFor(entry.categoryId),
+                  dashed: entry.categoryId == null,
+                );
+              }),
+            ],
+          ),
         ),
-        const SizedBox(height: 14),
-        ...summary.byCategory.map((entry) {
-          final pct = summary.totalSpendMinor == 0 ? 0.0 : entry.amountMinor / summary.totalSpendMinor;
-          return _CategoryBar(
-            name: entry.name,
-            amountMinor: entry.amountMinor,
-            fraction: pct,
-            color: _colorFor(entry.categoryId),
-            dashed: entry.categoryId == null,
-          );
-        }),
-      ],
-      if (_view == 'merchants') ...[
-        const _SectionTitle(
-          title: 'Spend by merchant',
-          sub: 'Where the money actually went. "Food" is not a thing to cut back on; '
-              'ordering from one app eleven times is.',
+      if (_view == 'merchants')
+        DsCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const _SectionTitle(
+                title: 'Spend by merchant',
+                sub: 'Where the money actually went. "Food" is not a thing to cut back on; '
+                    'ordering from one app eleven times is.',
+              ),
+              const SizedBox(height: 8),
+              if (_merchants.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    'Nothing this month has a merchant name on it yet.',
+                    style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
+                  ),
+                )
+              else
+                for (var i = 0; i < _merchants.length; i++)
+                  _MerchantRow(entry: _merchants[i], last: i == _merchants.length - 1),
+            ],
+          ),
         ),
-        const SizedBox(height: 14),
-        if (_merchants.isEmpty)
-          Text('Nothing this month has a merchant name on it yet.', style: TextStyle(fontSize: 12.8, color: c.muted))
-        else
-          ..._merchants.map((entry) => _CategoryBar(
-                name: entry.merchant,
-                amountMinor: entry.amountMinor,
-                fraction: _merchants.first.amountMinor == 0 ? 0.0 : entry.amountMinor / _merchants.first.amountMinor,
-                color: c.brand,
-                trailing: '×${entry.count}',
-              )),
-      ],
-      if (_view == 'compare' && _comparison != null) _Comparison(comparison: _comparison!),
-      const SizedBox(height: 22),
-      HomeTile(
-        label: 'Last 6 months',
-        icon: Icons.bar_chart,
-        child: _Trend(points: _trend, maxHeight: _trendHeight),
+      if (_view == 'compare' && _comparison != null) DsCard(child: _Comparison(comparison: _comparison!)),
+      const SizedBox(height: kCardGap),
+      _ChartCard(
+        title: 'Last 6 months',
+        child: _Trend(points: _trend, maxHeight: AnalyticsScreenState._trendHeight),
       ),
     ];
   }
@@ -507,47 +544,57 @@ class AnalyticsScreenState extends State<AnalyticsScreen> with AutomaticKeepAliv
     final c = context.c;
     final entries = summary.byCategory;
     final shown = entries.take(5).toList();
-    final rest = entries.skip(5).fold<int>(0, (sum, e) => sum + e.amountMinor);
+    final restEntries = entries.skip(5).toList();
+    final rest = restEntries.fold<int>(0, (sum, e) => sum + e.amountMinor);
     final total = summary.totalSpendMinor == 0 ? 1 : summary.totalSpendMinor;
 
-    final segments = [
-      for (final e in shown) DonutSegment(value: e.amountMinor, color: _colorFor(e.categoryId), label: e.name),
-      if (rest > 0) DonutSegment(value: rest, color: c.lineStrong, label: 'Other'),
+    // Each row's move against last month, when the figures are unfiltered
+    // (the comparison is whole-of-spending, so a filtered row has none).
+    final filtered = _accountFilter != null || _categoryFilter != null;
+    final changes = filtered ? null : _comparison?.categories;
+    int? changeFor(CategorySpend e) {
+      final match = changes?.where((ch) => ch.categoryId == e.categoryId && ch.name == e.name);
+      return match == null || match.isEmpty ? null : match.first.changeMinor;
+    }
+
+    final rows = [
+      for (final e in shown)
+        (
+          segment: DonutSegment(value: e.amountMinor, color: _colorFor(e.categoryId), label: e.name),
+          change: changeFor(e),
+        ),
+      if (rest > 0)
+        (
+          segment: DonutSegment(value: rest, color: c.chart.last, label: 'Other'),
+          change: changes == null
+              ? null
+              : restEntries.fold<int>(0, (sum, e) => sum + (changeFor(e) ?? 0)),
+        ),
     ];
 
-    return HomeTile(
-      label: 'Where it went',
-      icon: Icons.donut_large_outlined,
-      child: Row(
+    return DsCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          DonutChart(
-            segments: segments,
-            centerTop: compactMoney(summary.totalSpendMinor),
-            centerBottom: 'spent',
-            size: 128,
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (final s in segments)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 3),
-                    child: Row(
-                      children: [
-                        Expanded(child: LegendDot(color: s.color, label: s.label, textColor: c.ink70)),
-                        const SizedBox(width: 6),
-                        Text(
-                          '${(s.value / total * 100).round()}%',
-                          style: kNum.copyWith(fontSize: 11.5, fontWeight: FontWeight.w700, color: c.ink),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
+          DsSectionHeader('Where it went', meta: changes == null ? null : 'vs last month'),
+          const SizedBox(height: 12),
+          Center(
+            child: DonutChart(
+              segments: [for (final r in rows) r.segment],
+              centerTop: formatMoneyShort(summary.totalSpendMinor),
+              centerBottom: 'spent',
             ),
           ),
+          const SizedBox(height: 12),
+          for (var i = 0; i < rows.length; i++)
+            _LegendRow(
+              color: rows[i].segment.color,
+              name: rows[i].segment.label,
+              amountMinor: rows[i].segment.value,
+              share: rows[i].segment.value / total,
+              change: rows[i].change,
+              last: i == rows.length - 1,
+            ),
         ],
       ),
     );
@@ -558,17 +605,16 @@ class AnalyticsScreenState extends State<AnalyticsScreen> with AutomaticKeepAliv
     final shown = _byAccount.take(5).toList();
     final peak = shown.first.amountMinor == 0 ? 1 : shown.first.amountMinor;
 
-    return HomeTile(
-      label: 'By account',
-      icon: Icons.account_balance_wallet_outlined,
+    return _ChartCard(
+      title: 'By account',
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           for (final a in shown)
             Padding(
-              padding: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.only(bottom: 12),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Row(
                     children: [
@@ -577,25 +623,79 @@ class AnalyticsScreenState extends State<AnalyticsScreen> with AutomaticKeepAliv
                           a.name,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: c.ink70),
+                          style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx2),
                         ),
                       ),
-                      Text(compactMoney(a.amountMinor), style: kNum.copyWith(fontSize: 11.5, color: c.ink)),
+                      const SizedBox(width: 8),
+                      Text(
+                        formatMoneyShort(a.amountMinor),
+                        style: kNum.copyWith(fontSize: 14, fontWeight: FontWeight.w600, color: c.tx),
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 4),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(100),
-                    child: LinearProgressIndicator(
-                      value: (a.amountMinor / peak).clamp(0.0, 1.0),
-                      minHeight: 6,
-                      backgroundColor: c.track,
-                      valueColor: AlwaysStoppedAnimation(a.accountId == 'cash' ? c.credit : c.brand),
-                    ),
-                  ),
+                  const SizedBox(height: 6),
+                  DsMeter(value: a.amountMinor / peak, color: c.tx),
                 ],
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Stat tiles two to a row (three when there is room), each row as tall as
+/// its tallest tile.
+class _TileGrid extends StatelessWidget {
+  const _TileGrid({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final perRow = constraints.maxWidth >= 600 ? 3 : 2;
+        final rows = <Widget>[];
+        for (var i = 0; i < children.length; i += perRow) {
+          if (rows.isNotEmpty) rows.add(const SizedBox(height: kCardGap));
+          final slice = children.sublist(i, (i + perRow).clamp(0, children.length));
+          rows.add(IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var j = 0; j < perRow; j++) ...[
+                  if (j > 0) const SizedBox(width: kCardGap),
+                  Expanded(child: j < slice.length ? slice[j] : const SizedBox.shrink()),
+                ],
+              ],
+            ),
+          ));
+        }
+        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows);
+      },
+    );
+  }
+}
+
+/// A section card holding one chart: a 17/24 title, an optional meta line
+/// and the chart under it.
+class _ChartCard extends StatelessWidget {
+  const _ChartCard({required this.title, required this.child, this.meta});
+
+  final String title;
+  final String? meta;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return DsCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          DsSectionHeader(title, meta: meta),
+          const SizedBox(height: 12),
+          child,
         ],
       ),
     );
@@ -623,21 +723,21 @@ class _Filters extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.c;
+    // A chip row scrolls sideways on a phone rather than wrapping (§6.3).
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
       child: Row(
         children: [
-          _FilterChip(icon: Icons.account_balance_wallet_outlined, label: account, on: accountOn, onTap: onAccount),
+          _FilterChip(icon: DsIcons.bank, label: account, on: accountOn, onTap: onAccount),
           const SizedBox(width: 8),
-          _FilterChip(icon: Icons.category_outlined, label: category, on: categoryOn, onTap: onCategory),
+          _FilterChip(icon: DsIcons.tag, label: category, on: categoryOn, onTap: onCategory),
           if (onClear != null) ...[
             const SizedBox(width: 4),
             TextButton.icon(
               onPressed: onClear,
-              icon: Icon(Icons.close, size: 15, color: c.muted),
-              label: Text('Clear', style: TextStyle(fontSize: 12.5, color: c.muted)),
+              icon: const DsIcon(DsIcons.x, size: 16),
+              label: const Text('Clear'),
             ),
           ],
         ],
@@ -646,119 +746,51 @@ class _Filters extends StatelessWidget {
   }
 }
 
+/// A dropdown chip: a 36 h pill with a trailing chevron, ink-filled while
+/// its filter is on.
 class _FilterChip extends StatelessWidget {
   const _FilterChip({required this.icon, required this.label, required this.on, required this.onTap});
 
-  final IconData icon;
+  final Object icon;
   final String label;
   final bool on;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final c = context.c;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(100),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(
-          color: on ? c.brand50 : c.surface,
-          border: Border.all(color: on ? c.brand : c.lineStrong),
-          borderRadius: BorderRadius.circular(100),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 15, color: on ? c.brandDark : c.muted),
-            const SizedBox(width: 6),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 160),
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: on ? c.brandDark : c.ink70),
-              ),
-            ),
-            const SizedBox(width: 2),
-            Icon(Icons.arrow_drop_down, size: 18, color: on ? c.brandDark : c.muted),
-          ],
-        ),
-      ),
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 220),
+      child: DsChip(label: label, icon: icon, selected: on, onTap: onTap, dropdown: true),
     );
   }
 }
 
-class _Kpi extends StatelessWidget {
-  const _Kpi({required this.label, required this.value, this.colour, this.sub, this.text = false});
-
-  final String label;
-  final String value;
-  final Color? colour;
-  final String? sub;
-
-  /// A name rather than a number, so not set in the figures' font.
-  final bool text;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      decoration: BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: c.muted)),
-          const SizedBox(height: 5),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              value,
-              maxLines: 1,
-              style: text
-                  ? TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: colour ?? c.ink)
-                  : kNum.copyWith(fontSize: 18, fontWeight: FontWeight.w800, color: colour ?? c.ink),
-            ),
-          ),
-          if (sub != null) ...[
-            const SizedBox(height: 2),
-            Text(sub!, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: c.mutedLight)),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
+/// A full-width empty or error state: a 48 icon tile and one sentence,
+/// centred in the content area.
 class _Message extends StatelessWidget {
   const _Message({required this.icon, required this.text});
 
-  final IconData icon;
+  final Object icon;
   final String text;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 30, horizontal: 12),
+      padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 12),
       child: Column(
         children: [
-          Icon(icon, size: 30, color: c.mutedLight),
-          const SizedBox(height: 10),
-          Text(text, textAlign: TextAlign.center, style: TextStyle(fontSize: 13, height: 1.45, color: c.muted)),
+          DsIconTile(icon, size: 48, iconSize: 24, color: c.tx3),
+          const SizedBox(height: 12),
+          Text(text, textAlign: TextAlign.center, style: TextStyle(fontSize: 15, height: 22 / 15, color: c.tx2)),
         ],
       ),
     );
   }
 }
 
+/// The period stepper (§6.1): 40 h, radius 12, `ln2` outline, two 36×36
+/// icon buttons and a 14/600 tabular label.
 class _MonthPicker extends StatelessWidget {
   final String title;
   final bool canGoBack;
@@ -774,38 +806,44 @@ class _MonthPicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
+    Widget arrow(DsGlyph glyph, bool enabled, int delta, String tip) => SizedBox(
+          width: 36,
+          height: 36,
+          child: IconButton(
+            tooltip: tip,
+            padding: EdgeInsets.zero,
+            style: IconButton.styleFrom(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Ds.rMd)),
+              minimumSize: const Size(36, 36),
+            ),
+            icon: DsIcon(glyph, size: 20, color: enabled ? c.tx2 : c.ln2),
+            onPressed: enabled ? () => onChange(delta) : null,
+          ),
+        );
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        height: 40,
+        padding: const EdgeInsets.symmetric(horizontal: 1),
         decoration: BoxDecoration(
-          color: context.c.surface,
-          border: Border.all(color: context.c.lineStrong),
-          borderRadius: BorderRadius.circular(100),
+          color: c.sf,
+          border: Border.all(color: c.ln2),
+          borderRadius: BorderRadius.circular(Ds.rLg),
         ),
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            IconButton(
-              iconSize: 18,
-              visualDensity: VisualDensity.compact,
-              icon: Icon(Icons.chevron_left, color: canGoBack ? context.c.muted : context.c.lineStrong),
-              onPressed: canGoBack ? () => onChange(-1) : null,
-            ),
-            Flexible(
+            arrow(DsIcons.chevronLeft, canGoBack, -1, 'Previous month'),
+            Expanded(
               child: Text(
                 title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: context.c.ink),
+                textAlign: TextAlign.center,
+                style: kNum.copyWith(fontWeight: FontWeight.w600, fontSize: 14, color: c.tx),
               ),
             ),
-            IconButton(
-              iconSize: 18,
-              visualDensity: VisualDensity.compact,
-              icon: Icon(Icons.chevron_right, color: canGoForward ? context.c.muted : context.c.lineStrong),
-              onPressed: canGoForward ? () => onChange(1) : null,
-            ),
+            arrow(DsIcons.chevronRight, canGoForward, 1, 'Next month'),
           ],
         ),
       ),
@@ -823,10 +861,97 @@ class _SectionTitle extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title, style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: context.c.ink)),
-        const SizedBox(height: 3),
-        Text(sub, style: TextStyle(fontSize: 12.5, color: context.c.muted)),
+        Text(title, style: TextStyle(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: context.c.tx)),
+        const SizedBox(height: 2),
+        Text(sub, style: TextStyle(fontSize: 13, height: 18 / 13, color: context.c.tx3)),
       ],
+    );
+  }
+}
+
+/// One legend row under the donut: a 10×10 swatch, the name, the amount,
+/// the share, and how it moved against last month.
+class _LegendRow extends StatelessWidget {
+  const _LegendRow({
+    required this.color,
+    required this.name,
+    required this.amountMinor,
+    required this.share,
+    required this.last,
+    this.change,
+  });
+
+  final Color color;
+  final String name;
+  final int amountMinor;
+  final double share;
+  final int? change;
+  final bool last;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final change = this.change;
+    // More spend than last time is the only "bad" delta, so it alone is red.
+    final changeColour = change == null || change == 0 ? c.tx3 : (change > 0 ? c.crit : c.good);
+    return Container(
+      constraints: const BoxConstraints(minHeight: 40),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(border: last ? null : Border(bottom: BorderSide(color: c.ln))),
+      child: Row(
+        children: [
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3)),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            formatMoneyShort(amountMinor),
+            style: kNum.copyWith(fontSize: 14, fontWeight: FontWeight.w600, color: c.tx),
+          ),
+          SizedBox(
+            width: 44,
+            child: Text(
+              '${(share * 100).round()}%',
+              textAlign: TextAlign.end,
+              style: kNum.copyWith(fontSize: 12, color: c.tx3),
+            ),
+          ),
+          if (change != null)
+            SizedBox(
+              width: 72,
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: change == 0
+                      ? Text('same', style: TextStyle(fontSize: 12, color: c.tx3))
+                      : Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            DsIcon(change > 0 ? DsIcons.chevronUp : DsIcons.chevronDown, size: 12, color: changeColour),
+                            const SizedBox(width: 2),
+                            Text(
+                              formatMoneyShort(change.abs()),
+                              style: kNum.copyWith(fontSize: 12, fontWeight: FontWeight.w600, color: changeColour),
+                            ),
+                          ],
+                        ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -838,64 +963,104 @@ class _CategoryBar extends StatelessWidget {
   final Color color;
   final bool dashed;
 
-  /// What follows the amount. A share of the month for a category; how many
-  /// times it was paid, for a merchant.
-  final String? trailing;
-
   const _CategoryBar({
     required this.name,
     required this.amountMinor,
     required this.fraction,
     required this.color,
     this.dashed = false,
-    this.trailing,
   });
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 13),
+      padding: const EdgeInsets.only(bottom: 14),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
-              if (trailing == null) ...[
-                Container(
-                  width: 9,
-                  height: 9,
-                  decoration: BoxDecoration(
-                    color: dashed ? Colors.transparent : color,
-                    border: dashed ? Border.all(color: context.c.mutedLight, width: 1.5) : null,
-                    borderRadius: BorderRadius.circular(3),
-                  ),
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: dashed ? Colors.transparent : color,
+                  border: dashed ? Border.all(color: c.ln2, width: 1.5) : null,
+                  borderRadius: BorderRadius.circular(3),
                 ),
-                const SizedBox(width: 8),
-              ],
+              ),
+              const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: context.c.ink),
+                  style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx),
                 ),
               ),
-              Text(formatMoneyShort(amountMinor),
-                  style: kNum.copyWith(fontSize: 13, fontWeight: FontWeight.w700, color: context.c.ink)),
-              const SizedBox(width: 5),
-              Text(trailing ?? '${(fraction * 100).round()}%',
-                  style: TextStyle(fontSize: 11.5, color: context.c.muted)),
+              const SizedBox(width: 8),
+              Text(
+                formatMoneyShort(amountMinor),
+                style: kNum.copyWith(fontSize: 14, fontWeight: FontWeight.w600, color: c.tx),
+              ),
+              SizedBox(
+                width: 44,
+                child: Text(
+                  '${(fraction * 100).round()}%',
+                  textAlign: TextAlign.end,
+                  style: kNum.copyWith(fontSize: 12, color: c.tx3),
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 6),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: LinearProgressIndicator(
-              value: fraction.clamp(0.0, 1.0),
-              minHeight: 11,
-              backgroundColor: context.c.track,
-              valueColor: AlwaysStoppedAnimation<Color>(color),
+          const SizedBox(height: 8),
+          DsMeter(value: fraction, color: dashed ? c.tx3 : color, height: 10),
+        ],
+      ),
+    );
+  }
+}
+
+/// A merchant: monogram, name, how many times, and what it came to.
+class _MerchantRow extends StatelessWidget {
+  const _MerchantRow({required this.entry, required this.last});
+
+  final MerchantSpend entry;
+  final bool last;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Container(
+      constraints: const BoxConstraints(minHeight: 56),
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(border: last ? null : Border(bottom: BorderSide(color: c.ln))),
+      child: Row(
+        children: [
+          DsMonogram(entry.merchant, size: 36),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  entry.merchant,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w500, color: c.tx),
+                ),
+                Text(
+                  '×${entry.count}',
+                  style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx3),
+                ),
+              ],
             ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            formatMoneyShort(entry.amountMinor),
+            style: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w600, color: c.tx),
           ),
         ],
       ),
@@ -911,8 +1076,9 @@ class _Trend extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
     if (points.isEmpty) {
-      return Text('No history yet.', style: TextStyle(fontSize: 12, color: context.c.muted));
+      return Text('No history yet.', style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3));
     }
 
     final peak = points
@@ -920,63 +1086,74 @@ class _Trend extends StatelessWidget {
         .fold<int>(1, (a, b) => a > b ? a : b);
 
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SizedBox(
-          height: maxHeight + 30,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: points.map((point) {
-              final spend = point['spendMinor'] as int? ?? 0;
-              final income = point['incomeMinor'] as int? ?? 0;
-              final empty = spend == 0 && income == 0;
-              // Named by the day each month starts ("15 Sep"): with a salary
-              // day set, a bar is not a calendar month and "Sep" would lie.
-              // An older server sends no start date, only the key.
-              final from = point['from'] as String? ?? '';
-              final label = from.isNotEmpty
-                  ? formatIsoShortDate(from)
-                  : formatMonthLabel('${point['month']}').split(' ').first.substring(0, 3);
-
-              return Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    if (empty)
-                      Container(
-                        width: 30,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          color: context.c.lineStrong,
-                          borderRadius: BorderRadius.circular(3),
-                        ),
-                      )
-                    else
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          _Bar(height: spend / peak * maxHeight, color: context.c.debit),
-                          const SizedBox(width: 4),
-                          _Bar(height: income / peak * maxHeight, color: context.c.credit),
-                        ],
-                      ),
-                    const SizedBox(height: 6),
-                    Text(label,
-                        style: TextStyle(fontSize: 11, color: context.c.muted, fontWeight: FontWeight.w600)),
-                  ],
-                ),
-              );
-            }).toList(),
-          ),
+        Wrap(
+          spacing: 16,
+          runSpacing: 6,
+          children: [
+            LegendDot(color: c.tx, label: 'Spend'),
+            LegendDot(color: c.good, label: 'Income'),
+          ],
         ),
         const SizedBox(height: 12),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            LegendDot(color: context.c.debit, label: 'Spend', textColor: context.c.muted),
-            const SizedBox(width: 16),
-            LegendDot(color: context.c.credit, label: 'Income', textColor: context.c.muted),
-          ],
+        SizedBox(
+          height: maxHeight + 30,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: c.ln2)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: points.map((point) {
+                final spend = point['spendMinor'] as int? ?? 0;
+                final income = point['incomeMinor'] as int? ?? 0;
+                final empty = spend == 0 && income == 0;
+                // Named by the day each month starts ("15 Sep"): with a salary
+                // day set, a bar is not a calendar month and "Sep" would lie.
+                // An older server sends no start date, only the key.
+                final from = point['from'] as String? ?? '';
+                final label = from.isNotEmpty
+                    ? formatIsoShortDate(from)
+                    : formatMonthLabel('${point['month']}').split(' ').first.substring(0, 3);
+
+                return Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      if (empty)
+                        Container(
+                          width: 30,
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: c.sunk,
+                            border: Border.all(color: c.ln2),
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                        )
+                      else
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            _Bar(height: spend / peak * maxHeight, color: c.tx),
+                            const SizedBox(width: 3),
+                            _Bar(height: income / peak * maxHeight, color: c.good),
+                          ],
+                        ),
+                      const SizedBox(height: 6),
+                      Text(
+                        label,
+                        maxLines: 1,
+                        style: kNum.copyWith(fontSize: 11, height: 14 / 11, color: c.tx3),
+                      ),
+                      const SizedBox(height: 4),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
         ),
       ],
     );
@@ -995,7 +1172,7 @@ class _Bar extends StatelessWidget {
       height: height.clamp(2.0, double.infinity),
       decoration: BoxDecoration(
         color: color,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(2)),
       ),
     );
   }
@@ -1025,7 +1202,7 @@ class _Comparison extends StatelessWidget {
             .clamp(1, 1 << 62);
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _SectionTitle(
           title: 'Against ${readableMonth(comparison.previousMonthLabel)}',
@@ -1033,30 +1210,46 @@ class _Comparison extends StatelessWidget {
         ),
         const SizedBox(height: 14),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: comparison.changeMinor == 0 ? c.chipNeutral : (up ? c.debit50 : c.credit50),
-            borderRadius: BorderRadius.circular(T.rMd),
+            color: c.sf2,
+            border: Border.all(color: c.ln),
+            borderRadius: BorderRadius.circular(Ds.rLg),
           ),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _Figure(label: 'This month', value: formatMoneyShort(comparison.totalSpendMinor)),
-              _Figure(label: 'Last month', value: formatMoneyShort(comparison.previousSpendMinor)),
-              _Figure(
-                label: 'Change',
-                value: '${up ? '+' : ''}${formatMoneyShort(comparison.changeMinor)}',
-                colour: comparison.changeMinor == 0 ? null : (up ? c.debit : c.credit),
+              Expanded(
+                child: DsInlineStat(
+                  label: 'This month',
+                  value: formatMoneyShort(comparison.totalSpendMinor),
+                  compact: true,
+                ),
+              ),
+              Expanded(
+                child: DsInlineStat(
+                  label: 'Last month',
+                  value: formatMoneyShort(comparison.previousSpendMinor),
+                  compact: true,
+                ),
+              ),
+              Expanded(
+                child: DsInlineStat(
+                  label: 'Change',
+                  value: '${up ? '+' : ''}${formatMoneyShort(comparison.changeMinor)}',
+                  // More spend is the bad direction, so it alone is red.
+                  valueColor: comparison.changeMinor == 0 ? null : (up ? c.crit : c.good),
+                  compact: true,
+                ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 16),
         for (final entry in comparison.categories)
           Padding(
-            padding: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.only(bottom: 14),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Row(
                   children: [
@@ -1065,23 +1258,24 @@ class _Comparison extends StatelessWidget {
                         entry.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.ink),
+                        style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx),
                       ),
                     ),
+                    const SizedBox(width: 8),
                     Text(
                       entry.changeMinor == 0
                           ? 'no change'
                           : '${entry.changeMinor > 0 ? '+' : '−'}'
                               '${formatMoneyShort(entry.changeMinor.abs())}',
                       style: entry.changeMinor == 0
-                          ? TextStyle(fontSize: 12, color: c.muted)
+                          ? TextStyle(fontSize: 12, color: c.tx3)
                           : kNum.copyWith(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: entry.changeMinor > 0 ? c.debit : c.credit,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: entry.changeMinor > 0 ? c.crit : c.good,
                             ),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 8),
                     // What it actually is now, so a change has something to
                     // be a change *of*.
                     Text(
@@ -1090,47 +1284,18 @@ class _Comparison extends StatelessWidget {
                           : entry.amountMinor == 0
                               ? 'stopped'
                               : formatMoneyShort(entry.amountMinor),
-                      style: TextStyle(fontSize: 11.5, color: c.muted),
+                      style: kNum.copyWith(fontSize: 12, color: c.tx3),
                     ),
                   ],
                 ),
-                const SizedBox(height: 6),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
-                  child: LinearProgressIndicator(
-                    value: entry.changeMinor.abs() / biggest,
-                    minHeight: 9,
-                    backgroundColor: c.track,
-                    valueColor: AlwaysStoppedAnimation(entry.changeMinor > 0 ? c.debit : c.credit),
-                  ),
+                const SizedBox(height: 8),
+                DsMeter(
+                  value: entry.changeMinor.abs() / biggest,
+                  color: entry.changeMinor > 0 ? c.critFill : c.good,
                 ),
               ],
             ),
           ),
-      ],
-    );
-  }
-}
-
-class _Figure extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color? colour;
-
-  const _Figure({required this.label, required this.value, this.colour});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: c.muted)),
-        const SizedBox(height: 2),
-        Text(
-          value,
-          style: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w800, color: colour ?? c.ink),
-        ),
       ],
     );
   }

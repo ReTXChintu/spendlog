@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import 'ds/ds.dart';
 
 /// A kid's login, as the owner sees it.
 class FamilyKid {
@@ -118,7 +118,7 @@ class _FamilySectionState extends State<FamilySection> {
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            style: FilledButton.styleFrom(backgroundColor: context.c.debit),
+            style: FilledButton.styleFrom(backgroundColor: context.c.critFill, foregroundColor: Colors.white),
             child: const Text('Remove'),
           ),
         ],
@@ -136,26 +136,30 @@ class _FamilySectionState extends State<FamilySection> {
 
   @override
   Widget build(BuildContext context) {
-    final body = TextStyle(fontSize: 13, height: 1.5, color: context.c.ink70);
-    final note = TextStyle(fontSize: 12, height: 1.4, color: context.c.muted);
+    final note = TextStyle(fontSize: 12, height: 16 / 12, color: context.c.tx3);
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const SizedBox(height: 12),
-        Text(
-          'Give a child their own login to see and add their pocket money on this app. They can\'t '
-          'see anything else, and can\'t create an account themselves.',
-          style: body,
+        const DsCallout(
+          tone: DsTone.ac,
+          title: 'Give a child their own login to see and add their pocket money on this app. They can\'t '
+              'see anything else, and can\'t create an account themselves.',
         ),
         if (_loading) ...[
           const SizedBox(height: 14),
           const LinearProgressIndicator(),
         ] else if (_error != null) ...[
-          const SizedBox(height: 10),
-          Text(_error!, style: body.copyWith(color: context.c.debit)),
-          const SizedBox(height: 10),
-          OutlinedButton(onPressed: _load, child: const Text('Try again')),
+          const SizedBox(height: 12),
+          DsCallout(
+            tone: DsTone.crit,
+            title: _error!,
+            action: Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton(onPressed: _load, child: const Text('Try again')),
+            ),
+          ),
         ] else ...[
           if (!_pushAvailable) ...[
             const SizedBox(height: 10),
@@ -174,12 +178,18 @@ class _FamilySectionState extends State<FamilySection> {
               style: note,
             ),
             const SizedBox(height: 10),
-            OutlinedButton(onPressed: _openAccounts, child: const Text('Open accounts')),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton(onPressed: _openAccounts, child: const Text('Open accounts')),
+            ),
           ] else
-            FilledButton.icon(
-              onPressed: () => _addOrEdit(),
-              icon: const Icon(Icons.person_add_alt_1_outlined, size: 18),
-              label: const Text('Add a kid'),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: () => _addOrEdit(),
+                icon: const DsIcon(DsIcons.plus, size: 18),
+                label: const Text('Add a kid'),
+              ),
             ),
         ],
       ],
@@ -187,28 +197,51 @@ class _FamilySectionState extends State<FamilySection> {
   }
 
   Widget _kidRow(FamilyKid kid) {
+    final c = context.c;
     return Container(
       margin: const EdgeInsets.only(top: 12),
-      padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+      padding: const EdgeInsets.fromLTRB(14, 14, 4, 14),
       decoration: BoxDecoration(
-        border: Border.all(color: context.c.line),
-        borderRadius: BorderRadius.circular(T.rSm),
+        color: c.sf2,
+        border: Border.all(color: c.ln),
+        borderRadius: BorderRadius.circular(Ds.rXl),
       ),
       child: Row(
         children: [
+          DsAvatar(kid.name, size: 40, tone: DsTone.warn),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(kid.name, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: context.c.ink)),
-                Text(kid.email, style: TextStyle(fontSize: 12, color: context.c.muted)),
-                const SizedBox(height: 2),
-                Text(_accountNames(kid), style: TextStyle(fontSize: 12, color: context.c.ink70)),
+                Text(
+                  kid.name,
+                  style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
+                ),
+                Text(
+                  kid.email,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: kMono.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    DsIcon(DsIcons.piggyBank, size: 14, color: c.tx2),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        _accountNames(kid),
+                        style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2),
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
           PopupMenuButton<String>(
-            icon: Icon(Icons.more_vert, color: context.c.muted),
+            icon: DsIcon(DsIcons.moreVertical, color: c.tx2),
             onSelected: (action) {
               switch (action) {
                 case 'edit':
@@ -219,10 +252,19 @@ class _FamilySectionState extends State<FamilySection> {
                   _remove(kid);
               }
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'edit', child: Text('Edit')),
-              PopupMenuItem(value: 'password', child: Text('Reset password')),
-              PopupMenuItem(value: 'remove', child: Text('Remove')),
+            itemBuilder: (_) => [
+              const PopupMenuItem(
+                value: 'edit',
+                child: _MenuLine(icon: DsIcons.pencil, label: 'Edit'),
+              ),
+              const PopupMenuItem(
+                value: 'password',
+                child: _MenuLine(icon: DsIcons.lock, label: 'Reset password'),
+              ),
+              PopupMenuItem(
+                value: 'remove',
+                child: _MenuLine(icon: DsIcons.trash, label: 'Remove', colour: c.crit),
+              ),
             ],
           ),
         ],
@@ -325,10 +367,16 @@ class _KidDialogState extends State<_KidDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final note = TextStyle(fontSize: 12, height: 1.4, color: context.c.muted);
+    final note = TextStyle(fontSize: 12, height: 16 / 12, color: context.c.tx3);
 
     return AlertDialog(
-      title: Text(_adding ? 'Add a kid' : 'Edit ${widget.kid!.name}'),
+      title: Row(
+        children: [
+          const DsIconTile(DsIcons.users, tone: DsTone.ac),
+          const SizedBox(width: 12),
+          Expanded(child: Text(_adding ? 'Add a kid' : 'Edit ${widget.kid!.name}')),
+        ],
+      ),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -340,37 +388,36 @@ class _KidDialogState extends State<_KidDialog> {
               decoration: const InputDecoration(labelText: 'Name'),
             ),
             if (_adding) ...[
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               TextField(
                 controller: _email,
                 keyboardType: TextInputType.emailAddress,
                 autocorrect: false,
                 decoration: const InputDecoration(labelText: 'Email'),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               Text('Used only to sign in — nothing is sent to it.', style: note),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               TextField(
                 controller: _password,
                 obscureText: !_showPassword,
                 autocorrect: false,
                 enableSuggestions: false,
+                // Revealed, it switches to Plex Mono so a 1 and an l differ.
+                style: _showPassword ? kMono.copyWith(fontSize: 15) : null,
                 decoration: InputDecoration(
                   labelText: 'Password',
                   helperText: 'At least 6 characters',
-                  suffixIcon: IconButton(
-                    tooltip: _showPassword ? 'Hide password' : 'Show password',
-                    icon: Icon(_showPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                  suffixIcon: DsEyeButton(
+                    obscured: !_showPassword,
                     onPressed: () => setState(() => _showPassword = !_showPassword),
                   ),
                 ),
               ),
             ],
-            const SizedBox(height: 14),
-            Text(
-              'Pocket money they can see',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: context.c.ink),
-            ),
+            const SizedBox(height: 16),
+            const DsLabel('Pocket money they can see'),
+            const SizedBox(height: 4),
             for (final account in widget.accounts)
               Builder(builder: (context) {
                 final takenBy = _takenBy(account);
@@ -387,8 +434,8 @@ class _KidDialogState extends State<_KidDialog> {
                 );
               }),
             if (_error != null) ...[
-              const SizedBox(height: 8),
-              Text(_error!, style: TextStyle(fontSize: 12.5, color: context.c.debit)),
+              const SizedBox(height: 12),
+              DsCallout(tone: DsTone.crit, title: _error!),
             ],
           ],
         ),
@@ -453,34 +500,41 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('New password for ${widget.kid.name}'),
+      title: Row(
+        children: [
+          const DsIconTile(DsIcons.lock, tone: DsTone.ac),
+          const SizedBox(width: 12),
+          Expanded(child: Text('New password for ${widget.kid.name}')),
+        ],
+      ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             '${widget.kid.name} is signed out on their phone and signs in again with this one.',
-            style: TextStyle(fontSize: 13, height: 1.5, color: context.c.ink70),
+            style: TextStyle(fontSize: 15, height: 22 / 15, color: context.c.tx2),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 16),
           TextField(
             controller: _password,
             obscureText: !_show,
             autocorrect: false,
             enableSuggestions: false,
+            // Revealed, it switches to Plex Mono so a 1 and an l differ.
+            style: _show ? kMono.copyWith(fontSize: 15) : null,
             decoration: InputDecoration(
               labelText: 'New password',
               helperText: 'At least 6 characters',
-              suffixIcon: IconButton(
-                tooltip: _show ? 'Hide password' : 'Show password',
-                icon: Icon(_show ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+              suffixIcon: DsEyeButton(
+                obscured: !_show,
                 onPressed: () => setState(() => _show = !_show),
               ),
             ),
           ),
           if (_error != null) ...[
-            const SizedBox(height: 8),
-            Text(_error!, style: TextStyle(fontSize: 12.5, color: context.c.debit)),
+            const SizedBox(height: 12),
+            DsCallout(tone: DsTone.crit, title: _error!),
           ],
         ],
       ),
@@ -493,6 +547,28 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
           onPressed: _saving ? null : _save,
           child: Text(_saving ? 'Saving…' : 'Change password'),
         ),
+      ],
+    );
+  }
+}
+
+/// A popup-menu line: a 18 px icon and the label.
+class _MenuLine extends StatelessWidget {
+  final DsGlyph icon;
+  final String label;
+  final Color? colour;
+
+  const _MenuLine({required this.icon, required this.label, this.colour});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        DsIcon(icon, size: 18, color: colour ?? c.tx2),
+        const SizedBox(width: 12),
+        Text(label, style: TextStyle(fontSize: 14, color: colour ?? c.tx)),
       ],
     );
   }

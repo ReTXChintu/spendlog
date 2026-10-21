@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import '../widgets/ds/ds.dart';
 import '../utils/format.dart';
 import '../widgets/state_block.dart';
 import 'statement_compare_screen.dart';
@@ -265,20 +265,27 @@ class _StatementsScreenState extends State<StatementsScreen> {
       builder: (_) => SafeArea(
         child: ListView(
           shrinkWrap: true,
+          padding: const EdgeInsets.only(bottom: 16),
           children: [
+            const DsDragHandle(),
             Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                statement.isBank
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: DsSheetHeader(
+                title: statement.isBank
                     ? 'Which account is this statement for?'
                     : 'Which card is this statement for?',
-                style: const TextStyle(fontWeight: FontWeight.w700),
               ),
             ),
             for (final account in ordered)
               ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                leading: DsIconTile(
+                  account.accountType == 'BANK' ? DsIcons.bank : DsIcons.creditCard,
+                  tone: DsTone.neutral,
+                ),
                 title: Text(account.label),
                 subtitle: Text(account.accountType == 'BANK' ? 'Bank account' : 'Credit card'),
+                trailing: DsIcon(DsIcons.chevronRight, size: 18, color: context.c.tx3),
                 onTap: () => Navigator.of(context).pop(account.id),
               ),
           ],
@@ -340,36 +347,47 @@ class _StatementsScreenState extends State<StatementsScreen> {
     final c = context.c;
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: c.warnBg, borderRadius: BorderRadius.circular(T.rMd)),
-      child: Column(
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: c.warnSoft, borderRadius: BorderRadius.circular(Ds.rXl)),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            "${readableMonth(month)}'s statement",
-            style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: c.warn),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            "This bank doesn't text you about money coming in. Its statement lists every credit, and SpendLog "
-            'adds the ones it never saw. It reads statements from your mailbox.',
-            style: TextStyle(fontSize: 12.3, height: 1.45, color: c.ink70),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              FilledButton.tonal(
-                onPressed: _busy != null ? null : _fetchDue,
-                child: Text(_busy == 'sync' ? 'Reading…' : 'Read the mailbox'),
-              ),
-              TextButton(
-                onPressed: _busy != null ? null : _skipDue,
-                child: const Text('No statement this month'),
-              ),
-            ],
+          const DsIconTile(DsIcons.mail, tone: DsTone.warn, onTinted: true),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "${readableMonth(month)}'s statement",
+                  style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.warn),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  "This bank doesn't text you about money coming in. Its statement lists every credit, and SpendLog "
+                  'adds the ones it never saw. It reads statements from your mailbox.',
+                  style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    FilledButton(
+                      onPressed: _busy != null ? null : _fetchDue,
+                      style: FilledButton.styleFrom(minimumSize: const Size(64, 40)),
+                      child: Text(_busy == 'sync' ? 'Reading…' : 'Read the mailbox'),
+                    ),
+                    TextButton(
+                      onPressed: _busy != null ? null : _skipDue,
+                      child: const Text('No statement this month'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -382,11 +400,8 @@ class _StatementsScreenState extends State<StatementsScreen> {
     final due = widget.dueMonth;
 
     return Scaffold(
-      backgroundColor: c.paper,
-      appBar: AppBar(
-        title: Text(widget.title ?? 'Statements'),
-        shape: Border(bottom: BorderSide(color: c.line)),
-      ),
+      backgroundColor: c.bg,
+      appBar: AppBar(title: Text(widget.title ?? 'Statements')),
       body: due == null || widget.onlyAccountId == null
           ? _list()
           : Column(children: [_dueBanner(due), Expanded(child: _list())]),
@@ -395,10 +410,13 @@ class _StatementsScreenState extends State<StatementsScreen> {
 
   Widget _list() {
     return _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Padding(
+              padding: kPagePad,
+              child: DsSkeletonRows(count: 5, caption: 'Loading statements…'),
+            )
           : _shown.isEmpty
               ? const StateBlock(
-                  icon: Icons.receipt_long_outlined,
+                  icon: DsIcons.list,
                   title: 'No statements yet',
                   body: 'Read them from Settings, under Connections. They come from the same mailbox '
                       'as the transaction alerts.',
@@ -406,12 +424,12 @@ class _StatementsScreenState extends State<StatementsScreen> {
               : RefreshIndicator(
                   onRefresh: _load,
                   child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+                    padding: kPagePad,
                     children: [
-                      if (_duplicates > 0) ...[_resetCard(), const SizedBox(height: 14)],
+                      if (_duplicates > 0) ...[_resetCard(), const SizedBox(height: kCardGap)],
                       for (final group in _shown) ...[
                         _accountTile(group),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: kCardGap),
                       ],
                     ],
                   ),
@@ -430,40 +448,41 @@ class _StatementsScreenState extends State<StatementsScreen> {
   Widget _resetCard() {
     final c = context.c;
 
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: c.warn),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
-      child: Column(
+    return DsCard(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(Icons.error_outline, size: 17, color: c.warn),
-              const SizedBox(width: 9),
-              const Expanded(
-                child: Text(
+          const DsIconTile(DsIcons.alertTriangle, tone: DsTone.warn),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
                   'Statements were read more than once',
-                  style: TextStyle(fontSize: 13.3, fontWeight: FontWeight.w700),
+                  style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '$_duplicates of $_totalStatements are copies. They put $_addedRows transactions in '
-            'the ledger, $_categorisedRows of which you have categorised by hand. Nothing read from '
-            'an SMS or an email is touched.',
-            style: TextStyle(fontSize: 12, height: 1.45, color: c.muted),
-          ),
-          const SizedBox(height: 10),
-          OutlinedButton(
-            onPressed: _busy == 'reset' ? null : _confirmReset,
-            style: OutlinedButton.styleFrom(foregroundColor: c.debit),
-            child: Text(_busy == 'reset' ? 'Removing…' : 'Start over'),
+                const SizedBox(height: 4),
+                Text(
+                  '$_duplicates of $_totalStatements are copies. They put $_addedRows transactions in '
+                  'the ledger, $_categorisedRows of which you have categorised by hand. Nothing read from '
+                  'an SMS or an email is touched.',
+                  style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx2),
+                ),
+                const SizedBox(height: 12),
+                // Destructive: crit text on a crit-soft edge.
+                OutlinedButton.icon(
+                  onPressed: _busy == 'reset' ? null : _confirmReset,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: c.crit,
+                    backgroundColor: Colors.transparent,
+                    side: BorderSide(color: c.critSoft),
+                  ),
+                  icon: const DsIcon(DsIcons.trash, size: 18),
+                  label: Text(_busy == 'reset' ? 'Removing…' : 'Start over'),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -500,21 +519,21 @@ class _StatementsScreenState extends State<StatementsScreen> {
   Widget _accountTile(_AccountGroup group) {
     final c = context.c;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
-      clipBehavior: Clip.antiAlias,
+    return DsCard(
+      padding: EdgeInsets.zero,
+      clip: true,
       child: Theme(
         // A divider above an expanded card would read as a second card.
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
           initiallyExpanded: group.stuck > 0,
-          tilePadding: const EdgeInsets.symmetric(horizontal: 13),
-          childrenPadding: const EdgeInsets.fromLTRB(13, 0, 13, 12),
+          tilePadding: const EdgeInsets.fromLTRB(16, 4, 12, 4),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           expandedCrossAxisAlignment: CrossAxisAlignment.start,
+          leading: DsIconTile(
+            group.months.any((m) => m.statements.any((s) => s.isBank)) ? DsIcons.bank : DsIcons.creditCard,
+            tone: group.stuck > 0 ? DsTone.warn : DsTone.neutral,
+          ),
           title: Row(
             children: [
               Expanded(
@@ -522,11 +541,11 @@ class _StatementsScreenState extends State<StatementsScreen> {
                   group.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+                  style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
                 ),
               ),
               if (group.last4.isNotEmpty)
-                Text('•••• ${group.last4}', style: kNum.copyWith(fontSize: 11.5, color: c.muted)),
+                Text('••${group.last4}', style: kNum.copyWith(fontSize: 13, color: c.tx3)),
             ],
           ),
           subtitle: Text(
@@ -536,25 +555,15 @@ class _StatementsScreenState extends State<StatementsScreen> {
               if (group.network != null) group.network!,
             ].join(' · '),
             style: TextStyle(
-              fontSize: 11.5,
-              color: group.stuck > 0 ? c.warn : c.muted,
-              fontWeight: group.stuck > 0 ? FontWeight.w700 : FontWeight.w400,
+              fontSize: 13,
+              height: 18 / 13,
+              color: group.stuck > 0 ? c.warn : c.tx3,
+              fontWeight: group.stuck > 0 ? FontWeight.w500 : FontWeight.w400,
             ),
           ),
           children: [
             for (final month in group.months) ...[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(0, 10, 0, 7),
-                child: Text(
-                  month.label.toUpperCase(),
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.5,
-                    color: c.muted,
-                  ),
-                ),
-              ),
+              DsLabel(month.label, padding: const EdgeInsets.fromLTRB(0, 8, 0, 8)),
               for (final statement in month.statements)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
@@ -594,65 +603,66 @@ class _StatementsScreenState extends State<StatementsScreen> {
 
   Widget _row(_Statement statement) {
     final c = context.c;
-    final (pillBg, pillFg) = switch (statement.status) {
-      'PARSED' => (c.credit50, c.credit),
-      'LOCKED' => (c.warnBg, c.warn),
-      'UNIDENTIFIED' => (c.brand50, c.brandDark),
-      _ => (c.debit50, c.debit),
+    final tone = switch (statement.status) {
+      'PARSED' => DsTone.good,
+      'LOCKED' => DsTone.warn,
+      'UNIDENTIFIED' => DsTone.ac,
+      _ => DsTone.crit,
     };
+    // Secondary buttons at the spec's small size: 36 h, radius 10, 13/600.
+    final small = OutlinedButton.styleFrom(
+      minimumSize: const Size(0, 36),
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Ds.rMd)),
+      textStyle: const TextStyle(fontFamily: Ds.sans, fontSize: 13, fontWeight: FontWeight.w600),
+    );
+    final name = '${statement.subject ?? statement.fileName ?? 'A statement'}'
+        '${statement.isBank ? '  (bank)' : ''}';
 
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: c.paper,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rSm),
+        color: c.sf2,
+        border: Border.all(color: c.ln),
+        borderRadius: BorderRadius.circular(Ds.rLg),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(color: pillBg, borderRadius: BorderRadius.circular(100)),
-                child: Text(
-                  statement.label.toUpperCase(),
-                  style: TextStyle(
-                    fontSize: 8.5,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.4,
-                    color: pillFg,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 9),
               Expanded(
                 child: Text(
-                  '${statement.subject ?? statement.fileName ?? 'A statement'}'
-                  '${statement.isBank ? '  (bank)' : ''}',
-                  maxLines: 1,
+                  name,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 13.3, fontWeight: FontWeight.w600, color: c.ink),
+                  // A file name is a machine string; a mail subject is not.
+                  style: statement.subject == null && statement.fileName != null
+                      ? kMono.copyWith(fontSize: 13, height: 18 / 13, color: c.tx)
+                      : TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx),
                 ),
               ),
+              const SizedBox(width: 8),
+              DsBadge(statement.label, tone: tone),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
           Text(
             _subtitle(statement),
-            style: TextStyle(fontSize: 12.3, height: 1.45, color: c.muted),
+            style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx3),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           // Wrapped rather than in a row: a read statement has three
           // buttons and the bin, which is more than a phone's width.
           Wrap(
             spacing: 8,
-            runSpacing: 2,
+            runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               if (statement.isRead)
                 OutlinedButton(
+                  style: small,
                   onPressed: () => _open(statement),
                   child: const Text('Open'),
                 ),
@@ -660,11 +670,13 @@ class _StatementsScreenState extends State<StatementsScreen> {
               // bank statement, its close against the app's figure.
               if (statement.isRead)
                 OutlinedButton(
+                  style: small,
                   onPressed: () => _compare(statement),
                   child: const Text('Compare with app'),
                 ),
               if (statement.status == 'UNIDENTIFIED' && _cards.isNotEmpty)
                 OutlinedButton(
+                  style: small,
                   onPressed: _busy == statement.id ? null : () => _assign(statement),
                   child: const Text('Pick the account'),
                 ),
@@ -672,6 +684,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
               // statement read wrongly gets read again.
               if (!statement.isRead || statement.added == 0)
                 OutlinedButton(
+                  style: small,
                   onPressed: _busy == statement.id
                       ? null
                       : () => _act(statement.id, () async {
@@ -692,8 +705,8 @@ class _StatementsScreenState extends State<StatementsScreen> {
               // the ledger keeps rows pointing at something that no longer
               // exists.
               IconButton(
-                icon: const Icon(Icons.delete_outline, size: 19),
-                color: c.debit,
+                icon: const DsIcon(DsIcons.trash, size: 20),
+                color: c.crit,
                 tooltip: 'Forget this statement',
                 onPressed: _busy == statement.id ? null : () => _forget(statement),
               ),

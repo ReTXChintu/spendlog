@@ -9,6 +9,7 @@ import 'package:spendlog/screens/trip_add_payments_screen.dart';
 import 'package:spendlog/screens/trip_payments_screen.dart';
 import 'package:spendlog/screens/trips_screen.dart';
 import 'package:spendlog/theme.dart';
+import 'package:spendlog/widgets/ds/ds_icon.dart';
 import 'package:spendlog/widgets/edit_transaction_sheet.dart';
 
 /// A phone: 360 × 800 logical pixels.
@@ -132,7 +133,7 @@ void main() {
           tester.getTopLeft(find.text('Goa')).dy,
           lessThan(tester.getTopLeft(find.text('Kerala')).dy),
         );
-        expect(find.text('RUNNING'), findsOneWidget);
+        expect(find.text('Running'), findsOneWidget);
         await tester.tap(find.text('Goa'));
         await tester.pumpAndSettle();
 
@@ -284,10 +285,10 @@ void main() {
       await http.runWithClient(() async {
         await open(tester);
 
-        expect(top(tester, 'LOOKS LIKE TRAVEL'), lessThan(top(tester, 'IRCTC')));
+        expect(top(tester, 'Looks like travel'), lessThan(top(tester, 'IRCTC')));
         expect(top(tester, 'IRCTC'), lessThan(top(tester, 'Taj Exotica')));
-        expect(top(tester, 'Taj Exotica'), lessThan(top(tester, 'EVERYTHING ELSE')));
-        expect(top(tester, 'EVERYTHING ELSE'), lessThan(top(tester, 'DMart')));
+        expect(top(tester, 'Taj Exotica'), lessThan(top(tester, 'Everything else')));
+        expect(top(tester, 'Everything else'), lessThan(top(tester, 'DMart')));
         expect(top(tester, 'DMart'), lessThan(top(tester, 'Amazon')));
         expect(find.text('Pick the payments to add'), findsOneWidget);
       }, () => server(_Calls()));
@@ -484,7 +485,7 @@ void main() {
         expect(tester.takeException(), isNull);
         expect(find.textContaining('Paid by Asha'), findsOneWidget);
         // Only the user's own row opens the edit sheet.
-        expect(find.byIcon(Icons.chevron_right), findsOneWidget);
+        expect(find.byWidgetPredicate((w) => w is DsIcon && w.glyph == DsIcons.chevronRight), findsOneWidget);
       });
     }
   });

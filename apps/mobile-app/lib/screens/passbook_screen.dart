@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import '../widgets/ds/ds.dart';
 import '../utils/format.dart';
 import '../widgets/edit_transaction_sheet.dart';
 import '../widgets/reconcile_sheet.dart';
@@ -395,31 +395,28 @@ class PassbookScreenState extends State<PassbookScreen> {
     final page = _page;
 
     return Scaffold(
-      backgroundColor: c.paper,
+      backgroundColor: c.bg,
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Passbook', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: c.ink)),
+            Text('Passbook', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 20, height: 26 / 20, color: c.tx)),
             if (page != null)
-              Text(page.account.label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: c.muted)),
+              Text(page.account.label, style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3)),
           ],
         ),
-        shape: Border(bottom: BorderSide(color: c.line)),
         actions: [
           if (page != null)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: TextButton.icon(
-                onPressed: _addCheckpoint,
-                icon: const Icon(Icons.flag_outlined, size: 18),
-                label: const Text('Add checkpoint'),
-              ),
+            TextButton.icon(
+              onPressed: _addCheckpoint,
+              icon: const DsIcon(DsIcons.target, size: 18),
+              label: const Text('Add checkpoint'),
             ),
           if (page != null)
             PopupMenuButton<String>(
               key: const ValueKey('passbook-menu'),
               tooltip: 'More',
+              icon: DsIcon(DsIcons.moreVertical, size: 20, color: c.tx2),
               onSelected: (value) {
                 if (value == 'fresh') _startFresh();
                 if (value == 'fresh-all') _startFreshEverywhere();
@@ -461,7 +458,10 @@ class PassbookScreenState extends State<PassbookScreen> {
           onAction: _load,
         );
       }
-      return const Center(child: CircularProgressIndicator());
+      return ListView(
+        padding: kPagePad,
+        children: const [DsSkeletonRows(count: 6, caption: 'Loading the passbook…')],
+      );
     }
 
     final items = _items;
@@ -490,7 +490,7 @@ class PassbookScreenState extends State<PassbookScreen> {
               ),
             ),
           SliverPadding(
-            padding: const EdgeInsets.only(top: 6, bottom: 40),
+            padding: const EdgeInsets.only(top: 8, bottom: 40),
             sliver: SliverList.builder(
               itemCount: items.length + 1,
               itemBuilder: (context, index) {
@@ -520,7 +520,7 @@ class PassbookScreenState extends State<PassbookScreen> {
   Widget _tail() {
     final c = context.c;
     if (_loadMoreFailed) {
-      return _EndRow(text: "Couldn't load the rows before. Tap to try again", icon: Icons.refresh, onTap: _loadMore);
+      return _EndRow(text: "Couldn't load the rows before. Tap to try again", icon: DsIcons.refresh, onTap: _loadMore);
     }
     if (_nextBefore != null) {
       return Padding(
@@ -528,9 +528,9 @@ class PassbookScreenState extends State<PassbookScreen> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: c.muted)),
+            const DsSpinner(size: 16),
             const SizedBox(width: 10),
-            Text('Loading earlier rows…', style: TextStyle(fontSize: 12, color: c.muted, fontWeight: FontWeight.w600)),
+            Text('Loading earlier rows…', style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx2, fontWeight: FontWeight.w600)),
           ],
         ),
       );
@@ -561,111 +561,109 @@ class _Header extends StatelessWidget {
     final stated = page.lastStated;
     final where = page.account.isCash ? 'Your wallet' : 'Bank';
 
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'SPENDLOG EXPECTS',
-            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: c.muted),
-          ),
-          const SizedBox(height: 4),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              formatMoney(page.expectedNowMinor),
-              style: kNum.copyWith(
-                fontSize: 28,
-                fontWeight: FontWeight.w800,
-                color: page.expectedNowMinor < 0 ? c.debit : c.ink,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: DsCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const DsLabel('SpendLog expects'),
+            const SizedBox(height: 4),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                formatMoney(page.expectedNowMinor),
+                style: TextStyle(
+                  fontSize: 28,
+                  height: 34 / 28,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.56,
+                  fontFeatures: Ds.tabular,
+                  // Overdrawn is a problem; a balance is otherwise ink.
+                  color: page.expectedNowMinor < 0 ? c.crit : c.tx,
+                ),
               ),
             ),
-          ),
-          if (page.provisionalMinor > 0) ...[
-            const SizedBox(height: 2),
-            Text(
-              'Includes ${formatMoney(page.provisionalMinor)} not yet explained',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.warn),
-            ),
-          ],
-          const SizedBox(height: 10),
-          if (stated == null) ...[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(Icons.info_outline, size: 16, color: c.muted),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    page.account.isCash
-                        ? 'Nothing says what your wallet really holds. Count it and add a checkpoint.'
-                        : "This bank doesn't send balances in its SMS. Add a checkpoint from your bank app.",
-                    style: TextStyle(fontSize: 12.8, height: 1.45, color: c.ink70),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              onPressed: onAddCheckpoint,
-              icon: const Icon(Icons.flag_outlined, size: 17),
-              label: const Text('Add a checkpoint'),
-            ),
-          ] else ...[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: RichText(
-                    text: TextSpan(
-                      style: TextStyle(fontSize: 13, height: 1.4, color: c.ink70),
-                      children: [
-                        TextSpan(text: '$where said '),
-                        TextSpan(
-                          text: formatMoney(stated.minor),
-                          style: kNum.copyWith(fontWeight: FontWeight.w800, color: c.ink),
-                        ),
-                        TextSpan(text: ' on ${formatShortDate(stated.at)}'),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                _DriftChip(driftMinor: stated.driftMinor, large: true),
-              ],
-            ),
-            if (stated.isOff) ...[
-              const SizedBox(height: 6),
+            if (page.provisionalMinor > 0) ...[
+              const SizedBox(height: 4),
               Text(
-                stated.driftMinor < 0
-                    ? 'SpendLog shows more than the bank: a payment is probably missing.'
-                    : 'The bank shows more than SpendLog: money in is probably missing.',
-                style: TextStyle(fontSize: 12, height: 1.4, color: c.muted),
+                'Includes ${formatMoney(page.provisionalMinor)} not yet explained',
+                style: TextStyle(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w600, color: c.warn),
               ),
-              // The strip under this header is the usual way in; when the
-              // ledger cannot say where the figures parted there is no
-              // strip, so the offer is made here.
-              if (page.firstDrift == null) ...[
-                const SizedBox(height: 10),
-                FilledButton.tonal(onPressed: onFindTheCause, child: const Text('Find the cause')),
+            ],
+            const SizedBox(height: 14),
+            if (stated == null) ...[
+              DsCallout(
+                tone: DsTone.neutral,
+                title: page.account.isCash
+                    ? 'Nothing says what your wallet really holds. Count it and add a checkpoint.'
+                    : "This bank doesn't send balances in its SMS. Add a checkpoint from your bank app.",
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: onAddCheckpoint,
+                icon: const DsIcon(DsIcons.target, size: 18),
+                label: const Text('Add a checkpoint'),
+              ),
+            ] else ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: c.sf2,
+                  border: Border.all(color: c.ln),
+                  borderRadius: BorderRadius.circular(Ds.rLg),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: RichText(
+                        text: TextSpan(
+                          style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2, fontFamily: Ds.sans),
+                          children: [
+                            TextSpan(text: '$where said '),
+                            TextSpan(
+                              text: formatMoney(stated.minor),
+                              style: TextStyle(fontWeight: FontWeight.w600, color: c.tx, fontFeatures: Ds.tabular),
+                            ),
+                            TextSpan(text: ' on ${formatShortDate(stated.at)}'),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    _DriftChip(driftMinor: stated.driftMinor, large: true),
+                  ],
+                ),
+              ),
+              if (stated.isOff) ...[
+                const SizedBox(height: 8),
+                Text(
+                  stated.driftMinor < 0
+                      ? 'SpendLog shows more than the bank: a payment is probably missing.'
+                      : 'The bank shows more than SpendLog: money in is probably missing.',
+                  style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2),
+                ),
+                // The strip under this header is the usual way in; when the
+                // ledger cannot say where the figures parted there is no
+                // strip, so the offer is made here.
+                if (page.firstDrift == null) ...[
+                  const SizedBox(height: 12),
+                  FilledButton(onPressed: onFindTheCause, child: const Text('Find the cause')),
+                ],
               ],
             ],
           ],
-        ],
+        ),
       ),
     );
   }
 }
 
-/// Where the figures first parted, pinned under the header.
+/// Where the figures first parted, pinned under the header. A mismatch is
+/// a problem, so it is drawn in the critical tint.
 class _DriftStrip extends StatelessWidget {
   const _DriftStrip({required this.drift, required this.onJump, required this.onFindTheCause});
 
@@ -678,68 +676,77 @@ class _DriftStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    const small = TextStyle(fontFamily: Ds.sans, fontSize: 13, fontWeight: FontWeight.w600);
     return Container(
       height: height,
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
-      decoration: BoxDecoration(
-        color: c.warnBg,
-        border: Border(bottom: BorderSide(color: c.line)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.call_split, size: 16, color: c.warn),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'The figures part on ${formatShortDate(drift.on)} (${formatMoneyShort(drift.driftMinor.abs())})',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: c.warn),
+      color: c.bg,
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 8, 8, 6),
+        decoration: BoxDecoration(color: c.critSoft, borderRadius: BorderRadius.circular(Ds.rLg)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                DsIcon(DsIcons.alertTriangle, size: 16, color: c.crit),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'The figures part on ${formatShortDate(drift.on)} (${formatMoneyShort(drift.driftMinor.abs())})',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      height: 16 / 13,
+                      fontWeight: FontWeight.w600,
+                      color: c.crit,
+                      fontFeatures: Ds.tabular,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const Spacer(),
+            // The two actions on their own line, right-aligned; shrunk
+            // rather than clipped on a narrow phone.
+            Align(
+              alignment: Alignment.centerRight,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    OutlinedButton(
+                      onPressed: onJump,
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        minimumSize: const Size(0, 32),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Ds.rMd)),
+                        textStyle: small,
+                      ),
+                      child: const Text('Jump to it'),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      onPressed: onFindTheCause,
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        minimumSize: const Size(0, 32),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Ds.rMd)),
+                        textStyle: small,
+                      ),
+                      child: const Text('Find the cause'),
+                    ),
+                  ],
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 2),
-          // The two actions on their own line, right-aligned; shrunk
-          // rather than clipped on a narrow phone.
-          Align(
-            alignment: Alignment.centerRight,
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerRight,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextButton(
-                    onPressed: onJump,
-                    style: TextButton.styleFrom(
-                      foregroundColor: c.warn,
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      minimumSize: const Size(0, 36),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
-                    ),
-                    child: const Text('Jump to it'),
-                  ),
-                  const SizedBox(width: 4),
-                  FilledButton.tonal(
-                    onPressed: onFindTheCause,
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      minimumSize: const Size(0, 36),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
-                    ),
-                    child: const Text('Find the cause'),
-                  ),
-                ],
-              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -763,7 +770,7 @@ class _StripDelegate extends SliverPersistentHeaderDelegate {
   bool shouldRebuild(covariant _StripDelegate oldDelegate) => oldDelegate.child != child;
 }
 
-/// The gap, as a small chip: red when past a rupee, green within it.
+/// The gap, as a badge: critical when past a rupee, good within it.
 class _DriftChip extends StatelessWidget {
   const _DriftChip({required this.driftMinor, this.large = false});
 
@@ -780,17 +787,20 @@ class _DriftChip extends StatelessWidget {
             ? 'Matches'
             : '${formatMoney(driftMinor.abs())} · matches';
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: large ? 9 : 6, vertical: large ? 4 : 1.5),
+      constraints: BoxConstraints(minHeight: large ? 24 : 20),
+      alignment: Alignment.center,
+      padding: EdgeInsets.symmetric(horizontal: large ? 8 : 6),
       decoration: BoxDecoration(
-        color: off ? c.debit50 : c.credit50,
-        borderRadius: BorderRadius.circular(100),
+        color: off ? c.critSoft : c.goodSoft,
+        borderRadius: BorderRadius.circular(Ds.rSm),
       ),
       child: Text(
         label,
-        style: kNum.copyWith(
-          fontSize: large ? 12.5 : 10.5,
-          fontWeight: FontWeight.w800,
-          color: off ? c.debit : c.credit,
+        style: TextStyle(
+          fontSize: large ? 12 : 11,
+          fontWeight: FontWeight.w600,
+          color: off ? c.crit : c.good,
+          fontFeatures: Ds.tabular,
         ),
       ),
     );
@@ -801,7 +811,7 @@ class _DriftChip extends StatelessWidget {
 ///
 /// Right-hand column, top to bottom: the amount, the running balance in
 /// tabular figures so the column lines up down the page, and - when the
-/// bank said a figure here - that figure, with the gap as a chip.
+/// bank said a figure here - that figure, with the gap as a badge.
 class _PassbookRowTile extends StatelessWidget {
   const _PassbookRowTile({
     super.key,
@@ -828,16 +838,17 @@ class _PassbookRowTile extends StatelessWidget {
     final amount = row.amountMinor;
     final stated = row.statedMinor;
 
-    final (IconData icon, Color iconBg, Color iconFg) = switch (row.kind) {
-      'opening' => (Icons.play_arrow_rounded, c.brand50, c.brandDark),
-      'checkpoint' => (Icons.flag_outlined, c.brand50, c.brandDark),
-      'missing_credit' => (Icons.help_outline, c.warnBg, c.warn),
-      'adjustment' => (Icons.help_outline, row.needsExplanation ? c.warnBg : c.chipNeutral, row.needsExplanation ? c.warn : c.muted),
+    // Spending is ink, never red: an outgoing row gets a neutral tile.
+    final (Object icon, DsTone tone) = switch (row.kind) {
+      'opening' => (DsIcons.bank, DsTone.ac),
+      'checkpoint' => (DsIcons.target, DsTone.ac),
+      'missing_credit' => (DsIcons.arrowDownLeft, DsTone.warn),
+      'adjustment' => (DsIcons.info, row.needsExplanation ? DsTone.warn : DsTone.neutral),
       _ => row.isTransfer
-          ? (Icons.swap_horiz, c.chipNeutral, c.transfer)
+          ? (DsIcons.transfer, DsTone.neutral)
           : row.isDebit
-              ? (Icons.arrow_outward, c.debit50, c.debit)
-              : (Icons.south_west, c.credit50, c.credit),
+              ? (DsIcons.arrowUpRight, DsTone.neutral)
+              : (DsIcons.arrowDownLeft, DsTone.good),
     };
 
     final String title;
@@ -872,31 +883,26 @@ class _PassbookRowTile extends StatelessWidget {
 
     final amountColor = row.isMissingCredit
         ? c.warn
-        : (row.isTransfer ? c.transfer : (row.isDebit ? c.debit : c.credit));
+        : (row.isTransfer ? c.tx3 : (row.isDebit ? c.tx : c.good));
     final isAdjustmentOpen = (row.isAdjustment && row.needsExplanation) || row.isMissingCredit;
 
     return Material(
-      color: highlighted ? c.brand50 : Colors.transparent,
+      color: highlighted ? c.acSoft : (isAdjustmentOpen ? c.warnSoft : c.sf),
       child: InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
         child: Container(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
           decoration: BoxDecoration(
-            color: isAdjustmentOpen && !highlighted ? c.warnBg.withValues(alpha: 0.6) : null,
-            border: Border(bottom: BorderSide(color: c.line)),
+            border: highlighted
+                ? Border.all(color: c.ac, width: 2)
+                : Border(bottom: BorderSide(color: c.ln)),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 32,
-                height: 32,
-                margin: const EdgeInsets.only(top: 1),
-                decoration: BoxDecoration(color: iconBg, shape: BoxShape.circle),
-                child: Icon(icon, size: 16, color: iconFg),
-              ),
-              const SizedBox(width: 11),
+              DsIconTile(icon, tone: tone, size: 36, onTinted: isAdjustmentOpen && !highlighted),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -905,24 +911,25 @@ class _PassbookRowTile extends StatelessWidget {
                       title,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w700,
-                        color: isAdjustmentOpen ? c.warn : c.ink,
-                      ),
+                      style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w500, color: c.tx),
                     ),
                     const SizedBox(height: 2),
-                    Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11.5, color: c.muted)),
+                    Text(
+                      subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 13, height: 18 / 13, color: isAdjustmentOpen ? c.warn : c.tx3),
+                    ),
                     // The far side of a transfer, written in because this
                     // bank never texted it.
                     if (row.autoLeg) ...[
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 6),
                       const AutoLegChip(),
                     ],
                   ],
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 12),
               // The figures column. Capped so a long merchant name still
               // gets room, and each line shrinks rather than wraps: an
               // amount broken over two lines is unreadable.
@@ -935,7 +942,13 @@ class _PassbookRowTile extends StatelessWidget {
                       _Fit(
                         Text(
                           '${row.isDebit ? '−' : '+'}${formatMoney(amount)}',
-                          style: kNum.copyWith(fontSize: 13.5, fontWeight: FontWeight.w700, color: amountColor),
+                          style: TextStyle(
+                            fontSize: 15,
+                            height: 20 / 15,
+                            fontWeight: FontWeight.w600,
+                            color: amountColor,
+                            fontFeatures: Ds.tabular,
+                          ),
                         ),
                       )
                     else
@@ -943,32 +956,34 @@ class _PassbookRowTile extends StatelessWidget {
                     _Fit(
                       Text(
                         formatMoney(row.runningMinor),
-                        style: kNum.copyWith(
-                          fontSize: amount == null ? 13.5 : 12,
-                          fontWeight: amount == null ? FontWeight.w800 : FontWeight.w600,
-                          color: row.runningMinor < 0 ? c.debit : (amount == null ? c.ink : c.ink70),
+                        style: TextStyle(
+                          fontSize: amount == null ? 15 : 13,
+                          height: amount == null ? 20 / 15 : 18 / 13,
+                          fontWeight: amount == null ? FontWeight.w600 : FontWeight.w500,
+                          fontFeatures: Ds.tabular,
+                          color: row.runningMinor < 0 ? c.crit : (amount == null ? c.tx : c.tx2),
                         ),
                       ),
                     ),
                     if (stated != null && !row.isOpening && !row.isCheckpoint) ...[
-                      const SizedBox(height: 3),
+                      const SizedBox(height: 4),
                       _Fit(
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
                               '${isCash ? 'wallet' : 'bank'} ${formatMoney(stated)}',
-                              style: kNum.copyWith(fontSize: 11, color: c.muted),
+                              style: TextStyle(fontSize: 12, color: c.tx3, fontFeatures: Ds.tabular),
                             ),
                             if (row.driftMinor != null && row.driftMinor != 0) ...[
-                              const SizedBox(width: 5),
+                              const SizedBox(width: 6),
                               _DriftChip(driftMinor: row.driftMinor!),
                             ],
                           ],
                         ),
                       ),
                     ] else if (row.isCheckpoint && row.driftMinor != null) ...[
-                      const SizedBox(height: 3),
+                      const SizedBox(height: 4),
                       _DriftChip(driftMinor: row.driftMinor!),
                     ],
                   ],
@@ -993,6 +1008,8 @@ class _Fit extends StatelessWidget {
       FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: child);
 }
 
+/// A day strip: `sf2`, the day on the left, what the right column means on
+/// the right.
 class _DayHeader extends StatelessWidget {
   const _DayHeader({required this.day});
 
@@ -1001,16 +1018,11 @@ class _DayHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-      padding: const EdgeInsets.only(bottom: 6),
-      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: c.ink, width: 2))),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(formatDayLabel(day), style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: c.ink)),
-          Text('balance after', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: c.mutedLight)),
-        ],
+    return DsDayHeader(
+      label: formatDayLabel(day),
+      trailing: Text(
+        'balance after',
+        style: TextStyle(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w500, color: c.tx3),
       ),
     );
   }
@@ -1020,31 +1032,36 @@ class _EndRow extends StatelessWidget {
   const _EndRow({required this.text, this.icon, this.onTap});
 
   final String text;
-  final IconData? icon;
+  final Object? icon;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(T.rSm),
+        borderRadius: BorderRadius.circular(Ds.rMd),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               if (icon != null) ...[
-                Icon(icon, size: 16, color: c.brandDark),
+                dsIconOf(icon!, size: 16, color: c.ac),
                 const SizedBox(width: 6),
               ],
               Flexible(
                 child: Text(
                   text,
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: onTap == null ? c.muted : c.brandDark),
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 16 / 12,
+                    fontWeight: onTap == null ? FontWeight.w400 : FontWeight.w600,
+                    color: onTap == null ? c.tx3 : c.ac,
+                  ),
                 ),
               ),
             ],
@@ -1090,7 +1107,7 @@ class _FreshStartDialogState extends State<_FreshStartDialog> {
           Text(
             'Your transactions and spending stay as they are. Only this balance starts again from the figure '
             'below, as of now.',
-            style: TextStyle(fontSize: 13, height: 1.45, color: c.ink70),
+            style: TextStyle(fontSize: 15, height: 22 / 15, color: c.tx2),
           ),
           const SizedBox(height: 14),
           TextField(
@@ -1098,11 +1115,10 @@ class _FreshStartDialogState extends State<_FreshStartDialog> {
             autofocus: true,
             keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
             inputFormatters: [_signedAmount],
-            style: kNum.copyWith(fontSize: 18, fontWeight: FontWeight.w700, color: c.ink),
+            style: kNum.copyWith(fontSize: 17, fontWeight: FontWeight.w600, color: c.tx),
             decoration: InputDecoration(
               labelText: widget.isCash ? 'What your wallet holds now' : 'What your bank shows now',
               prefixText: '₹ ',
-              border: const OutlineInputBorder(),
             ),
             onChanged: (_) => setState(() {}),
           ),
@@ -1197,7 +1213,7 @@ class _CheckpointDialogState extends State<_CheckpointDialog> {
                 ? 'Count what is in your wallet. SpendLog sets its own figure against it.'
                 : 'The balance your bank app shows. SpendLog sets its own figure against it, the same as a balance '
                     'in an SMS.',
-            style: TextStyle(fontSize: 13, height: 1.45, color: c.ink70),
+            style: TextStyle(fontSize: 15, height: 22 / 15, color: c.tx2),
           ),
           const SizedBox(height: 14),
           TextField(
@@ -1205,34 +1221,34 @@ class _CheckpointDialogState extends State<_CheckpointDialog> {
             autofocus: true,
             keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
             inputFormatters: [_signedAmount],
-            style: kNum.copyWith(fontSize: 18, fontWeight: FontWeight.w700, color: c.ink),
+            style: kNum.copyWith(fontSize: 17, fontWeight: FontWeight.w600, color: c.tx),
             decoration: InputDecoration(
               labelText: widget.isCash ? 'In the wallet' : 'Balance shown',
               prefixText: '₹ ',
-              border: const OutlineInputBorder(),
             ),
             onChanged: (_) => setState(() {}),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           Row(
             children: [
-              Text('On', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: c.muted)),
-              const SizedBox(width: 8),
+              const DsLabel('On'),
+              const SizedBox(width: 12),
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed: _pickDay,
-                  icon: const Icon(Icons.calendar_today_outlined, size: 15),
+                  style: OutlinedButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Ds.rMd))),
+                  icon: const DsIcon(DsIcons.calendar, size: 18),
                   label: Align(alignment: Alignment.centerLeft, child: Text(dayLabel, maxLines: 1, overflow: TextOverflow.ellipsis)),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           TextField(
             controller: _note,
             maxLength: 120,
-            style: TextStyle(fontSize: 14, color: c.ink),
-            decoration: const InputDecoration(labelText: 'Note (optional)', border: OutlineInputBorder(), counterText: ''),
+            style: TextStyle(fontSize: 15, color: c.tx),
+            decoration: const InputDecoration(labelText: 'Note (optional)', counterText: ''),
           ),
         ],
       ),

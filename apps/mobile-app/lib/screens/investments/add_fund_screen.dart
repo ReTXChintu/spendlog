@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../models/fund_models.dart';
 import '../../services/api_client.dart';
-import '../../theme.dart';
+import '../../widgets/ds/ds.dart';
 import '../../utils/format.dart';
 import '../../widgets/funds/fund_form.dart';
 import '../../widgets/funds/fund_text.dart';
@@ -121,13 +121,9 @@ class _AddFundScreenState extends State<AddFundScreen> {
   Widget build(BuildContext context) {
     final c = context.c;
     return Scaffold(
-      backgroundColor: c.paper,
+      backgroundColor: c.bg,
       appBar: AppBar(
-        title: Text(
-          _scheme == null ? 'Add a fund' : 'Your investment',
-          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: c.ink),
-        ),
-        shape: Border(bottom: BorderSide(color: c.line)),
+        title: Text(_scheme == null ? 'Add a fund' : 'Your investment'),
       ),
       body: _scheme == null ? _searchView() : _formView(_scheme!),
     );
@@ -140,30 +136,35 @@ class _AddFundScreenState extends State<AddFundScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
           child: TextField(
             controller: _query,
             autofocus: true,
             textInputAction: TextInputAction.search,
             onChanged: _onQuery,
+            style: TextStyle(fontSize: 14, color: c.tx),
             decoration: InputDecoration(
               hintText: 'Fund name, e.g. Parag Parikh Flexi Cap',
-              prefixIcon: const Icon(Icons.search),
+              hintStyle: TextStyle(fontSize: 14, color: c.tx3),
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              prefixIcon: Padding(
+                padding: const EdgeInsets.only(left: 12, right: 8),
+                child: DsIcon(DsIcons.search, size: 20, color: c.tx3),
+              ),
+              prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 44),
               suffixIcon: _searching
                   ? const Padding(
-                      padding: EdgeInsets.all(14),
+                      padding: EdgeInsets.all(13),
                       child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
                     )
                   : null,
-              filled: true,
-              fillColor: c.surface,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(T.rSm)),
             ),
           ),
         ),
         if (_fromCache && results != null)
           const Padding(
-            padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: FundBanner(
               icon: Icons.cloud_off_outlined,
               text: "The fund list can't be reached right now, so these are only funds SpendLog already knows.",
@@ -178,7 +179,7 @@ class _AddFundScreenState extends State<AddFundScreen> {
                   : results.isEmpty
                       ? _hint('No funds match "${_query.text.trim()}". Try fewer words, or the fund house name.')
                       : ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                           itemCount: results.length,
                           separatorBuilder: (_, __) => const SizedBox(height: 8),
                           itemBuilder: (context, i) => _ResultRow(
@@ -194,12 +195,14 @@ class _AddFundScreenState extends State<AddFundScreen> {
   Widget _hint(String text, {bool warn = false}) {
     final c = context.c;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
-      child: Text(
-        text,
-        textAlign: TextAlign.center,
-        style: TextStyle(fontSize: 13, height: 1.5, color: warn ? c.warn : c.muted),
-      ),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: warn
+          ? Align(alignment: Alignment.topCenter, child: DsCallout(tone: DsTone.warn, title: text))
+          : Text(
+              text,
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx2),
+            ),
     );
   }
 
@@ -207,7 +210,7 @@ class _AddFundScreenState extends State<AddFundScreen> {
     final c = context.c;
     final bare = _fields.data.isBare;
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 32),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
       children: [
         FundCard(
           child: Row(
@@ -219,11 +222,11 @@ class _AddFundScreenState extends State<AddFundScreen> {
                   children: [
                     Text(
                       shortSchemeName(scheme.schemeName),
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: c.ink),
+                      style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
                     ),
-                    const SizedBox(height: 3),
-                    Text(scheme.schemeName, style: TextStyle(fontSize: 11.5, height: 1.35, color: c.muted)),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 2),
+                    Text(scheme.schemeName, style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3)),
+                    const SizedBox(height: 10),
                     Wrap(
                       spacing: 6,
                       runSpacing: 6,
@@ -244,25 +247,25 @@ class _AddFundScreenState extends State<AddFundScreen> {
           ),
         ),
         if (scheme.isRegular) ...[
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           const FundBanner(
-            icon: Icons.swap_horiz,
+            icon: DsIcons.transfer,
             text: 'This is a regular plan. If you are choosing now, the Direct plan of the same fund costs less '
                 'every year.',
           ),
         ],
         const SizedBox(height: 16),
         ToggleSection(
-          icon: Icons.account_balance_wallet_outlined,
+          icon: DsIcons.banknote,
           title: 'I already hold units',
           subtitle: 'From a statement: units, what they cost, and as of when.',
           on: _fields.holdsUnits,
           onChanged: (on) => setState(() => _fields.holdsUnits = on),
           child: OpeningFields(fields: _fields, onChanged: () => setState(() {})),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: kCardGap),
         ToggleSection(
-          icon: Icons.event_repeat_outlined,
+          icon: DsIcons.repeat,
           title: 'I run a SIP',
           subtitle: 'An amount each month on the same day, with any changes along the way.',
           on: _fields.runsSip,
@@ -272,18 +275,16 @@ class _AddFundScreenState extends State<AddFundScreen> {
           }),
           child: SipFields(fields: _fields, onChanged: () => setState(() {})),
         ),
-        const SizedBox(height: 14),
-        TextField(
-          controller: _fields.folio,
-          decoration: const InputDecoration(
-            labelText: 'Folio number (optional)',
-            helperText: 'Only to tell two holdings of the same fund apart.',
-          ),
+        const SizedBox(height: 16),
+        DsField(
+          label: 'Folio number (optional)',
+          help: 'Only to tell two holdings of the same fund apart.',
+          child: TextField(controller: _fields.folio),
         ),
         if (bare) ...[
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           const FundBanner(
-            icon: Icons.link,
+            icon: DsIcons.link,
             tone: TagTone.neutral,
             text: "Nothing to fill in? That's fine if SpendLog already has this fund's SIP debits: add it bare, "
                 "then link them from the fund's page. It shows ₹0 until you do.",
@@ -291,9 +292,9 @@ class _AddFundScreenState extends State<AddFundScreen> {
         ],
         if (_error != null) ...[
           const SizedBox(height: 12),
-          Text(_error!, style: TextStyle(fontSize: 12.5, height: 1.4, color: c.debit)),
+          DsCallout(tone: DsTone.crit, title: _error!),
         ],
-        const SizedBox(height: 18),
+        const SizedBox(height: 20),
         FilledButton(
           onPressed: _saving ? null : _save,
           child: _saving
@@ -305,7 +306,7 @@ class _AddFundScreenState extends State<AddFundScreen> {
           Text(
             'Fetching its NAV history. The first fund can take a few seconds while category ranks are built.',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12, height: 1.4, color: c.muted),
+            style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
           ),
         ],
       ],
@@ -324,22 +325,22 @@ class _ResultRow extends StatelessWidget {
     final c = context.c;
     return FundCard(
       onTap: onTap,
-      padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             shortSchemeName(result.schemeName),
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: c.ink),
+            style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
           ),
           const SizedBox(height: 2),
           Text(
             result.schemeName,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 11.5, height: 1.35, color: c.muted),
+            style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           Wrap(
             spacing: 6,
             runSpacing: 4,

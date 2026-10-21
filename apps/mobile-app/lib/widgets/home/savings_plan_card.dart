@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../models/models.dart';
 import '../../services/api_client.dart';
-import '../../theme.dart';
+import '../ds/ds.dart';
 import '../../utils/format.dart';
 import 'ai_insights_card.dart';
 
@@ -120,16 +120,16 @@ class SavingsPlanCardState extends State<SavingsPlanCard> {
           Text(
             'Let the assistant look at your recent spending and write a few plain rules for saving '
             'more - a cap per category, a target for the month. Home warns you when one slips.',
-            style: TextStyle(fontSize: 12.8, height: 1.45, color: c.muted),
+            style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx2),
           ),
           if (_error != null) ...[
             const SizedBox(height: 6),
-            Text(_error!, style: TextStyle(fontSize: 12, color: c.debit)),
+            Text(_error!, style: TextStyle(fontSize: 12, height: 16 / 12, color: c.crit)),
           ],
           const SizedBox(height: 12),
           FilledButton.icon(
             onPressed: _write,
-            icon: const Icon(Icons.auto_awesome, size: 17),
+            icon: const DsIcon(DsIcons.sparkles, size: 18),
             label: const Text('Make my savings plan'),
           ),
         ],
@@ -138,7 +138,7 @@ class SavingsPlanCardState extends State<SavingsPlanCard> {
       body = _PlanBody(plan: plan, error: _error, onRewrite: _write);
     }
 
-    return AiCardFrame(title: 'Savings plan', icon: Icons.savings_outlined, child: body);
+    return AiCardFrame(title: 'Savings plan', icon: DsIcons.piggyBank, child: body);
   }
 }
 
@@ -161,48 +161,41 @@ class _PlanBody extends StatelessWidget {
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(color: c.credit50, borderRadius: BorderRadius.circular(T.rSm)),
+            decoration: BoxDecoration(color: c.goodSoft, borderRadius: BorderRadius.circular(Ds.rLg)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Save each month', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: c.credit)),
+                DsLabel('Save each month', color: c.good),
                 const SizedBox(height: 2),
                 Text(
                   formatMoney(plan.monthlyTargetMinor!),
-                  style: kNum.copyWith(fontSize: 22, fontWeight: FontWeight.w800, color: c.credit),
+                  style: kNum.copyWith(fontSize: 22, height: 28 / 22, fontWeight: FontWeight.w600, color: c.good),
                 ),
               ],
             ),
           ),
         const SizedBox(height: 12),
-        Text(plan.summary, style: TextStyle(fontSize: 13, height: 1.5, color: c.ink70)),
+        Text(plan.summary, style: TextStyle(fontSize: 15, height: 22 / 15, color: c.tx2)),
         const SizedBox(height: 16),
-        Text(
-          slipping == 0
-              ? 'THE RULES · ALL ON TRACK'
-              : 'THE RULES · $slipping SLIPPING',
-          style: TextStyle(
-            fontSize: 10.5,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 0.6,
-            color: slipping == 0 ? c.muted : c.warn,
-          ),
+        DsLabel(
+          slipping == 0 ? 'The rules · all on track' : 'The rules · $slipping slipping',
+          color: slipping == 0 ? c.tx2 : c.warn,
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
         for (final rule in plan.rules) _RuleRow(rule: rule),
-        if (error != null) Text(error!, style: TextStyle(fontSize: 12, color: c.debit)),
+        if (error != null) Text(error!, style: TextStyle(fontSize: 12, height: 16 / 12, color: c.crit)),
         const SizedBox(height: 4),
         Row(
           children: [
             Expanded(
               child: Text(
                 'Written ${madeWhen(plan.updatedAt)}',
-                style: TextStyle(fontSize: 11, color: c.mutedLight),
+                style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
               ),
             ),
             TextButton.icon(
               onPressed: onRewrite,
-              icon: const Icon(Icons.edit_note, size: 18),
+              icon: const DsIcon(DsIcons.pencil, size: 16),
               label: const Text('Rewrite plan'),
             ),
           ],
@@ -220,10 +213,10 @@ class _RuleRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final (label, fg, bg) = switch (rule.state) {
-      'over' => ('Over', c.debit, c.debit50),
-      'watch' => ('Watch', c.warn, c.warnBg),
-      _ => ('On track', c.credit, c.credit50),
+    final (label, tone, fill) = switch (rule.state) {
+      'over' => ('Over', DsTone.crit, c.critFill),
+      'watch' => ('Watch', DsTone.warn, c.warnFill),
+      _ => ('On track', DsTone.good, c.good),
     };
     final cap = rule.monthlyCapMinor;
     final spent = rule.spentMinor;
@@ -238,52 +231,24 @@ class _RuleRow extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Text(rule.text, style: TextStyle(fontSize: 13, height: 1.4, fontWeight: FontWeight.w600, color: c.ink)),
+                child: Text(
+                  rule.text,
+                  style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx),
+                ),
               ),
               const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(100)),
-                child: Text(label, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: fg)),
-              ),
+              DsBadge(label, tone: tone),
             ],
           ),
           if (cap != null && cap > 0 && spent != null) ...[
             const SizedBox(height: 7),
             // The bar is the cap; the tick is where spending should be by
             // today, so "ahead of pace" can be seen, not just read.
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final w = constraints.maxWidth;
-                final tick = expected == null ? null : (expected / cap).clamp(0.0, 1.0) * w;
-                return SizedBox(
-                  height: 10,
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      Positioned.fill(
-                        top: 2,
-                        bottom: 2,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(100),
-                          child: LinearProgressIndicator(
-                            value: (spent / cap).clamp(0.0, 1.0),
-                            backgroundColor: c.track,
-                            valueColor: AlwaysStoppedAnimation(fg),
-                          ),
-                        ),
-                      ),
-                      if (tick != null)
-                        Positioned(
-                          left: (tick - 1).clamp(0.0, w - 2),
-                          top: 0,
-                          bottom: 0,
-                          child: Container(width: 2, color: c.ink70),
-                        ),
-                    ],
-                  ),
-                );
-              },
+            DsMeter(
+              value: (spent / cap).clamp(0.0, 1.0),
+              height: 10,
+              color: fill,
+              today: expected == null ? null : (expected / cap).clamp(0.0, 1.0),
             ),
             const SizedBox(height: 4),
             Text(
@@ -291,7 +256,7 @@ class _RuleRow extends StatelessWidget {
                 '${formatMoneyShort(spent)} of ${formatMoneyShort(cap)}',
                 if (expected != null) '${formatMoneyShort(expected)} expected by now',
               ].join(' · '),
-              style: TextStyle(fontSize: 11.5, color: c.muted),
+              style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3),
             ),
           ],
         ],

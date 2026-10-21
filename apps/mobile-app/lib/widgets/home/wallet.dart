@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../../models/models.dart';
-import '../../theme.dart';
+import '../ds/ds.dart';
 import '../../utils/format.dart';
 import '../pocket_money.dart';
 import 'card_face.dart';
@@ -68,21 +68,27 @@ class WalletSection extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'MONEY ON HAND',
-                    style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: c.muted),
-                  ),
+                  const DsLabel('Money on hand'),
                   const SizedBox(height: 4),
                   FittedBox(
                     fit: BoxFit.scaleDown,
                     alignment: Alignment.centerLeft,
                     child: Text(
                       formatMoney(money.onHandMinor),
-                      style: kNum.copyWith(fontSize: 28, fontWeight: FontWeight.w800, color: c.ink),
+                      style: kNum.copyWith(
+                        fontSize: 28,
+                        height: 34 / 28,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 28 * -0.02,
+                        color: c.tx,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 2),
-                  Text(parts.join(' · '), style: TextStyle(fontSize: 12, color: c.muted)),
+                  Text(
+                    parts.join(' · '),
+                    style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx3),
+                  ),
                 ],
               ),
             ),
@@ -91,29 +97,29 @@ class WalletSection extends StatelessWidget {
         ),
         if (money.untracked > 0)
           Padding(
-            padding: const EdgeInsets.only(top: 2),
+            padding: const EdgeInsets.only(top: 4),
             child: Text(
               money.untracked == 1
                   ? 'One account has no starting balance yet, so it is not in this.'
                   : '${money.untracked} accounts have no starting balance yet, so they are not in this.',
-              style: TextStyle(fontSize: 11.5, color: c.warn),
+              style: TextStyle(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w500, color: c.warn),
             ),
           ),
         if (wallet.isEmpty) ...[
           const SizedBox(height: 12),
           HomeTile(
             label: 'Cards and accounts',
-            icon: Icons.account_balance_wallet_outlined,
+            icon: DsIcons.banknote,
             onTap: onManage,
             child: Text(
               'They appear here on their own the first time a bank texts you. Add one by hand for '
               'anything that never sends alerts.',
-              style: TextStyle(fontSize: 12, height: 1.45, color: c.muted),
+              style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
             ),
           ),
         ],
         if (wallet.cards.isNotEmpty) ...[
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           CardPager(
             cards: wallet.cards,
             onOpenCard: onOpenCard,
@@ -122,7 +128,7 @@ class WalletSection extends StatelessWidget {
           ),
         ],
         if (wallet.banks.isNotEmpty) ...[
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           HomeGrid(
             squareness: 0,
             items: [
@@ -195,15 +201,15 @@ class _CardPagerState extends State<CardPager> {
   Widget build(BuildContext context) {
     final c = context.c;
     final cards = widget.cards;
-    final captionLine = MediaQuery.textScalerOf(context).scale(17);
+    final captionLine = MediaQuery.textScalerOf(context).scale(16);
 
     return LayoutBuilder(builder: (context, constraints) {
       final width = constraints.maxWidth;
-      // One card takes the width; with more, each leaves room for the next
-      // to peek in, which is what says "swipe".
+      // One card takes the width; with more, each is 85% of it (§6.3) and
+      // leaves room for the next to peek in, which is what says "swipe".
       final cardWidth = cards.length == 1
           ? width.clamp(0.0, _maxCardWidth)
-          : (width * 0.86).clamp(0.0, _maxCardWidth);
+          : (width * 0.85).clamp(0.0, _maxCardWidth);
       final fraction = ((cardWidth + _gap) / width).clamp(0.1, 1.0);
       // A line for the limit, and up to two for the bill and the cycle.
       final height = (cardWidth / kCardAspect) + 10 + captionLine * 3 + 6;
@@ -250,12 +256,13 @@ class _CardPagerState extends State<CardPager> {
               children: [
                 for (var i = 0; i < cards.length; i++)
                   AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
+                    duration: Ds.dur,
+                    curve: Ds.ease,
                     margin: const EdgeInsets.symmetric(horizontal: 3),
                     width: i == _page ? 18 : 6,
                     height: 6,
                     decoration: BoxDecoration(
-                      color: i == _page ? c.brand : c.lineStrong,
+                      color: i == _page ? c.ac : c.ln2,
                       borderRadius: BorderRadius.circular(100),
                     ),
                   ),
@@ -348,8 +355,9 @@ class _CardCaption extends StatelessWidget {
     final c = context.c;
     final second = cardSecondLine(card);
     final bar = cardBar(card);
+    // Near the credit line is a problem (crit); getting close is a heads-up.
     final tint = switch (bar.state) {
-      'over' => c.debit,
+      'over' => c.crit,
       'close' => c.warn,
       _ => null,
     };
@@ -366,13 +374,14 @@ class _CardCaption extends StatelessWidget {
       overflow: TextOverflow.ellipsis,
       style: kNum.copyWith(
         fontSize: 12,
-        fontWeight: tint != null ? FontWeight.w700 : FontWeight.w600,
-        color: tint ?? c.ink70,
+        height: 16 / 12,
+        fontWeight: tint != null ? FontWeight.w600 : FontWeight.w500,
+        color: tint ?? c.tx2,
       ),
     );
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 2),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -380,7 +389,7 @@ class _CardCaption extends StatelessWidget {
             Row(
               children: [
                 Flexible(child: first),
-                Text(' · ', style: TextStyle(fontSize: 12, color: c.muted)),
+                Text(' · ', style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3)),
                 Semantics(
                   button: true,
                   child: InkWell(
@@ -389,7 +398,7 @@ class _CardCaption extends StatelessWidget {
                     child: Text(
                       action,
                       maxLines: 1,
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: c.brandDark),
+                      style: TextStyle(fontSize: 13, height: 16 / 13, fontWeight: FontWeight.w600, color: c.ac),
                     ),
                   ),
                 ),
@@ -402,11 +411,11 @@ class _CardCaption extends StatelessWidget {
               second,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 11.5,
-                height: 1.3,
-                fontWeight: urgent ? FontWeight.w700 : FontWeight.w500,
-                color: urgent ? c.debit : c.muted,
+              style: kNum.copyWith(
+                fontSize: 12,
+                height: 16 / 12,
+                fontWeight: urgent ? FontWeight.w600 : FontWeight.w400,
+                color: urgent ? c.crit : c.tx3,
               ),
             ),
         ],
@@ -443,19 +452,22 @@ class _BankTileState extends State<BankTile> {
     final gradient = cardGradient(color: bank.color, bankName: bank.bankName);
     final balance = bank.balanceMinor;
     final drift = bank.drift;
+    final radius = BorderRadius.circular(Ds.rXl);
+    // An account with no starting balance has no data yet: a dashed edge.
+    final noData = !savings && balance == null;
 
-    return Material(
+    Widget tile = Material(
       color: Colors.transparent,
       child: InkWell(
         // Savings toggles in place; anything else opens its page.
         onTap: savings ? () => setState(() => _shown = !_shown) : widget.onOpen,
-        borderRadius: BorderRadius.circular(T.rMd),
+        borderRadius: radius,
         child: Ink(
-          padding: const EdgeInsets.fromLTRB(13, 12, 13, 13),
+          padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: savings ? c.paper : c.surface,
-            border: Border.all(color: savings ? c.lineStrong : c.line),
-            borderRadius: BorderRadius.circular(T.rMd),
+            color: c.sf2,
+            border: noData ? null : Border.all(color: c.ln),
+            borderRadius: radius,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -464,65 +476,80 @@ class _BankTileState extends State<BankTile> {
               Row(
                 children: [
                   Container(
-                    width: 26,
-                    height: 26,
+                    width: 24,
+                    height: 24,
+                    alignment: Alignment.center,
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(7),
-                      gradient: savings ? null : LinearGradient(colors: gradient),
-                      color: savings ? c.chipNeutral : null,
+                      borderRadius: BorderRadius.circular(6),
+                      gradient: savings
+                          ? null
+                          : LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: gradient),
+                      color: savings ? c.sunk : null,
                     ),
-                    child: Icon(
-                      savings
-                          ? Icons.lock_outline
-                          : (bank.isCash ? Icons.payments_outlined : Icons.account_balance_outlined),
-                      size: 15,
-                      color: savings ? c.muted : Colors.white,
+                    child: DsIcon(
+                      savings ? DsIcons.lock : (bank.isCash ? DsIcons.banknote : DsIcons.bank),
+                      size: 14,
+                      color: savings ? c.tx3 : Colors.white,
                     ),
                   ),
-                  const SizedBox(width: 9),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       bank.isCash ? 'Cash' : bank.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 12.8, fontWeight: FontWeight.w700, color: savings ? c.muted : c.ink70),
+                      style: TextStyle(
+                        fontSize: 13,
+                        height: 18 / 13,
+                        fontWeight: FontWeight.w600,
+                        color: savings ? c.tx2 : c.tx,
+                      ),
                     ),
                   ),
                   if (bank.last4 != null)
-                    Text('••${bank.last4}', style: kNum.copyWith(fontSize: 11.5, color: c.mutedLight)),
+                    Text('••${bank.last4}', style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3)),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               if (savings) ...[
                 Text(
                   _shown ? (balance == null ? 'No balance set' : formatMoney(balance)) : '₹ • • • •',
-                  style: kNum.copyWith(fontSize: 18, fontWeight: FontWeight.w800, color: c.muted),
+                  style: kNum.copyWith(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx3),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   _shown ? 'Savings · not counted · tap to hide' : 'Savings · tap to show',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 11, color: c.mutedLight),
+                  style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
                 ),
                 if (_shown && drift != null) ...[
                   const SizedBox(height: 6),
                   _DriftChip(drift: drift, onTap: widget.onOpenPassbook),
                 ],
               ] else if (balance == null) ...[
-                Text('No starting balance', style: TextStyle(fontSize: 11.5, color: c.muted)),
-                const SizedBox(height: 2),
-                Text('Set balance', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: c.brandDark)),
+                Text('No starting balance', style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3)),
+                const SizedBox(height: 4),
+                Text(
+                  'Set balance',
+                  style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w600, color: c.ac),
+                ),
               ] else ...[
                 FittedBox(
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerLeft,
                   child: Text(
                     formatMoney(balance),
-                    style: kNum.copyWith(fontSize: 19, fontWeight: FontWeight.w800, color: balance < 0 ? c.debit : c.ink),
+                    // Below zero on a bank account is a problem; otherwise ink.
+                    style: kNum.copyWith(
+                      fontSize: 17,
+                      height: 24 / 17,
+                      fontWeight: FontWeight.w600,
+                      color: balance < 0 ? c.crit : c.tx,
+                    ),
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 4),
                 // Off from the bank: the gap, red, and the way to the
                 // passbook that says where. In step: a quiet link to it.
                 if (drift != null)
@@ -537,15 +564,18 @@ class _BankTileState extends State<BankTile> {
                       'incl. ${formatMoneyShort(bank.provisionalMinor)} unexplained ›',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: c.warn),
+                      style: kNum.copyWith(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w600, color: c.warn),
                     ),
                   )
                 else
                   Row(
                     children: [
-                      Text(bank.isCash ? 'in hand' : 'balance', style: TextStyle(fontSize: 11.5, color: c.muted)),
+                      Text(
+                        bank.isCash ? 'in hand' : 'balance',
+                        style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
+                      ),
                       if (widget.onOpenPassbook != null) ...[
-                        Text(' · ', style: TextStyle(fontSize: 11.5, color: c.mutedLight)),
+                        Text(' · ', style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3)),
                         Flexible(
                           child: InkWell(
                             onTap: widget.onOpenPassbook,
@@ -554,7 +584,7 @@ class _BankTileState extends State<BankTile> {
                               'Passbook ›',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: c.brandDark),
+                              style: TextStyle(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w600, color: c.ac),
                             ),
                           ),
                         ),
@@ -579,11 +609,13 @@ class _BankTileState extends State<BankTile> {
         ),
       ),
     );
+    if (noData) tile = DsDashedBorder(radius: Ds.rXl, child: tile);
+    return tile;
   }
 }
 
-/// How far the tile's figure is from the bank's: "₹3,000 off", red, and
-/// the way into the passbook that says where it went wrong.
+/// How far the tile's figure is from the bank's: "₹3,000 off", a crit
+/// badge, and the way into the passbook that says where it went wrong.
 class _DriftChip extends StatelessWidget {
   const _DriftChip({required this.drift, this.onTap});
 
@@ -599,10 +631,11 @@ class _DriftChip extends StatelessWidget {
         button: onTap != null,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(100),
+          borderRadius: BorderRadius.circular(Ds.rSm),
           child: Container(
-            padding: const EdgeInsets.fromLTRB(8, 3, 6, 3),
-            decoration: BoxDecoration(color: c.debit50, borderRadius: BorderRadius.circular(100)),
+            constraints: const BoxConstraints(minHeight: 24),
+            padding: EdgeInsets.fromLTRB(8, 3, onTap != null ? 4 : 8, 3),
+            decoration: BoxDecoration(color: c.critSoft, borderRadius: BorderRadius.circular(Ds.rSm)),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -611,10 +644,13 @@ class _DriftChip extends StatelessWidget {
                     '${formatMoneyShort(drift.minor.abs())} off',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: kNum.copyWith(fontSize: 11, fontWeight: FontWeight.w800, color: c.debit),
+                    style: kNum.copyWith(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w600, color: c.crit),
                   ),
                 ),
-                if (onTap != null) Icon(Icons.chevron_right, size: 14, color: c.debit),
+                if (onTap != null) ...[
+                  const SizedBox(width: 2),
+                  DsIcon(DsIcons.chevronRight, size: 14, color: c.crit),
+                ],
               ],
             ),
           ),
@@ -636,8 +672,8 @@ class _DebitChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(5),
-        gradient: LinearGradient(colors: gradient),
+        borderRadius: BorderRadius.circular(Ds.rSm),
+        gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: gradient),
       ),
       // Shrinks rather than overflows in a half-width tile.
       child: FittedBox(
@@ -647,16 +683,16 @@ class _DebitChip extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (card.network != null) ...[
-              NetworkMark(network: card.network, color: Colors.white, scale: 0.5),
-              const SizedBox(width: 5),
+              NetworkMark(network: card.network, color: Colors.white, scale: 0.6),
+              const SizedBox(width: 6),
             ] else
               const Padding(
                 padding: EdgeInsets.only(right: 4),
-                child: Icon(Icons.credit_card, size: 12, color: Colors.white),
+                child: DsIcon(DsIcons.creditCard, size: 12, color: Colors.white),
               ),
             Text(
               card.last4 == null ? 'Debit' : '••${card.last4}',
-              style: kNum.copyWith(fontSize: 10.5, fontWeight: FontWeight.w700, color: Colors.white),
+              style: kNum.copyWith(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white),
             ),
           ],
         ),
@@ -676,31 +712,37 @@ class _PocketStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     final due = pocket.topUpDue;
+    final strong = due ? c.warn : c.ac;
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
-        color: due ? c.warnBg : c.brand50,
-        borderRadius: BorderRadius.circular(T.rSm),
+        color: due ? c.warnSoft : c.acSoft,
+        borderRadius: BorderRadius.circular(Ds.rLg),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.savings_outlined, size: 14, color: due ? c.warn : c.brandDark),
-              const SizedBox(width: 6),
+              DsIcon(DsIcons.piggyBank, size: 16, color: strong),
+              const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   pocketTitle(pocket.holder),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: due ? c.warn : c.brandDark),
+                  style: TextStyle(fontSize: 13, height: 18 / 13, fontWeight: FontWeight.w600, color: strong),
                 ),
               ),
               Text(
                 due ? 'Top up ${formatMoneyShort(pocket.lastMonthSpentMinor)} today' : pocketRenews(pocket),
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: due ? c.warn : c.muted),
+                style: kNum.copyWith(
+                  fontSize: 12,
+                  height: 16 / 12,
+                  fontWeight: due ? FontWeight.w600 : FontWeight.w400,
+                  color: due ? c.warn : c.tx3,
+                ),
               ),
             ],
           ),

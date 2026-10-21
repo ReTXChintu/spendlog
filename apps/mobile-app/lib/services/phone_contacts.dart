@@ -172,7 +172,7 @@ class _WhyDialog extends StatelessWidget {
           'You pick one person from your contacts. To keep their number with their name - so '
           'picking them again finds the same person - Android needs SpendLog to have contacts '
           'permission. SpendLog only reads the one person you pick, never your address book.',
-          style: TextStyle(fontSize: 13, height: 1.45, color: context.c.ink70),
+          style: TextStyle(fontSize: 14, height: 20 / 14, color: context.c.tx2),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Name only')),
@@ -274,7 +274,7 @@ class _ContactDialogState extends State<ContactDialog> {
                   padding: const EdgeInsets.only(top: 5),
                   child: Text(
                     'Money between you from before SpendLog. It starts their balance.',
-                    style: TextStyle(fontSize: 11, height: 1.4, color: context.c.mutedLight),
+                    style: TextStyle(fontSize: 12, height: 16 / 12, color: context.c.tx3),
                   ),
                 ),
               ],

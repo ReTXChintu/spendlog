@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/perk_reader.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import 'ds/ds.dart';
 
 /// Add or edit one perk.
 ///
@@ -201,264 +201,285 @@ class _PerkSheetState extends State<PerkSheet> {
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: Container(
         decoration: BoxDecoration(
-          color: c.surface,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(T.rLg)),
+          color: c.sf,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(Ds.r3xl)),
         ),
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                widget.perk == null ? 'Add a perk' : 'Edit perk',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: c.ink),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const DsDragHandle(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+              child: DsSheetHeader(
+                title: widget.perk == null ? 'Add a perk' : 'Edit perk',
+                subtitle: 'Anything that makes a purchase cheaper, so the app can answer before you pay.',
+                icon: DsIcons.tag,
+                onClose: () => Navigator.of(context).pop(),
               ),
-              const SizedBox(height: 3),
-              Text(
-                'Anything that makes a purchase cheaper, so the app can answer before you pay.',
-                style: TextStyle(fontSize: 12, height: 1.45, color: c.muted),
-              ),
-              const SizedBox(height: 16),
-
-              // Read, not saved. The model fills the form and you decide,
-              // because one that reads "20% up to ₹150" as "₹150 off" is
-              // wrong in a way nobody notices until they are at a till.
-              if (widget.draft != null) ...[
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: c.brand50,
-                    border: Border.all(color: c.brand),
-                    borderRadius: BorderRadius.circular(T.rMd),
-                  ),
-                  child: Text(
-                    _readNote(widget.draft!),
-                    style: TextStyle(fontSize: 12, height: 1.5, color: c.ink70),
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-
-              SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(value: 'COUPON', label: Text('Coupon')),
-                  ButtonSegment(value: 'CARD_OFFER', label: Text('Card offer')),
-                ],
-                selected: {_kind},
-                onSelectionChanged: (selection) => setState(() => _kind = selection.first),
-              ),
-              const SizedBox(height: 16),
-
-              _field(c, 'What it is', _title, hint: _kind == 'COUPON' ? '20% off' : '5% NeuCoins'),
-              const SizedBox(height: 12),
-              _field(
-                c,
-                'Where it works',
-                _merchants,
-                hint: 'Gucci, Croma — or leave empty for anywhere',
-              ),
-              Padding(
-                padding: const EdgeInsets.only(top: 5),
-                child: Text(
-                  'Separate several with commas. Matching is forgiving, so "amazon" finds '
-                  '"AMAZON PAY IN UTILITY".',
-                  style: TextStyle(fontSize: 11, height: 1.4, color: c.mutedLight),
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              DropdownButtonFormField<String?>(
-                initialValue: _accountId,
-                decoration: InputDecoration(
-                  labelText: _kind == 'CARD_OFFER' ? 'On which card' : 'Card (optional)',
-                  isDense: true,
-                ),
-                items: [
-                  DropdownMenuItem<String?>(
-                    value: null,
-                    child: Text(_kind == 'CARD_OFFER' ? 'Pick one…' : 'Any card'),
-                  ),
-                  for (final card in cards)
-                    DropdownMenuItem<String?>(value: card.id, child: Text(card.label)),
-                ],
-                onChanged: (value) => setState(() => _accountId = value),
-              ),
-              const SizedBox(height: 12),
-
-              DropdownButtonFormField<String?>(
-                initialValue: _categoryId,
-                decoration: const InputDecoration(
-                  labelText: 'Category (optional)',
-                  helperText: 'For "5% on all dining" instead of naming shops',
-                  isDense: true,
-                ),
-                items: [
-                  const DropdownMenuItem<String?>(value: null, child: Text('Any')),
-                  for (final category in widget.categories)
-                    DropdownMenuItem<String?>(value: category.id, child: Text(category.name)),
-                ],
-                onChanged: (value) => setState(() => _categoryId = value),
-              ),
-              const SizedBox(height: 16),
-
-              SegmentedButton<bool>(
-                segments: const [
-                  ButtonSegment(value: true, label: Text('Percentage')),
-                  ButtonSegment(value: false, label: Text('Flat ₹')),
-                ],
-                selected: {_asPercent},
-                onSelectionChanged: (selection) => setState(() => _asPercent = selection.first),
-              ),
-              const SizedBox(height: 12),
-
-              if (_asPercent) ...[
-                Row(
+            ),
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(child: _field(c, 'Percent off', _percent, hint: '5', numeric: true)),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _field(c, 'Capped at (₹)', _maxDiscount, hint: '500', numeric: true),
+                    // Read, not saved. The model fills the form and you decide,
+                    // because one that reads "20% up to ₹150" as "₹150 off" is
+                    // wrong in a way nobody notices until they are at a till.
+                    if (widget.draft != null) ...[
+                      DsCallout(
+                        tone: DsTone.ac,
+                        icon: DsIcons.sparkles,
+                        title: _readNote(widget.draft!),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+
+                    DsField(
+                      label: 'Kind',
+                      child: DsSegmented<String>(
+                        segments: const [('COUPON', 'Coupon'), ('CARD_OFFER', 'Card offer')],
+                        selected: _kind,
+                        onChanged: (kind) => setState(() => _kind = kind),
+                      ),
                     ),
+                    const SizedBox(height: 16),
+
+                    _field(c, 'What it is', _title, hint: _kind == 'COUPON' ? '20% off' : '5% NeuCoins'),
+                    const SizedBox(height: 16),
+                    _field(
+                      c,
+                      'Where it works',
+                      _merchants,
+                      hint: 'Gucci, Croma — or leave empty for anywhere',
+                      help: 'Separate several with commas. Matching is forgiving, so "amazon" finds '
+                          '"AMAZON PAY IN UTILITY".',
+                    ),
+                    const SizedBox(height: 16),
+
+                    DsField(
+                      label: _kind == 'CARD_OFFER' ? 'On which card' : 'Card (optional)',
+                      child: DropdownButtonFormField<String?>(
+                        initialValue: _accountId,
+                        isExpanded: true,
+                        icon: DsIcon(DsIcons.chevronDown, size: 20, color: c.tx2),
+                        borderRadius: BorderRadius.circular(Ds.rLg),
+                        dropdownColor: c.sf,
+                        items: [
+                          DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text(_kind == 'CARD_OFFER' ? 'Pick one…' : 'Any card'),
+                          ),
+                          for (final card in cards)
+                            DropdownMenuItem<String?>(value: card.id, child: Text(card.label)),
+                        ],
+                        onChanged: (value) => setState(() => _accountId = value),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    DsField(
+                      label: 'Category (optional)',
+                      help: 'For "5% on all dining" instead of naming shops',
+                      child: DropdownButtonFormField<String?>(
+                        initialValue: _categoryId,
+                        isExpanded: true,
+                        icon: DsIcon(DsIcons.chevronDown, size: 20, color: c.tx2),
+                        borderRadius: BorderRadius.circular(Ds.rLg),
+                        dropdownColor: c.sf,
+                        items: [
+                          const DropdownMenuItem<String?>(value: null, child: Text('Any')),
+                          for (final category in widget.categories)
+                            DropdownMenuItem<String?>(value: category.id, child: Text(category.name)),
+                        ],
+                        onChanged: (value) => setState(() => _categoryId = value),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    DsField(
+                      label: 'How much it takes off',
+                      child: DsSegmented<bool>(
+                        segments: const [(true, 'Percentage'), (false, 'Flat ₹')],
+                        selected: _asPercent,
+                        onChanged: (asPercent) => setState(() => _asPercent = asPercent),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    if (_asPercent) ...[
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: _field(c, 'Percent off', _percent, hint: '5', numeric: true)),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _field(c, 'Capped at (₹)', _maxDiscount, hint: '500', numeric: true),
+                          ),
+                        ],
+                      ),
+                    ] else
+                      _field(c, 'Amount off (₹)', _flat, hint: '500', numeric: true),
+
+                    const SizedBox(height: 16),
+                    _field(c, 'Minimum spend (₹)', _minSpend, hint: '5000', numeric: true),
+
+                    if (_kind == 'COUPON') ...[
+                      const SizedBox(height: 16),
+                      _field(c, 'Code', _code, hint: 'GUCCI20', mono: true),
+                      const SizedBox(height: 16),
+                      DsField(
+                        label: 'Expires',
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(Ds.rMd),
+                          onTap: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: _expiresOn ?? DateTime.now().add(const Duration(days: 30)),
+                              firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                              lastDate: DateTime.now().add(const Duration(days: 365 * 3)),
+                            );
+                            if (picked != null) setState(() => _expiresOn = picked);
+                          },
+                          child: InputDecorator(
+                            decoration: InputDecoration(
+                              suffixIcon: Padding(
+                                padding: const EdgeInsets.only(right: 12),
+                                child: DsIcon(DsIcons.calendar, size: 20, color: c.tx2),
+                              ),
+                              suffixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 20),
+                            ),
+                            child: Text(
+                              _expiresOn == null
+                                  ? 'No expiry'
+                                  : '${_expiresOn!.day}/${_expiresOn!.month}/${_expiresOn!.year}',
+                              style: TextStyle(
+                                fontSize: 15,
+                                color: _expiresOn == null ? c.tx3 : c.tx,
+                                fontFeatures: Ds.tabular,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 16),
+                    _field(c, 'From (app or bank)', _source, hint: 'Google Pay, CRED, HDFC Bank…'),
+                    const SizedBox(height: 8),
+                    // Tap to fill rather than a dropdown: the list is a shortcut,
+                    // and a bank not on it still has to be typeable.
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final suggestion in _sourceSuggestions)
+                          if (suggestion.toLowerCase() != _source.text.trim().toLowerCase())
+                            DsChip(
+                              label: suggestion,
+                              height: 32,
+                              onTap: () => setState(() => _source.text = suggestion),
+                            ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    DsField(
+                      label: 'Terms & conditions',
+                      child: TextField(
+                        controller: _terms,
+                        minLines: 2,
+                        maxLines: 6,
+                        style: TextStyle(color: c.tx, fontSize: 15),
+                        decoration: const InputDecoration(
+                          hintText: 'Valid once per user. Not on sale items.',
+                        ),
+                      ),
+                    ),
+
+                    // What was read off the screenshot, for checking the fields
+                    // above against. Not editable: it is a record of the picture.
+                    if ((widget.perk?.extractedText?.trim() ?? '').isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      const DsLabel('Text read from the screenshot'),
+                      const SizedBox(height: 6),
+                      Container(
+                        width: double.infinity,
+                        constraints: const BoxConstraints(maxHeight: 220),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: c.sf2,
+                          border: Border.all(color: c.ln),
+                          borderRadius: BorderRadius.circular(Ds.rMd),
+                        ),
+                        child: SingleChildScrollView(
+                          child: SelectableText(
+                            widget.perk!.extractedText!.trim(),
+                            style: TextStyle(fontSize: 12, height: 17 / 12, color: c.tx2),
+                          ),
+                        ),
+                      ),
+                    ],
+
+                    if (_error != null) ...[
+                      const SizedBox(height: 16),
+                      DsCallout(title: _error!, tone: DsTone.crit),
+                    ],
                   ],
                 ),
-              ] else
-                _field(c, 'Amount off (₹)', _flat, hint: '500', numeric: true),
-
-              const SizedBox(height: 12),
-              _field(c, 'Minimum spend (₹)', _minSpend, hint: '5000', numeric: true),
-
-              if (_kind == 'COUPON') ...[
-                const SizedBox(height: 12),
-                _field(c, 'Code', _code, hint: 'GUCCI20'),
-                const SizedBox(height: 12),
-                InkWell(
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: context,
-                      initialDate: _expiresOn ?? DateTime.now().add(const Duration(days: 30)),
-                      firstDate: DateTime.now().subtract(const Duration(days: 365)),
-                      lastDate: DateTime.now().add(const Duration(days: 365 * 3)),
-                    );
-                    if (picked != null) setState(() => _expiresOn = picked);
-                  },
-                  child: InputDecorator(
-                    decoration: const InputDecoration(labelText: 'Expires', isDense: true),
-                    child: Text(
-                      _expiresOn == null
-                          ? 'No expiry'
-                          : '${_expiresOn!.day}/${_expiresOn!.month}/${_expiresOn!.year}',
-                      style: TextStyle(color: _expiresOn == null ? c.mutedLight : c.ink),
-                    ),
-                  ),
-                ),
-              ],
-
-              const SizedBox(height: 16),
-              _field(c, 'From (app or bank)', _source, hint: 'Google Pay, CRED, HDFC Bank…'),
-              const SizedBox(height: 8),
-              // Tap to fill rather than a dropdown: the list is a shortcut,
-              // and a bank not on it still has to be typeable.
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  for (final suggestion in _sourceSuggestions)
-                    if (suggestion.toLowerCase() != _source.text.trim().toLowerCase())
-                      ActionChip(
-                        label: Text(suggestion, style: const TextStyle(fontSize: 12)),
-                        visualDensity: VisualDensity.compact,
-                        onPressed: () => setState(() => _source.text = suggestion),
-                      ),
-                ],
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _terms,
-                minLines: 2,
-                maxLines: 6,
-                style: TextStyle(color: c.ink),
-                decoration: const InputDecoration(
-                  labelText: 'Terms & conditions',
-                  hintText: 'Valid once per user. Not on sale items.',
-                  alignLabelWithHint: true,
-                  isDense: true,
-                ),
-              ),
-
-              // What was read off the screenshot, for checking the fields
-              // above against. Not editable: it is a record of the picture.
-              if ((widget.perk?.extractedText?.trim() ?? '').isNotEmpty) ...[
-                const SizedBox(height: 16),
-                Text(
-                  'TEXT READ FROM THE SCREENSHOT',
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.5,
-                    color: c.muted,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Container(
-                  width: double.infinity,
-                  constraints: const BoxConstraints(maxHeight: 220),
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: c.paper,
-                    border: Border.all(color: c.line),
-                    borderRadius: BorderRadius.circular(T.rSm),
-                  ),
-                  child: SingleChildScrollView(
-                    child: SelectableText(
-                      widget.perk!.extractedText!.trim(),
-                      style: TextStyle(fontSize: 12, height: 1.5, color: c.ink70),
-                    ),
-                  ),
-                ),
-              ],
-
-              if (_error != null) ...[
-                const SizedBox(height: 12),
-                Text(_error!, style: TextStyle(fontSize: 12.5, color: c.debit)),
-              ],
-
-              const SizedBox(height: 20),
-              Row(
+            ),
+            // The footer stays put while the form scrolls.
+            Container(
+              decoration: BoxDecoration(color: c.sf2, border: Border(top: BorderSide(color: c.ln))),
+              padding: EdgeInsets.fromLTRB(16, 12, 16, 12 + MediaQuery.of(context).padding.bottom),
+              child: Row(
                 children: [
+                  const Spacer(),
                   TextButton(
                     onPressed: () => Navigator.of(context).pop(),
+                    style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
                     child: const Text('Cancel'),
                   ),
-                  const Spacer(),
+                  const SizedBox(width: 8),
                   FilledButton(
                     onPressed: _saving || _title.text.trim().isEmpty ? null : _save,
                     child: Text(_saving ? 'Saving…' : 'Save'),
                   ),
                 ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 
   Widget _field(
-    SpendColors c,
+    DsColors c,
     String label,
     TextEditingController controller, {
     String? hint,
+    String? help,
     bool numeric = false,
+    bool mono = false,
   }) {
-    return TextField(
-      controller: controller,
-      keyboardType: numeric ? const TextInputType.numberWithOptions(decimal: true) : null,
-      style: TextStyle(color: c.ink),
-      // Rebuilt on every keystroke so the save button can turn on the
-      // moment there is a title to save.
-      onChanged: (_) => setState(() {}),
-      decoration: InputDecoration(labelText: label, hintText: hint, isDense: true),
+    return DsField(
+      label: label,
+      help: help,
+      child: TextField(
+        controller: controller,
+        keyboardType: numeric ? const TextInputType.numberWithOptions(decimal: true) : null,
+        style: mono
+            ? kMono.copyWith(color: c.tx, fontSize: 15)
+            : TextStyle(color: c.tx, fontSize: 15, fontFeatures: numeric ? Ds.tabular : null),
+        // Rebuilt on every keystroke so the save button can turn on the
+        // moment there is a title to save.
+        onChanged: (_) => setState(() {}),
+        decoration: InputDecoration(hintText: hint),
+      ),
     );
   }
 }

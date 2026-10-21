@@ -5,6 +5,9 @@ import 'chart_utils.dart';
 
 /// Upright bars with a label under each, the tallest one picked out in
 /// [highlight] and labelled with its value - the bar worth reading first.
+///
+/// Drawn per §7.13: 14 px bars with a 2 px top radius, an `ln2` baseline
+/// and 11 px tabular `tx3` labels.
 class ColumnChart extends StatelessWidget {
   const ColumnChart({
     super.key,
@@ -33,9 +36,9 @@ class ColumnChart extends StatelessWidget {
           labels: labels,
           color: color,
           highlight: highlight,
-          grid: c.line,
-          axis: c.muted,
-          ink: c.ink,
+          baseline: c.ln2,
+          axis: c.tx3,
+          ink: c.tx,
         ),
       ),
     );
@@ -48,7 +51,7 @@ class _ColumnPainter extends CustomPainter {
     required this.labels,
     required this.color,
     required this.highlight,
-    required this.grid,
+    required this.baseline,
     required this.axis,
     required this.ink,
   });
@@ -57,12 +60,12 @@ class _ColumnPainter extends CustomPainter {
   final List<String> labels;
   final Color color;
   final Color highlight;
-  final Color grid;
+  final Color baseline;
   final Color axis;
   final Color ink;
 
-  static const _bottom = 16.0;
-  static const _top = 16.0;
+  static const _bottom = 18.0;
+  static const _top = 18.0;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -71,42 +74,43 @@ class _ColumnPainter extends CustomPainter {
     final peak = values.reduce(math.max);
     final peakIndex = values.indexOf(peak);
     final slot = size.width / values.length;
-    final barW = math.min(slot * 0.58, 26.0);
-    final labelStyle = TextStyle(fontSize: 10, color: axis);
-
-    canvas.drawLine(
-      Offset(0, _top + plotH),
-      Offset(size.width, _top + plotH),
-      Paint()
-        ..color = grid
-        ..strokeWidth = 1,
-    );
+    final barW = math.min(slot * 0.58, 14.0);
+    final labelStyle = axisStyle(axis);
 
     for (var i = 0; i < values.length; i++) {
       final h = peak <= 0 ? 0.0 : values[i] / peak * plotH;
       final x = slot * i + (slot - barW) / 2;
       final rect = RRect.fromRectAndCorners(
         Rect.fromLTWH(x, _top + plotH - math.max(h, 2), barW, math.max(h, 2)),
-        topLeft: const Radius.circular(4),
-        topRight: const Radius.circular(4),
+        topLeft: const Radius.circular(2),
+        topRight: const Radius.circular(2),
       );
       canvas.drawRRect(rect, Paint()..color = i == peakIndex && peak > 0 ? highlight : color);
       if (i < labels.length) {
-        paintLabel(canvas, labels[i], Offset(slot * i + slot / 2, _top + plotH + 3), labelStyle, center: true);
+        paintLabel(canvas, labels[i], Offset(slot * i + slot / 2, _top + plotH + 4), labelStyle, center: true);
       }
     }
+
+    canvas.drawLine(
+      Offset(0, _top + plotH + 0.5),
+      Offset(size.width, _top + plotH + 0.5),
+      Paint()
+        ..color = baseline
+        ..strokeWidth = 1,
+    );
 
     if (peak > 0) {
       paintLabel(
         canvas,
         compactMoney(peak),
-        Offset(slot * peakIndex + slot / 2, _top - 14),
-        TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: ink),
+        Offset(slot * peakIndex + slot / 2, _top - 16),
+        axisStyle(ink, weight: FontWeight.w600),
         center: true,
       );
     }
   }
 
   @override
-  bool shouldRepaint(_ColumnPainter old) => old.values != values || old.color != color;
+  bool shouldRepaint(_ColumnPainter old) =>
+      old.values != values || old.color != color || old.highlight != highlight || old.axis != axis;
 }

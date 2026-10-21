@@ -2,6 +2,19 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:spendlog/utils/format.dart';
 
 void main() {
+  group('formatMoney', () {
+    test('groups the Indian way and writes ₹ with no space', () {
+      expect(formatMoney(12000000), '₹1,20,000.00');
+      expect(formatMoneyShort(68421000), '₹6,84,210');
+    });
+
+    test('writes a negative with a true minus sign, not a hyphen', () {
+      expect(formatMoney(-48600), '−₹486.00');
+      expect(formatMoneyShort(-48600), '−₹486');
+      expect(formatMoneyShort(-48600).contains('-'), isFalse);
+    });
+  });
+
   group('ordinalDay', () {
     test('says every day of the month without throwing', () {
       // The bug this exists for. The suffix table has four entries and the

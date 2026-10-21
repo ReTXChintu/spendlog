@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/fund_models.dart';
 import '../../models/models.dart' show Transaction;
 import '../../services/api_client.dart';
-import '../../theme.dart';
+import '../../widgets/ds/ds.dart';
 import '../../utils/format.dart';
 import '../../widgets/funds/fund_text.dart';
 import '../../widgets/funds/fund_widgets.dart';
@@ -37,8 +37,6 @@ Future<bool> showLinkSuggestionsSheet(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
-    backgroundColor: context.c.paper,
-    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(T.rLg))),
     builder: (_) => _LinkSheet(links: links, holdings: holdings),
   );
   return changed == true;
@@ -123,18 +121,16 @@ class _LinkSheetState extends State<_LinkSheet> {
       maxChildSize: 0.95,
       builder: (context, scroll) => Column(
         children: [
+          const DsDragHandle(),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 8, 6),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Link SIP payments',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: c.ink),
-                  ),
-                ),
-                TextButton(onPressed: () => Navigator.of(context).pop(changed), child: Text(changed ? 'Done' : 'Close')),
-              ],
+            padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+            child: DsSheetHeader(
+              title: 'Link SIP payments',
+              icon: DsIcons.link,
+              trailing: TextButton(
+                onPressed: () => Navigator.of(context).pop(changed),
+                child: Text(changed ? 'Done' : 'Close'),
+              ),
             ),
           ),
           Expanded(
@@ -145,19 +141,19 @@ class _LinkSheetState extends State<_LinkSheet> {
                 Text(
                   'Debits SpendLog already has that look like SIP instalments. Linking one counts it towards the '
                   'fund at that day\'s NAV; the transaction itself, and your budget, stay as they are.',
-                  style: TextStyle(fontSize: 12.5, height: 1.45, color: c.muted),
+                  style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2),
                 ),
                 if (_error != null) ...[
-                  const SizedBox(height: 10),
-                  Text(_error!, style: TextStyle(fontSize: 12.5, color: c.debit)),
+                  const SizedBox(height: 12),
+                  DsCallout(tone: DsTone.crit, title: _error!),
                 ],
                 for (final entry in byHolding.entries) ...[
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 20),
                   FundSectionHeader(
                     title: shortSchemeName(_holding(entry.key)?.schemeName ?? entry.value.first.schemeName),
                     count: entry.value.length,
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
                   for (final suggestion in entry.value) ...[
                     DebitRow(
                       merchant: suggestion.merchant,
@@ -173,15 +169,15 @@ class _LinkSheetState extends State<_LinkSheet> {
                   ],
                 ],
                 if (widget.links.commitments.isNotEmpty) ...[
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 20),
                   const FundSectionHeader(title: 'SIP commitments to connect'),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
                   Text(
                     'Monthly SIPs set up under fixed costs. Connect one to its fund and every debit matched to it '
                     'counts as an instalment from now on.',
-                    style: TextStyle(fontSize: 12, height: 1.45, color: c.muted),
+                    style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
                   for (final commitment in widget.links.commitments) ...[
                     _CommitmentRow(
                       commitment: commitment,
@@ -229,44 +225,40 @@ class DebitRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final name = merchant ?? 'Debit';
     return FundCard(
-      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+      padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
       child: Row(
         children: [
+          DsMonogram(name, size: 36),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  merchant ?? 'Debit',
+                  name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: c.ink),
+                  style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w500, color: c.tx),
                 ),
                 Text(
                   [
                     if (occurredAt != null) formatShortDate(occurredAt!),
                     formatMoney(amountMinor),
                   ].join(' · '),
-                  style: kNum.copyWith(fontSize: 12, color: c.ink70),
+                  style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx2),
                 ),
                 if (detail != null && detail!.isNotEmpty)
-                  Text(detail!, style: TextStyle(fontSize: 11.5, height: 1.35, color: c.muted)),
+                  Text(detail!, style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3)),
               ],
             ),
           ),
           const SizedBox(width: 8),
           if (done)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.check_circle, size: 16, color: c.credit),
-                  const SizedBox(width: 4),
-                  Text('Linked', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: c.credit)),
-                ],
-              ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 8),
+              child: DsBadge('Linked', tone: DsTone.good, icon: DsIcons.check),
             )
           else if (busy)
             const Padding(
@@ -302,30 +294,47 @@ class _CommitmentRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     final day = commitment.dayOfMonth;
+    const small = Size(0, 40);
     return FundCard(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(commitment.name, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: c.ink)),
-          Text(
-            [
-              formatMoneyShort(commitment.amountMinor) + (day == null ? '' : ' on ${ordinalDay(day)}'),
-              '${commitment.matchedDebits} ${commitment.matchedDebits == 1 ? 'debit' : 'debits'} matched',
-              if (!commitment.isActive) 'paused',
-            ].join(' · '),
-            style: TextStyle(fontSize: 12, color: c.ink70),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const DsIconTile(DsIcons.repeat, tone: DsTone.ac),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      commitment.name,
+                      style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
+                    ),
+                    Text(
+                      [
+                        formatMoneyShort(commitment.amountMinor) + (day == null ? '' : ' on ${ordinalDay(day)}'),
+                        '${commitment.matchedDebits} ${commitment.matchedDebits == 1 ? 'debit' : 'debits'} matched',
+                        if (!commitment.isActive) 'paused',
+                      ].join(' · '),
+                      style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx3),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           if (connectedTo != null)
             Row(
               children: [
-                Icon(Icons.check_circle, size: 16, color: c.credit),
+                DsIcon(DsIcons.check, size: 16, color: c.good),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
                     'Connected to ${shortSchemeName(connectedTo!.schemeName)}',
-                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: c.credit),
+                    style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w600, color: c.good),
                   ),
                 ),
               ],
@@ -338,10 +347,15 @@ class _CommitmentRow extends StatelessWidget {
           else
             Wrap(
               spacing: 8,
-              runSpacing: 6,
+              runSpacing: 8,
               children: [
                 if (suggested != null)
-                  FilledButton.tonal(
+                  FilledButton(
+                    style: FilledButton.styleFrom(
+                      minimumSize: small,
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      textStyle: const TextStyle(fontFamily: Ds.sans, fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
                     onPressed: () => onConnect(suggested!),
                     child: Text(
                       'Connect to ${shortSchemeName(suggested!.schemeName)}',
@@ -349,6 +363,7 @@ class _CommitmentRow extends StatelessWidget {
                     ),
                   ),
                 OutlinedButton(
+                  style: OutlinedButton.styleFrom(minimumSize: small),
                   onPressed: onPickOther,
                   child: Text(suggested == null ? 'Pick its fund' : 'Another fund'),
                 ),
@@ -369,29 +384,28 @@ Future<FundHolding?> pickHolding(
   return showModalBottomSheet<FundHolding>(
     context: context,
     useSafeArea: true,
-    backgroundColor: context.c.surface,
     builder: (context) {
-      final c = context.c;
       return ListView(
         shrinkWrap: true,
-        padding: const EdgeInsets.fromLTRB(0, 14, 0, 20),
+        padding: const EdgeInsets.fromLTRB(0, 0, 0, 16),
         children: [
+          const DsDragHandle(),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Text(title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: c.ink)),
+            child: DsSheetHeader(title: title),
           ),
           if (holdings.isEmpty)
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                'Every fund already has a SIP connected.',
-                style: TextStyle(fontSize: 13, color: c.muted),
-              ),
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: DsEmpty(icon: DsIcons.check, message: 'Every fund already has a SIP connected.'),
             ),
           for (final holding in holdings)
             ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+              leading: DsMonogram(shortSchemeName(holding.schemeName), size: 36),
               title: Text(shortSchemeName(holding.schemeName)),
               subtitle: Text(holding.categoryLabel),
+              trailing: DsIcon(DsIcons.chevronRight, size: 18, color: context.c.tx3),
               onTap: () => Navigator.of(context).pop(holding),
             ),
         ],
@@ -407,8 +421,6 @@ Future<Transaction?> pickRecentDebit(BuildContext context) {
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
-    backgroundColor: context.c.paper,
-    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(T.rLg))),
     builder: (_) => const _DebitPicker(),
   );
 }
@@ -468,33 +480,48 @@ class _DebitPickerState extends State<_DebitPicker> {
       maxChildSize: 0.95,
       builder: (context, scroll) => Column(
         children: [
+          const DsDragHandle(),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: TextField(
               controller: _query,
               onChanged: (text) {
                 _debounce?.cancel();
                 _debounce = Timer(const Duration(milliseconds: 300), () => _load(text));
               },
+              style: TextStyle(fontSize: 14, color: c.tx),
               decoration: InputDecoration(
                 hintText: 'Search payments',
-                prefixIcon: const Icon(Icons.search),
-                filled: true,
-                fillColor: c.surface,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(T.rSm)),
+                hintStyle: TextStyle(fontSize: 14, color: c.tx3),
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                prefixIcon: Padding(
+                  padding: const EdgeInsets.only(left: 12, right: 8),
+                  child: DsIcon(DsIcons.search, size: 20, color: c.tx3),
+                ),
+                prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 44),
               ),
             ),
           ),
           Expanded(
             child: _error != null
-                ? Center(child: Text(_error!, style: TextStyle(color: c.warn)))
+                ? Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Align(alignment: Alignment.topCenter, child: DsCallout(tone: DsTone.warn, title: _error!)),
+                  )
                 : rows == null
-                    ? const Center(child: CircularProgressIndicator())
+                    ? const Center(child: DsSpinner())
                     : rows.isEmpty
-                        ? Center(child: Text('No payments match.', style: TextStyle(color: c.muted)))
+                        ? const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 16),
+                            child: Align(
+                              alignment: Alignment.topCenter,
+                              child: DsEmpty(icon: DsIcons.search, message: 'No payments match.'),
+                            ),
+                          )
                         : ListView.separated(
                             controller: scroll,
-                            padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                             itemCount: rows.length,
                             separatorBuilder: (_, __) => const SizedBox(height: 8),
                             itemBuilder: (context, i) {

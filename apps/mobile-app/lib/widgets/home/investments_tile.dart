@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/fund_models.dart';
-import '../../theme.dart';
+import '../ds/ds.dart';
 import '../../utils/format.dart';
 import '../funds/fund_text.dart';
 import '../funds/fund_widgets.dart';
@@ -26,11 +26,11 @@ class InvestmentsTile extends StatelessWidget {
     if (data == null) {
       return HomeTile(
         label: 'Investments',
-        icon: Icons.savings_outlined,
+        icon: DsIcons.trendingUp,
         onTap: onTap,
         child: Text(
           failed ? "Couldn't load your funds just now. Tap to open them." : 'Loading your funds…',
-          style: TextStyle(fontSize: 12, height: 1.4, color: c.muted),
+          style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
         ),
       );
     }
@@ -38,7 +38,7 @@ class InvestmentsTile extends StatelessWidget {
     if (data.isEmpty) {
       return HomeTile(
         label: 'Investments',
-        icon: Icons.savings_outlined,
+        icon: DsIcons.trendingUp,
         onTap: onTap,
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -47,23 +47,21 @@ class InvestmentsTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Track your mutual funds', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: c.ink)),
+                  Text(
+                    'Track your mutual funds',
+                    style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
+                  ),
                   const SizedBox(height: 4),
                   Text(
                     'Add your SIPs and holdings: their value every day, which ones lag, and how much to put away for '
                     'a goal.',
-                    style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
+                    style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 10),
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(color: c.brand50, borderRadius: BorderRadius.circular(12)),
-              child: Icon(Icons.add, color: c.brand),
-            ),
+            const SizedBox(width: 12),
+            const DsIconTile(DsIcons.plus, tone: DsTone.ac),
           ],
         ),
       );
@@ -75,7 +73,7 @@ class InvestmentsTile extends StatelessWidget {
     final count = data.holdings.length;
     return HomeTile(
       label: 'Mutual funds · $count ${count == 1 ? 'fund' : 'funds'}',
-      icon: Icons.savings_outlined,
+      icon: DsIcons.trendingUp,
       onTap: onTap,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -83,18 +81,18 @@ class InvestmentsTile extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Expanded(child: TileFigure(formatMoneyShort(t.valueMinor), size: 24)),
+              Expanded(child: TileFigure(formatMoneyShort(t.valueMinor), size: 28)),
               const SizedBox(width: 8),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
                     '${signedMoneyShort(day)} today',
-                    style: kNum.copyWith(fontSize: 12.5, fontWeight: FontWeight.w800, color: gainColor(c, day)),
+                    style: kNum.copyWith(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w600, color: gainColor(c, day)),
                   ),
                   Text(
                     fundPercent(t.dayChangePercent, signed: true, digits: 2),
-                    style: kNum.copyWith(fontSize: 11.5, fontWeight: FontWeight.w600, color: gainColor(c, day)),
+                    style: kNum.copyWith(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w500, color: gainColor(c, day)),
                   ),
                 ],
               ),
@@ -103,30 +101,30 @@ class InvestmentsTile extends StatelessWidget {
           const SizedBox(height: 6),
           Text.rich(
             TextSpan(children: [
-              TextSpan(text: 'Invested ${formatMoneyShort(t.investedMinor)} · ', style: TextStyle(color: c.muted)),
+              TextSpan(text: 'Invested ${formatMoneyShort(t.investedMinor)} · ', style: TextStyle(color: c.tx3)),
               TextSpan(
                 text: '${signedMoneyShort(t.gainMinor)} (${fundPercent(t.gainPercent, signed: true)})',
-                style: TextStyle(fontWeight: FontWeight.w700, color: gainColor(c, t.gainMinor)),
+                style: TextStyle(fontWeight: FontWeight.w600, color: gainColor(c, t.gainMinor)),
               ),
               if (t.xirrPercent != null)
-                TextSpan(text: ' · XIRR ${fundPercent(t.xirrPercent)}', style: TextStyle(color: c.muted)),
+                TextSpan(text: ' · XIRR ${fundPercent(t.xirrPercent)}', style: TextStyle(color: c.tx3)),
             ]),
-            style: const TextStyle(fontSize: 11.5, height: 1.4),
+            style: kNum.copyWith(fontSize: 13, height: 18 / 13),
           ),
           if (t.monthlySipMinor > 0 || flagged > 0) ...[
             const SizedBox(height: 4),
             Text.rich(
               TextSpan(children: [
                 if (t.monthlySipMinor > 0)
-                  TextSpan(text: 'SIPs ${perMonth(t.monthlySipMinor)}', style: TextStyle(color: c.ink70)),
-                if (t.monthlySipMinor > 0 && flagged > 0) TextSpan(text: ' · ', style: TextStyle(color: c.muted)),
+                  TextSpan(text: 'SIPs ${perMonth(t.monthlySipMinor)}', style: TextStyle(color: c.tx2)),
+                if (t.monthlySipMinor > 0 && flagged > 0) TextSpan(text: ' · ', style: TextStyle(color: c.tx3)),
                 if (flagged > 0)
                   TextSpan(
                     text: '$flagged need${flagged == 1 ? 's' : ''} a look',
-                    style: TextStyle(fontWeight: FontWeight.w700, color: c.warn),
+                    style: TextStyle(fontWeight: FontWeight.w600, color: c.warn),
                   ),
               ]),
-              style: const TextStyle(fontSize: 11.5, height: 1.4, fontWeight: FontWeight.w600),
+              style: kNum.copyWith(fontSize: 13, height: 18 / 13, fontWeight: FontWeight.w500),
             ),
           ],
         ],

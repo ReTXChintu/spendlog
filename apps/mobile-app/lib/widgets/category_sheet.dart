@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import 'ds/ds.dart';
 
 /// Bottom sheet for setting a transaction's category — the mobile
 /// counterpart of the web popover.
@@ -13,10 +13,6 @@ Future<void> showCategorySheet(
 }) {
   return showModalBottomSheet<void>(
     context: context,
-    backgroundColor: context.c.surface,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(T.rLg)),
-    ),
     builder: (sheetContext) => _CategorySheet(
       transaction: transaction,
       categories: categories,
@@ -71,19 +67,27 @@ class _CategorySheetState extends State<_CategorySheet> {
   void _offerToRemember(String merchant, Category category) {
     final shown = merchant.length > 22 ? '${merchant.substring(0, 22)}…' : merchant;
     final messenger = ScaffoldMessenger.of(context);
+    final c = context.c;
 
+    // The inverse toast (§7.12): ink fill, paper text, underlined action.
     messenger.showSnackBar(
       SnackBar(
         duration: const Duration(seconds: 8),
-        backgroundColor: context.c.darkPanel,
-        behavior: SnackBarBehavior.floating,
-        content: Text(
-          'Categorized as ${category.name}. Apply to future "$shown" payments?',
-          style: TextStyle(color: context.c.darkPanelText),
+        content: Row(
+          children: [
+            DsIcon(DsIcons.tag, size: 20, color: c.bg),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Categorized as ${category.name}. Apply to future "$shown" payments?',
+                style: TextStyle(fontSize: 14, height: 20 / 14, color: c.bg),
+              ),
+            ),
+          ],
         ),
         action: SnackBarAction(
           label: 'Yes',
-          textColor: const Color(0xFF9DB6FF),
+          textColor: c.bg,
           onPressed: () {
             ApiClient.instance.post('/categories/rules', {
               'categoryId': category.id,
@@ -100,27 +104,21 @@ class _CategorySheetState extends State<_CategorySheet> {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
+    final merchant = widget.transaction.merchant;
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Center(
-              child: Container(
-                width: 38,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: context.c.lineStrong,
-                  borderRadius: BorderRadius.circular(100),
-                ),
-              ),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              'Set category',
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: context.c.ink),
+            const DsDragHandle(),
+            const SizedBox(height: 4),
+            DsSheetHeader(
+              title: 'Set category',
+              subtitle: merchant == null || merchant.isEmpty ? null : merchant,
+              icon: DsIcons.tag,
             ),
             const SizedBox(height: 12),
             Flexible(
@@ -129,27 +127,32 @@ class _CategorySheetState extends State<_CategorySheet> {
                   // Money out is never income, and a refund is never a
                   // way of spending, so offering either is offering a
                   // mistake.
-                  children: categoriesFor(widget.categories, widget.transaction.type)
-                      .map((category) {
+                  children: categoriesFor(widget.categories, widget.transaction.type).map((category) {
                     final selected = widget.transaction.category?.id == category.id;
-                    return ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      enabled: !_saving,
-                      onTap: () => _pick(category),
-                      leading: Container(
-                        width: 34,
-                        height: 34,
-                        decoration: BoxDecoration(
-                          color: parseHexColor(category.color),
-                          shape: BoxShape.circle,
+                    final tint = parseHexColor(category.color);
+                    return Container(
+                      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: c.ln))),
+                      child: ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        minTileHeight: 56,
+                        enabled: !_saving,
+                        onTap: () => _pick(category),
+                        leading: DsIconTile(
+                          categoryIcon(category.icon),
+                          color: tint,
+                          background: tint.withValues(alpha: 0.14),
                         ),
-                        child: Icon(categoryIcon(category.icon), size: 17, color: Colors.white),
+                        title: Text(
+                          category.name,
+                          style: TextStyle(
+                            fontSize: 15,
+                            height: 20 / 15,
+                            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                            color: c.tx,
+                          ),
+                        ),
+                        trailing: selected ? DsIcon(DsIcons.check, size: 20, color: c.ac) : null,
                       ),
-                      title: Text(
-                        category.name,
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: context.c.ink),
-                      ),
-                      trailing: selected ? Icon(Icons.check, size: 18, color: context.c.brand) : null,
                     );
                   }).toList(),
                 ),

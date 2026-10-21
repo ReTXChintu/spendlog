@@ -10,11 +10,11 @@ import '../services/reminder_service.dart';
 import '../services/theme_service.dart';
 import '../services/sms_service.dart';
 import '../services/update_service.dart';
-import '../theme.dart';
 import '../utils/format.dart';
 import '../utils/loan_tab.dart';
 import '../version.dart';
 import '../widgets/commitment_amount.dart';
+import '../widgets/ds/ds.dart';
 import '../widgets/family_section.dart';
 import '../widgets/loan_dialog.dart';
 import 'accounts_screen.dart';
@@ -197,7 +197,7 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
         ),
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Keep it')),
-          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Remove')),
+          _ConfirmRemove(onPressed: () => Navigator.of(context).pop(true)),
         ],
       ),
     );
@@ -279,7 +279,7 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
         ),
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Keep them')),
-          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Remove')),
+          _ConfirmRemove(onPressed: () => Navigator.of(context).pop(true)),
         ],
       ),
     );
@@ -639,20 +639,36 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
     // are fetched from. "You" held a salary, a set of monthly commitments
     // and a sign-out button, which is a budget and an identity in one
     // drawer.
+    //
+    // The design has no underline tabs; six sections are too many for a
+    // segmented control at phone width, so they are a scrolling row of
+    // chips (the settings "secondary nav"), still driven by the same
+    // controller so a swipe between pages keeps working.
+    final c = context.c;
     return Column(
       children: [
-        TabBar(
-          controller: _tabs,
-          isScrollable: true,
-          tabAlignment: TabAlignment.start,
-          tabs: const [
-            Tab(text: 'Connections'),
-            Tab(text: 'Accounts'),
-            Tab(text: 'Budget'),
-            Tab(text: 'Presets'),
-            Tab(text: 'You'),
-            Tab(text: 'About'),
-          ],
+        Container(
+          decoration: BoxDecoration(color: c.bg, border: Border(bottom: BorderSide(color: c.ln))),
+          child: AnimatedBuilder(
+            animation: _tabs,
+            builder: (context, _) => SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+              child: Row(
+                children: [
+                  for (var i = 0; i < _sections.length; i++) ...[
+                    if (i > 0) const SizedBox(width: 8),
+                    DsChip(
+                      label: _sections[i],
+                      selected: _tabs.index == i,
+                      showCheck: false,
+                      onTap: () => _tabs.animateTo(i),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
         ),
         Expanded(
           child: TabBarView(
@@ -671,20 +687,30 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
     );
   }
 
+  static const _sections = ['Connections', 'Accounts', 'Budget', 'Presets', 'You', 'About'];
+
   Widget _tab(List<Widget> children) => ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+        padding: kPagePad,
         children: children,
+      );
+
+  /// A destructive secondary button: transparent, crit text, critSoft edge.
+  ButtonStyle _destructive(DsColors c) => OutlinedButton.styleFrom(
+        foregroundColor: c.crit,
+        backgroundColor: Colors.transparent,
+        side: BorderSide(color: c.critSoft),
       );
 
   /// Where the data comes from: Gmail, the statements in it, and SMS.
   List<Widget> _connectionsTab() {
     final connection = _connections.isEmpty ? null : _connections.first;
+    final c = context.c;
 
     return [
         // Where the ledger starts is a fact about what gets fetched, so it
         // belongs beside the mailbox and the phone it gets fetched from.
         _SettingsCard(
-          icon: Icons.event_outlined,
+          icon: DsIcons.calendar,
           title: 'Start loading from',
           subtitle: _ledgerMonth == null ? 'Loading…' : _monthLabel(_ledgerMonth!),
           child: _CardBody(
@@ -710,17 +736,20 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
               if (_ledgerStale > 0)
                 OutlinedButton(
                   onPressed: _purgingLedger ? null : _purgeOldMonths,
-                  style: OutlinedButton.styleFrom(foregroundColor: context.c.debit),
+                  style: _destructive(c),
                   child: Text(_purgingLedger ? 'Removing…' : 'Clear $_ledgerStale older rows'),
                 ),
             ],
           ),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: kCardGap),
         _SettingsCard(
-          icon: Icons.mail_outline,
+          icon: DsIcons.mail,
           title: 'Email import',
           subtitle: 'Gmail, read-only',
+          // A mailbox Google stopped letting us read is the critical state
+          // (§7.5): the whole card turns, not just a line in it.
+          critical: connection?.needsReconnect ?? false,
           child: connection == null
               ? _CardBody(
                   pill: const _StatusPill(label: 'Not connected', on: false),
@@ -733,7 +762,7 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
               // only reading new mail waits on reconnecting.
               : connection.needsReconnect
               ? _CardBody(
-                  pill: const _StatusPill(label: 'Not connected', on: false),
+                  pill: const _StatusPill(label: 'Not connected', on: false, tone: DsTone.crit),
                   text: '${connection.email}\nGoogle stopped letting SpendLog read this mailbox, so it has been '
                       'unlinked. Nothing already imported is lost - connect it again to carry on reading new '
                       'emails and statements.',
@@ -752,10 +781,10 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
                   ],
                 ),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: kCardGap),
         if (Platform.isAndroid)
           _SettingsCard(
-            icon: Icons.sms_outlined,
+            icon: DsIcons.message,
             title: 'SMS import',
             subtitle: 'Android only',
             child: _smsGranted
@@ -781,7 +810,7 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
           )
         else
           const _SettingsCard(
-            icon: Icons.sms_outlined,
+            icon: DsIcons.message,
             title: 'SMS import',
             subtitle: 'Android only',
             child: _CardBody(
@@ -791,9 +820,9 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
             ),
           ),
         if (Platform.isAndroid) ...[
-          const SizedBox(height: 14),
+          const SizedBox(height: kCardGap),
           _SettingsCard(
-            icon: Icons.notifications_none,
+            icon: DsIcons.bell,
             title: 'Reminders',
             subtitle: 'About yesterday',
             child: Column(
@@ -803,9 +832,9 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
                 Text(
                   'An import gets the amount and the merchant. What it was for is the part only '
                   'you know, and it is easiest to remember the next morning.',
-                  style: TextStyle(fontSize: 13, height: 1.5, color: context.c.ink70),
+                  style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx2),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 8),
                 _ToggleRow(
                   title: 'At midnight',
                   subtitle: 'One nudge as the day closes.',
@@ -832,6 +861,7 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
                       'still uncategorised. Stops as soon as none are.',
                   value: _nagReminder,
                   onChanged: (on) => _setReminder('nag', on),
+                  last: true,
                 ),
                 // Said out loud because it is the thing that goes wrong.
                 // Android stops background work on most phones once the
@@ -840,13 +870,13 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
                 // "never" rather than leaving it looking broken.
                 if (_nagReminder)
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(2, 2, 2, 0),
+                    padding: const EdgeInsets.only(top: 8),
                     child: Text(
                       _nagLastRun == null
                           ? 'The background check has not managed to run yet, so the reminders '
                               'come from alarms and are switched off next time you open the app.'
                           : 'Background check last ran ${formatDateTime(_nagLastRun!)}.',
-                      style: TextStyle(fontSize: 11.5, height: 1.45, color: context.c.mutedLight),
+                      style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
                     ),
                   ),
               ],
@@ -859,7 +889,7 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
   /// What the money moves through.
   List<Widget> _accountsTab() => [
         _SettingsCard(
-          icon: Icons.account_balance_outlined,
+          icon: DsIcons.bank,
           title: 'Accounts and cards',
           subtitle: 'Where the money moves',
           child: _CardBody(
@@ -876,16 +906,16 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
             ],
           ),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: kCardGap),
         // Beside Accounts because a kid's login is built on the pocket
         // money accounts marked there.
         _SettingsCard(
-          icon: Icons.family_restroom_outlined,
+          icon: DsIcons.users,
           title: 'Family',
           subtitle: 'Logins for your kids',
           child: FamilySection(onOpenAccounts: _openAccounts),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: kCardGap),
         // A card's statements are that card's paperwork, so they live with
         // it rather than under the mailbox they arrived through.
         // Read here as well as seen here. It was read from Connections,
@@ -893,7 +923,7 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
         // tab whose result appeared in another, which is the thing a tab
         // must never ask of you.
         _SettingsCard(
-          icon: Icons.receipt_long_outlined,
+          icon: DsIcons.list,
           title: 'Statements',
           subtitle: 'Filed under each card, by month',
           child: _CardBody(
@@ -916,7 +946,7 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
   /// The merchant shortcuts, so a payment entered by hand takes one tap.
   List<Widget> _presetsTab() => [
         _SettingsCard(
-          icon: Icons.bolt_outlined,
+          icon: DsIcons.tag,
           title: 'Merchant presets',
           subtitle: 'A name and the category it usually belongs to',
           child: Column(
@@ -926,13 +956,13 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
               Text(
                 'These appear under the merchant field when you add or edit a payment. Picking one '
                 'fills in both, which is most of the typing gone.',
-                style: TextStyle(fontSize: 13, height: 1.5, color: context.c.ink70),
+                style: TextStyle(fontSize: 14, height: 20 / 14, color: context.c.tx2),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 16),
               if (_presets.isEmpty)
-                Text(
-                  'None yet. Add one from the merchant field while editing a payment.',
-                  style: TextStyle(fontSize: 12.5, color: context.c.muted),
+                const DsEmpty(
+                  icon: DsIcons.tag,
+                  message: 'None yet. Add one from the merchant field while editing a payment.',
                 )
               else
                 Wrap(
@@ -946,6 +976,8 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
                               ? preset.merchant
                               : '${preset.merchant} · ${preset.category!.name}',
                         ),
+                        deleteIcon: DsIcon(DsIcons.x, size: 14, color: context.c.tx2),
+                        deleteButtonTooltipMessage: 'Remove',
                         onDeleted: () => _removePreset(preset),
                       ),
                   ],
@@ -970,7 +1002,7 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
   /// as the sign-out button.
   List<Widget> _budgetTab() => [
         _SettingsCard(
-          icon: Icons.account_balance_wallet_outlined,
+          icon: DsIcons.banknote,
           title: 'What lands each month',
           subtitle: _salaryMinor != null
               ? '${formatMoney(_salaryMinor!)} on the ${_salaryDay}th'
@@ -985,9 +1017,9 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
             ],
           ),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: kCardGap),
         _SettingsCard(
-          icon: Icons.donut_large_outlined,
+          icon: DsIcons.target,
           title: 'Monthly budget',
           subtitle: _budgetSubtitle(),
           child: _CardBody(
@@ -1004,52 +1036,42 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
           ),
         ),
         if (_commitments.isNotEmpty) ...[
-          const SizedBox(height: 14),
+          const SizedBox(height: kCardGap),
           _SettingsCard(
-            icon: Icons.event_repeat_outlined,
+            icon: DsIcons.repeat,
             title: 'Fixed each month',
             subtitle:
                 '${formatMoney(_commitments.fold<int>(0, (sum, c) => sum + c.amountMinor))} a month',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SizedBox(height: 6),
-                for (final commitment in _commitments)
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    onTap: () => _editCommitment(commitment),
-                    title: Text(commitment.name, style: const TextStyle(fontSize: 13.5)),
-                    subtitle: Text(
-                      [
-                        'on the ${commitment.dayOfMonth}th',
-                        if (commitment.merchant != null) commitment.merchant!,
-                        if (commitment.categoryName != null) commitment.categoryName!,
-                      ].join(' · '),
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        CommitmentAmount(commitment: commitment, fontSize: 13),
-                        IconButton(
-                          icon: const Icon(Icons.close, size: 17),
-                          onPressed: () => _removeCommitment(commitment),
-                        ),
-                      ],
-                    ),
+                const SizedBox(height: 8),
+                for (var i = 0; i < _commitments.length; i++)
+                  _ListRow(
+                    title: _commitments[i].name,
+                    subtitle: [
+                      'on the ${_commitments[i].dayOfMonth}th',
+                      if (_commitments[i].merchant != null) _commitments[i].merchant!,
+                      if (_commitments[i].categoryName != null) _commitments[i].categoryName!,
+                    ].join(' · '),
+                    amount: CommitmentAmount(commitment: _commitments[i], fontSize: 14),
+                    onTap: () => _editCommitment(_commitments[i]),
+                    onRemove: () => _removeCommitment(_commitments[i]),
+                    divider: i < _commitments.length - 1,
                   ),
+                const SizedBox(height: 8),
                 Text(
                   'Each one counts against your monthly budget. Tick one off on the dashboard when it has '
                   'actually gone out.',
-                  style: TextStyle(fontSize: 11.5, height: 1.45, color: context.c.mutedLight),
+                  style: TextStyle(fontSize: 12, height: 16 / 12, color: context.c.tx3),
                 ),
               ],
             ),
           ),
         ],
-        const SizedBox(height: 14),
+        const SizedBox(height: kCardGap),
         _SettingsCard(
-          icon: Icons.account_balance_outlined,
+          icon: DsIcons.bank,
           title: 'Loans',
           subtitle: _loans.where((loan) => loan.status == 'ACTIVE').isEmpty
               ? 'None yet'
@@ -1057,40 +1079,37 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              const SizedBox(height: 12),
               Text(
                 "A bank's personal loan, an employer advance, money from a relative — anything "
                 'with a fixed term and a monthly repayment. Mark a payment against one from the '
                 'transaction itself, or from here if it never produced a message to match.',
-                style: TextStyle(fontSize: 13, height: 1.5, color: context.c.ink70),
+                style: TextStyle(fontSize: 14, height: 20 / 14, color: context.c.tx2),
               ),
-              if (_loans.isNotEmpty) const SizedBox(height: 6),
-              for (final loan in _loans)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  onTap: () => _editLoan(loan),
-                  title: Text(loan.label, style: const TextStyle(fontSize: 13.5)),
-                  subtitle: Text(
-                    loan.status != 'ACTIVE'
-                        ? loan.status == 'CLOSED'
-                            ? 'Closed'
-                            : 'Cancelled'
-                        : '${loan.paidCount} of ${loan.months} paid · '
-                            '${formatMoney(loan.remainingMinor)} left · ${loanTabShort(loan.balanceMinor)}',
+              if (_loans.isNotEmpty) const SizedBox(height: 8),
+              for (var i = 0; i < _loans.length; i++)
+                _ListRow(
+                  title: _loans[i].label,
+                  subtitle: _loans[i].status != 'ACTIVE'
+                      ? _loans[i].status == 'CLOSED'
+                          ? 'Closed'
+                          : 'Cancelled'
+                      : '${_loans[i].paidCount} of ${_loans[i].months} paid · '
+                          '${formatMoney(_loans[i].remainingMinor)} left · ${loanTabShort(_loans[i].balanceMinor)}',
+                  amount: Text(
+                    formatMoney(_loans[i].monthlyAmountMinor),
+                    style: kNum.copyWith(fontSize: 14, fontWeight: FontWeight.w600, color: context.c.tx),
                   ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(formatMoney(loan.monthlyAmountMinor), style: kNum.copyWith(fontSize: 13)),
-                      IconButton(
-                        icon: const Icon(Icons.close, size: 17),
-                        onPressed: () => _removeLoan(loan),
-                      ),
-                    ],
-                  ),
+                  onTap: () => _editLoan(_loans[i]),
+                  onRemove: () => _removeLoan(_loans[i]),
+                  divider: i < _loans.length - 1,
                 ),
-              const SizedBox(height: 6),
-              OutlinedButton(onPressed: () => _editLoan(), child: const Text('Add a loan')),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: () => _editLoan(),
+                icon: const DsIcon(DsIcons.plus, size: 18),
+                label: const Text('Add a loan'),
+              ),
             ],
           ),
         ),
@@ -1099,9 +1118,40 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
   /// Who you are signed in as, and how to stop being.
   List<Widget> _youTab() => [
         _aiCard(),
-        const SizedBox(height: 14),
+        const SizedBox(height: kCardGap),
         _SettingsCard(
-          icon: Icons.lock_outline,
+          icon: DsIcons.sliders,
+          title: 'Appearance',
+          subtitle: ThemeService.instance.label,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 12),
+              Text(
+                'Follows the device unless you say otherwise. The choice is remembered on this '
+                'phone and nowhere else.',
+                style: TextStyle(fontSize: 14, height: 20 / 14, color: context.c.tx2),
+              ),
+              const SizedBox(height: 16),
+              DsSegmented<ThemeMode>(
+                height: 40,
+                segments: const [
+                  (ThemeMode.light, 'Light'),
+                  (ThemeMode.dark, 'Dark'),
+                  (ThemeMode.system, 'System'),
+                ],
+                selected: ThemeService.instance.mode,
+                onChanged: (mode) async {
+                  await ThemeService.instance.set(mode);
+                  if (mounted) setState(() {});
+                },
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: kCardGap),
+        _SettingsCard(
+          icon: DsIcons.lock,
           title: 'Account',
           subtitle: 'Signed in with Google',
           child: _CardBody(
@@ -1110,27 +1160,8 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
             actions: [
               OutlinedButton(
                 onPressed: _signOut,
-                style: OutlinedButton.styleFrom(foregroundColor: context.c.debit),
+                style: _destructive(context.c),
                 child: const Text('Sign out'),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-        _SettingsCard(
-          icon: ThemeService.instance.icon,
-          title: 'Appearance',
-          subtitle: ThemeService.instance.label,
-          child: _CardBody(
-            text: 'Follows the device unless you say otherwise. The choice is remembered on this '
-                'phone and nowhere else.',
-            actions: [
-              OutlinedButton(
-                onPressed: () async {
-                  await ThemeService.instance.cycle();
-                  if (mounted) setState(() {});
-                },
-                child: Text('Switch to ${_nextThemeLabel()}'),
               ),
             ],
           ),
@@ -1156,7 +1187,7 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
     ];
 
     return _SettingsCard(
-      icon: Icons.auto_awesome_outlined,
+      icon: DsIcons.sparkles,
       title: 'AI assistant',
       subtitle: ai == null
           ? 'Loading…'
@@ -1178,31 +1209,39 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
             '(aistudio.google.com/apikey) and paste it here. Your questions, and the figures needed '
             'to answer them, are sent to Google under that key. The key is stored encrypted and '
             'never shown again.',
-            style: TextStyle(fontSize: 13, height: 1.5, color: c.ink70),
+            style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx2),
           ),
           if (!canStore) ...[
-            const SizedBox(height: 10),
-            Text(
-              "The server isn't set up to store keys yet, so one can't be saved here.",
-              style: TextStyle(fontSize: 12.5, height: 1.45, color: c.warn),
+            const SizedBox(height: 12),
+            const DsCallout(
+              tone: DsTone.warn,
+              title: "The server isn't set up to store keys yet, so one can't be saved here.",
             ),
           ],
-          const SizedBox(height: 12),
-          TextField(
-            controller: _aiKey,
-            enabled: canStore && !_aiSaving,
-            obscureText: !_aiKeyVisible,
-            autocorrect: false,
-            enableSuggestions: false,
-            decoration: InputDecoration(
-              labelText: ai?.hasKey ?? false ? 'Replace the key' : 'Gemini API key',
-              hintText: 'Paste it here',
-              suffixIcon: IconButton(
-                icon: Icon(_aiKeyVisible ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 19),
-                onPressed: () => setState(() => _aiKeyVisible = !_aiKeyVisible),
+          const SizedBox(height: 16),
+          DsField(
+            label: ai?.hasKey ?? false ? 'Replace the key' : 'Gemini API key',
+            child: TextField(
+              controller: _aiKey,
+              enabled: canStore && !_aiSaving,
+              obscureText: !_aiKeyVisible,
+              autocorrect: false,
+              enableSuggestions: false,
+              // Revealed in Plex Mono, so the key's characters can be told apart.
+              style: _aiKeyVisible ? kMono.copyWith(fontSize: 15, color: c.tx) : null,
+              decoration: InputDecoration(
+                hintText: 'Paste it here',
+                suffixIcon: Padding(
+                  padding: const EdgeInsets.only(right: 2),
+                  child: DsEyeButton(
+                    obscured: !_aiKeyVisible,
+                    noun: 'key',
+                    onPressed: () => setState(() => _aiKeyVisible = !_aiKeyVisible),
+                  ),
+                ),
               ),
+              onChanged: (_) => setState(() {}),
             ),
-            onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: 12),
           Wrap(
@@ -1216,22 +1255,30 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
               if (ai?.hasKey ?? false)
                 OutlinedButton(
                   onPressed: _aiSaving ? null : _removeAiKey,
-                  style: OutlinedButton.styleFrom(foregroundColor: c.debit),
+                  style: _destructive(c),
                   child: const Text('Remove'),
                 ),
-              TextButton(onPressed: _openAiStudio, child: const Text('Get a free key')),
+              TextButton.icon(
+                onPressed: _openAiStudio,
+                icon: const DsIcon(DsIcons.arrowUpRight, size: 16),
+                label: const Text('Get a free key'),
+              ),
             ],
           ),
           if (ai != null && ai.hasKey) ...[
-            const SizedBox(height: 14),
+            const SizedBox(height: 16),
+            const DsLabel('Model'),
+            const SizedBox(height: 6),
             DropdownButtonFormField<String?>(
               // Rebuilt when the list arrives, since initialValue is only
               // read the first time.
               key: ValueKey('${ai.model}-${models.length}'),
               initialValue: ai.model,
               isExpanded: true,
+              icon: DsIcon(DsIcons.chevronDown, size: 20, color: c.tx2),
+              borderRadius: BorderRadius.circular(Ds.rLg),
+              dropdownColor: c.sf,
               decoration: const InputDecoration(
-                labelText: 'Model',
                 helperText: 'The default is quick and fine for most questions.',
                 helperMaxLines: 2,
               ),
@@ -1258,37 +1305,38 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
             ),
           ],
           if (_aiNote != null) ...[
-            const SizedBox(height: 10),
-            Text(
-              _aiNote!,
-              style: TextStyle(fontSize: 12.5, height: 1.45, color: _aiNoteIsError ? c.debit : c.muted),
-            ),
+            const SizedBox(height: 12),
+            if (_aiNoteIsError)
+              DsCallout(tone: DsTone.crit, title: _aiNote!)
+            else
+              Row(
+                children: [
+                  DsIcon(DsIcons.check, size: 16, color: c.good),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      _aiNote!,
+                      style: TextStyle(fontSize: 13, height: 18 / 13, fontWeight: FontWeight.w500, color: c.good),
+                    ),
+                  ),
+                ],
+              ),
           ],
         ],
       ),
     );
   }
 
-  /// What the button offers next. ThemeService cycles light, dark, system.
-  String _nextThemeLabel() {
-    switch (ThemeService.instance.mode) {
-      case ThemeMode.light:
-        return 'dark';
-      case ThemeMode.dark:
-        return 'system';
-      case ThemeMode.system:
-        return 'light';
-    }
-  }
-
   /// What the app is, and what it cannot do.
   List<Widget> _aboutTab() => [
         _SettingsCard(
-          icon: Icons.info_outline,
+          icon: DsIcons.info,
           title: 'Version',
           subtitle: 'SpendLog $appVersion (build $appBuildNumber)',
           child: _CardBody(
-            pill: _updateAvailable ? const _StatusPill(label: 'Update available', on: false) : null,
+            pill: _updateAvailable
+                ? const _StatusPill(label: 'Update available', on: false, tone: DsTone.ac)
+                : null,
             text: _updateAvailable
                 ? 'Version $_latestVersion is out. Installing it over this one keeps your data.'
                 : 'The app, the website and the server are released together and share this version '
@@ -1307,9 +1355,9 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
             ],
           ),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: kCardGap),
         const _SettingsCard(
-          icon: Icons.help_outline,
+          icon: DsIcons.shield,
           title: 'What it knows',
           subtitle: 'And what it does not',
           child: _CardBody(
@@ -1322,46 +1370,57 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
       ];
 }
 
+/// A settings card: a 40 icon tile, a 15/20 title and a 13/18 sub-line,
+/// then the body. [critical] is the whole-card critical state (§7.5) for
+/// something that has stopped working.
 class _SettingsCard extends StatelessWidget {
-  final IconData icon;
+  final Object icon;
   final String title;
   final String subtitle;
   final Widget child;
+  final bool critical;
 
   const _SettingsCard({
     required this.icon,
     required this.title,
     required this.subtitle,
     required this.child,
+    this.critical = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: context.c.surface,
-        border: Border.all(color: context.c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
+    final c = context.c;
+    return DsCard(
+      color: critical ? c.critSoft : null,
+      borderColor: critical ? c.critSoft : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(color: context.c.brand50, borderRadius: BorderRadius.circular(9)),
-                child: Icon(icon, size: 17, color: context.c.brand),
-              ),
-              const SizedBox(width: 10),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: context.c.ink)),
-                  Text(subtitle, style: TextStyle(fontSize: 12, color: context.c.muted)),
-                ],
+              DsIconTile(icon, tone: critical ? DsTone.crit : DsTone.ac, onTinted: critical),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 15,
+                        height: 20 / 15,
+                        fontWeight: FontWeight.w600,
+                        color: critical ? c.crit : c.tx,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(fontSize: 13, height: 18 / 13, color: critical ? c.tx2 : c.tx3),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -1386,49 +1445,29 @@ class _CardBody extends StatelessWidget {
       children: [
         const SizedBox(height: 12),
         if (pill != null) ...[pill!, const SizedBox(height: 8)],
-        Text(text, style: TextStyle(fontSize: 13, height: 1.5, color: context.c.ink70)),
-        if (actions != null) ...[
-          const SizedBox(height: 14),
-          Wrap(spacing: 8, runSpacing: 6, children: [for (final action in actions!) action]),
+        Text(text, style: TextStyle(fontSize: 14, height: 20 / 14, color: context.c.tx2)),
+        if (actions != null && actions!.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Wrap(spacing: 8, runSpacing: 8, children: [for (final action in actions!) action]),
         ],
       ],
     );
   }
 }
 
+/// A status badge: good with a check when [on], otherwise [tone]
+/// (neutral unless something is actually wrong).
 class _StatusPill extends StatelessWidget {
   final String label;
   final bool on;
+  final DsTone tone;
 
-  const _StatusPill({required this.label, required this.on});
+  const _StatusPill({required this.label, required this.on, this.tone = DsTone.neutral});
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-      decoration: BoxDecoration(
-        color: on ? context.c.credit50 : context.c.chipNeutral,
-        borderRadius: BorderRadius.circular(100),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (on) ...[
-            Icon(Icons.check, size: 12, color: context.c.credit),
-            const SizedBox(width: 4),
-          ],
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 11.5,
-              fontWeight: FontWeight.w700,
-              color: on ? context.c.credit : context.c.muted,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => on
+      ? DsBadge(label, tone: DsTone.good, icon: DsIcons.check)
+      : DsBadge(label, tone: tone, icon: tone == DsTone.crit ? DsIcons.alertTriangle : null);
 }
 
 /// A switch with room for a line explaining what it does — these two need
@@ -1438,31 +1477,113 @@ class _ToggleRow extends StatelessWidget {
   final String subtitle;
   final bool value;
   final ValueChanged<bool> onChanged;
+  final bool last;
 
   const _ToggleRow({
     required this.title,
     required this.subtitle,
     required this.value,
     required this.onChanged,
+    this.last = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return SwitchListTile(
-      value: value,
-      onChanged: onChanged,
-      contentPadding: EdgeInsets.zero,
-      dense: true,
-      title: Text(
-        title,
-        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: context.c.ink),
-      ),
-      subtitle: Text(
-        subtitle,
-        style: TextStyle(fontSize: 12, height: 1.4, color: context.c.muted),
+    final c = context.c;
+    return DecoratedBox(
+      decoration: BoxDecoration(border: last ? null : Border(bottom: BorderSide(color: c.ln))),
+      child: SwitchListTile(
+        value: value,
+        onChanged: onChanged,
+        contentPadding: EdgeInsets.zero,
+        minTileHeight: 48,
+        title: Text(
+          title,
+          style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx),
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Text(
+            subtitle,
+            style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
+          ),
+        ),
       ),
     );
   }
+}
+
+/// A row in a settings list: title and a sub-line, the amount, and a remove
+/// button; tapping the row edits it.
+class _ListRow extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final Widget amount;
+  final VoidCallback onTap;
+  final VoidCallback onRemove;
+  final bool divider;
+
+  const _ListRow({
+    required this.title,
+    required this.subtitle,
+    required this.amount,
+    required this.onTap,
+    required this.onRemove,
+    this.divider = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 56),
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        decoration: BoxDecoration(border: divider ? Border(bottom: BorderSide(color: c.ln)) : null),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(subtitle, style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            amount,
+            IconButton(
+              tooltip: 'Remove',
+              icon: DsIcon(DsIcons.x, size: 18, color: c.tx3),
+              onPressed: onRemove,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The final "Remove" in a confirm dialog: the filled destructive button
+/// the system proposes for an action that can't be undone.
+class _ConfirmRemove extends StatelessWidget {
+  final VoidCallback onPressed;
+
+  const _ConfirmRemove({required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) => FilledButton(
+        onPressed: onPressed,
+        style: FilledButton.styleFrom(backgroundColor: context.c.critFill, foregroundColor: Colors.white),
+        child: const Text('Remove'),
+      );
 }
 
 /// What lands each month and when.
@@ -1516,17 +1637,25 @@ class _SalaryDialogState extends State<_SalaryDialog> {
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          TextField(
-            controller: _amount,
-            autofocus: true,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: 'Amount', prefixText: '₹ '),
+          DsField(
+            label: 'Amount',
+            child: TextField(
+              controller: _amount,
+              autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: kNum.copyWith(fontSize: 15),
+              decoration: const InputDecoration(prefixText: '₹'),
+            ),
           ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: _day,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Day of the month', hintText: '15'),
+          const SizedBox(height: 16),
+          DsField(
+            label: 'Day of the month',
+            child: TextField(
+              controller: _day,
+              keyboardType: TextInputType.number,
+              style: kNum.copyWith(fontSize: 15),
+              decoration: const InputDecoration(hintText: '15'),
+            ),
           ),
         ],
       ),
@@ -1610,48 +1739,66 @@ class _CommitmentDialogState extends State<_CommitmentDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(
-              controller: _name,
-              autofocus: widget.commitment == null,
-              decoration: const InputDecoration(labelText: 'What it is', hintText: 'Rent'),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _amount,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                labelText: 'Amount a month',
-                prefixText: '₹ ',
-                helperText: 'What it costs you - your share, on a bill you pay whole for others.',
-                helperMaxLines: 3,
+            DsField(
+              label: 'What it is',
+              child: TextField(
+                controller: _name,
+                autofocus: widget.commitment == null,
+                decoration: const InputDecoration(hintText: 'Rent'),
               ),
             ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _day,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Day of the month', hintText: '5'),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _merchant,
-              decoration: const InputDecoration(labelText: 'Usually paid to', hintText: 'Landlord'),
-            ),
-            const SizedBox(height: 10),
-            DropdownButtonFormField<String?>(
-              initialValue: _categoryId,
-              isExpanded: true,
-              decoration: const InputDecoration(
-                labelText: 'Usual category',
-                helperText: 'Both fill themselves in on a payment marked against this.',
-                helperMaxLines: 3,
+            const SizedBox(height: 16),
+            DsField(
+              label: 'Amount a month',
+              child: TextField(
+                controller: _amount,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                style: kNum.copyWith(fontSize: 15),
+                decoration: const InputDecoration(
+                  prefixText: '₹',
+                  helperText: 'What it costs you - your share, on a bill you pay whole for others.',
+                  helperMaxLines: 3,
+                ),
               ),
-              items: [
-                const DropdownMenuItem<String?>(value: null, child: Text('None')),
-                for (final category in widget.categories)
-                  DropdownMenuItem<String?>(value: category.id, child: Text(category.name)),
-              ],
-              onChanged: (value) => setState(() => _categoryId = value),
+            ),
+            const SizedBox(height: 16),
+            DsField(
+              label: 'Day of the month',
+              child: TextField(
+                controller: _day,
+                keyboardType: TextInputType.number,
+                style: kNum.copyWith(fontSize: 15),
+                decoration: const InputDecoration(hintText: '5'),
+              ),
+            ),
+            const SizedBox(height: 16),
+            DsField(
+              label: 'Usually paid to',
+              child: TextField(
+                controller: _merchant,
+                decoration: const InputDecoration(hintText: 'Landlord'),
+              ),
+            ),
+            const SizedBox(height: 16),
+            DsField(
+              label: 'Usual category',
+              child: DropdownButtonFormField<String?>(
+                initialValue: _categoryId,
+                isExpanded: true,
+                icon: DsIcon(DsIcons.chevronDown, size: 20, color: context.c.tx2),
+                borderRadius: BorderRadius.circular(Ds.rLg),
+                dropdownColor: context.c.sf,
+                decoration: const InputDecoration(
+                  helperText: 'Both fill themselves in on a payment marked against this.',
+                  helperMaxLines: 3,
+                ),
+                items: [
+                  const DropdownMenuItem<String?>(value: null, child: Text('None')),
+                  for (final category in widget.categories)
+                    DropdownMenuItem<String?>(value: category.id, child: Text(category.name)),
+                ],
+                onChanged: (value) => setState(() => _categoryId = value),
+              ),
             ),
           ],
         ),

@@ -973,7 +973,7 @@ void main() {
         await tester.pumpAndSettle();
       }, () => _server(_routes()));
 
-      expect(find.text('CURRENT VALUE'), findsOneWidget);
+      expect(find.text('Current value'), findsOneWidget);
       expect(find.text('₹2,51,234'), findsOneWidget);
       expect(find.text('−₹812 (−0.32%) today'), findsOneWidget);
       expect(find.text('₹2,20,000'), findsOneWidget); // invested
@@ -1042,7 +1042,7 @@ void main() {
           }));
 
       expect(calls, 2);
-      expect(find.text('CURRENT VALUE'), findsOneWidget);
+      expect(find.text('Current value'), findsOneWidget);
     });
 
     testWidgets('the Goals tab shows the cards and the assumptions', (tester) async {
@@ -1077,7 +1077,7 @@ void main() {
 
       expect(find.text('Made today · gemini-2.5-flash'), findsOneWidget);
       expect(find.text('Mostly equity, doing well. One regular plan is costing you.'), findsOneWidget);
-      expect(find.text('NOT PERFORMING WELL'), findsOneWidget);
+      expect(find.text('Not performing well'), findsOneWidget);
       expect(find.text('Axis Bluechip Fund'), findsOneWidget);
       expect(find.text('Rank 26 of 29 on 3y.'), findsOneWidget);
       expect(find.text('Switch to a better large cap'), findsOneWidget);
@@ -1165,7 +1165,7 @@ void main() {
     Future<void> open(WidgetTester tester) async {
       await _pump(tester, HoldingDetailScreen(key: UniqueKey(), holdingId: id), height: 14400);
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('SIP HISTORY'));
+      await tester.ensureVisible(find.text('SIP history'));
       await tester.pumpAndSettle();
     }
 
@@ -1260,7 +1260,7 @@ void main() {
   group('dashboard tile', () {
     testWidgets('value and today, an invitation, loading and failed', (tester) async {
       await tile(tester, FundPortfolio.fromJson(_portfolio()));
-      expect(find.text('MUTUAL FUNDS · 2 FUNDS'), findsOneWidget);
+      expect(find.text('Mutual funds · 2 funds'), findsOneWidget);
       expect(find.text('₹2,51,234'), findsOneWidget);
       expect(find.text('−₹812 today'), findsOneWidget);
       expect(find.text('SIPs ₹10,000/month · 1 needs a look'), findsOneWidget);
@@ -1378,6 +1378,11 @@ void main() {
           );
           await tester.pumpAndSettle();
           await tester.tap(find.text('I already hold units'));
+          await tester.pumpAndSettle();
+          // The redesigned form (52 px fields, labels above) is taller than
+          // the 800 px screen, so the SIP toggle has to be scrolled to.
+          await tester.scrollUntilVisible(find.text('I run a SIP'), 200, scrollable: find.byType(Scrollable).first);
+          await tester.pumpAndSettle();
           await tester.tap(find.text('I run a SIP'));
           await tester.pumpAndSettle();
           // With a change of amount, a skipped month, and the month picker open.

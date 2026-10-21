@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import '../widgets/ds/ds.dart';
 import '../utils/format.dart';
 import '../widgets/state_block.dart';
 
@@ -127,7 +127,7 @@ class _TripAddPaymentsScreenState extends State<TripAddPaymentsScreen> {
     final totalMinor = _picked.values.fold<int>(0, (sum, row) => sum + row.amountMinor);
 
     return Scaffold(
-      backgroundColor: c.paper,
+      backgroundColor: c.bg,
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -137,7 +137,7 @@ class _TripAddPaymentsScreenState extends State<TripAddPaymentsScreen> {
               widget.trip.name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: c.muted),
+              style: TextStyle(fontSize: 13, height: 18 / 13, fontWeight: FontWeight.w400, color: c.tx3),
             ),
           ],
         ),
@@ -145,22 +145,21 @@ class _TripAddPaymentsScreenState extends State<TripAddPaymentsScreen> {
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: TextField(
               controller: _search,
               onChanged: _onSearch,
               textInputAction: TextInputAction.search,
+              style: TextStyle(fontSize: 14, color: c.tx),
               decoration: InputDecoration(
                 hintText: 'Search merchant or note',
-                prefixIcon: const Icon(Icons.search, size: 20),
-                isDense: true,
-                filled: true,
-                fillColor: c.surface,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(T.rSm)),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(T.rSm),
-                  borderSide: BorderSide(color: c.lineStrong),
+                hintStyle: TextStyle(fontSize: 14, color: c.tx3),
+                prefixIcon: Padding(
+                  padding: const EdgeInsets.only(left: 12, right: 8),
+                  child: DsIcon(DsIcons.search, size: 20, color: c.tx3),
                 ),
+                prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 44),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               ),
             ),
           ),
@@ -172,13 +171,13 @@ class _TripAddPaymentsScreenState extends State<TripAddPaymentsScreen> {
                   child: Text(
                     'Your payments since ${formatShortDate(from)}, on no trip yet',
                     maxLines: 2,
-                    style: TextStyle(fontSize: 12, color: c.muted),
+                    style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
                   ),
                 ),
                 if (_step < tripLookbackSteps.length - 1)
                   TextButton.icon(
                     onPressed: _goBackFurther,
-                    icon: const Icon(Icons.history, size: 16),
+                    icon: const DsIcon(DsIcons.calendar, size: 16),
                     label: const Text('Go back further'),
                   ),
               ],
@@ -195,7 +194,10 @@ class _TripAddPaymentsScreenState extends State<TripAddPaymentsScreen> {
                     onAction: _load,
                   )
                 : rows == null
-                    ? const Center(child: CircularProgressIndicator())
+                    ? const Padding(
+                        padding: EdgeInsets.fromLTRB(16, 16, 16, 0),
+                        child: DsSkeletonRows(count: 5, caption: 'Loading your payments…'),
+                      )
                     : rows.isEmpty
                         ? StateBlock(
                             icon: Icons.receipt_long_outlined,
@@ -211,45 +213,48 @@ class _TripAddPaymentsScreenState extends State<TripAddPaymentsScreen> {
                             padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
                             children: [
                               if (travel.isNotEmpty) ...[
-                                const _GroupLabel('LOOKS LIKE TRAVEL'),
-                                for (final row in travel)
-                                  _CandidateRow(
-                                    row: row,
-                                    picked: _picked.containsKey(row.id),
-                                    onTap: () => _toggle(row),
-                                  ),
+                                const _GroupLabel('Looks like travel'),
+                                _Group(
+                                  rows: travel,
+                                  picked: _picked,
+                                  onToggle: _toggle,
+                                ),
                               ],
                               if (rest.isNotEmpty) ...[
-                                _GroupLabel(travel.isEmpty ? 'YOUR PAYMENTS' : 'EVERYTHING ELSE'),
-                                for (final row in rest)
-                                  _CandidateRow(
-                                    row: row,
-                                    picked: _picked.containsKey(row.id),
-                                    onTap: () => _toggle(row),
-                                  ),
+                                _GroupLabel(travel.isEmpty ? 'Your payments' : 'Everything else'),
+                                _Group(
+                                  rows: rest,
+                                  picked: _picked,
+                                  onToggle: _toggle,
+                                ),
                               ],
                             ],
                           ),
           ),
         ],
       ),
-      bottomNavigationBar: SafeArea(
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-          decoration: BoxDecoration(
-            color: c.surface,
-            border: Border(top: BorderSide(color: c.line)),
-          ),
-          child: SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: count == 0 || _saving ? null : _add,
-              child: Text(
-                count == 0
-                    ? 'Pick the payments to add'
-                    : 'Add $count ${count == 1 ? 'payment' : 'payments'} (${formatMoney(totalMinor)})',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+      // The footer stays pinned, so the total is always in view.
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: c.sf2,
+          border: Border(top: BorderSide(color: c.ln)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: count == 0 || _saving ? null : _add,
+                child: Text(
+                  count == 0
+                      ? 'Pick the payments to add'
+                      : 'Add $count ${count == 1 ? 'payment' : 'payments'} (${formatMoney(totalMinor)})',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontFeatures: Ds.tabular),
+                ),
               ),
             ),
           ),
@@ -264,13 +269,33 @@ class _GroupLabel extends StatelessWidget {
   const _GroupLabel(this.text);
 
   @override
+  Widget build(BuildContext context) =>
+      DsLabel(text, padding: const EdgeInsets.fromLTRB(2, 16, 2, 8));
+}
+
+/// One group's rows in a single flat card, divided by hairlines.
+class _Group extends StatelessWidget {
+  final List<TripCandidate> rows;
+  final Map<String, TripCandidate> picked;
+  final ValueChanged<TripCandidate> onToggle;
+
+  const _Group({required this.rows, required this.picked, required this.onToggle});
+
+  @override
   Widget build(BuildContext context) {
-    final c = context.c;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(2, 14, 2, 6),
-      child: Text(
-        text,
-        style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, letterSpacing: 0.5, color: c.muted),
+    return DsCard(
+      padding: EdgeInsets.zero,
+      clip: true,
+      child: Column(
+        children: [
+          for (var i = 0; i < rows.length; i++)
+            _CandidateRow(
+              row: rows[i],
+              picked: picked.containsKey(rows[i].id),
+              last: i == rows.length - 1,
+              onTap: () => onToggle(rows[i]),
+            ),
+        ],
       ),
     );
   }
@@ -279,9 +304,10 @@ class _GroupLabel extends StatelessWidget {
 class _CandidateRow extends StatelessWidget {
   final TripCandidate row;
   final bool picked;
+  final bool last;
   final VoidCallback onTap;
 
-  const _CandidateRow({required this.row, required this.picked, required this.onTap});
+  const _CandidateRow({required this.row, required this.picked, required this.onTap, this.last = false});
 
   @override
   Widget build(BuildContext context) {
@@ -292,21 +318,26 @@ class _CandidateRow extends StatelessWidget {
       if (row.categoryName != null) row.categoryName!,
     ].join(' · ');
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      decoration: BoxDecoration(
-        color: picked ? c.brand50 : c.surface,
-        border: Border.all(color: picked ? c.brand : c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
+    return Material(
+      // A picked row is a selected list item: accent tint.
+      color: picked ? c.acSoft : Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(T.rMd),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(4, 8, 14, 8),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 64),
+          decoration: BoxDecoration(
+            border: last ? null : Border(bottom: BorderSide(color: c.ln)),
+          ),
+          padding: const EdgeInsets.fromLTRB(4, 8, 16, 8),
           child: Row(
             children: [
-              Checkbox(value: picked, onChanged: (_) => onTap()),
+              // A 24 px box in a 48 px hit area.
+              SizedBox(
+                width: 48,
+                height: 48,
+                child: Center(child: Checkbox(value: picked, onChanged: (_) => onTap())),
+              ),
+              const SizedBox(width: 4),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -315,22 +346,22 @@ class _CandidateRow extends StatelessWidget {
                       row.merchant ?? 'Payment',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: c.ink),
+                      style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w500, color: c.tx),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       meta,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 11.5, color: c.muted),
+                      style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 12),
               Text(
                 formatMoney(row.amountMinor),
-                style: kNum.copyWith(fontSize: 13.5, fontWeight: FontWeight.w700, color: c.ink),
+                style: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w600, color: c.tx),
               ),
             ],
           ),

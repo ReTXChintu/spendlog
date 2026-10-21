@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/models.dart';
-import '../../theme.dart';
+import '../ds/ds.dart';
 import '../../utils/format.dart';
 
 /// What the pace means for the rest of the month, in one sentence.
@@ -35,12 +35,17 @@ String paceMessage(MonthPace pace) {
   }
 }
 
-/// The month against its budget, on Home.
+/// The month against its budget, on Home: the "Free to spend" hero.
 ///
 /// Answers three questions in the order they come: how much is left, can
 /// I keep going like this, and where did it go. Then what the month is
 /// worth to savings if it ended now - the leftover is what goes in, so
 /// that number is the reason to keep to the rest.
+///
+/// The pace bar is the design's signature: ink for what is spent, hatching
+/// for the fixed costs still due (promised, not yet spent), the sunk track
+/// for what is free, and a thin cobalt tick where spending would be today
+/// on plan.
 class MonthlyBudgetCard extends StatelessWidget {
   const MonthlyBudgetCard({super.key, required this.budget, required this.onEdit});
 
@@ -58,157 +63,173 @@ class MonthlyBudgetCard extends StatelessWidget {
     final left = budget.leftMinor ?? total - budget.spentMinor;
     final over = left < 0;
     final pace = budget.pace;
-    final tint = over || (pace?.isOver ?? false)
-        ? c.debit
-        : (pace?.isHigh ?? false)
-            ? c.warn
-            : c.brand;
-    final fraction = total > 0 ? (budget.spentMinor / total).clamp(0.0, 1.0) : 0.0;
-    final expected = pace != null && total > 0 ? (pace.expectedSpentMinor / total).clamp(0.0, 1.0) : null;
+    final promisedMinor = pace == null ? 0 : pace.fixedStillDueMinor.clamp(0, left < 0 ? 0 : left);
+    final freeMinor = (left - promisedMinor).clamp(0, total);
+    final spentFraction = total > 0 ? (budget.spentMinor / total).clamp(0.0, 1.0) : 0.0;
+    final promisedFraction = total > 0 ? (promisedMinor / total).clamp(0.0, 1.0) : 0.0;
+    final expected = pace != null && total > 0 && budget.month.isCurrent
+        ? (pace.expectedSpentMinor / total).clamp(0.0, 1.0)
+        : null;
     final month = budget.month;
     final unassigned = budget.unassigned;
     final showUnassigned = unassigned != null && (unassigned.amountMinor > 0 || unassigned.spentMinor > 0);
+    final todayFraction = month.isCurrent && month.dayOfMonth != null && month.daysInMonth > 0
+        ? (month.dayOfMonth! / month.daysInMonth).clamp(0.0, 1.0)
+        : null;
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 8, 16),
-      decoration: BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
+    final eyebrow = [
+      if (month.label.isNotEmpty) month.label,
+      if (month.dayOfMonth != null) 'day ${month.dayOfMonth} of ${month.daysInMonth}',
+    ].join(' · ');
+
+    final explain = <InlineSpan>[
+      if (month.isCurrent) TextSpan(text: '${month.daysLeft} ${month.daysLeft == 1 ? 'day' : 'days'} left'),
+      if (month.isCurrent && pace != null && pace.safeDailyMinor > 0 && !over) ...[
+        const TextSpan(text: ' · about '),
+        TextSpan(
+          text: '${formatMoneyShort(pace.safeDailyMinor)}/day',
+          style: TextStyle(fontWeight: FontWeight.w600, color: c.tx),
+        ),
+      ],
+      if (!month.isCurrent) TextSpan(text: '${formatMoneyShort(budget.spentMinor)} spent'),
+    ];
+
+    return DsCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.donut_large_outlined, size: 14, color: c.muted),
-              const SizedBox(width: 6),
               Expanded(
-                child: Text(
-                  month.label.isEmpty ? 'MONTHLY BUDGET' : 'MONTHLY BUDGET · ${month.label.toUpperCase()}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: c.muted),
-                ),
+                child: DsLabel(eyebrow.isEmpty ? 'Monthly budget' : eyebrow),
               ),
               TextButton.icon(
                 onPressed: onEdit,
-                icon: const Icon(Icons.edit_outlined, size: 15),
+                icon: const DsIcon(DsIcons.pencil, size: 16),
                 label: const Text('Edit budget'),
-                style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
               ),
             ],
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Bottom-aligned rather than on the baseline: the figure
-                // sits in a FittedBox, which has no baseline to offer.
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Expanded(
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Flexible(
-                            child: FittedBox(
-                              fit: BoxFit.scaleDown,
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                formatMoney(left.abs()),
-                                style: kNum.copyWith(
-                                  fontSize: 28,
-                                  fontWeight: FontWeight.w800,
-                                  color: over ? c.debit : c.ink,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 5),
-                            child: Text(
-                              over ? 'over' : 'left',
-                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: over ? c.debit : c.muted),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 5),
-                      child: Text(
-                        'of ${formatMoneyShort(total)}',
-                        style: kNum.copyWith(fontSize: 13, fontWeight: FontWeight.w600, color: c.muted),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                _Meter(fraction: fraction, tint: tint, marker: expected),
-                const SizedBox(height: 7),
-                Text(
-                  [
-                    '${formatMoneyShort(budget.spentMinor)} spent',
-                    if (month.dayOfMonth != null) 'day ${month.dayOfMonth} of ${month.daysInMonth}',
-                    if (month.isCurrent) '${month.daysLeft} ${month.daysLeft == 1 ? 'day' : 'days'} left',
-                  ].join(' · '),
-                  style: TextStyle(fontSize: 12, color: c.muted),
-                ),
-                if (pace != null) ...[
-                  const SizedBox(height: 12),
-                  PaceBanner(pace: pace),
-                ],
-                if (budget.categories.isNotEmpty || showUnassigned) ...[
-                  const SizedBox(height: 16),
-                  Text(
-                    'CATEGORY LIMITS',
-                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: c.mutedLight),
-                  ),
-                  const SizedBox(height: 8),
-                  for (final category in budget.categories)
-                    _LimitRow(
-                      name: category.name,
-                      icon: categoryIcon(category.icon),
-                      colour: parseHexColor(category.color, fallback: c.brand),
-                      spentMinor: category.spentMinor,
-                      limitMinor: category.limitMinor,
-                      isOver: category.isOver,
-                      isHigh: category.pace?.isHigh ?? false,
-                    ),
-                  if (showUnassigned)
-                    _LimitRow(
-                      name: 'Unplanned',
-                      icon: Icons.more_horiz,
-                      colour: c.muted,
-                      spentMinor: unassigned.spentMinor,
-                      limitMinor: unassigned.amountMinor,
-                      isOver: unassigned.isOver,
-                      isHigh: unassigned.pace?.isHigh ?? false,
-                      note: unassigned.categories.isEmpty
-                          ? 'Everything without a limit of its own'
-                          : 'Mostly ${unassigned.categories.take(2).map((x) => x.name).join(' and ')}',
-                    ),
-                ],
-                if (budget.bucket.configured) ...[
-                  const SizedBox(height: 6),
-                  Divider(height: 20, color: c.line),
-                  _BucketRow(bucket: budget.bucket),
-                ],
-              ],
+          Text(
+            over ? 'Over budget' : 'Free to spend',
+            style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx2),
+          ),
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              over ? formatMoneyShort(left.abs()) : formatMoneyShort(freeMinor),
+              style: kNum.copyWith(
+                fontSize: 34,
+                height: 40 / 34,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.68,
+                color: over ? c.crit : c.tx,
+              ),
             ),
           ),
+          if (explain.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text.rich(
+              TextSpan(children: explain),
+              style: kNum.copyWith(fontSize: 15, height: 22 / 15, color: c.tx2),
+            ),
+          ],
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 24,
+            runSpacing: 10,
+            children: [
+              DsInlineStat(label: 'Budget', value: formatMoneyShort(total)),
+              DsInlineStat(
+                label: over ? 'Over by' : 'Left',
+                value: formatMoneyShort(left.abs()),
+                valueColor: over ? c.crit : null,
+              ),
+              DsInlineStat(label: 'Spent', value: formatMoneyShort(budget.spentMinor)),
+            ],
+          ),
+          const SizedBox(height: 16),
+          DsPaceBar(
+            spent: spentFraction,
+            promised: promisedFraction,
+            today: expected,
+            todayLabel: expected == null ? null : 'Today · ${formatMoneyShort(pace!.expectedSpentMinor)}',
+            semanticsLabel: [
+              'Spent ${formatMoneyShort(budget.spentMinor)} of ${formatMoneyShort(total)}',
+              if (promisedMinor > 0) 'promised ${formatMoneyShort(promisedMinor)}',
+              'free ${formatMoneyShort(freeMinor)}',
+              if (expected != null) 'on plan by today ${formatMoneyShort(pace!.expectedSpentMinor)}',
+            ].join(', '),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 20,
+            runSpacing: 6,
+            children: [
+              DsLegendItem(swatch: DsSwatch.spent, label: 'Spent', value: formatMoneyShort(budget.spentMinor)),
+              if (promisedMinor > 0)
+                DsLegendItem(swatch: DsSwatch.promised, label: 'Promised', value: formatMoneyShort(promisedMinor)),
+              DsLegendItem(swatch: DsSwatch.free, label: 'Free', value: formatMoneyShort(freeMinor)),
+              if (expected != null) const DsLegendItem(swatch: DsSwatch.today, label: 'Where you should be today'),
+            ],
+          ),
+          if (pace != null) ...[
+            const SizedBox(height: 14),
+            PaceBanner(pace: pace),
+          ],
+          if (budget.categories.isNotEmpty || showUnassigned) ...[
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Category limits',
+                    style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            for (final category in budget.categories)
+              _LimitRow(
+                name: category.name,
+                spentMinor: category.spentMinor,
+                limitMinor: category.limitMinor,
+                isOver: category.isOver,
+                isHigh: category.pace?.isHigh ?? false,
+                today: todayFraction,
+              ),
+            if (showUnassigned)
+              _LimitRow(
+                name: 'Unplanned',
+                spentMinor: unassigned.spentMinor,
+                limitMinor: unassigned.amountMinor,
+                isOver: unassigned.isOver,
+                isHigh: unassigned.pace?.isHigh ?? false,
+                today: todayFraction,
+                note: unassigned.categories.isEmpty
+                    ? 'Everything without a limit of its own'
+                    : 'Mostly ${unassigned.categories.take(2).map((x) => x.name).join(' and ')}',
+              ),
+          ],
+          if (budget.bucket.configured) ...[
+            const SizedBox(height: 4),
+            Divider(height: 24, color: c.ln),
+            _BucketRow(bucket: budget.bucket),
+          ],
         ],
       ),
     );
   }
 }
 
-/// The pace sentence, tinted by how worried it should make you.
+/// The pace sentence, as a callout tinted by how worried it should make you.
 class PaceBanner extends StatelessWidget {
   const PaceBanner({super.key, required this.pace});
 
@@ -216,180 +237,110 @@ class PaceBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.c;
-    final (background, foreground, icon) = switch (pace.status) {
-      'over' => (c.debit50, c.debit, Icons.error_outline),
-      'high' => (c.warnBg, c.warn, Icons.speed),
-      _ => (c.credit50, c.credit, Icons.check_circle_outline),
+    final tone = switch (pace.status) {
+      'over' => DsTone.crit,
+      'high' => DsTone.warn,
+      _ => DsTone.good,
     };
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(color: background, borderRadius: BorderRadius.circular(T.rSm)),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(padding: const EdgeInsets.only(top: 1), child: Icon(icon, size: 16, color: foreground)),
-          const SizedBox(width: 9),
-          Expanded(
-            child: Text(
-              paceMessage(pace),
-              style: TextStyle(fontSize: 12.8, height: 1.4, fontWeight: FontWeight.w600, color: foreground),
-            ),
-          ),
-        ],
-      ),
-    );
+    return DsCallout(title: paceMessage(pace), tone: tone);
   }
 }
 
-/// The month's bar, with a tick where spending would be today if the
-/// month were going exactly to plan.
-class _Meter extends StatelessWidget {
-  const _Meter({required this.fraction, required this.tint, this.marker});
-
-  final double fraction;
-  final Color tint;
-  final double? marker;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    return SizedBox(
-      height: 14,
-      child: LayoutBuilder(builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        return Stack(
-          clipBehavior: Clip.none,
-          alignment: Alignment.centerLeft,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(100),
-              child: LinearProgressIndicator(
-                value: fraction,
-                minHeight: 8,
-                backgroundColor: c.track,
-                valueColor: AlwaysStoppedAnimation(tint),
-              ),
-            ),
-            if (marker != null && marker! > 0 && marker! < 1)
-              Positioned(
-                left: (width * marker!).clamp(1.0, width - 2) - 1,
-                top: 0,
-                bottom: 0,
-                child: Tooltip(
-                  message: 'Where spending would be today, on plan',
-                  child: Container(width: 2, decoration: BoxDecoration(color: c.ink70, borderRadius: BorderRadius.circular(1))),
-                ),
-              ),
-          ],
-        );
-      }),
-    );
-  }
-}
-
+/// One category limit: a 10 px limit bar, green while on pace and red once
+/// over pace or over the limit, with the same today tick as the pace bar.
 class _LimitRow extends StatelessWidget {
   const _LimitRow({
     required this.name,
-    required this.icon,
-    required this.colour,
     required this.spentMinor,
     required this.limitMinor,
     required this.isOver,
     required this.isHigh,
+    this.today,
     this.note,
   });
 
   final String name;
-  final IconData icon;
-  final Color colour;
   final int spentMinor;
   final int limitMinor;
   final bool isOver;
   final bool isHigh;
+  final double? today;
   final String? note;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
     final fraction = limitMinor > 0 ? (spentMinor / limitMinor).clamp(0.0, 1.0) : (spentMinor > 0 ? 1.0 : 0.0);
-    final bar = isOver ? c.debit : (isHigh ? c.warn : colour);
+    final problem = isOver || isHigh;
+    final percent = limitMinor > 0 ? (spentMinor * 100 / limitMinor).round() : null;
+    final leftMinor = limitMinor - spentMinor;
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 24,
-            height: 24,
-            decoration: BoxDecoration(color: colour.withValues(alpha: .14), borderRadius: BorderRadius.circular(7)),
-            child: Icon(icon, size: 14, color: colour),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text.rich(
+                TextSpan(children: [
+                  TextSpan(
+                    text: formatMoneyShort(spentMinor),
+                    style: TextStyle(fontWeight: FontWeight.w600, color: c.tx),
+                  ),
+                  TextSpan(text: ' of ${formatMoneyShort(limitMinor)}'),
+                ]),
+                style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx3),
+              ),
+            ],
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 12.8, fontWeight: FontWeight.w600, color: c.ink70),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    if (isOver)
-                      Text(
-                        'Over by ${formatMoneyShort(spentMinor - limitMinor)}',
-                        style: kNum.copyWith(fontSize: 12, fontWeight: FontWeight.w800, color: c.debit),
-                      )
-                    else
-                      Text.rich(
-                        TextSpan(children: [
-                          TextSpan(
-                            text: formatMoneyShort(spentMinor),
-                            style: TextStyle(fontWeight: FontWeight.w700, color: c.ink),
-                          ),
-                          TextSpan(text: ' / ${formatMoneyShort(limitMinor)}'),
-                        ]),
-                        style: kNum.copyWith(fontSize: 12, color: c.muted),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 5),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(100),
-                  child: LinearProgressIndicator(
-                    value: fraction,
-                    minHeight: 5,
-                    backgroundColor: c.track,
-                    valueColor: AlwaysStoppedAnimation(bar),
-                  ),
-                ),
-                if (note != null) ...[
-                  const SizedBox(height: 3),
-                  Text(
-                    note!,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 11, color: c.mutedLight),
-                  ),
-                ],
-              ],
+          const SizedBox(height: 6),
+          DsMeter(
+            value: fraction,
+            height: 10,
+            color: problem ? c.critFill : c.good,
+            today: today,
+          ),
+          const SizedBox(height: 4),
+          if (isOver)
+            Text(
+              'Over by ${formatMoneyShort(spentMinor - limitMinor)}',
+              style: kNum.copyWith(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w600, color: c.crit),
+            )
+          else if (percent != null)
+            Text(
+              '$percent% used · ${formatMoneyShort(leftMinor)} left',
+              style: kNum.copyWith(
+                fontSize: 12,
+                height: 16 / 12,
+                fontWeight: isHigh ? FontWeight.w600 : FontWeight.w400,
+                color: isHigh ? c.crit : c.tx3,
+              ),
             ),
-          ),
+          if (note != null)
+            Text(
+              note!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
+            ),
         ],
       ),
     );
   }
 }
 
+/// The savings bucket, and what this month would add to it.
 class _BucketRow extends StatelessWidget {
   const _BucketRow({required this.bucket});
 
@@ -402,32 +353,37 @@ class _BucketRow extends StatelessWidget {
 
     return Row(
       children: [
-        Container(
-          width: 24,
-          height: 24,
-          decoration: BoxDecoration(color: c.credit50, borderRadius: BorderRadius.circular(7)),
-          child: Icon(Icons.savings_outlined, size: 14, color: c.credit),
-        ),
-        const SizedBox(width: 10),
+        const DsIconTile(DsIcons.piggyBank, tone: DsTone.good, size: 36),
+        const SizedBox(width: 12),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Savings bucket', style: TextStyle(fontSize: 12.8, fontWeight: FontWeight.w600, color: c.ink70)),
+              Text(
+                'Savings bucket',
+                style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx),
+              ),
               if (change != 0)
                 Text(
                   '${change > 0 ? '+' : '−'}${formatMoneyShort(change.abs())} if the month ended now',
-                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: change > 0 ? c.credit : c.debit),
+                  style: kNum.copyWith(
+                    fontSize: 13,
+                    height: 18 / 13,
+                    fontWeight: FontWeight.w600,
+                    color: change > 0 ? c.good : c.crit,
+                  ),
                 ),
             ],
           ),
         ),
+        const SizedBox(width: 8),
         Text(
           formatMoneyShort(bucket.balanceMinor),
           style: kNum.copyWith(
-            fontSize: 16,
-            fontWeight: FontWeight.w800,
-            color: bucket.balanceMinor < 0 ? c.debit : c.ink,
+            fontSize: 17,
+            height: 24 / 17,
+            fontWeight: FontWeight.w600,
+            color: bucket.balanceMinor < 0 ? c.crit : c.tx,
           ),
         ),
       ],
@@ -448,42 +404,36 @@ class _SetUp extends StatelessWidget {
     final c = context.c;
     final suggested = budget.suggestedMonthlyMinor;
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: c.brand50,
-        border: Border.all(color: c.brand100),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
+    return DsCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.donut_large_outlined, size: 18, color: c.brandDark),
-              const SizedBox(width: 8),
+              const DsIconTile(DsIcons.target, tone: DsTone.ac),
+              const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   'Set a monthly budget',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: c.ink),
+                  style: TextStyle(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           Text(
             'One amount for the month, with rent, EMIs and SIPs counted in it. Share it out across dining, '
             'groceries, transport and the rest - whatever is left when the month ends goes to savings.',
-            style: TextStyle(fontSize: 12.5, height: 1.5, color: c.ink70),
+            style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx2),
           ),
           if (suggested != null && suggested > 0) ...[
             const SizedBox(height: 6),
             Text(
               'Your old daily budget comes to about ${formatMoneyShort(suggested)} for this month.',
-              style: TextStyle(fontSize: 12, height: 1.45, color: c.muted),
+              style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx3),
             ),
           ],
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
           FilledButton(
             onPressed: onSetUp,
             child: Text(suggested != null && suggested > 0 ? 'Start with ${formatMoneyShort(suggested)}' : 'Set a budget'),
@@ -493,3 +443,4 @@ class _SetUp extends StatelessWidget {
     );
   }
 }
+

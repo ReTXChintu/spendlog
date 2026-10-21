@@ -29,7 +29,7 @@ class CrashCard extends StatelessWidget {
     return Material(
       color: scheme.surface,
       child: Padding(
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.all(16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -37,13 +37,14 @@ class CrashCard extends StatelessWidget {
             Row(
               children: [
                 Icon(Icons.error_outline, size: 20, color: scheme.error),
-                const SizedBox(width: 9),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Text(
                     'This part stopped working',
                     style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
+                      fontSize: 15,
+                      height: 20 / 15,
+                      fontWeight: FontWeight.w600,
                       color: scheme.onSurface,
                     ),
                   ),
@@ -58,22 +59,23 @@ class CrashCard extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               'Nothing has been changed or lost — it is the screen that broke, not your data.',
-              style: TextStyle(fontSize: 12, height: 1.45, color: scheme.onSurfaceVariant),
+              style: TextStyle(fontSize: 13, height: 18 / 13, color: scheme.onSurfaceVariant),
             ),
             const SizedBox(height: 12),
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: scheme.errorContainer.withValues(alpha: 0.35),
-                borderRadius: BorderRadius.circular(10),
+                color: scheme.errorContainer,
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
                 message,
                 style: TextStyle(
-                  fontSize: 11.5,
-                  height: 1.5,
-                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  height: 18 / 12,
+                  fontFamily: 'IBM Plex Mono',
+                  fontFamilyFallback: const ['monospace'],
                   color: scheme.onSurface,
                 ),
               ),

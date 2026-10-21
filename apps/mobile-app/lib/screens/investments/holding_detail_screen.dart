@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../models/fund_models.dart';
 import '../../services/api_client.dart';
-import '../../theme.dart';
+import '../../widgets/ds/ds.dart';
 import '../../utils/format.dart';
 import '../../widgets/funds/fund_form.dart';
 import '../../widgets/funds/fund_text.dart';
@@ -174,34 +174,31 @@ class _HoldingDetailScreenState extends State<HoldingDetailScreen> {
     final picked = await showModalBottomSheet<CommitmentSuggestion>(
       context: context,
       useSafeArea: true,
-      backgroundColor: context.c.surface,
       builder: (context) {
-        final c = context.c;
         return ListView(
           shrinkWrap: true,
-          padding: const EdgeInsets.fromLTRB(0, 14, 0, 20),
+          padding: const EdgeInsets.fromLTRB(0, 0, 0, 16),
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-              child: Text('Connect a SIP commitment', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: c.ink)),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Text(
-                'Every debit matched to the commitment counts as an instalment of this fund.',
-                style: TextStyle(fontSize: 12, height: 1.4, color: c.muted),
+            const DsDragHandle(),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: DsSheetHeader(
+                title: 'Connect a SIP commitment',
+                subtitle: 'Every debit matched to the commitment counts as an instalment of this fund.',
+                icon: DsIcons.repeat,
               ),
             ),
             if (commitments.isEmpty)
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(
-                  'No SIP commitments to connect. Add one under Settings → Budget → fixed costs, with the kind SIP.',
-                  style: TextStyle(fontSize: 13, height: 1.4, color: c.muted),
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: DsEmpty(
+                  icon: DsIcons.repeat,
+                  message: 'No SIP commitments to connect. Add one under Settings → Budget → fixed costs, with the kind SIP.',
                 ),
               ),
             for (final commitment in commitments)
               ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                 title: Text(commitment.name),
                 subtitle: Text(
                   '${formatMoneyShort(commitment.amountMinor)}'
@@ -313,7 +310,8 @@ class _HoldingDetailScreenState extends State<HoldingDetailScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: context.c.debit),
+            // The final, destructive confirm (§7.1): critFill with white text.
+            style: FilledButton.styleFrom(backgroundColor: context.c.critFill, foregroundColor: Colors.white),
             onPressed: () => Navigator.of(context).pop(true),
             child: const Text('Remove'),
           ),
@@ -335,17 +333,17 @@ class _HoldingDetailScreenState extends State<HoldingDetailScreen> {
     final c = context.c;
     final holding = _detail?.holding ?? widget.initial;
     return Scaffold(
-      backgroundColor: c.paper,
+      backgroundColor: c.bg,
       appBar: AppBar(
         title: Text(
           holding == null ? 'Fund' : shortSchemeName(holding.schemeName),
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: c.ink),
+          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 19, height: 24 / 19, color: c.tx),
         ),
-        shape: Border(bottom: BorderSide(color: c.line)),
         actions: [
           PopupMenuButton<String>(
             tooltip: 'More',
+            icon: DsIcon(DsIcons.moreVertical, size: 20, color: c.tx2),
             onSelected: (choice) {
               switch (choice) {
                 case 'sip':
@@ -393,18 +391,22 @@ class _HoldingDetailScreenState extends State<HoldingDetailScreen> {
           },
         );
       }
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: DsSpinner());
     }
 
+    final c = context.c;
     final h = detail.holding;
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 32),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
         children: [
           if (detail.navError != null || h.stale) ...[
             FundBanner(
-              icon: Icons.schedule,
+              icon: DsIcons.refresh,
+              tone: TagTone.neutral,
+              actionLabel: 'Retry',
+              onTap: _load,
               text: [
                 h.nav == null ? 'No NAV yet' : 'NAV as of ${formatIsoLongDate(h.nav!.day)}',
                 if (detail.navError != null) "couldn't refresh: ${detail.navError}",
@@ -413,26 +415,26 @@ class _HoldingDetailScreenState extends State<HoldingDetailScreen> {
             const SizedBox(height: 12),
           ],
           _Header(holding: h),
-          const SizedBox(height: 12),
+          const SizedBox(height: kCardGap),
           _SparklineCard(points: detail.sparkline),
-          const SizedBox(height: 12),
+          const SizedBox(height: kCardGap),
           _StatsCard(holding: h),
           if (h.flags.isNotEmpty) ...[
-            const SizedBox(height: 18),
+            const SizedBox(height: 24),
             const FundSectionHeader(title: 'Worth a look'),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             for (final flag in h.flags) ...[
               FlagNote(holding: h, flag: flag, rules: widget.rules, explain: true),
               const SizedBox(height: 8),
             ],
           ],
-          const SizedBox(height: 18),
+          const SizedBox(height: 24),
           FundSectionHeader(title: 'In its category · ${h.categoryLabel}'),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           _PeersCard(holding: h, peersAvailable: widget.peersAvailable),
-          const SizedBox(height: 18),
+          const SizedBox(height: 24),
           const FundSectionHeader(title: "How it's tracked"),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           _TermsCard(
             holding: h,
             commitmentBusy: _busy.contains('commitment'),
@@ -442,9 +444,9 @@ class _HoldingDetailScreenState extends State<HoldingDetailScreen> {
             onDisconnect: _disconnectCommitment,
           ),
           if (h.sip != null) ...[
-            const SizedBox(height: 18),
+            const SizedBox(height: 24),
             const FundSectionHeader(title: 'SIP history'),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             SipHistoryCard(
               sip: h.sip!,
               plan: detail.sipPlan,
@@ -457,9 +459,9 @@ class _HoldingDetailScreenState extends State<HoldingDetailScreen> {
             ),
           ],
           if (_suggestions.isNotEmpty) ...[
-            const SizedBox(height: 18),
+            const SizedBox(height: 24),
             FundSectionHeader(title: 'Payments that look like this SIP', count: _suggestions.length),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             for (final suggestion in _suggestions) ...[
               DebitRow(
                 merchant: suggestion.merchant,
@@ -473,33 +475,32 @@ class _HoldingDetailScreenState extends State<HoldingDetailScreen> {
               const SizedBox(height: 8),
             ],
           ],
-          const SizedBox(height: 18),
+          const SizedBox(height: 24),
           FundSectionHeader(title: 'History', count: detail.txns.length),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
               OutlinedButton.icon(
+                style: _smallButton,
                 onPressed: _linkAny,
-                icon: const Icon(Icons.link, size: 17),
+                icon: const DsIcon(DsIcons.link, size: 18),
                 label: const Text('Link a payment'),
               ),
               OutlinedButton.icon(
+                style: _smallButton,
                 onPressed: _addManual,
-                icon: const Icon(Icons.add, size: 17),
+                icon: const DsIcon(DsIcons.plus, size: 18),
                 label: const Text('Buy or redemption'),
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           if (detail.txns.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Text(
-                'Nothing yet. Add units you already hold or a SIP, or link the payments that bought it.',
-                style: TextStyle(fontSize: 12.5, height: 1.45, color: context.c.muted),
-              ),
+            const DsEmpty(
+              icon: DsIcons.list,
+              message: 'Nothing yet. Add units you already hold or a SIP, or link the payments that bought it.',
             )
           else
             FundCard(
@@ -507,7 +508,7 @@ class _HoldingDetailScreenState extends State<HoldingDetailScreen> {
               child: Column(
                 children: [
                   for (final (i, entry) in detail.txns.indexed) ...[
-                    if (i > 0) Divider(height: 1, color: context.c.line),
+                    if (i > 0) Divider(height: 1, color: c.ln),
                     LedgerRow(
                       entry: entry,
                       busy: _busy.contains(entry.transactionId) || _busy.contains(entry.txnId),
@@ -519,13 +520,17 @@ class _HoldingDetailScreenState extends State<HoldingDetailScreen> {
               ),
             ),
           const SizedBox(height: 24),
+          // Destructive (§7.1): transparent, crit text, critSoft border, trash.
           OutlinedButton.icon(
             style: OutlinedButton.styleFrom(
-              foregroundColor: context.c.debit,
-              side: BorderSide(color: context.c.debit.withValues(alpha: .4)),
+              minimumSize: const Size(64, 48),
+              backgroundColor: Colors.transparent,
+              foregroundColor: c.crit,
+              side: BorderSide(color: c.critSoft),
+              textStyle: const TextStyle(fontFamily: Ds.sans, fontSize: 15, fontWeight: FontWeight.w600),
             ),
             onPressed: _delete,
-            icon: const Icon(Icons.delete_outline, size: 18),
+            icon: const DsIcon(DsIcons.trash, size: 18),
             label: const Text('Remove fund'),
           ),
         ],
@@ -533,6 +538,13 @@ class _HoldingDetailScreenState extends State<HoldingDetailScreen> {
     );
   }
 }
+
+/// The 40 h secondary button used for row and section actions.
+final ButtonStyle _smallButton = OutlinedButton.styleFrom(
+  minimumSize: const Size(0, 40),
+  padding: const EdgeInsets.symmetric(horizontal: 14),
+  textStyle: const TextStyle(fontFamily: Ds.sans, fontSize: 14, fontWeight: FontWeight.w600),
+);
 
 class _Header extends StatelessWidget {
   const _Header({required this.holding});
@@ -548,13 +560,18 @@ class _Header extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(h.schemeName, style: TextStyle(fontSize: 13, height: 1.35, fontWeight: FontWeight.w600, color: c.ink70)),
+          const DsLabel('Fund detail'),
+          const SizedBox(height: 4),
+          Text(
+            h.schemeName,
+            style: TextStyle(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx),
+          ),
           const SizedBox(height: 2),
           Text(
             [if (h.fundHouse != null) h.fundHouse!, h.categoryLabel].join(' · '),
-            style: TextStyle(fontSize: 12, color: c.muted),
+            style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Wrap(
             spacing: 6,
             runSpacing: 6,
@@ -564,28 +581,31 @@ class _Header extends StatelessWidget {
               if (h.folio != null) FundTag('Folio ${h.folio}'),
             ],
           ),
-          const SizedBox(height: 14),
-          Text('VALUE TODAY', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 1, color: c.muted)),
+          const SizedBox(height: 16),
+          Divider(height: 1, color: c.ln),
+          const SizedBox(height: 16),
+          const DsLabel('Value today'),
+          const SizedBox(height: 2),
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
             child: Text(
               formatMoney(h.valueMinor),
-              style: kNum.copyWith(fontSize: 28, fontWeight: FontWeight.w800, color: c.ink),
+              style: kNum.copyWith(fontSize: 28, height: 34 / 28, fontWeight: FontWeight.w600, letterSpacing: -0.56, color: c.tx),
             ),
           ),
-          const SizedBox(height: 2),
+          const SizedBox(height: 4),
           Wrap(
             spacing: 12,
             runSpacing: 2,
             children: [
               Text(
                 '${signedMoneyShort(h.gainMinor)} (${fundPercent(h.gainPercent, signed: true)}) overall',
-                style: kNum.copyWith(fontSize: 12.5, fontWeight: FontWeight.w800, color: gainColor(c, h.gainMinor)),
+                style: kNum.copyWith(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w600, color: gainColor(c, h.gainMinor)),
               ),
               Text(
                 '${signedMoneyShort(h.dayChangeMinor)} (${fundPercent(h.dayChangePercent, signed: true, digits: 2)}) today',
-                style: kNum.copyWith(fontSize: 12.5, fontWeight: FontWeight.w700, color: gainColor(c, h.dayChangeMinor)),
+                style: kNum.copyWith(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: gainColor(c, h.dayChangeMinor)),
               ),
             ],
           ),
@@ -593,7 +613,7 @@ class _Header extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               'NAV ₹${nav.nav.toStringAsFixed(4)} on ${formatIsoLongDate(nav.day)}',
-              style: TextStyle(fontSize: 11.5, color: c.muted),
+              style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3),
             ),
           ],
         ],
@@ -618,24 +638,27 @@ class _SparklineCard extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: Text('NAV over the year', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: c.ink)),
+                child: Text(
+                  'NAV over the year',
+                  style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
+                ),
               ),
               if (change != null)
                 Text(
                   fundPercent(change, signed: true),
-                  style: kNum.copyWith(fontSize: 13, fontWeight: FontWeight.w800, color: gainColor(c, change)),
+                  style: kNum.copyWith(fontSize: 14, fontWeight: FontWeight.w600, color: gainColor(c, change)),
                 ),
             ],
           ),
-          const SizedBox(height: 10),
-          NavSparkline(points: points),
+          const SizedBox(height: 12),
+          NavSparkline(points: points, height: 120),
           if (points.length >= 2) ...[
             const SizedBox(height: 6),
             Row(
               children: [
-                Text(formatIsoLongDate(points.first.day), style: TextStyle(fontSize: 11, color: c.muted)),
+                Text(formatIsoLongDate(points.first.day), style: kNum.copyWith(fontSize: 11, height: 14 / 11, color: c.tx3)),
                 const Spacer(),
-                Text(formatIsoLongDate(points.last.day), style: TextStyle(fontSize: 11, color: c.muted)),
+                Text(formatIsoLongDate(points.last.day), style: kNum.copyWith(fontSize: 11, height: 14 / 11, color: c.tx3)),
               ],
             ),
           ],
@@ -700,31 +723,36 @@ class _PeersCard extends StatelessWidget {
       return FundCard(
         child: Text(
           'No category to compare it with: too few similar funds, or it is too young for a 1-year return.',
-          style: TextStyle(fontSize: 12.5, height: 1.45, color: c.muted),
+          style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
         ),
       );
     }
 
-    final head = TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: c.muted);
+    final head = TextStyle(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w600, color: c.tx2);
+    final divider = BoxDecoration(border: Border(top: BorderSide(color: c.ln)));
     TableRow row(String label, double? own, PeerStats stats, bool basis) {
-      final cell = kNum.copyWith(fontSize: 13, fontWeight: basis ? FontWeight.w800 : FontWeight.w600, color: c.ink);
+      final cell = kNum.copyWith(fontSize: 14, fontWeight: basis ? FontWeight.w600 : FontWeight.w400, color: c.tx);
       final median = stats.medianPercent;
-      final ownColour = own == null || median == null ? c.ink : (own >= median ? c.credit : c.debit);
-      return TableRow(children: [
+      final ownColour = own == null || median == null ? c.tx : (own >= median ? c.good : c.crit);
+      return TableRow(decoration: divider, children: [
         Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Text(label, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: c.ink70)),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Text(label, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: c.tx2)),
         ),
         Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Text(fundPercent(own), textAlign: TextAlign.right, style: cell.copyWith(color: ownColour)),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Text(
+            fundPercent(own),
+            textAlign: TextAlign.right,
+            style: cell.copyWith(color: ownColour, fontWeight: FontWeight.w600),
+          ),
         ),
         Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
+          padding: const EdgeInsets.symmetric(vertical: 10),
           child: Text(fundPercent(median), textAlign: TextAlign.right, style: cell),
         ),
         Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
+          padding: const EdgeInsets.symmetric(vertical: 10),
           child: Text(fundPercent(stats.averagePercent), textAlign: TextAlign.right, style: cell),
         ),
       ]);
@@ -740,7 +768,7 @@ class _PeersCard extends StatelessWidget {
             columnWidths: const {0: FlexColumnWidth(1.1), 1: FlexColumnWidth(1.2), 2: FlexColumnWidth(1.2), 3: FlexColumnWidth(1.2)},
             children: [
               TableRow(children: [
-                Text('Return', style: head),
+                Padding(padding: const EdgeInsets.only(bottom: 8), child: Text('Return', style: head)),
                 Text('This fund', textAlign: TextAlign.right, style: head),
                 Text('Median', textAlign: TextAlign.right, style: head),
                 Text('Average', textAlign: TextAlign.right, style: head),
@@ -751,28 +779,28 @@ class _PeersCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           if (rank != null)
-            Text.rich(
-              TextSpan(children: [
-                TextSpan(
-                  text: rankLine(rank),
-                  style: kNum.copyWith(fontSize: 14, fontWeight: FontWeight.w800, color: c.ink),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                DsBadge(rankLine(rank), tone: rank.percentile >= 50 ? DsTone.good : DsTone.crit),
+                Text(
+                  'on $basisName returns · beats ${rank.percentile}% of its category',
+                  style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx2),
                 ),
-                TextSpan(
-                  text: ' on $basisName returns · beats ${rank.percentile}% of its category',
-                  style: TextStyle(fontSize: 12.5, color: c.ink70),
-                ),
-              ]),
+              ],
             )
           else
             Text(
               'Too young to rank: a rank needs at least a 1-year return.',
-              style: TextStyle(fontSize: 12.5, color: c.muted),
+              style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
             ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 8),
           Text(
             '${peers.threeYear.count > 0 ? peers.threeYear.count : peers.oneYear.count} funds in the category. '
             'Returns are a year, compounded, from NAVs alone.',
-            style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
+            style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
           ),
         ],
       ),
@@ -803,19 +831,21 @@ class _TermsCard extends StatelessWidget {
     final sip = holding.sip;
     final opening = holding.opening;
 
-    Widget line(IconData icon, String title, String body, String action, VoidCallback? onTap, {bool busy = false}) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
+    Widget line(Object icon, String title, String body, String action, VoidCallback? onTap,
+        {bool busy = false, bool last = false}) {
+      return Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(border: last ? null : Border(bottom: BorderSide(color: c.ln))),
         child: Row(
           children: [
-            Icon(icon, size: 18, color: c.muted),
-            const SizedBox(width: 10),
+            DsIconTile(icon),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: c.ink)),
-                  Text(body, style: TextStyle(fontSize: 12, height: 1.35, color: c.muted)),
+                  Text(title, style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx)),
+                  Text(body, style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx3)),
                 ],
               ),
             ),
@@ -832,11 +862,11 @@ class _TermsCard extends StatelessWidget {
     }
 
     return FundCard(
-      padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+      padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
       child: Column(
         children: [
           line(
-            Icons.event_repeat_outlined,
+            DsIcons.repeat,
             'SIP',
             sip == null
                 ? 'None set'
@@ -850,7 +880,7 @@ class _TermsCard extends StatelessWidget {
             onEditSip,
           ),
           line(
-            Icons.account_balance_wallet_outlined,
+            DsIcons.banknote,
             'Units already held',
             opening == null
                 ? 'None set'
@@ -860,7 +890,7 @@ class _TermsCard extends StatelessWidget {
             onEditOpening,
           ),
           line(
-            Icons.link,
+            DsIcons.link,
             'SIP commitment',
             holding.commitmentId == null
                 ? 'Not connected. Connect one and its matched debits count as instalments.'
@@ -868,6 +898,7 @@ class _TermsCard extends StatelessWidget {
             holding.commitmentId == null ? 'Connect' : 'Disconnect',
             holding.commitmentId == null ? onConnect : onDisconnect,
             busy: commitmentBusy,
+            last: true,
           ),
         ],
       ),
@@ -895,12 +926,12 @@ class LedgerRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final icon = switch (entry.kind) {
-      FundTxnKind.opening => Icons.inventory_2_outlined,
-      FundTxnKind.sipScheduled => Icons.event_repeat_outlined,
-      FundTxnKind.linked => Icons.link,
-      FundTxnKind.redeem => Icons.remove_circle_outline,
-      _ => Icons.add_circle_outline,
+    final (Object icon, DsTone tone) = switch (entry.kind) {
+      FundTxnKind.opening => (Icons.inventory_2_outlined, DsTone.neutral),
+      FundTxnKind.sipScheduled => (DsIcons.repeat, DsTone.ac),
+      FundTxnKind.linked => (DsIcons.link, DsTone.ac),
+      FundTxnKind.redeem => (DsIcons.arrowDownLeft, DsTone.good),
+      _ => (DsIcons.plus, DsTone.neutral),
     };
     final nav = entry.nav;
     final detail = [
@@ -912,50 +943,53 @@ class LedgerRow extends StatelessWidget {
     final amount = entry.kind == FundTxnKind.redeem ? '−${formatMoney(entry.amountMinor)}' : formatMoney(entry.amountMinor);
 
     final row = Padding(
-      padding: EdgeInsets.fromLTRB(12, 10, onUnlink != null || onDelete != null ? 0 : 12, 10),
+      padding: EdgeInsets.fromLTRB(16, 12, onUnlink != null || onDelete != null ? 4 : 16, 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(padding: const EdgeInsets.only(top: 1), child: Icon(icon, size: 18, color: c.muted)),
-          const SizedBox(width: 10),
+          DsIconTile(icon, tone: tone, size: 36),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title(entry), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: c.ink)),
-                Text(detail, style: TextStyle(fontSize: 11.5, height: 1.35, color: c.muted)),
+                Text(title(entry), style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx)),
+                Text(detail, style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3)),
                 if (entry.pending) ...[
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 6),
                   const FundTag('Waiting for NAV', tone: TagTone.warn),
                 ] else if (entry.note != null && (!entry.counted || entry.inSkippedMonth || entry.differsFromPlan)) ...[
                   const SizedBox(height: 2),
-                  Text(entry.note!, style: TextStyle(fontSize: 11.5, fontStyle: FontStyle.italic, color: c.muted)),
+                  Text(entry.note!, style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3)),
                 ],
               ],
             ),
           ),
           const SizedBox(width: 8),
-          Text(
-            entry.amountMinor > 0 || entry.kind != FundTxnKind.redeem ? amount : '${entry.units.toStringAsFixed(3)} u',
-            style: kNum.copyWith(fontSize: 13, fontWeight: FontWeight.w700, color: c.ink),
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Text(
+              entry.amountMinor > 0 || entry.kind != FundTxnKind.redeem ? amount : '${entry.units.toStringAsFixed(3)} u',
+              style: kNum.copyWith(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w600, color: c.tx),
+            ),
           ),
           if (busy)
             const Padding(
-              padding: EdgeInsets.fromLTRB(12, 0, 12, 0),
+              padding: EdgeInsets.fromLTRB(12, 2, 12, 0),
               child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
             )
           else if (onUnlink != null)
             IconButton(
               tooltip: 'Unlink',
               visualDensity: VisualDensity.compact,
-              icon: Icon(Icons.link_off, size: 18, color: c.muted),
+              icon: Icon(Icons.link_off, size: 18, color: c.tx3),
               onPressed: onUnlink,
             )
           else if (onDelete != null)
             IconButton(
               tooltip: 'Remove',
               visualDensity: VisualDensity.compact,
-              icon: Icon(Icons.delete_outline, size: 18, color: c.muted),
+              icon: DsIcon(DsIcons.trash, size: 18, color: c.tx3),
               onPressed: onDelete,
             ),
         ],
@@ -1044,21 +1078,22 @@ class _EditTermsScreenState extends State<_EditTermsScreen> {
   Widget build(BuildContext context) {
     final c = context.c;
     return Scaffold(
-      backgroundColor: c.paper,
+      backgroundColor: c.bg,
       appBar: AppBar(
         title: Text(
           _isSip ? (_exists ? 'Edit SIP' : 'Add a SIP') : (_exists ? 'Units already held' : 'Add units already held'),
-          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: c.ink),
         ),
-        shape: Border(bottom: BorderSide(color: c.line)),
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 32),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
         children: [
-          Text(shortSchemeName(widget.holding.schemeName), style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: c.ink)),
+          Text(
+            shortSchemeName(widget.holding.schemeName),
+            style: TextStyle(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx),
+          ),
           const SizedBox(height: 12),
           ToggleSection(
-            icon: _isSip ? Icons.event_repeat_outlined : Icons.account_balance_wallet_outlined,
+            icon: _isSip ? DsIcons.repeat : DsIcons.banknote,
             title: _isSip ? 'SIP' : 'Units already held',
             subtitle: _isSip ? 'An amount each month on the same day, with any changes along the way.' : 'From a statement, as of a day.',
             on: true,
@@ -1067,13 +1102,13 @@ class _EditTermsScreenState extends State<_EditTermsScreen> {
                 ? SipFields(fields: _fields, showActive: _exists, onChanged: () => setState(() {}))
                 : OpeningFields(fields: _fields, onChanged: () => setState(() {})),
           ),
-          const SizedBox(height: 14),
-          TextField(controller: _fields.folio, decoration: const InputDecoration(labelText: 'Folio number (optional)')),
+          const SizedBox(height: 16),
+          LabelledField(label: 'Folio number (optional)', controller: _fields.folio),
           if (_error != null) ...[
             const SizedBox(height: 12),
-            Text(_error!, style: TextStyle(fontSize: 12.5, height: 1.4, color: c.debit)),
+            DsCallout(tone: DsTone.crit, title: _error!),
           ],
-          const SizedBox(height: 18),
+          const SizedBox(height: 20),
           FilledButton(
             onPressed: _saving ? null : _save,
             child: _saving
@@ -1082,17 +1117,19 @@ class _EditTermsScreenState extends State<_EditTermsScreen> {
           ),
           if (_exists) ...[
             const SizedBox(height: 8),
-            TextButton(
-              style: TextButton.styleFrom(foregroundColor: c.debit),
+            TextButton.icon(
+              style: TextButton.styleFrom(foregroundColor: c.crit, minimumSize: const Size(48, 48)),
               onPressed: _saving ? null : () => _send({if (_isSip) 'sip': null else 'opening': null}),
-              child: Text(_isSip ? 'Remove the SIP' : 'Remove the units held'),
+              icon: const DsIcon(DsIcons.trash, size: 18),
+              label: Text(_isSip ? 'Remove the SIP' : 'Remove the units held'),
             ),
             Text(
               _isSip
                   ? 'Removing it drops every scheduled instalment. To keep what went in, turn off "Still running" '
                       'instead.'
                   : 'Removing it takes those units off the fund. Linked payments and SIP instalments stay.',
-              style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
             ),
           ],
         ],
@@ -1173,15 +1210,12 @@ class _ManualEntryDialogState extends State<_ManualEntryDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(value: FundTxnKind.manualBuy, label: Text('Bought')),
-                  ButtonSegment(value: FundTxnKind.redeem, label: Text('Redeemed')),
-                ],
-                selected: {_kind},
-                onSelectionChanged: (choice) => setState(() => _kind = choice.first),
+              DsSegmented<String>(
+                segments: const [(FundTxnKind.manualBuy, 'Bought'), (FundTxnKind.redeem, 'Redeemed')],
+                selected: _kind,
+                onChanged: (kind) => setState(() => _kind = kind),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
               DateField(
                 label: 'On',
                 value: _on,
@@ -1190,28 +1224,29 @@ class _ManualEntryDialogState extends State<_ManualEntryDialog> {
                   if (picked != null) setState(() => _on = picked);
                 },
               ),
-              const SizedBox(height: 10),
-              TextField(
+              const SizedBox(height: 14),
+              LabelledField(
+                label: 'Amount',
                 controller: _amount,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Amount', prefixText: '₹ '),
+                prefix: '₹ ',
               ),
-              const SizedBox(height: 10),
-              TextField(
+              const SizedBox(height: 14),
+              LabelledField(
+                label: 'Units (optional)',
                 controller: _units,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Units (optional)'),
               ),
               const SizedBox(height: 8),
               Text(
                 _kind == FundTxnKind.redeem
                     ? 'Redeeming everything? Give the units. Gains on what you sold show as realised.'
                     : 'For a purchase SpendLog never saw. If the payment is in your transactions, link it instead.',
-                style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
+                style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
               ),
               if (_error != null) ...[
-                const SizedBox(height: 8),
-                Text(_error!, style: TextStyle(fontSize: 12, height: 1.4, color: c.debit)),
+                const SizedBox(height: 12),
+                DsCallout(tone: DsTone.crit, title: _error!),
               ],
             ],
           ),

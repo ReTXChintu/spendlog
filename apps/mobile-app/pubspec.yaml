@@ -30,6 +30,9 @@ dependencies:
   path_provider: ^2.1.4
   open_filex: ^4.5.0
   flutter_contacts: ^2.5.0
+  # The design's own icon set (docs/design-assets/icons), drawn from its
+  # path data in lib/widgets/ds/ds_glyphs.g.dart.
+  flutter_svg: ^2.2.0
   firebase_core: ^4.15.0
   firebase_messaging: ^16.7.0
   flutter_appauth: ^12.1.0
@@ -45,6 +48,26 @@ flutter:
   assets:
     - assets/app_icon.png
     - assets/logo_full.png
+
+  # IBM Plex, bundled so the app looks right offline (SIL OFL 1.1; the
+  # licence is in assets/fonts/OFL.txt). Static TTFs from IBM/plex.
+  fonts:
+    - family: IBM Plex Sans
+      fonts:
+        - asset: assets/fonts/IBMPlexSans-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/IBMPlexSans-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/IBMPlexSans-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/IBMPlexSans-Bold.ttf
+          weight: 700
+    - family: IBM Plex Mono
+      fonts:
+        - asset: assets/fonts/IBMPlexMono-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/IBMPlexMono-Medium.ttf
+          weight: 500
 
 # Generates the native Android/iOS launcher icons from the brand asset.
 # Run after `flutter create .`:  dart run flutter_launcher_icons

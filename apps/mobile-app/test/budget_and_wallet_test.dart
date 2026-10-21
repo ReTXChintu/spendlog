@@ -605,9 +605,9 @@ void main() {
       expect(find.text('Set a credit limit'), findsNothing);
       final context = tester.element(find.byType(WalletSection));
       final line = tester.widget<Text>(find.text('₹95,000 of ₹1,00,000 used · ₹5,000 available'));
-      expect(line.style?.color, context.c.debit);
+      expect(line.style?.color, context.c.crit);
       final bill = tester.widget<Text>(find.text('Bill ₹80,000 due 12 Oct · in 2 days · ₹15,000 spent since statement'));
-      expect(bill.style?.color, context.c.debit);
+      expect(bill.style?.color, context.c.crit);
     });
 
     for (final brightness in Brightness.values) {

@@ -7,7 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:spendlog/screens/login_screen.dart';
 import 'package:spendlog/services/api_client.dart';
 import 'package:spendlog/services/auth_service.dart';
-import 'package:spendlog/theme.dart';
+import 'package:spendlog/widgets/ds/ds.dart';
 
 /// Stands in for the browser tab AppAuth opens at the identity server.
 class _FakeAuthenticator implements OidcAuthenticator {
@@ -128,7 +128,7 @@ void main() {
 
     expect(fake.signIns, 1);
     expect(find.text('Sign in with your account'), findsOneWidget);
-    expect(find.byIcon(Icons.error_outline), findsNothing);
+    expect(find.byType(DsAlertCard), findsNothing);
   });
 
   testWidgets('the kid path is untouched: email and password to /kid/login', (tester) async {

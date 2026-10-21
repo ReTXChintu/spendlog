@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../models/fund_models.dart';
 import '../../services/api_client.dart';
-import '../../theme.dart';
+import '../../widgets/ds/ds.dart';
 import '../../utils/format.dart';
 import '../../widgets/funds/fund_text.dart';
 import '../../widgets/funds/fund_widgets.dart';
@@ -209,33 +209,41 @@ class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerP
       0 when _portfolio != null && !_portfolio!.isEmpty => FloatingActionButton.extended(
           heroTag: 'add-fund',
           onPressed: _addFund,
-          icon: const Icon(Icons.add),
+          icon: const DsIcon(DsIcons.plus, size: 20),
           label: const Text('Add fund'),
         ),
       1 when _goals != null && _goals!.goals.isNotEmpty => FloatingActionButton.extended(
           heroTag: 'add-goal',
           onPressed: _editGoal,
-          icon: const Icon(Icons.flag_outlined),
+          icon: const DsIcon(DsIcons.target, size: 20),
           label: const Text('Add goal'),
         ),
       _ => null,
     };
 
     return Scaffold(
-      backgroundColor: c.paper,
+      backgroundColor: c.bg,
       appBar: AppBar(
-        title: Text('Investments', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: c.ink)),
-        shape: Border(bottom: BorderSide(color: c.line)),
-        bottom: TabBar(
-          controller: _tabs,
-          labelColor: c.brandDark,
-          unselectedLabelColor: c.muted,
-          indicatorColor: c.brand,
-          indicatorSize: TabBarIndicatorSize.label,
-          dividerColor: Colors.transparent,
-          labelStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
-          unselectedLabelStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
-          tabs: const [Tab(text: 'Portfolio', height: 42), Tab(text: 'Goals', height: 42), Tab(text: 'Advice', height: 42)],
+        title: const Text('Investments'),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(56),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            // The tab controller still drives the pages, so swiping works;
+            // this is just the system's one tab style.
+            child: AnimatedBuilder(
+              animation: _tabs,
+              builder: (context, _) => DsSegmented<int>(
+                height: 32,
+                segments: const [(0, 'Portfolio'), (1, 'Goals'), (2, 'Advice')],
+                selected: _tabs.index,
+                onChanged: (index) {
+                  _tabs.animateTo(index);
+                  setState(() {});
+                },
+              ),
+            ),
+          ),
         ),
       ),
       floatingActionButton: fab,
@@ -269,7 +277,7 @@ class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerP
           },
         );
       }
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: DsSpinner());
     }
 
     if (portfolio.isEmpty) {
@@ -281,7 +289,7 @@ class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerP
               ConstrainedBox(
                 constraints: BoxConstraints(minHeight: constraints.maxHeight),
                 child: StateBlock(
-                  icon: Icons.savings_outlined,
+                  icon: DsIcons.piggyBank,
                   title: 'Track your mutual funds',
                   body: 'Add the funds you invest in - a SIP, units you already hold, or both. See what they are '
                       'worth every day, how each does against its category, and which need a look.',
@@ -299,11 +307,15 @@ class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerP
     return RefreshIndicator(
       onRefresh: _reloadAll,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 96),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
         children: [
           if (portfolio.stale || portfolio.error != null) ...[
+            // Stale data is a neutral notice with a way to try again (§7.11).
             FundBanner(
-              icon: Icons.schedule,
+              icon: DsIcons.refresh,
+              tone: TagTone.neutral,
+              actionLabel: 'Retry',
+              onTap: _reloadAll,
               text: [
                 portfolio.lastNavDate == null
                     ? 'No NAVs yet'
@@ -320,8 +332,8 @@ class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerP
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text('Allocation', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: c.ink)),
-                  const SizedBox(height: 10),
+                  const FundSectionHeader(title: 'Allocation'),
+                  const SizedBox(height: 12),
                   AllocationBar(slices: portfolio.allocation),
                 ],
               ),
@@ -330,7 +342,7 @@ class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerP
           if (!_links.isEmpty) ...[
             const SizedBox(height: 12),
             FundBanner(
-              icon: Icons.link,
+              icon: DsIcons.link,
               tone: TagTone.brand,
               text: _linksBannerText(_links),
               actionLabel: 'Review',
@@ -341,27 +353,24 @@ class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerP
             const SizedBox(height: 12),
             const RanksComingNote(),
           ],
-          const SizedBox(height: 20),
+          const SizedBox(height: 24),
           FundSectionHeader(
             title: 'Funds',
             count: portfolio.holdings.length,
             trailing: flagged == 0
                 ? null
-                : Text(
-                    '$flagged need${flagged == 1 ? 's' : ''} a look',
-                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: c.warn),
-                  ),
+                : DsBadge('$flagged need${flagged == 1 ? 's' : ''} a look', tone: DsTone.warn),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           for (final (i, holding) in portfolio.holdings.indexed) ...[
-            if (i > 0) const SizedBox(height: 10),
+            if (i > 0) const SizedBox(height: kCardGap),
             HoldingCard(holding: holding, rules: portfolio.flagRules, onTap: () => _openHolding(holding.id)),
           ],
-          const SizedBox(height: 18),
+          const SizedBox(height: 16),
           Text(
             'NAVs are AMFI\'s, refreshed every day. XIRR is your own yearly return, counting when each rupee went '
             'in; it shows once a fund has three months of history. Category figures compare growth plans only.',
-            style: TextStyle(fontSize: 11.5, height: 1.5, color: c.muted),
+            style: TextStyle(fontSize: 12, height: 17 / 12, color: c.tx3),
           ),
         ],
       ),
@@ -397,42 +406,38 @@ class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerP
           },
         );
       }
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: DsSpinner());
     }
 
     final holdings = _portfolio?.holdings ?? const <FundHolding>[];
     return RefreshIndicator(
       onRefresh: _loadGoals,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 96),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
         children: [
           if (goals.goals.isEmpty) ...[
             FundCard(
-              padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
+              padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
               child: Column(
                 children: [
-                  Container(
-                    width: 52,
-                    height: 52,
-                    decoration: BoxDecoration(color: c.brand50, borderRadius: BorderRadius.circular(14)),
-                    child: Icon(Icons.flag_outlined, size: 26, color: c.brand),
-                  ),
-                  const SizedBox(height: 14),
+                  const DsIconTile(DsIcons.target, tone: DsTone.ac, size: 48, iconSize: 24),
+                  const SizedBox(height: 16),
                   Text(
                     'Save up for something',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: c.ink),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx),
                   ),
                   const SizedBox(height: 6),
                   Text(
                     'A laptop for ₹2,00,000 by next June? Add it, and see how much to put in each month, and '
                     'in what kind of fund, to have it on time.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 13.5, height: 1.5, color: c.ink70),
+                    style: TextStyle(fontSize: 15, height: 22 / 15, color: c.tx2),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 20),
                   FilledButton.icon(
                     onPressed: _editGoal,
-                    icon: const Icon(Icons.add, size: 18),
+                    icon: const DsIcon(DsIcons.plus, size: 18),
                     label: const Text('Add a goal'),
                   ),
                 ],
@@ -440,7 +445,7 @@ class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerP
             ),
           ] else
             for (final (i, goal) in goals.goals.indexed) ...[
-              if (i > 0) const SizedBox(height: 12),
+              if (i > 0) const SizedBox(height: kCardGap),
               GoalCard(
                 goal: goal,
                 holdings: holdings,
@@ -453,7 +458,7 @@ class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerP
           if (!goals.peersAvailable && goals.goals.isNotEmpty) ...[
             const SizedBox(height: 12),
             const FundBanner(
-              icon: Icons.leaderboard_outlined,
+              icon: DsIcons.barChart,
               tone: TagTone.neutral,
               text: 'Example funds for each plan come once category returns have been gathered.',
             ),
@@ -481,7 +486,7 @@ class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerP
           },
         );
       }
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: DsSpinner());
     }
     return AdviceView(
       response: advice,
@@ -510,43 +515,33 @@ class PortfolioHeader extends StatelessWidget {
     final t = portfolio.totals;
     final day = t.dayChangeMinor;
     return FundCard(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'CURRENT VALUE',
-            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 1, color: c.muted),
-          ),
-          const SizedBox(height: 2),
+          const DsLabel('Current value'),
+          const SizedBox(height: 4),
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
             child: Text(
               formatMoneyShort(t.valueMinor),
-              style: kNum.copyWith(fontSize: 32, fontWeight: FontWeight.w800, color: c.ink),
+              style: kNum.copyWith(
+                fontSize: 34,
+                height: 40 / 34,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.68,
+                color: c.tx,
+              ),
             ),
           ),
-          const SizedBox(height: 2),
-          Row(
-            children: [
-              Icon(
-                day > 0 ? Icons.arrow_upward : (day < 0 ? Icons.arrow_downward : Icons.remove),
-                size: 14,
-                color: gainColor(c, day),
-              ),
-              const SizedBox(width: 4),
-              Flexible(
-                child: Text(
-                  '${signedMoneyShort(day)} (${fundPercent(t.dayChangePercent, signed: true, digits: 2)}) today',
-                  style: kNum.copyWith(fontSize: 13, fontWeight: FontWeight.w700, color: gainColor(c, day)),
-                ),
-              ),
-            ],
+          const SizedBox(height: 4),
+          Text(
+            '${signedMoneyShort(day)} (${fundPercent(t.dayChangePercent, signed: true, digits: 2)}) today',
+            style: kNum.copyWith(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w600, color: gainColor(c, day)),
           ),
-          const SizedBox(height: 12),
-          Divider(height: 1, color: c.line),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
+          Divider(height: 1, color: c.ln),
+          const SizedBox(height: 16),
           StatGrid(cells: [
             StatCell(label: 'Invested', value: formatMoneyShort(t.investedMinor)),
             StatCell(
@@ -566,10 +561,10 @@ class PortfolioHeader extends StatelessWidget {
               value: t.monthlySipMinor > 0 ? formatMoneyShort(t.monthlySipMinor) : '—',
             ),
           ]),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
           Text(
             portfolio.lastNavDate == null ? 'No NAV yet' : 'NAV as of ${formatIsoLongDate(portfolio.lastNavDate!)}',
-            style: TextStyle(fontSize: 11.5, color: c.muted),
+            style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
           ),
         ],
       ),
@@ -618,7 +613,7 @@ class AdviceView extends StatelessWidget {
     return RefreshIndicator(
       onRefresh: onReload,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 32),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
         children: [
           if (!response.hasKey) ...[
             _NoKeyCard(onOpenSettings: onOpenSettings),
@@ -626,14 +621,15 @@ class AdviceView extends StatelessWidget {
           ],
           if (advice == null && response.hasKey)
             FundCard(
-              padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
+              padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
               child: Column(
                 children: [
-                  Icon(Icons.auto_awesome_outlined, size: 28, color: c.brand),
-                  const SizedBox(height: 10),
+                  const DsIconTile(DsIcons.sparkles, tone: DsTone.ac, size: 48, iconSize: 24),
+                  const SizedBox(height: 16),
                   Text(
                     'A second look at your funds',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: c.ink),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx),
                   ),
                   const SizedBox(height: 6),
                   Text(
@@ -643,12 +639,12 @@ class AdviceView extends StatelessWidget {
                         : 'Add a fund or a goal first: the advice works from what you hold and what you are '
                             'saving for.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 13, height: 1.5, color: c.ink70),
+                    style: TextStyle(fontSize: 15, height: 22 / 15, color: c.tx2),
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 20),
                   FilledButton.icon(
                     onPressed: busy ? null : onGet,
-                    icon: const Icon(Icons.auto_awesome, size: 18),
+                    icon: const DsIcon(DsIcons.sparkles, size: 18),
                     label: const Text('Get advice'),
                   ),
                 ],
@@ -657,47 +653,64 @@ class AdviceView extends StatelessWidget {
           if (advice != null)
             Row(
               children: [
+                const DsIconTile(DsIcons.sparkles, tone: DsTone.ac, size: 36),
+                const SizedBox(width: 12),
                 Expanded(
-                  child: Text(
-                    [if (made != null) made, if (response.model != null) response.model!].join(' · '),
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.muted),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'AI advice',
+                        style: TextStyle(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx),
+                      ),
+                      Text(
+                        [if (made != null) made, if (response.model != null) response.model!].join(' · '),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
+                      ),
+                    ],
                   ),
                 ),
                 TextButton.icon(
                   onPressed: busy || !response.hasKey ? null : onRefresh,
-                  icon: const Icon(Icons.refresh, size: 18),
+                  icon: const DsIcon(DsIcons.refresh, size: 18),
                   label: const Text('Refresh'),
                 ),
               ],
             ),
           if (busy) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             const LinearProgressIndicator(),
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             Text(
               'Reading your funds and goals. This can take up to half a minute.',
-              style: TextStyle(fontSize: 12, color: c.muted),
+              style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
             ),
           ],
           if (problem != null) ...[
-            const SizedBox(height: 10),
-            FundBanner(icon: Icons.error_outline, text: problem!),
+            const SizedBox(height: 12),
+            DsCallout(tone: DsTone.crit, title: problem!),
           ],
           if (advice != null) ..._adviceSections(context, advice),
           const SizedBox(height: 20),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(padding: const EdgeInsets.only(top: 1), child: Icon(Icons.info_outline, size: 14, color: c.muted)),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  advice?.disclaimer ?? kAdviceDisclaimer,
-                  key: const ValueKey('advice-disclaimer'),
-                  style: TextStyle(fontSize: 11.5, height: 1.5, color: c.muted),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(color: c.sunk, borderRadius: BorderRadius.circular(Ds.rLg)),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                DsIcon(DsIcons.info, size: 18, color: c.tx2),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    advice?.disclaimer ?? kAdviceDisclaimer,
+                    key: const ValueKey('advice-disclaimer'),
+                    style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -708,16 +721,16 @@ class AdviceView extends StatelessWidget {
     final c = context.c;
     return [
       if (advice.summary.isNotEmpty) ...[
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         FundCard(
-          child: Text(advice.summary, style: TextStyle(fontSize: 13.5, height: 1.55, color: c.ink)),
+          child: Text(advice.summary, style: TextStyle(fontSize: 15, height: 22 / 15, color: c.tx)),
         ),
       ],
-      const SizedBox(height: 20),
+      const SizedBox(height: 24),
       FundSectionHeader(title: 'Not performing well', count: advice.underperformers.length),
-      const SizedBox(height: 8),
+      const SizedBox(height: 12),
       if (advice.underperformers.isEmpty)
-        Text('Nothing stands out as lagging.', style: TextStyle(fontSize: 12.5, color: c.muted))
+        Text('Nothing stands out as lagging.', style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx2))
       else
         for (final item in advice.underperformers) ...[
           FundCard(
@@ -725,44 +738,53 @@ class AdviceView extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Padding(padding: const EdgeInsets.only(top: 1), child: Icon(Icons.trending_down, size: 17, color: c.warn)),
-                const SizedBox(width: 10),
+                const DsIconTile(Icons.trending_down, tone: DsTone.warn),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         shortSchemeName(item.schemeName),
-                        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: c.ink),
+                        style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
                       ),
                       const SizedBox(height: 2),
-                      Text(item.reason, style: TextStyle(fontSize: 12.5, height: 1.45, color: c.ink70)),
+                      Text(item.reason, style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2)),
                     ],
                   ),
                 ),
-                if (item.holdingId.isNotEmpty) Icon(Icons.chevron_right, size: 18, color: c.mutedLight),
+                if (item.holdingId.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 1),
+                    child: DsIcon(DsIcons.chevronRight, size: 18, color: c.tx3),
+                  ),
+                ],
               ],
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: kCardGap),
         ],
       if (advice.actions.isNotEmpty) ...[
         const SizedBox(height: 12),
         FundSectionHeader(title: 'What to do', count: advice.actions.length),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         for (final action in advice.actions) ...[
           FundCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 if (action.title.isNotEmpty)
-                  Text(action.title, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: c.ink)),
+                  Text(
+                    action.title,
+                    style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
+                  ),
                 if (action.detail.isNotEmpty) ...[
-                  const SizedBox(height: 3),
-                  Text(action.detail, style: TextStyle(fontSize: 12.5, height: 1.5, color: c.ink70)),
+                  const SizedBox(height: 4),
+                  Text(action.detail, style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx2)),
                 ],
                 if (action.amountMinor != null || action.category != null) ...[
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
                   Wrap(
                     spacing: 6,
                     runSpacing: 6,
@@ -775,19 +797,20 @@ class AdviceView extends StatelessWidget {
                 for (final fund in action.exampleFunds)
                   InkWell(
                     onTap: () => onExampleFund(fund),
+                    borderRadius: BorderRadius.circular(Ds.rMd),
                     child: Padding(
-                      padding: const EdgeInsets.only(top: 8),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
                       child: Row(
                         children: [
-                          Icon(Icons.north_east, size: 14, color: c.mutedLight),
+                          DsIcon(DsIcons.arrowUpRight, size: 16, color: c.tx3),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               shortSchemeName(fund.name),
-                              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: c.brandDark),
+                              style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w600, color: c.ac),
                             ),
                           ),
-                          Icon(Icons.add_circle_outline, size: 18, color: c.brand),
+                          DsIcon(DsIcons.plus, size: 18, color: c.ac),
                         ],
                       ),
                     ),
@@ -795,22 +818,35 @@ class AdviceView extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: kCardGap),
         ],
       ],
       if (advice.goals.isNotEmpty) ...[
         const SizedBox(height: 12),
         const FundSectionHeader(title: 'For your goals'),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         FundCard(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              for (final (i, line) in advice.goals.indexed) ...[
-                if (i > 0) const SizedBox(height: 10),
-                Text(line.name, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: c.ink)),
-                Text(line.line, style: TextStyle(fontSize: 12.5, height: 1.45, color: c.ink70)),
-              ],
+              for (final (i, line) in advice.goals.indexed)
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    border: i == 0 ? null : Border(top: BorderSide(color: c.ln)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        line.name,
+                        style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w600, color: c.tx),
+                      ),
+                      Text(line.line, style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx2)),
+                    ],
+                  ),
+                ),
             ],
           ),
         ),
@@ -829,33 +865,38 @@ class _NoKeyCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      decoration: BoxDecoration(color: c.warnBg, borderRadius: BorderRadius.circular(T.rMd)),
-      child: Column(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: c.warnSoft, borderRadius: BorderRadius.circular(Ds.rXl)),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(Icons.key_outlined, size: 17, color: c.warn),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
+          const DsIconTile(Icons.key_outlined, tone: DsTone.warn, onTinted: true, size: 36),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
                   'Advice needs a Gemini key',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: c.warn),
+                  style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.warn),
                 ),
-              ),
-            ],
+                const SizedBox(height: 4),
+                Text(
+                  'It runs on Google Gemini with a key of your own. Get one free from Google AI Studio, then paste it '
+                  'under Settings → You → AI assistant.',
+                  style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2),
+                ),
+                if (onOpenSettings != null) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton(
+                    onPressed: onOpenSettings,
+                    style: OutlinedButton.styleFrom(minimumSize: const Size(0, 40)),
+                    child: const Text('Go to Settings'),
+                  ),
+                ],
+              ],
+            ),
           ),
-          const SizedBox(height: 6),
-          Text(
-            'It runs on Google Gemini with a key of your own. Get one free from Google AI Studio, then paste it '
-            'under Settings → You → AI assistant.',
-            style: TextStyle(fontSize: 12.5, height: 1.5, color: c.ink70),
-          ),
-          if (onOpenSettings != null) ...[
-            const SizedBox(height: 10),
-            OutlinedButton(onPressed: onOpenSettings, child: const Text('Go to Settings')),
-          ],
         ],
       ),
     );

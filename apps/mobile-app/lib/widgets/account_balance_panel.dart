@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import 'ds/ds.dart';
 import '../utils/format.dart';
 
 /// What a bank account or cash should hold, from a balance typed in once.
@@ -92,12 +92,12 @@ class _AccountBalancePanelState extends State<AccountBalancePanel> {
 
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: c.paper,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
+        color: c.sf2,
+        border: Border.all(color: c.ln),
+        borderRadius: BorderRadius.circular(Ds.rLg),
       ),
       child: balance == null ? _prompt() : _tracked(balance),
     );
@@ -109,20 +109,20 @@ class _AccountBalancePanelState extends State<AccountBalancePanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _label('BALANCE'),
-        const SizedBox(height: 6),
+        const DsLabel('Balance'),
+        const SizedBox(height: 4),
         Text(
           widget.isCash
               ? "Add what's in your wallet, and SpendLog will keep track of what it should be — so a "
                   'missing transaction shows up.'
               : 'Add the balance your bank shows, and SpendLog will keep track of what it should be — '
                   'so a missing transaction shows up.',
-          style: TextStyle(fontSize: 12, height: 1.45, color: c.muted),
+          style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 12),
         OutlinedButton.icon(
           onPressed: _busy ? null : _setOpening,
-          icon: const Icon(Icons.add, size: 17),
+          icon: const DsIcon(DsIcons.plus, size: 18),
           label: const Text('Add the balance'),
         ),
       ],
@@ -135,68 +135,68 @@ class _AccountBalancePanelState extends State<AccountBalancePanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _label('SHOULD HAVE'),
-        const SizedBox(height: 5),
+        const DsLabel('Should have'),
+        const SizedBox(height: 4),
         Text(
           formatMoney(balance.expectedMinor),
           style: kNum.copyWith(
             fontSize: 22,
-            fontWeight: FontWeight.w800,
-            color: balance.expectedMinor < 0 ? c.debit : c.ink,
+            height: 28 / 22,
+            fontWeight: FontWeight.w600,
+            // Overdrawn is a problem; a balance is otherwise ink.
+            color: balance.expectedMinor < 0 ? c.crit : c.tx,
           ),
         ),
         if (balance.provisionalMinor > 0) ...[
           const SizedBox(height: 2),
           Text(
             'Includes ${formatMoney(balance.provisionalMinor)} not yet explained',
-            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: c.warn),
+            style: TextStyle(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w600, color: c.warn),
           ),
         ],
-        const SizedBox(height: 4),
-        Text(
-          [
-            '${formatMoney(balance.openingMinor)} on ${formatShortDate(balance.since)}',
-            '+${formatMoney(balance.inMinor)} in',
-            '−${formatMoney(balance.outMinor)} out',
-            '${balance.transactionCount} ${balance.transactionCount == 1 ? 'transaction' : 'transactions'}',
-          ].join(' · '),
-          style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
+        const SizedBox(height: 6),
+        Text.rich(
+          TextSpan(
+            style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3, fontFeatures: Ds.tabular),
+            children: [
+              TextSpan(text: '${formatMoney(balance.openingMinor)} on ${formatShortDate(balance.since)} · '),
+              TextSpan(text: '+${formatMoney(balance.inMinor)} in', style: TextStyle(color: c.good)),
+              const TextSpan(text: ' · '),
+              TextSpan(text: '−${formatMoney(balance.outMinor)} out', style: TextStyle(color: c.tx2)),
+              TextSpan(
+                text: ' · ${balance.transactionCount} '
+                    '${balance.transactionCount == 1 ? 'transaction' : 'transactions'}',
+              ),
+            ],
+          ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
         Wrap(
           spacing: 4,
           runSpacing: 4,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            FilledButton.tonal(
+            OutlinedButton(
               onPressed: _busy ? null : _check,
+              style: OutlinedButton.styleFrom(minimumSize: const Size(0, 40)),
               child: Text(widget.isCash ? 'Check against wallet' : 'Check against bank'),
             ),
             TextButton(onPressed: _busy ? null : _setOpening, child: const Text('Change')),
             TextButton(
               onPressed: _busy ? null : _remove,
-              style: TextButton.styleFrom(foregroundColor: c.debit),
+              style: TextButton.styleFrom(foregroundColor: c.crit),
               child: const Text('Remove'),
             ),
           ],
         ),
+        const SizedBox(height: 4),
         Text(
           'Counts every payment in and out of $_where since then, debit cards on it included.',
-          style: TextStyle(fontSize: 11, height: 1.4, color: c.mutedLight),
+          style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
         ),
       ],
     );
   }
-
-  Widget _label(String text) => Text(
-        text,
-        style: TextStyle(
-          fontSize: 9.5,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.6,
-          color: context.c.muted,
-        ),
-      );
 }
 
 /// Digits, one minus sign at the front, and a decimal point: a balance can
@@ -207,10 +207,8 @@ InputDecoration _amountDecoration(BuildContext context, String label) => InputDe
       labelText: label,
       prefixText: '₹ ',
       hintText: '0.00',
-      isDense: true,
-      prefixStyle: TextStyle(color: context.c.muted, fontWeight: FontWeight.w600),
+      prefixStyle: TextStyle(fontSize: 15, color: context.c.tx3, fontWeight: FontWeight.w500),
     );
-
 /// The instant a day ends in India: 23:59:59.999 IST, which is 18:29:59.999
 /// UTC. A balance read "at the end of the 3rd" already includes everything
 /// on the 3rd, and nothing after it.
@@ -294,14 +292,14 @@ class _OpeningDialogState extends State<_OpeningDialog> {
               autofocus: true,
               keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
               inputFormatters: [_signedAmount],
-              style: kNum.copyWith(fontWeight: FontWeight.w700),
+              style: kNum.copyWith(fontSize: 17, fontWeight: FontWeight.w600),
               decoration: _amountDecoration(
                 context,
                 widget.isCash ? 'In your wallet' : 'What your bank shows',
               ),
             ),
             const SizedBox(height: 14),
-            Text('As of', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: c.muted)),
+            const DsLabel('As of'),
             RadioGroup<_AsOf>(
               groupValue: _asOf,
               onChanged: (value) {
@@ -343,11 +341,11 @@ class _OpeningDialogState extends State<_OpeningDialog> {
             Text(
               '"Right now" means the figure already includes everything so far. Pick the end of a '
               'day for a figure off a statement or an older passbook entry.',
-              style: TextStyle(fontSize: 11.5, height: 1.45, color: c.muted),
+              style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
             ),
             if (_error != null) ...[
               const SizedBox(height: 8),
-              Text(_error!, style: TextStyle(fontSize: 12, color: c.debit)),
+              Text(_error!, style: TextStyle(fontSize: 12, height: 16 / 12, color: c.crit)),
             ],
           ],
         ),
@@ -396,7 +394,7 @@ class _CheckDialogState extends State<_CheckDialog> {
         children: [
           Text(
             'SpendLog expects ${formatMoney(widget.expectedMinor)}.',
-            style: TextStyle(fontSize: 12.5, color: c.muted),
+            style: TextStyle(fontSize: 15, height: 22 / 15, color: c.tx2),
           ),
           const SizedBox(height: 10),
           TextField(
@@ -405,7 +403,7 @@ class _CheckDialogState extends State<_CheckDialog> {
             keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
             inputFormatters: [_signedAmount],
             onChanged: (_) => setState(() {}),
-            style: kNum.copyWith(fontWeight: FontWeight.w700),
+            style: kNum.copyWith(fontSize: 17, fontWeight: FontWeight.w600),
             decoration: _amountDecoration(
               context,
               widget.isCash ? "What's in your wallet now" : 'What your bank shows now',
@@ -416,10 +414,10 @@ class _CheckDialogState extends State<_CheckDialog> {
             Text(
               describeBalanceCheck(expectedMinor: widget.expectedMinor, bankMinor: bankMinor),
               style: TextStyle(
-                fontSize: 12.5,
-                height: 1.45,
+                fontSize: 13,
+                height: 18 / 13,
                 fontWeight: FontWeight.w600,
-                color: matches ? c.credit : c.warn,
+                color: matches ? c.good : c.crit,
               ),
             ),
           ],

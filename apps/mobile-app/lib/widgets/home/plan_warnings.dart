@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/models.dart';
-import '../../theme.dart';
+import '../ds/ds.dart';
 import '../../utils/format.dart';
 
 /// The savings-plan rules being broken this month, near the top of Home so
@@ -21,7 +21,7 @@ class PlanWarnings extends StatelessWidget {
     final extra = warnings.length - _shown;
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.only(bottom: kCardGap),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -31,7 +31,7 @@ class PlanWarnings extends StatelessWidget {
               onTap: onOpenPlan,
               child: Text(
                 'and $extra more ${extra == 1 ? 'rule' : 'rules'} slipping - see the savings plan',
-                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: c.muted),
+                style: TextStyle(fontSize: 13, height: 18 / 13, fontWeight: FontWeight.w600, color: c.ac),
               ),
             ),
         ],
@@ -50,8 +50,8 @@ class _Warning extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     final over = rule.state == 'over';
-    final fg = over ? c.debit : c.warn;
-    final bg = over ? c.debit50 : c.warnBg;
+    final fg = over ? c.crit : c.warn;
+    final bg = over ? c.critSoft : c.warnSoft;
     final cap = rule.monthlyCapMinor;
     final spent = rule.spentMinor;
 
@@ -71,14 +71,14 @@ class _Warning extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(T.rSm),
+          borderRadius: BorderRadius.circular(Ds.rLg),
           child: Ink(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(T.rSm)),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(Ds.rLg)),
             child: Row(
               children: [
-                Icon(over ? Icons.error_outline : Icons.warning_amber_rounded, size: 17, color: fg),
-                const SizedBox(width: 10),
+                DsIcon(DsIcons.alertTriangle, size: 20, color: fg),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -87,17 +87,17 @@ class _Warning extends StatelessWidget {
                         rule.text,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 12.8, fontWeight: FontWeight.w700, color: fg),
+                        style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w600, color: fg),
                       ),
                       const SizedBox(height: 2),
                       Text(
                         rule.category == null ? status : '${rule.category} · $status',
-                        style: TextStyle(fontSize: 11.5, color: fg),
+                        style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx2),
                       ),
                     ],
                   ),
                 ),
-                Icon(Icons.chevron_right, size: 16, color: fg),
+                DsIcon(DsIcons.chevronRight, size: 16, color: fg),
               ],
             ),
           ),

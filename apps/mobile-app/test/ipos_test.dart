@@ -210,9 +210,9 @@ void main() {
         await tester.pumpAndSettle();
       }, () => _server(_mixed));
 
-      expect(find.text('OPEN NOW'), findsOneWidget);
-      expect(find.text('UPCOMING'), findsOneWidget);
-      expect(find.text('WAITING TO LIST'), findsOneWidget);
+      expect(find.text('Open now'), findsOneWidget);
+      expect(find.text('Upcoming'), findsOneWidget);
+      expect(find.text('Waiting to list'), findsOneWidget);
       expect(find.text('2'), findsNWidgets(2));
       expect(find.text('1'), findsOneWidget);
       expect(find.text('Acme Industries'), findsOneWidget);
@@ -228,7 +228,7 @@ void main() {
         await tester.pumpAndSettle();
       }, () => _server(_mixed));
 
-      const c = SpendColors.light;
+      const c = DsColors.light;
       Color? colourOf(String text) {
         final rich = tester.widget<RichText>(find.byWidgetPredicate(
           (w) => w is RichText && w.text.toPlainText().contains(text),
@@ -243,10 +243,10 @@ void main() {
 
       // Acme, and Waiting Works further down.
       expect(find.text("At today's GMP +₹1,350 (+9.1%) per lot"), findsNWidgets(2));
-      expect(colourOf('+₹1,350'), c.credit);
+      expect(colourOf('+₹1,350'), c.good);
 
       expect(find.text("At today's GMP −₹420 (−2.8%) per lot"), findsOneWidget);
-      expect(colourOf('−₹420'), c.debit);
+      expect(colourOf('−₹420'), c.crit);
 
       expect(find.text('GMP ₹0 · no premium today'), findsOneWidget);
       expect(find.text('No GMP yet'), findsOneWidget);
@@ -271,14 +271,14 @@ void main() {
       expect(find.text('Waiting Works'), findsOneWidget);
       expect(find.text('Acme Industries'), findsNothing);
       expect(find.text('Flat Co'), findsNothing);
-      expect(find.text('OPEN NOW'), findsNothing);
+      expect(find.text('Open now'), findsNothing);
 
       await tester.tap(find.text('Mainboard'));
       await tester.pumpAndSettle();
       expect(find.text('Acme Industries'), findsOneWidget);
       expect(find.text('Drop Ltd'), findsOneWidget);
       expect(find.text('Tiny Tools SME'), findsNothing);
-      expect(find.text('WAITING TO LIST'), findsNothing);
+      expect(find.text('Waiting to list'), findsNothing);
 
       await tester.tap(find.text('All'));
       await tester.pumpAndSettle();

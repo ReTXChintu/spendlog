@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import '../widgets/ds/ds.dart';
 
 /// Joins a trip by scanning the owner's code, or typing it.
 ///
@@ -56,111 +56,100 @@ class _JoinTripScreenState extends State<JoinTripScreen> {
     final c = context.c;
 
     return Scaffold(
-      backgroundColor: c.paper,
-      appBar: AppBar(
-        title: Text(
-          'Join a trip',
-          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: c.ink),
-        ),
-        shape: Border(bottom: BorderSide(color: c.line)),
-      ),
+      backgroundColor: c.bg,
+      appBar: AppBar(title: const Text('Join a trip')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+        padding: kPagePad,
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(T.rMd),
-            child: SizedBox(
-              height: 280,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  MobileScanner(
-                    controller: _scanner,
-                    onDetect: (capture) {
-                      final code = capture.barcodes.firstOrNull?.rawValue;
-                      if (code != null) _join(code);
-                    },
-                    errorBuilder: (context, error) => Container(
-                      color: c.chipNeutral,
-                      padding: const EdgeInsets.all(20),
-                      alignment: Alignment.center,
-                      child: Text(
-                        'The camera is not available. Type the code instead.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 12.5, color: c.muted),
-                      ),
+          Container(
+            height: 280,
+            decoration: BoxDecoration(
+              border: Border.all(color: c.ln),
+              borderRadius: BorderRadius.circular(Ds.rXl),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                MobileScanner(
+                  controller: _scanner,
+                  onDetect: (capture) {
+                    final code = capture.barcodes.firstOrNull?.rawValue;
+                    if (code != null) _join(code);
+                  },
+                  errorBuilder: (context, error) => Container(
+                    color: c.sunk,
+                    padding: const EdgeInsets.all(20),
+                    alignment: Alignment.center,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const DsIconTile(DsIcons.alertTriangle, tone: DsTone.neutral, onTinted: true),
+                        const SizedBox(height: 8),
+                        Text(
+                          'The camera is not available. Type the code instead.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2),
+                        ),
+                      ],
                     ),
                   ),
-                  if (_joining)
-                    Container(
-                      color: Colors.black54,
-                      alignment: Alignment.center,
-                      child: const CircularProgressIndicator(),
-                    ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            'Point it at the code on their phone.',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12, color: c.muted),
-          ),
-          const SizedBox(height: 22),
-          Text(
-            'OR TYPE IT',
-            style: TextStyle(
-              fontSize: 10.5,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.5,
-              color: c.muted,
+                ),
+                if (_joining)
+                  Container(
+                    color: c.scrim,
+                    alignment: Alignment.center,
+                    child: const DsSpinner(),
+                  ),
+              ],
             ),
           ),
           const SizedBox(height: 8),
+          Text(
+            'Point it at the code on their phone.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
+          ),
+          const SizedBox(height: 24),
+          const DsLabel('Or type it', padding: EdgeInsets.only(bottom: 6)),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
                 child: TextField(
                   controller: _controller,
                   autocorrect: false,
                   textCapitalization: TextCapitalization.characters,
-                  style: kNum.copyWith(fontSize: 18, letterSpacing: 3, color: c.ink),
+                  // A join code is a machine string: Plex Mono, wide tracking.
+                  style: kMono.copyWith(fontSize: 18, letterSpacing: 18 * 0.12, color: c.tx),
                   decoration: InputDecoration(
                     hintText: 'ABC123',
-                    hintStyle: TextStyle(color: c.mutedLight, letterSpacing: 3),
-                    isDense: true,
-                    filled: true,
-                    fillColor: c.surface,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(T.rSm),
-                      borderSide: BorderSide(color: c.lineStrong),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(T.rSm),
-                      borderSide: BorderSide(color: c.brand),
-                    ),
+                    hintStyle: kMono.copyWith(fontSize: 18, letterSpacing: 18 * 0.12, color: c.tx3),
+                    errorText: _error == null ? null : '',
+                    errorStyle: const TextStyle(height: 0, fontSize: 0),
                   ),
                   onSubmitted: _join,
                 ),
               ),
-              const SizedBox(width: 10),
-              FilledButton(
-                onPressed: _joining ? null : () => _join(_controller.text),
-                child: const Text('Join'),
+              const SizedBox(width: 8),
+              SizedBox(
+                height: 54,
+                child: FilledButton(
+                  onPressed: _joining ? null : () => _join(_controller.text),
+                  child: const Text('Join'),
+                ),
               ),
             ],
           ),
           if (_error != null) ...[
-            const SizedBox(height: 14),
-            Text(_error!, style: TextStyle(fontSize: 12.5, color: c.debit)),
+            const SizedBox(height: 12),
+            DsCallout(title: _error!, tone: DsTone.crit),
           ],
-          const SizedBox(height: 18),
+          const SizedBox(height: 16),
           Text(
             'Joining shares this trip from now on. What you spent before it stays yours — you can '
             'add those payments afterwards if you want them counted.',
-            style: TextStyle(fontSize: 11.8, height: 1.5, color: c.mutedLight),
+            style: TextStyle(fontSize: 12, height: 17 / 12, color: c.tx3),
           ),
         ],
       ),

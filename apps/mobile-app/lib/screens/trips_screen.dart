@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import '../widgets/ds/ds.dart';
 import '../utils/format.dart';
 import '../widgets/state_block.dart';
 import 'join_trip_screen.dart';
@@ -197,11 +197,11 @@ class _TripsScreenState extends State<TripsScreen> {
     final active = _trips?.where((t) => t.isActive).firstOrNull;
 
     return Scaffold(
-      backgroundColor: c.paper,
+      backgroundColor: c.bg,
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+          padding: kPagePad,
           children: [
             _TripModeCard(
               active: active,
@@ -217,7 +217,7 @@ class _TripsScreenState extends State<TripsScreen> {
                         done: 'Trip ended.',
                       ),
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 20),
             if (_error)
               StateBlock(
                 icon: Icons.wifi_off,
@@ -230,7 +230,7 @@ class _TripsScreenState extends State<TripsScreen> {
             else if (_trips == null)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 40),
-                child: Center(child: CircularProgressIndicator()),
+                child: Center(child: DsSpinner()),
               )
             else if (_trips!.isEmpty)
               const StateBlock(
@@ -240,7 +240,8 @@ class _TripsScreenState extends State<TripsScreen> {
                     'together, so you can see what the whole thing cost rather than picking it out '
                     'of a month.',
               )
-            else
+            else ...[
+              const DsLabel('Your trips', padding: EdgeInsets.only(left: 2, bottom: 8)),
               for (final trip in _trips!)
                 _TripCard(
                   trip: trip,
@@ -258,6 +259,7 @@ class _TripsScreenState extends State<TripsScreen> {
                     done: 'Trip deleted. Every payment kept.',
                   ),
                 ),
+            ],
           ],
         ),
       ),
@@ -285,51 +287,56 @@ class _TripModeCard extends StatelessWidget {
     final c = context.c;
     final running = active != null;
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: running ? c.brand : c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
+    return DsCard(
+      color: running ? c.acSoft : c.sf,
+      borderColor: running ? c.acLine : c.ln,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            running ? 'TRIP MODE IS ON' : 'TRIP MODE IS OFF',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.5,
-              color: running ? c.brandDark : c.muted,
-            ),
-          ),
-          const SizedBox(height: 4),
-          if (running) ...[
-            Text(
-              active!.name,
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: c.ink),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              'Since ${formatDateTime(active!.startedAt)} · '
-              '${formatMoney(active!.totalMinor)} so far',
-              style: TextStyle(fontSize: 12.5, color: c.muted),
-            ),
-            if (active!.source?.linked ?? false) ...[
-              const SizedBox(height: 6),
-              Text(
-                "Planned in Trippin, so it runs on Trippin's dates. Ending it here works, "
-                "but Trippin's next change to the trip puts its dates back.",
-                style: TextStyle(fontSize: 12, height: 1.45, color: c.muted),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              DsIconTile(DsIcons.briefcase, tone: running ? DsTone.ac : DsTone.neutral, onTinted: running),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    DsLabel(
+                      running ? 'Trip mode is on' : 'Trip mode is off',
+                      color: running ? c.ac : c.tx3,
+                    ),
+                    const SizedBox(height: 2),
+                    if (running) ...[
+                      Text(
+                        active!.name,
+                        style: TextStyle(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Since ${formatDateTime(active!.startedAt)} · '
+                        '${formatMoney(active!.totalMinor)} so far',
+                        style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2, fontFeatures: Ds.tabular),
+                      ),
+                    ] else
+                      Text(
+                        'Start one and everything spent from now on goes onto it, until you end it.',
+                        style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2),
+                      ),
+                  ],
+                ),
               ),
             ],
-          ] else
+          ),
+          if (running && (active!.source?.linked ?? false)) ...[
+            const SizedBox(height: 12),
             Text(
-              'Start one and everything spent from now on goes onto it, until you end it.',
-              style: TextStyle(fontSize: 12.5, height: 1.45, color: c.muted),
+              "Planned in Trippin, so it runs on Trippin's dates. Ending it here works, "
+              "but Trippin's next change to the trip puts its dates back.",
+              style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
             ),
-          const SizedBox(height: 14),
+          ],
+          const SizedBox(height: 16),
           Row(
             children: [
               Expanded(
@@ -340,9 +347,10 @@ class _TripModeCard extends StatelessWidget {
                         child: const Text('Start a trip'),
                       ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               OutlinedButton(
                 onPressed: busy ? null : onJoin,
+                style: OutlinedButton.styleFrom(minimumSize: const Size(64, 48)),
                 child: const Text('Join one'),
               ),
             ],
@@ -387,205 +395,170 @@ class _TripCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    // The open trip is the selected list item: an accent tint and ring.
+    final selected = isOpen;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: kCardGap),
       decoration: BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: trip.isActive ? c.brand : c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
+        color: c.sf,
+        border: Border.all(color: selected ? c.acLine : c.ln),
+        borderRadius: BorderRadius.circular(Ds.rXl),
       ),
+      clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
-          GestureDetector(
-            onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                trip.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 14.5,
-                                  color: c.ink,
-                                ),
-                              ),
-                            ),
-                            if (trip.isActive) ...[
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: c.brand50,
-                                  borderRadius: BorderRadius.circular(100),
-                                ),
-                                child: Text(
-                                  'RUNNING',
-                                  style: TextStyle(
-                                    fontSize: 9.5,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.4,
-                                    color: c.brandDark,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          '${formatDayLabel(istDayOf(trip.startedAt))}'
-                          '${trip.endedAt != null ? ' – ${formatDayLabel(istDayOf(trip.endedAt!))}' : ' – now'}'
-                          ' · ${trip.transactionCount} '
-                          '${trip.transactionCount == 1 ? 'payment' : 'payments'}',
-                          style: TextStyle(fontSize: 12, color: c.muted),
-                        ),
-                      ],
+          Material(
+            color: selected ? c.acSoft : Colors.transparent,
+            child: InkWell(
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    DsMonogram(
+                      trip.name,
+                      tone: trip.isActive ? DsTone.ac : DsTone.neutral,
+                      onTinted: selected,
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Text(
-                    formatMoney(trip.totalMinor),
-                    style: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w800, color: c.ink),
-                  ),
-                  Icon(isOpen ? Icons.expand_less : Icons.chevron_right, size: 18, color: c.muted),
-                ],
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            trip.name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 15,
+                              height: 20 / 15,
+                              color: c.tx,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${formatDayLabel(istDayOf(trip.startedAt))}'
+                            '${trip.endedAt != null ? ' – ${formatDayLabel(istDayOf(trip.endedAt!))}' : ' – now'}'
+                            ' · ${trip.transactionCount} '
+                            '${trip.transactionCount == 1 ? 'payment' : 'payments'}',
+                            style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
+                          ),
+                          if (trip.isActive) ...[
+                            const SizedBox(height: 6),
+                            DsBadge('Running', tone: DsTone.ac, onTinted: selected),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      formatMoney(trip.totalMinor),
+                      style: kNum.copyWith(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
+                    ),
+                    const SizedBox(width: 4),
+                    DsIcon(isOpen ? DsIcons.chevronUp : DsIcons.chevronRight, size: 18, color: c.tx3),
+                  ],
+                ),
               ),
             ),
           ),
-          if (trip.source != null) _TripSourceRow(source: trip.source!),
+          if (trip.source != null) _TripSourceRow(source: trip.source!, tinted: selected),
           if (isOpen)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+            Container(
+              decoration: BoxDecoration(border: Border(top: BorderSide(color: c.ln))),
+              padding: const EdgeInsets.all(16),
               child: summary == null
                   ? const Padding(
                       padding: EdgeInsets.symmetric(vertical: 16),
-                      child: Center(child: CircularProgressIndicator()),
+                      child: Center(child: DsSpinner()),
                     )
                   : Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                          decoration: BoxDecoration(
-                            color: c.brand50,
-                            borderRadius: BorderRadius.circular(T.rMd),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Flexible(
-                                child: _Figure(label: 'Total', value: formatMoneyShort(summary!.totalMinor)),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _Figure(label: 'Total', value: formatMoneyShort(summary!.totalMinor)),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(child: _Figure(label: 'Days', value: '${summary!.dayCount}')),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: _Figure(
+                                label: 'Per day',
+                                value: formatMoneyShort(summary!.perDayMinor),
                               ),
-                              Flexible(child: _Figure(label: 'Days', value: '${summary!.dayCount}')),
-                              Flexible(
-                                child: _Figure(
-                                  label: 'Per day',
-                                  value: formatMoneyShort(summary!.perDayMinor),
-                                ),
-                              ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                         if (summary!.byMember.length > 1) ...[
-                          const SizedBox(height: 12),
+                          const SizedBox(height: 16),
+                          const DsLabel('Who paid'),
+                          const SizedBox(height: 4),
                           for (final member in summary!.byMember)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 6),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text('${member.name} paid',
-                                      style: TextStyle(fontSize: 12.8, color: c.ink70)),
-                                  Text(
-                                    formatMoneyShort(member.spentMinor),
-                                    style: kNum.copyWith(
-                                      fontSize: 12.8,
-                                      fontWeight: FontWeight.w700,
-                                      color: c.ink70,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          Divider(color: c.line, height: 18),
+                            _AmountRow(label: '${member.name} paid', amount: formatMoneyShort(member.spentMinor)),
                         ],
                         if (summary!.byCategory.isNotEmpty) ...[
-                          const SizedBox(height: 12),
+                          const SizedBox(height: 16),
+                          const DsLabel('By category'),
+                          const SizedBox(height: 4),
                           for (final entry in summary!.byCategory)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 6),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(entry.name,
-                                      style: TextStyle(fontSize: 12.8, color: c.ink70)),
-                                  Text(
-                                    formatMoneyShort(entry.amountMinor),
-                                    style: kNum.copyWith(fontSize: 12.8, color: c.ink70),
-                                  ),
-                                ],
-                              ),
-                            ),
+                            _AmountRow(label: entry.name, amount: formatMoneyShort(entry.amountMinor)),
                         ],
                         if (settlement != null && settlement!.balances.length > 1) ...[
-                          const SizedBox(height: 12),
+                          const SizedBox(height: 16),
                           Container(
                             width: double.infinity,
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                             decoration: BoxDecoration(
-                              color: c.credit50,
-                              borderRadius: BorderRadius.circular(T.rMd),
+                              color: c.goodSoft,
+                              borderRadius: BorderRadius.circular(Ds.rLg),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'SETTLING UP',
+                                  'Settle up',
                                   style: TextStyle(
-                                    fontSize: 10.5,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.5,
-                                    color: c.muted,
+                                    fontSize: 15,
+                                    height: 20 / 15,
+                                    fontWeight: FontWeight.w600,
+                                    color: c.tx,
                                   ),
                                 ),
                                 const SizedBox(height: 8),
                                 if (settlement!.transfers.isEmpty)
                                   Text(
                                     'Everyone is square — nobody owes anybody anything.',
-                                    style: TextStyle(fontSize: 12.8, color: c.muted),
+                                    style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2),
                                   )
                                 else
                                   for (final transfer in settlement!.transfers)
                                     Padding(
-                                      padding: const EdgeInsets.only(bottom: 5),
+                                      padding: const EdgeInsets.symmetric(vertical: 4),
                                       child: Row(
                                         children: [
+                                          DsAvatar(transfer.fromName, size: 28, tone: DsTone.good),
+                                          const SizedBox(width: 8),
                                           Expanded(
                                             child: Text(
                                               '${transfer.fromName} → ${transfer.toName}',
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
-                                              style: TextStyle(fontSize: 13, color: c.ink),
+                                              style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx),
                                             ),
                                           ),
+                                          const SizedBox(width: 8),
                                           Text(
                                             formatMoney(transfer.amountMinor),
                                             style: kNum.copyWith(
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w700,
-                                              color: c.ink,
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w600,
+                                              color: c.good,
                                             ),
                                           ),
                                         ],
@@ -595,31 +568,28 @@ class _TripCard extends StatelessWidget {
                             ),
                           ),
                         ],
-                        const SizedBox(height: 12),
-                        Row(
+                        const SizedBox(height: 16),
+                        // Stacked full width: side by side, "Add earlier
+                        // payments" was cut short on a 360 px phone.
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Expanded(
-                              flex: 3,
-                              child: OutlinedButton.icon(
-                                onPressed: busy ? null : onAddEarlier,
-                                icon: const Icon(Icons.playlist_add, size: 17),
-                                label: const Text(
-                                  'Add earlier payments',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
+                            OutlinedButton.icon(
+                              onPressed: busy ? null : onAddEarlier,
+                              icon: const DsIcon(DsIcons.plus, size: 18),
+                              label: const Text(
+                                'Add earlier payments',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              flex: 2,
-                              child: OutlinedButton(
-                                onPressed: busy ? null : onPayments,
-                                child: const Text(
-                                  'Payments',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
+                            const SizedBox(height: 8),
+                            OutlinedButton(
+                              onPressed: busy ? null : onPayments,
+                              child: const Text(
+                                'Payments',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
                           ],
@@ -634,31 +604,62 @@ class _TripCard extends StatelessWidget {
                                 children: [
                                   TextButton.icon(
                                     onPressed: busy ? null : onMembers,
-                                    icon: const Icon(Icons.group_outlined, size: 16),
+                                    icon: const DsIcon(DsIcons.users, size: 18),
                                     label: const Text('People'),
                                   ),
                                   TextButton.icon(
                                     onPressed: busy ? null : onRescan,
-                                    icon: const Icon(Icons.sync, size: 15),
+                                    icon: const DsIcon(DsIcons.refresh, size: 18),
                                     label: const Text('Re-scan'),
                                   ),
                                 ],
                               ),
                             ),
-                            TextButton(
+                            TextButton.icon(
                               onPressed: busy ? null : onDelete,
-                              style: TextButton.styleFrom(foregroundColor: c.debit),
-                              child: const Text('Delete'),
+                              style: TextButton.styleFrom(foregroundColor: c.crit),
+                              icon: const DsIcon(DsIcons.trash, size: 18),
+                              label: const Text('Delete'),
                             ),
                           ],
                         ),
                         Text(
                           'Deleting a trip keeps every payment — only the label goes.',
-                          style: TextStyle(fontSize: 11.5, color: c.mutedLight),
+                          style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
                         ),
                       ],
                     ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A label and an amount on one divided row.
+class _AmountRow extends StatelessWidget {
+  final String label;
+  final String amount;
+
+  const _AmountRow({required this.label, required this.amount});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Container(
+      constraints: const BoxConstraints(minHeight: 40),
+      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: c.ln))),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(label, style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx2)),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            amount,
+            style: kNum.copyWith(fontSize: 14, fontWeight: FontWeight.w600, color: c.tx),
+          ),
         ],
       ),
     );
@@ -670,8 +671,9 @@ class _TripCard extends StatelessWidget {
 /// there.
 class _TripSourceRow extends StatelessWidget {
   final TripSource source;
+  final bool tinted;
 
-  const _TripSourceRow({required this.source});
+  const _TripSourceRow({required this.source, this.tinted = false});
 
   Future<void> _open() async {
     final url = source.url;
@@ -684,36 +686,43 @@ class _TripSourceRow extends StatelessWidget {
     final c = context.c;
     final linked = source.linked;
     final hasUrl = source.url != null && source.url!.isNotEmpty;
+    final fg = linked ? c.ac : c.tx2;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+    return Container(
+      width: double.infinity,
+      color: tinted ? c.acSoft : null,
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // An accent badge while linked (neutral once it isn't), which
+          // opens the trip in Trippin.
           Material(
-            color: linked ? c.brand50 : c.chipNeutral,
-            borderRadius: BorderRadius.circular(100),
+            color: linked ? (tinted ? c.sf : c.acSoft) : c.sunk,
+            borderRadius: BorderRadius.circular(Ds.rSm),
             child: InkWell(
-              borderRadius: BorderRadius.circular(100),
+              borderRadius: BorderRadius.circular(Ds.rSm),
               onTap: hasUrl ? _open : null,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              child: Container(
+                constraints: const BoxConstraints(minHeight: 28),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.link, size: 13, color: linked ? c.brandDark : c.muted),
-                    const SizedBox(width: 5),
+                    DsIcon(DsIcons.link, size: 14, color: fg),
+                    const SizedBox(width: 6),
                     Text(
                       linked ? 'Planned in Trippin' : 'Was linked to Trippin',
                       style: TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w700,
-                        color: linked ? c.brandDark : c.muted,
+                        fontSize: 12,
+                        height: 16 / 12,
+                        fontWeight: FontWeight.w600,
+                        color: fg,
                       ),
                     ),
                     if (hasUrl) ...[
                       const SizedBox(width: 4),
-                      Icon(Icons.open_in_new, size: 12, color: linked ? c.brandDark : c.muted),
+                      DsIcon(DsIcons.arrowUpRight, size: 14, color: fg),
                     ],
                   ],
                 ),
@@ -727,7 +736,7 @@ class _TripSourceRow extends StatelessWidget {
                     "but Trippin's next change overwrites yours."
                 : "Tracking was switched off in Trippin. Everything on it stayed, and it's an "
                     'ordinary trip now.',
-            style: TextStyle(fontSize: 11.5, height: 1.45, color: c.muted),
+            style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
           ),
         ],
       ),
@@ -735,6 +744,7 @@ class _TripSourceRow extends StatelessWidget {
   }
 }
 
+/// A stat tile in miniature: label over a tabular figure, on `sf2`.
 class _Figure extends StatelessWidget {
   final String label;
   final String value;
@@ -744,19 +754,30 @@ class _Figure extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: c.muted)),
-        const SizedBox(height: 2),
-        // A lakh-sized trip on a narrow phone shrinks a little rather than
-        // losing digits.
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Text(value, style: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w800, color: c.ink)),
-        ),
-      ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: c.sf2,
+        border: Border.all(color: c.ln),
+        borderRadius: BorderRadius.circular(Ds.rLg),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          DsLabel(label),
+          const SizedBox(height: 2),
+          // A lakh-sized trip on a narrow phone shrinks a little rather than
+          // losing digits.
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              style: kNum.copyWith(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

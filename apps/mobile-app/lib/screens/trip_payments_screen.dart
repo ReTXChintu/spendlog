@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import '../widgets/ds/ds.dart';
 import '../utils/format.dart';
 import '../widgets/edit_transaction_sheet.dart';
 import '../widgets/state_block.dart';
@@ -91,15 +91,16 @@ class _TripPaymentsScreenState extends State<TripPaymentsScreen> {
         if (!didPop) Navigator.of(context).pop(_changed);
       },
       child: Scaffold(
-        backgroundColor: c.paper,
+        backgroundColor: c.bg,
         appBar: AppBar(
           title: Text(widget.trip.name, maxLines: 1, overflow: TextOverflow.ellipsis),
           actions: [
             IconButton(
               tooltip: 'Add earlier payments',
               onPressed: _addEarlier,
-              icon: const Icon(Icons.playlist_add),
+              icon: const DsIcon(DsIcons.plus),
             ),
+            const SizedBox(width: 4),
           ],
         ),
         body: _error
@@ -112,7 +113,10 @@ class _TripPaymentsScreenState extends State<TripPaymentsScreen> {
                 onAction: _load,
               )
             : rows == null
-                ? const Center(child: CircularProgressIndicator())
+                ? const Padding(
+                    padding: EdgeInsets.fromLTRB(16, 16, 16, 0),
+                    child: DsSkeletonRows(count: 5),
+                  )
                 : rows.isEmpty
                     ? StateBlock(
                         icon: Icons.luggage_outlined,
@@ -125,15 +129,27 @@ class _TripPaymentsScreenState extends State<TripPaymentsScreen> {
                     : RefreshIndicator(
                         onRefresh: _load,
                         child: ListView(
-                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                          padding: kPagePad,
                           children: [
-                            for (final row in rows)
-                              _PaymentRow(row: row, onTap: row.isMine ? () => _edit(row) : null),
-                            const SizedBox(height: 6),
+                            DsCard(
+                              padding: EdgeInsets.zero,
+                              clip: true,
+                              child: Column(
+                                children: [
+                                  for (var i = 0; i < rows.length; i++)
+                                    _PaymentRow(
+                                      row: rows[i],
+                                      last: i == rows.length - 1,
+                                      onTap: rows[i].isMine ? () => _edit(rows[i]) : null,
+                                    ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 12),
                             Text(
                               'Tap one of yours to change it, or switch "On ${widget.trip.name}" off to '
                               'take it off the trip.',
-                              style: TextStyle(fontSize: 11.5, height: 1.4, color: c.mutedLight),
+                              style: TextStyle(fontSize: 12, height: 17 / 12, color: c.tx3),
                             ),
                           ],
                         ),
@@ -143,68 +159,71 @@ class _TripPaymentsScreenState extends State<TripPaymentsScreen> {
   }
 }
 
+/// The phone transaction row: monogram, two lines, the amount.
 class _PaymentRow extends StatelessWidget {
   final _TripRow row;
   final VoidCallback? onTap;
+  final bool last;
 
-  const _PaymentRow({required this.row, required this.onTap});
+  const _PaymentRow({required this.row, required this.onTap, this.last = false});
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
     final t = row.transaction;
+    final isOut = t.type == 'DEBIT';
     final meta = [
       formatShortDate(t.occurredAt),
       if (!row.isMine) 'Paid by ${row.payer}',
       if (row.isMine && t.category != null) t.category!.name,
     ].join(' · ');
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      decoration: BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(T.rMd),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      t.merchant ?? 'Payment',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: c.ink),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      meta,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 11.5, color: c.muted),
-                    ),
-                  ],
-                ),
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 64),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(border: last ? null : Border(bottom: BorderSide(color: c.ln))),
+        child: Row(
+          children: [
+            DsMonogram(t.merchant ?? 'Payment', tone: row.isMine ? DsTone.ac : DsTone.neutral),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    t.merchant ?? 'Payment',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w500, color: c.tx),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    meta,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
+                  ),
+                ],
               ),
-              const SizedBox(width: 10),
-              Text(
-                formatMoney(t.amountMinor),
-                style: kNum.copyWith(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w700,
-                  color: t.type == 'DEBIT' ? c.ink : c.credit,
-                ),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              '${isOut ? '' : '+'}${formatMoney(t.amountMinor)}',
+              style: kNum.copyWith(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: isOut ? c.tx : c.good,
               ),
-              if (onTap != null) Icon(Icons.chevron_right, size: 18, color: c.mutedLight),
-            ],
-          ),
+            ),
+            const SizedBox(width: 6),
+            // Yours open the editor; someone else's are theirs to change.
+            if (onTap != null)
+              DsIcon(DsIcons.chevronRight, size: 18, color: c.tx3)
+            else
+              DsIcon(DsIcons.lock, size: 16, color: c.tx3),
+          ],
         ),
       ),
     );

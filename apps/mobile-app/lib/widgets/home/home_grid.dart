@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../theme.dart';
+import '../ds/ds.dart';
 
 /// One entry in a [HomeGrid]: a half-width tile, or one spanning both columns.
 class GridItem {
@@ -19,7 +19,7 @@ class GridItem {
 /// than two ragged boxes. A half tile left without a partner takes the whole
 /// row instead of leaving a hole beside it.
 class HomeGrid extends StatelessWidget {
-  const HomeGrid({super.key, required this.items, this.gap = 10, this.squareness = 0.8});
+  const HomeGrid({super.key, required this.items, this.gap = kCardGap, this.squareness = 0.8});
 
   final List<GridItem> items;
   final double gap;
@@ -72,7 +72,8 @@ class HomeGrid extends StatelessWidget {
   }
 }
 
-/// The frame every Home tile shares: a small caps label, then the content.
+/// The frame every Home tile shares: a stat-tile card (§7.5) with a
+/// sentence-case label, then the content.
 class HomeTile extends StatelessWidget {
   const HomeTile({
     super.key,
@@ -86,7 +87,9 @@ class HomeTile extends StatelessWidget {
 
   final String label;
   final Widget child;
-  final IconData? icon;
+
+  /// A [DsGlyph] or a Material [IconData].
+  final Object? icon;
   final VoidCallback? onTap;
 
   /// A tint for tiles that need attention; the plain surface otherwise.
@@ -96,56 +99,48 @@ class HomeTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final labelColour = accent ?? c.muted;
+    final labelColour = accent ?? c.tx2;
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(T.rMd),
-        child: Ink(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-          decoration: BoxDecoration(
-            color: background ?? c.surface,
-            border: Border.all(color: background == null ? c.line : Colors.transparent),
-            borderRadius: BorderRadius.circular(T.rMd),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return DsCard(
+      onTap: onTap,
+      color: background,
+      borderColor: background == null ? null : Colors.transparent,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Row(
-                children: [
-                  if (icon != null) ...[
-                    Icon(icon, size: 14, color: labelColour),
-                    const SizedBox(width: 6),
-                  ],
-                  Expanded(
-                    child: Text(
-                      label.toUpperCase(),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.6,
-                        color: labelColour,
-                      ),
-                    ),
+              if (icon != null) ...[
+                dsIconOf(icon!, size: 16, color: labelColour),
+                const SizedBox(width: 8),
+              ],
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 16 / 12,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.24,
+                    color: labelColour,
                   ),
-                  if (onTap != null) Icon(Icons.chevron_right, size: 16, color: c.mutedLight),
-                ],
+                ),
               ),
-              const SizedBox(height: 10),
-              child,
+              if (onTap != null) DsIcon(DsIcons.chevronRight, size: 16, color: c.tx3),
             ],
           ),
-        ),
+          const SizedBox(height: 8),
+          child,
+        ],
       ),
     );
   }
 }
 
-/// A big figure that shrinks to fit a half-width tile rather than wrapping.
+/// A big figure that shrinks to fit a half-width tile rather than wrapping:
+/// the stat-tile value, 22/28 600 in tabular figures.
 class TileFigure extends StatelessWidget {
   const TileFigure(this.text, {super.key, this.color, this.size = 22});
 
@@ -161,7 +156,13 @@ class TileFigure extends StatelessWidget {
       child: Text(
         text,
         maxLines: 1,
-        style: kNum.copyWith(fontSize: size, fontWeight: FontWeight.w800, color: color ?? context.c.ink),
+        style: kNum.copyWith(
+          fontSize: size,
+          height: 28 / 22,
+          fontWeight: FontWeight.w600,
+          letterSpacing: size >= 26 ? -0.02 * size : 0,
+          color: color ?? context.c.tx,
+        ),
       ),
     );
   }

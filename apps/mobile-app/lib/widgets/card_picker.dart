@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
-import '../theme.dart';
+import 'ds/ds.dart';
 import '../utils/format.dart';
 
 /// Which card to reach for, one answer per network.
@@ -45,10 +45,10 @@ class CardPicker extends StatelessWidget {
         LayoutBuilder(
           builder: (context, constraints) {
             final columns = constraints.maxWidth > 380 ? 2 : 1;
-            final width = (constraints.maxWidth - (columns - 1) * 10) / columns;
+            final width = (constraints.maxWidth - (columns - 1) * 12) / columns;
             return Wrap(
-              spacing: 10,
-              runSpacing: 10,
+              spacing: 12,
+              runSpacing: 12,
               children: tiles.map((tile) => SizedBox(width: width, child: tile)).toList(),
             );
           },
@@ -67,7 +67,7 @@ class CardPicker extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             'Set a network on each card and this becomes one answer per network.',
-            style: TextStyle(fontSize: 11.5, height: 1.45, color: c.mutedLight),
+            style: TextStyle(fontSize: 12, height: 17 / 12, color: c.tx3),
           ),
         ],
       ],
@@ -75,6 +75,10 @@ class CardPicker extends StatelessWidget {
   }
 }
 
+
+/// One network's answer: an inner tile on `sf2` (the best one is the
+/// selected-item style: `acSoft` with an `acLine` ring), the network as a
+/// label, the card, and the days of float as the figure.
 class _Tile extends StatelessWidget {
   final String label;
   final CardStatus card;
@@ -87,77 +91,62 @@ class _Tile extends StatelessWidget {
     final c = context.c;
 
     return Container(
-      padding: const EdgeInsets.all(13),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: isBest ? c.brand50 : c.surface,
-        border: Border.all(color: isBest ? c.brand : c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
+        color: isBest ? c.acSoft : c.sf2,
+        border: Border.all(color: isBest ? c.acLine : c.ln),
+        borderRadius: BorderRadius.circular(Ds.rXl),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Expanded(
-                child: Text(
-                  label.toUpperCase(),
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.5,
-                    color: c.muted,
-                  ),
-                ),
-              ),
-              if (isBest)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(color: c.brand, borderRadius: BorderRadius.circular(100)),
-                  child: Text(
-                    'BEST',
-                    style: TextStyle(
-                      fontSize: 8.5,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.4,
-                      color: c.surface,
-                    ),
-                  ),
-                ),
+              DsIcon(DsIcons.creditCard, size: 16, color: isBest ? c.ac : c.tx2),
+              const SizedBox(width: 8),
+              Expanded(child: DsLabel(label)),
+              if (isBest) const DsBadge('Best', tone: DsTone.ac, onTinted: true),
             ],
           ),
-          const SizedBox(height: 5),
+          const SizedBox(height: 8),
           Text(
             card.name,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: c.ink),
+            style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
           ),
-          const SizedBox(height: 3),
+          const SizedBox(height: 4),
           Row(
             crossAxisAlignment: CrossAxisAlignment.baseline,
             textBaseline: TextBaseline.alphabetic,
             children: [
               Text(
                 '${card.floatDays}',
-                style: kNum.copyWith(fontSize: 19, fontWeight: FontWeight.w800, color: c.ink),
+                style: kNum.copyWith(fontSize: 22, height: 28 / 22, fontWeight: FontWeight.w600, color: c.tx),
               ),
-              const SizedBox(width: 5),
+              const SizedBox(width: 6),
               Text(
                 'days to pay',
-                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: c.muted),
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: c.tx3),
               ),
             ],
           ),
           if (card.state == 'close' && card.availableMinor != null) ...[
-            const SizedBox(height: 5),
+            const SizedBox(height: 6),
             Row(
               children: [
-                Icon(Icons.error_outline, size: 12, color: c.warn),
-                const SizedBox(width: 5),
+                DsIcon(DsIcons.alertTriangle, size: 14, color: c.warn),
+                const SizedBox(width: 6),
                 Expanded(
                   child: Text(
                     '${formatMoney(card.availableMinor!)} of credit left',
-                    style: TextStyle(fontSize: 11, color: c.warn),
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 16 / 12,
+                      fontWeight: FontWeight.w500,
+                      color: c.warn,
+                      fontFeatures: Ds.tabular,
+                    ),
                   ),
                 ),
               ],
@@ -169,6 +158,7 @@ class _Tile extends StatelessWidget {
   }
 }
 
+/// A quiet line with one verb-led action after it.
 class _Note extends StatelessWidget {
   final String text;
   final String actionLabel;
@@ -181,15 +171,18 @@ class _Note extends StatelessWidget {
     final c = context.c;
 
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Expanded(
-          child: Text(text, style: TextStyle(fontSize: 12, height: 1.45, color: c.muted)),
+          child: Text(text, style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3)),
         ),
         if (onTap != null)
           TextButton(
             onPressed: onTap,
-            style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 36),
+            ),
             child: Text(actionLabel),
           ),
       ],

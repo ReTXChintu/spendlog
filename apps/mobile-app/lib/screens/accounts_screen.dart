@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import '../widgets/ds/ds.dart';
 import '../utils/format.dart';
 import '../widgets/account_balance_panel.dart';
 import '../widgets/card_vault_panel.dart';
@@ -345,17 +345,16 @@ class _AccountsScreenState extends State<AccountsScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextField(
+            DsPasswordField(
               controller: controller,
               autofocus: true,
-              obscureText: true,
               decoration: const InputDecoration(labelText: 'Password that opens the statement PDF'),
             ),
             const SizedBox(height: 10),
             Text(
               'Usually built from your date of birth and name - the statement email says the format. '
               "It's stored encrypted and never shown again.",
-              style: TextStyle(fontSize: 12, color: context.c.muted),
+              style: TextStyle(fontSize: 12, height: 16 / 12, color: context.c.tx3),
             ),
           ],
         ),
@@ -363,7 +362,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
           if (account.hasStatementPassword)
             TextButton(
               onPressed: () => Navigator.of(context).pop(''),
-              style: TextButton.styleFrom(foregroundColor: context.c.debit),
+              style: TextButton.styleFrom(foregroundColor: context.c.crit),
               child: const Text('Remove'),
             ),
           TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
@@ -405,26 +404,21 @@ class _AccountsScreenState extends State<AccountsScreen> {
     final c = context.c;
 
     return Scaffold(
-      backgroundColor: c.paper,
+      backgroundColor: c.bg,
       appBar: AppBar(
-        title: Text(
-          'Accounts and cards',
-          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: c.ink),
-        ),
-        shape: Border(bottom: BorderSide(color: c.line)),
+        title: const Text('Accounts and cards'),
         actions: [
           IconButton(
             tooltip: 'Read statements from the mailbox',
             onPressed: _reading ? null : _readStatements,
-            icon: _reading
-                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.sync),
+            icon: _reading ? const DsSpinner(size: 18) : const DsIcon(DsIcons.refresh),
           ),
           IconButton(
             tooltip: 'Add a card or account',
             onPressed: () => _open(),
-            icon: const Icon(Icons.add),
+            icon: const DsIcon(DsIcons.plus),
           ),
+          const SizedBox(width: 4),
         ],
       ),
       body: _buildBody(),
@@ -443,7 +437,12 @@ class _AccountsScreenState extends State<AccountsScreen> {
       );
     }
 
-    if (_accounts == null) return const Center(child: CircularProgressIndicator());
+    if (_accounts == null) {
+      return ListView(
+        padding: kPagePad,
+        children: const [DsSkeletonRows(count: 5, caption: 'Loading your accounts…')],
+      );
+    }
 
     if (_accounts!.isEmpty) {
       return StateBlock(
@@ -468,7 +467,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
           child: RefreshIndicator(
             onRefresh: _load,
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+              padding: kPagePad,
               children: [_panel(selected)],
             ),
           ),
@@ -481,10 +480,10 @@ class _AccountsScreenState extends State<AccountsScreen> {
     final c = context.c;
 
     return Container(
-      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: c.line))),
+      decoration: BoxDecoration(color: c.bg, border: Border(bottom: BorderSide(color: c.ln))),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
         child: Row(
           children: [
             for (final row in _accounts!)
@@ -505,99 +504,111 @@ class _AccountsScreenState extends State<AccountsScreen> {
   Widget _unfiledChip() {
     final c = context.c;
 
-    return GestureDetector(
-      onTap: () async {
-        await Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => const StatementsScreen(
-              onlyAccountId: 'unfiled',
-              title: 'Not on an account',
+    return Material(
+      color: c.warnSoft,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Ds.rLg)),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () async {
+          await Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => const StatementsScreen(
+                onlyAccountId: 'unfiled',
+                title: 'Not on an account',
+              ),
             ),
-          ),
-        );
-        await _load();
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: c.warnBg,
-          border: Border.all(color: c.warn),
-          borderRadius: BorderRadius.circular(T.rMd),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.help_outline, size: 16, color: c.warn),
-            const SizedBox(width: 8),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('Not on an account',
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                      color: c.warn,
-                    )),
-                Text('$_unfiled statement${_unfiled == 1 ? '' : 's'}',
-                    style: TextStyle(fontSize: 10.5, color: c.warn)),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _chip(_Overview row) {
-    final c = context.c;
-    final on = row.account.id == _selectedId;
-
-    return Opacity(
-      opacity: row.account.isActive ? 1 : 0.55,
-      child: GestureDetector(
-        onTap: () => setState(() => _selectedId = row.account.id),
+          );
+          await _load();
+        },
         child: Container(
+          constraints: const BoxConstraints(minHeight: 52),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: on ? c.surface : c.paper,
-            border: Border.all(color: on ? c.brand : c.line, width: on ? 1.5 : 1),
-            borderRadius: BorderRadius.circular(T.rMd),
-          ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                switch (row.account.accountType) {
-                  'BANK' => Icons.account_balance,
-                  'CASH' => Icons.payments_outlined,
-                  'DEBIT' => Icons.credit_card_outlined,
-                  _ => Icons.credit_card,
-                },
-                size: 16,
-                color: on ? c.brandDark : c.muted,
-              ),
+              DsIcon(DsIcons.alertTriangle, size: 18, color: c.warn),
               const SizedBox(width: 8),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    row.account.nickname?.trim().isNotEmpty ?? false
-                        ? row.account.nickname!.trim()
-                        : row.account.bankName,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                      color: on ? c.ink : c.ink70,
-                    ),
+                    'Not on an account',
+                    style: TextStyle(fontSize: 13, height: 18 / 13, fontWeight: FontWeight.w600, color: c.warn),
                   ),
-                  if (row.account.last4 != null)
-                    Text('•••• ${row.account.last4}',
-                        style: kNum.copyWith(fontSize: 10.5, color: c.muted)),
+                  Text(
+                    '$_unfiled statement${_unfiled == 1 ? '' : 's'}',
+                    style: TextStyle(fontSize: 12, height: 16 / 12, color: c.warn, fontFeatures: Ds.tabular),
+                  ),
                 ],
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The icon for a kind of account, from the design set.
+  static DsGlyph _kindIcon(String accountType) => switch (accountType) {
+        'BANK' => DsIcons.bank,
+        'CASH' => DsIcons.banknote,
+        _ => DsIcons.creditCard,
+      };
+
+  /// One account in the selector: a selected list item is `acSoft` with an
+  /// `acLine` ring (§5.3).
+  Widget _chip(_Overview row) {
+    final c = context.c;
+    final on = row.account.id == _selectedId;
+
+    return Opacity(
+      opacity: row.account.isActive ? 1 : 0.55,
+      child: Material(
+        color: on ? c.acSoft : c.sf,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(Ds.rLg),
+          side: BorderSide(color: on ? c.acLine : c.ln),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => setState(() => _selectedId = row.account.id),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 52),
+            padding: const EdgeInsets.fromLTRB(8, 8, 14, 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DsIconTile(
+                  _kindIcon(row.account.accountType),
+                  size: 32,
+                  iconSize: 18,
+                  tone: on ? DsTone.ac : DsTone.neutral,
+                  onTinted: on,
+                ),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      row.account.nickname?.trim().isNotEmpty ?? false
+                          ? row.account.nickname!.trim()
+                          : row.account.bankName,
+                      style: TextStyle(
+                        fontSize: 13,
+                        height: 18 / 13,
+                        fontWeight: FontWeight.w600,
+                        color: on ? c.ac : c.tx,
+                      ),
+                    ),
+                    if (row.account.last4 != null)
+                      Text('•••• ${row.account.last4}',
+                          style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: on ? c.ac : c.tx3)),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -616,28 +627,24 @@ class _AccountsScreenState extends State<AccountsScreen> {
     final isDebit = account.accountType == 'DEBIT';
     final isBank = account.accountType == 'BANK';
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rLg),
-      ),
+    return DsCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              DsIconTile(_kindIcon(account.accountType), tone: DsTone.ac),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       account.label,
-                      style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800),
+                      style: TextStyle(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx),
                     ),
-                    const SizedBox(height: 3),
+                    const SizedBox(height: 2),
                     Text(
                       [
                         switch (account.accountType) {
@@ -654,14 +661,14 @@ class _AccountsScreenState extends State<AccountsScreen> {
                               : 'draws on ${row.linkedAccount}',
                         if (!account.isActive) 'closed',
                       ].join(' · '),
-                      style: TextStyle(fontSize: 12, color: c.muted),
+                      style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
                     ),
                   ],
                 ),
               ),
               TextButton.icon(
                 onPressed: () => _open(account: account),
-                icon: const Icon(Icons.edit_outlined, size: 16),
+                icon: const DsIcon(DsIcons.pencil, size: 16),
                 label: const Text('Edit'),
               ),
               // Cash is a fixture rather than something that was added -
@@ -671,11 +678,11 @@ class _AccountsScreenState extends State<AccountsScreen> {
                 IconButton(
                   tooltip: 'Remove this account',
                   onPressed: () => _remove(account),
-                  icon: Icon(Icons.delete_outline, size: 19, color: c.debit),
+                  icon: DsIcon(DsIcons.trash, size: 18, color: c.crit),
                 ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
 
           // First among the figures when there is one: it is the only one
           // here that says whether anything has gone missing.
@@ -708,31 +715,33 @@ class _AccountsScreenState extends State<AccountsScreen> {
                 child: const Text('Open'),
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
           ],
 
           // The emergency pot: still tracked here, but left out of the
           // money-on-hand total on Home so it never looks spendable.
-          if (isBank)
+          if (isBank) ...[
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               value: account.isSavings,
               onChanged: (value) => _setSavings(account, value),
               title: Text(
                 'This is my savings account',
-                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: c.ink),
+                style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx),
               ),
               subtitle: Text(
                 'Kept out of money on hand. Only one account can be the savings account.',
-                style: TextStyle(fontSize: 11.5, color: c.muted),
+                style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
               ),
             ),
+            const SizedBox(height: 4),
+          ],
 
           // A credit card bills you rather than holding money someone can
           // be handed, so pocket money is for everything else.
           if (!isCard) ...[
             _pocket(row),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
           ],
 
           if (isCard && row.cycle != null && row.cycle!.cycleKnown)
@@ -750,19 +759,19 @@ class _AccountsScreenState extends State<AccountsScreen> {
             ),
 
           if (!isDebit) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(child: _dates(account, row.cycle)),
-                const SizedBox(width: 10),
+                const SizedBox(width: 12),
                 Expanded(child: _latestBill(row.bill)),
               ],
             ),
           ],
 
           if (row.debitCards.isNotEmpty) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             _figure(
               'Debit cards on it',
               row.debitCards
@@ -786,9 +795,9 @@ class _AccountsScreenState extends State<AccountsScreen> {
 
           // Every account has payments on it, debit cards included, so this
           // is the one row they all get.
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           _row(
-            Icons.receipt_outlined,
+            DsIcons.list,
             'Transactions',
             !isCard
                 ? 'This month'
@@ -812,41 +821,51 @@ class _AccountsScreenState extends State<AccountsScreen> {
           // one and nothing filed under it. The account it draws on has
           // both, and that is where its spending shows.
           if (!isDebit) ...[
-          const SizedBox(height: 14),
-          _row(
-            Icons.receipt_long_outlined,
-            'Statement password',
-            account.hasStatementPassword ? 'Set' : 'Not set',
-            on: account.hasStatementPassword,
-            action: TextButton(
-              onPressed: () => _editStatementPassword(account),
-              child: Text(account.hasStatementPassword ? 'Change' : 'Add'),
+            const SizedBox(height: 8),
+            _row(
+              DsIcons.lock,
+              'Statement password',
+              account.hasStatementPassword ? 'Set' : 'Not set',
+              on: account.hasStatementPassword,
+              action: TextButton(
+                onPressed: () => _editStatementPassword(account),
+                child: Text(account.hasStatementPassword ? 'Change' : 'Add'),
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          _row(
-            Icons.folder_outlined,
-            'Statements',
-            'Filed by month',
-            on: true,
-            action: TextButton(
-              onPressed: () async {
-                await Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => StatementsScreen(
-                      onlyAccountId: account.id,
-                      title: account.label,
+            const SizedBox(height: 8),
+            _row(
+              Icons.folder_outlined,
+              'Statements',
+              'Filed by month',
+              on: true,
+              action: TextButton(
+                onPressed: () async {
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => StatementsScreen(
+                        onlyAccountId: account.id,
+                        title: account.label,
+                      ),
                     ),
-                  ),
-                );
-                await _load();
-              },
-              child: const Text('Open'),
+                  );
+                  await _load();
+                },
+                child: const Text('Open'),
+              ),
             ),
-          ),
           ],
         ],
       ),
+    );
+  }
+
+  /// An inner tile: `sf2`, 1 px `ln`, radius 12.
+  BoxDecoration _tile() {
+    final c = context.c;
+    return BoxDecoration(
+      color: c.sf2,
+      border: Border.all(color: c.ln),
+      borderRadius: BorderRadius.circular(Ds.rLg),
     );
   }
 
@@ -857,34 +876,27 @@ class _AccountsScreenState extends State<AccountsScreen> {
     final account = row.account;
     final setting = account.pocketMoney;
 
-    final frame = BoxDecoration(
-      color: c.paper,
-      border: Border.all(color: c.line),
-      borderRadius: BorderRadius.circular(T.rMd),
-    );
-    final label = TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: c.muted);
-
     if (setting == null) {
       return Container(
         width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(13, 12, 13, 8),
-        decoration: frame,
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
+        decoration: _tile(),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('POCKET MONEY', style: label),
-            const SizedBox(height: 5),
+            const DsLabel('Pocket money'),
+            const SizedBox(height: 4),
             Text(
               'For an account someone else spends from - a child without UPI, say. Give it a '
               'monthly limit and a day it renews, and every payment from it is marked as theirs.',
-              style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
+              style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2),
             ),
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
                 style: TextButton.styleFrom(padding: EdgeInsets.zero),
                 onPressed: () => _editPocket(account),
-                icon: const Icon(Icons.savings_outlined, size: 16),
+                icon: const DsIcon(DsIcons.piggyBank, size: 16),
                 label: const Text('Make this pocket money'),
               ),
             ),
@@ -906,19 +918,19 @@ class _AccountsScreenState extends State<AccountsScreen> {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(13, 12, 13, 6),
-      decoration: frame,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
+      decoration: _tile(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(pocketTitle(status.holder).toUpperCase(), style: label),
+          DsLabel(pocketTitle(status.holder)),
           const SizedBox(height: 6),
           PocketMeter(status: status),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Text(
             '${status.transactionCount} ${status.transactionCount == 1 ? 'payment' : 'payments'} this month · '
             '${pocketRenews(status)}',
-            style: TextStyle(fontSize: 11.5, color: c.muted),
+            style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
           ),
           if (status.renewsToday) ...[
             const SizedBox(height: 10),
@@ -932,10 +944,13 @@ class _AccountsScreenState extends State<AccountsScreen> {
                 child: const Text('Edit'),
               ),
               const Spacer(),
-              TextButton(
-                style: TextButton.styleFrom(foregroundColor: c.debit),
-                onPressed: () => _stopPocket(account),
-                child: const Text('Stop being pocket money'),
+              Flexible(
+                flex: 4,
+                child: TextButton(
+                  style: TextButton.styleFrom(foregroundColor: c.crit),
+                  onPressed: () => _stopPocket(account),
+                  child: const Text('Stop being pocket money', maxLines: 1, overflow: TextOverflow.ellipsis),
+                ),
               ),
             ],
           ),
@@ -946,7 +961,6 @@ class _AccountsScreenState extends State<AccountsScreen> {
 
   /// Renewal day: what has to go in, or what already did.
   Widget _topUp(PocketStatus status) {
-    final c = context.c;
     final done = status.toppedUpMinor > 0;
     final text = done
         ? 'Topped up ${formatMoney(status.toppedUpMinor)}'
@@ -954,26 +968,10 @@ class _AccountsScreenState extends State<AccountsScreen> {
             ? 'Top up ${formatMoney(status.lastMonthSpentMinor)} today'
             : 'Renews today - nothing was spent last month, so nothing to top up';
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
-      decoration: BoxDecoration(
-        color: done ? c.credit50 : c.warnBg,
-        borderRadius: BorderRadius.circular(T.rSm),
-      ),
-      child: Row(
-        children: [
-          Icon(done ? Icons.check_circle_outline : Icons.add_card_outlined,
-              size: 16, color: done ? c.credit : c.warn),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              text,
-              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: done ? c.credit : c.warn),
-            ),
-          ),
-        ],
-      ),
+    return DsCallout(
+      tone: done ? DsTone.good : DsTone.warn,
+      icon: done ? DsIcons.check : DsIcons.banknote,
+      title: text,
     );
   }
 
@@ -997,65 +995,53 @@ class _AccountsScreenState extends State<AccountsScreen> {
     final owed = cycle.outstandingMinor ?? 0;
     final used = cycle.usedMinor ?? owed;
     final fraction = limit != null && limit > 0 ? (used / limit).clamp(0.0, 1.0) : null;
-    final tint = switch (cycle.state) {
-      'over' => c.debit,
-      'close' => c.warn,
-      _ => c.brand,
+    // Ink for ordinary use; amber close to the limit; red only past it.
+    final (Color fill, Color note) = switch (cycle.state) {
+      'over' => (c.critFill, c.crit),
+      'close' => (c.warnFill, c.warn),
+      _ => (c.tx, c.tx3),
     };
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: c.paper,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
+      decoration: _tile(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'OWED ON THIS CARD',
-            style: TextStyle(
-              fontSize: 9.5,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.6,
-              color: c.muted,
-            ),
-          ),
-          const SizedBox(height: 5),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
+          const DsLabel('Owed on this card'),
+          const SizedBox(height: 4),
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.end,
+            spacing: 8,
             children: [
-              Text(formatMoney(owed), style: kNum.copyWith(fontSize: 21)),
-              if (limit != null && limit > 0) ...[
-                const SizedBox(width: 7),
-                Text('of ${formatMoney(limit)} limit',
-                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: c.muted)),
-              ],
+              Text(
+                formatMoney(owed),
+                style: kNum.copyWith(fontSize: 22, height: 28 / 22, fontWeight: FontWeight.w600, color: c.tx),
+              ),
+              if (limit != null && limit > 0)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 3),
+                  child: Text(
+                    'of ${formatMoney(limit)} limit',
+                    style: kNum.copyWith(fontSize: 13, fontWeight: FontWeight.w500, color: c.tx3),
+                  ),
+                ),
             ],
           ),
           if (fraction != null) ...[
-            const SizedBox(height: 9),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(100),
-              child: LinearProgressIndicator(
-                value: fraction,
-                minHeight: 6,
-                backgroundColor: c.track,
-                valueColor: AlwaysStoppedAnimation(tint),
-              ),
-            ),
+            const SizedBox(height: 10),
+            DsMeter(value: fraction, color: fill),
           ],
-          const SizedBox(height: 7),
+          const SizedBox(height: 8),
           Text(
             _meterNote(cycle),
             style: TextStyle(
-              fontSize: 11.5,
-              height: 1.4,
-              color: cycle.state == 'over' || cycle.state == 'close' ? tint : c.muted,
-              fontWeight: cycle.state == 'over' ? FontWeight.w700 : FontWeight.w400,
+              fontSize: 12,
+              height: 16 / 12,
+              color: note,
+              fontWeight: cycle.state == 'over' ? FontWeight.w600 : FontWeight.w400,
+              fontFeatures: Ds.tabular,
             ),
           ),
         ],
@@ -1081,23 +1067,13 @@ class _AccountsScreenState extends State<AccountsScreen> {
     final c = context.c;
 
     return Container(
-      padding: const EdgeInsets.all(13),
-      decoration: BoxDecoration(
-        color: c.paper,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
+      padding: const EdgeInsets.all(14),
+      decoration: _tile(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('DATES',
-              style: TextStyle(
-                fontSize: 9.5,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.6,
-                color: c.muted,
-              )),
-          const SizedBox(height: 7),
+          const DsLabel('Dates'),
+          const SizedBox(height: 8),
           for (final (label, value) in [
             ('Statement', account.statementDay == null ? '—' : ordinalDay(account.statementDay!)),
             ('Due', account.dueDay == null ? '—' : ordinalDay(account.dueDay!)),
@@ -1108,8 +1084,11 @@ class _AccountsScreenState extends State<AccountsScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(label, style: TextStyle(fontSize: 11.5, color: c.muted)),
-                  Text(value, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                  Flexible(child: Text(label, style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3))),
+                  Text(
+                    value,
+                    style: kNum.copyWith(fontSize: 13, height: 18 / 13, fontWeight: FontWeight.w600, color: c.tx),
+                  ),
                 ],
               ),
             ),
@@ -1122,10 +1101,11 @@ class _AccountsScreenState extends State<AccountsScreen> {
     final c = context.c;
 
     return _figure(
-      'LATEST BILL',
+      'Latest bill',
       bill == null ? '—' : formatMoney(bill.totalDueMinor),
       _billNote(bill),
-      valueColor: (bill?.isPaid ?? false) ? c.credit : null,
+      valueColor: (bill?.isPaid ?? false) ? c.good : null,
+      noteColor: bill != null && !bill.isPaid && (bill.daysUntilDue ?? 99) < 0 ? c.crit : null,
     );
   }
 
@@ -1139,61 +1119,57 @@ class _AccountsScreenState extends State<AccountsScreen> {
     return days < 0 ? '${days.abs()} days overdue' : 'Due in $days days';
   }
 
-  Widget _figure(String label, String value, String note, {Color? valueColor}) {
+  Widget _figure(String label, String value, String note, {Color? valueColor, Color? noteColor}) {
     final c = context.c;
 
     return Container(
-      padding: const EdgeInsets.all(13),
-      decoration: BoxDecoration(
-        color: c.paper,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: _tile(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label.toUpperCase(),
-              style: TextStyle(
-                fontSize: 9.5,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.6,
-                color: c.muted,
-              )),
-          const SizedBox(height: 5),
-          Text(value, style: kNum.copyWith(fontSize: 17, color: valueColor ?? c.ink)),
+          DsLabel(label),
           const SizedBox(height: 4),
-          Text(note, style: TextStyle(fontSize: 11, height: 1.35, color: c.muted)),
+          Text(
+            value,
+            style: kNum.copyWith(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: valueColor ?? c.tx),
+          ),
+          const SizedBox(height: 4),
+          Text(note, style: TextStyle(fontSize: 12, height: 16 / 12, color: noteColor ?? c.tx3)),
         ],
       ),
     );
   }
 
-  Widget _row(IconData icon, String label, String value, {required bool on, bool warn = false, required Widget action}) {
+  /// A link row in an inner tile: icon tile, label and state, and the way in.
+  /// [warn] marks a mismatch, which is a problem, so it reads in `crit`.
+  Widget _row(Object icon, String label, String value, {required bool on, bool warn = false, required Widget action}) {
     final c = context.c;
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(13, 7, 7, 7),
-      decoration: BoxDecoration(
-        color: c.paper,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
+      padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
+      decoration: _tile(),
       child: Row(
         children: [
-          Icon(icon, size: 16, color: c.muted),
-          const SizedBox(width: 10),
+          DsIconTile(icon, size: 36, tone: warn ? DsTone.crit : DsTone.neutral, onTinted: !warn),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                Text(value,
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: warn ? FontWeight.w700 : FontWeight.w400,
-                      color: warn ? c.debit : (on ? c.credit : c.muted),
-                    )),
+                Text(label, style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx)),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 13,
+                    height: 18 / 13,
+                    fontWeight: warn ? FontWeight.w600 : FontWeight.w400,
+                    color: warn ? c.crit : (on ? c.good : c.tx3),
+                    fontFeatures: Ds.tabular,
+                  ),
+                ),
               ],
             ),
           ),
@@ -1202,5 +1178,4 @@ class _AccountsScreenState extends State<AccountsScreen> {
       ),
     );
   }
-
 }

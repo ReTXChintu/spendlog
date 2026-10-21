@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import 'ds/ds.dart';
 import '../utils/format.dart';
 
 /// Picks one of the user's trips, for a payment that belongs to it but fell
@@ -13,9 +13,9 @@ Future<Trip?> showTripPickerSheet(BuildContext context) {
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
-    backgroundColor: context.c.surface,
+    backgroundColor: context.c.sf,
     shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(T.rLg)),
+      borderRadius: BorderRadius.vertical(top: Radius.circular(Ds.r3xl)),
     ),
     builder: (_) => const _TripPicker(),
   );
@@ -79,43 +79,57 @@ class _TripPickerState extends State<_TripPicker> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 18, 16, 4),
-            child: Text(
-              'Add to a trip',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: c.ink),
+          const DsDragHandle(),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: DsSheetHeader(
+              icon: DsIcons.briefcase,
+              title: 'Add to a trip',
+              subtitle: 'Whatever its date - a ticket booked weeks before still belongs to the trip.',
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Text(
-              'Whatever its date - a ticket booked weeks before still belongs to the trip.',
-              style: TextStyle(fontSize: 12, height: 1.4, color: c.muted),
-            ),
-          ),
+          Divider(height: 1, color: c.ln),
           if (_error)
             Padding(
               padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text("Couldn't load your trips.", style: TextStyle(fontSize: 13, color: c.ink70)),
-                  ),
-                  TextButton(onPressed: _load, child: const Text('Retry')),
-                ],
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+                decoration: BoxDecoration(color: c.sunk, borderRadius: BorderRadius.circular(Ds.rLg)),
+                child: Row(
+                  children: [
+                    DsIcon(DsIcons.alertTriangle, size: 20, color: c.tx2),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        "Couldn't load your trips.",
+                        style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2),
+                      ),
+                    ),
+                    OutlinedButton(
+                      onPressed: _load,
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 36),
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Ds.rMd)),
+                        textStyle: const TextStyle(fontFamily: Ds.sans, fontSize: 13, fontWeight: FontWeight.w600),
+                      ),
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
               ),
             )
           else if (trips == null)
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 28),
-              child: Center(child: CircularProgressIndicator()),
+              padding: EdgeInsets.all(16),
+              child: DsSkeletonRows(count: 3),
             )
           else if (trips.isEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-              child: Text(
-                'No trips yet. Start one from Trips, then add this to it.',
-                style: TextStyle(fontSize: 13, color: c.ink70),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 24),
+              child: DsEmpty(
+                icon: DsIcons.briefcase,
+                message: 'No trips yet. Start one from Trips, then add this to it.',
               ),
             )
           else
@@ -125,48 +139,64 @@ class _TripPickerState extends State<_TripPicker> {
                 padding: const EdgeInsets.only(bottom: 16),
                 children: [
                   for (final trip in trips)
-                    ListTile(
+                    InkWell(
                       onTap: () => Navigator.of(context).pop(trip),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                      leading: Icon(Icons.luggage_outlined, color: trip.isActive ? c.brandDark : c.muted),
-                      title: Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              trip.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: c.ink),
+                      child: Container(
+                        constraints: const BoxConstraints(minHeight: 64),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        decoration: BoxDecoration(border: Border(bottom: BorderSide(color: c.ln))),
+                        child: Row(
+                          children: [
+                            DsIconTile(
+                              DsIcons.briefcase,
+                              tone: trip.isActive ? DsTone.ac : DsTone.neutral,
                             ),
-                          ),
-                          if (trip.isActive) ...[
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          trip.name,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontSize: 15,
+                                            height: 20 / 15,
+                                            fontWeight: FontWeight.w600,
+                                            color: c.tx,
+                                          ),
+                                        ),
+                                      ),
+                                      if (trip.isActive) ...[
+                                        const SizedBox(width: 8),
+                                        const DsBadge('Running', tone: DsTone.ac),
+                                      ],
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '${_dates(trip)} · ${formatMoneyShort(trip.totalMinor)}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      height: 18 / 13,
+                                      color: c.tx3,
+                                      fontFeatures: Ds.tabular,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                             const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: c.brand50,
-                                borderRadius: BorderRadius.circular(100),
-                              ),
-                              child: Text(
-                                'RUNNING',
-                                style: TextStyle(
-                                  fontSize: 9.5,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.4,
-                                  color: c.brandDark,
-                                ),
-                              ),
-                            ),
+                            DsIcon(DsIcons.chevronRight, size: 18, color: c.tx3),
                           ],
-                        ],
+                        ),
                       ),
-                      subtitle: Text(
-                        '${_dates(trip)} · ${formatMoneyShort(trip.totalMinor)}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 12, color: c.muted),
-                      ),
-                      trailing: Icon(Icons.chevron_right, size: 18, color: c.mutedLight),
                     ),
                 ],
               ),

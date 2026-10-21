@@ -1,0 +1,56 @@
+// GENERATED from docs/design-assets/icons/icons.json. Do not edit by hand.
+// The SpendLog icon set: 24x24, stroke 1.75, round caps and joins.
+
+part of 'ds_icon.dart';
+
+/// Every glyph in the design set, by name.
+abstract final class DsIcons {
+  static const alertTriangle = DsGlyph('alert-triangle', ['M12 3 2 20h20zM12 10v4M12 17h.01']);
+  static const arrowDownLeft = DsGlyph('arrow-down-left', ['M17 7 7 17M16 17H7V8']);
+  static const arrowUpRight = DsGlyph('arrow-up-right', ['M7 17 17 7M8 7h9v9']);
+  static const bank = DsGlyph('bank', ['M3 10h18M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 21h18M12 3l9 5H3z']);
+  static const banknote = DsGlyph('banknote', ['M3 7h18v10H3zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 10v4M18 10v4']);
+  static const barChart = DsGlyph('bar-chart', ['M4 20V10M10 20V4M16 20v-7M22 20H2']);
+  static const bell = DsGlyph('bell', ['M6 16v-5a6 6 0 0 1 12 0v5l2 2H4zM10 21h4']);
+  static const briefcase = DsGlyph('briefcase', ['M4 8h16v11H4zM9 8V5h6v3M4 13h16']);
+  static const calendar = DsGlyph('calendar', ['M4 6h16v15H4zM4 10h16M8 3v5M16 3v5']);
+  static const check = DsGlyph('check', ['M5 12.5l4.5 4.5L19 7']);
+  static const chevronDown = DsGlyph('chevron-down', ['M6 9l6 6 6-6']);
+  static const chevronLeft = DsGlyph('chevron-left', ['M15 18l-6-6 6-6']);
+  static const chevronRight = DsGlyph('chevron-right', ['M9 18l6-6-6-6']);
+  static const chevronUp = DsGlyph('chevron-up', ['M18 15l-6-6-6 6']);
+  static const creditCard = DsGlyph('credit-card', ['M3 6h18v12H3zM3 10h18M7 15h4']);
+  static const eye = DsGlyph('eye', ['M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z']);
+  static const eyeOff = DsGlyph('eye-off', ['M3 3l18 18M10.6 5.1A10.4 10.4 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.9 8.4 2 12 2 12s3.5 7 10 7c1.7 0 3.2-.4 4.5-1.1M9.9 9.9a3 3 0 0 0 4.2 4.2']);
+  static const filter = DsGlyph('filter', ['M4 6h16M7 12h10M10 18h4']);
+  static const home = DsGlyph('home', ['M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z']);
+  static const info = DsGlyph('info', ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v5M12 8h.01']);
+  static const link = DsGlyph('link', ['M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1']);
+  static const list = DsGlyph('list', ['M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01']);
+  static const listChecks = DsGlyph('list-checks', ['M10 6h10M10 12h10M10 18h10M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2']);
+  static const lock = DsGlyph('lock', ['M6 11h12v10H6zM8.5 11V7.5a3.5 3.5 0 0 1 7 0V11']);
+  static const mail = DsGlyph('mail', ['M3 6h18v12H3zM3 7l9 6 9-6']);
+  static const message = DsGlyph('message', ['M4 5h16v11H9l-5 4z']);
+  static const moreVertical = DsGlyph('more-vertical', ['M12 5h.01M12 12h.01M12 19h.01']);
+  static const pencil = DsGlyph('pencil', ['M4 20h4L19 9l-4-4L4 16zM14 6l4 4']);
+  static const piggyBank = DsGlyph('piggy-bank', ['M5 11a7 6 0 0 1 13-2h2v4l-2 1v3h-3v-2h-5v2H7v-3a6 6 0 0 1-2-3zM15 9.5h.01']);
+  static const plus = DsGlyph('plus', ['M12 5v14M5 12h14']);
+  static const refresh = DsGlyph('refresh', ['M20 11a8 8 0 0 0-14.9-3.9M4 4v4h4M4 13a8 8 0 0 0 14.9 3.9M20 20v-4h-4']);
+  static const repeat = DsGlyph('repeat', ['M17 2l3 3-3 3M4 11V9a4 4 0 0 1 4-4h12M7 22l-3-3 3-3M20 13v2a4 4 0 0 1-4 4H4']);
+  static const search = DsGlyph('search', ['M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4']);
+  static const shield = DsGlyph('shield', ['M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z']);
+  static const sliders = DsGlyph('sliders', ['M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4']);
+  static const sparkles = DsGlyph('sparkles', ['M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z']);
+  static const tag = DsGlyph('tag', ['M3 12V4h8l10 10-8 8zM7.5 8h.01']);
+  static const target = DsGlyph('target', ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z']);
+  static const transfer = DsGlyph('transfer', ['M4 8h14l-3-3M20 16H6l3 3']);
+  static const trash = DsGlyph('trash', ['M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3']);
+  static const trendingUp = DsGlyph('trending-up', ['M3 17l6-6 4 4 8-8M14 7h7v7']);
+  static const trophy = DsGlyph('trophy', ['M6 3v6a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3M12 15v6']);
+  static const undo = DsGlyph('undo', ['M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3']);
+  static const upload = DsGlyph('upload', ['M12 16V4M7 9l5-5 5 5M4 20h16']);
+  static const users = DsGlyph('users', ['M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 12 0v1M16 3.5a4 4 0 0 1 0 7M22 21v-1a6 6 0 0 0-4-5.6']);
+  static const x = DsGlyph('x', ['M6 6l12 12M18 6 6 18']);
+
+  static const all = <DsGlyph>[alertTriangle, arrowDownLeft, arrowUpRight, bank, banknote, barChart, bell, briefcase, calendar, check, chevronDown, chevronLeft, chevronRight, chevronUp, creditCard, eye, eyeOff, filter, home, info, link, list, listChecks, lock, mail, message, moreVertical, pencil, piggyBank, plus, refresh, repeat, search, shield, sliders, sparkles, tag, target, transfer, trash, trendingUp, trophy, undo, upload, users, x];
+}

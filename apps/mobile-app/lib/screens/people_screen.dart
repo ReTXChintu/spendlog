@@ -3,9 +3,8 @@ import 'package:intl/intl.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
 import '../services/phone_contacts.dart';
-import '../theme.dart';
 import '../utils/format.dart';
-import '../widgets/person_picker_sheet.dart';
+import '../widgets/ds/ds.dart';
 import '../widgets/state_block.dart';
 
 /// Who owes what.
@@ -49,20 +48,31 @@ class _PeopleScreenState extends State<PeopleScreen> {
     final how = await showModalBottomSheet<String>(
       context: context,
       builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.contacts_outlined),
-              title: const Text('Pick from phone contacts'),
-              onTap: () => Navigator.of(context).pop('phone'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.person_add_alt),
-              title: const Text('Type a name'),
-              onTap: () => Navigator.of(context).pop('name'),
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(0, 0, 0, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const DsDragHandle(),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
+                child: DsSheetHeader(title: 'Add a person'),
+              ),
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                leading: const DsIconTile(Icons.contacts_outlined, tone: DsTone.ac),
+                title: const Text('Pick from phone contacts'),
+                onTap: () => Navigator.of(context).pop('phone'),
+              ),
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                leading: const DsIconTile(DsIcons.users, tone: DsTone.neutral),
+                title: const Text('Type a name'),
+                onTap: () => Navigator.of(context).pop('name'),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -84,12 +94,12 @@ class _PeopleScreenState extends State<PeopleScreen> {
     final c = context.c;
 
     return Scaffold(
-      backgroundColor: c.paper,
+      backgroundColor: c.bg,
       appBar: AppBar(
-        title: Text('People', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: c.ink)),
-        shape: Border(bottom: BorderSide(color: c.line)),
+        title: const Text('People'),
         actions: [
-          IconButton(tooltip: 'Add a person', onPressed: _add, icon: const Icon(Icons.person_add_alt)),
+          IconButton(tooltip: 'Add a person', onPressed: _add, icon: const DsIcon(DsIcons.plus)),
+          const SizedBox(width: 4),
         ],
       ),
       body: _body(),
@@ -111,7 +121,7 @@ class _PeopleScreenState extends State<PeopleScreen> {
     }
 
     final data = _data;
-    if (data == null) return const Center(child: CircularProgressIndicator());
+    if (data == null) return const Center(child: DsSpinner());
 
     if (data.contacts.isEmpty) {
       return StateBlock(
@@ -127,32 +137,43 @@ class _PeopleScreenState extends State<PeopleScreen> {
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+        padding: kPagePad,
         children: [
           Row(
             children: [
-              Expanded(child: _Total(label: 'Owed to you', amountMinor: data.owedToYouMinor, colour: c.credit)),
-              const SizedBox(width: 10),
-              Expanded(child: _Total(label: 'You owe', amountMinor: data.youOweMinor, colour: c.debit)),
+              Expanded(
+                child: _Total(
+                  label: 'Owed to you',
+                  amountMinor: data.owedToYouMinor,
+                  colour: c.good,
+                  tint: c.goodSoft,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _Total(label: 'You owe', amountMinor: data.youOweMinor, colour: c.tx, tint: c.sunk),
+              ),
             ],
           ),
-          const SizedBox(height: 16),
-          Container(
-            decoration: BoxDecoration(
-              color: c.surface,
-              border: Border.all(color: c.line),
-              borderRadius: BorderRadius.circular(T.rMd),
-            ),
+          const SizedBox(height: kCardGap),
+          DsCard(
+            padding: EdgeInsets.zero,
+            clip: true,
             child: Column(
               children: [
+                const DsSectionHeader('Everyone', padding: EdgeInsets.fromLTRB(16, 14, 16, 6)),
                 for (final (i, contact) in data.contacts.indexed) ...[
-                  if (i > 0) Divider(height: 1, color: c.line),
+                  if (i > 0) const Divider(indent: 64),
                   ListTile(
                     onTap: () => _open(contact),
-                    leading: PersonAvatar(name: contact.name, radius: 18),
+                    minVerticalPadding: 12,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                    leading: DsAvatar(contact.name, size: 40),
                     title: Text(
                       contact.name,
-                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: c.ink),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w500, color: c.tx),
                     ),
                     subtitle: Text(
                       contact.transactionCount == 0
@@ -160,11 +181,12 @@ class _PeopleScreenState extends State<PeopleScreen> {
                           : '${contact.transactionCount} '
                               '${contact.transactionCount == 1 ? 'transaction' : 'transactions'}'
                               '${contact.lastAt != null ? ' · last ${formatShortDate(contact.lastAt!)}' : ''}',
-                      style: TextStyle(fontSize: 11.5, color: c.muted),
+                      style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
                     ),
-                    trailing: BalanceText(balanceMinor: contact.balanceMinor),
+                    trailing: _BalanceStack(balanceMinor: contact.balanceMinor),
                   ),
                 ],
+                const SizedBox(height: 4),
               ],
             ),
           ),
@@ -174,41 +196,118 @@ class _PeopleScreenState extends State<PeopleScreen> {
   }
 }
 
+/// A summary tile on the person's tint: green for what comes back to you,
+/// neutral for what you owe (spending is ink, never red).
 class _Total extends StatelessWidget {
-  const _Total({required this.label, required this.amountMinor, required this.colour});
+  const _Total({required this.label, required this.amountMinor, required this.colour, required this.tint});
 
   final String label;
   final int amountMinor;
   final Color colour;
+  final Color tint;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
     return Container(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
+      decoration: BoxDecoration(color: tint, borderRadius: BorderRadius.circular(Ds.rLg)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            label.toUpperCase(),
-            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, letterSpacing: 0.5, color: c.muted),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            formatMoney(amountMinor),
-            style: kNum.copyWith(
-              fontSize: 19,
-              fontWeight: FontWeight.w800,
-              color: amountMinor == 0 ? c.ink : colour,
+          DsLabel(label),
+          const SizedBox(height: 4),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              formatMoney(amountMinor),
+              style: kNum.copyWith(
+                fontSize: 22,
+                height: 28 / 22,
+                fontWeight: FontWeight.w600,
+                color: amountMinor == 0 ? c.tx : colour,
+              ),
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// "owes you" over a green amount, "you owe" over an ink one, or "settled
+/// up" — the trailing figure of a person's row.
+class _BalanceStack extends StatelessWidget {
+  const _BalanceStack({required this.balanceMinor});
+
+  final int balanceMinor;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    if (balanceMinor == 0) {
+      return Text('settled up', style: TextStyle(fontSize: 13, color: c.tx3));
+    }
+    final theyOwe = balanceMinor > 0;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Text(theyOwe ? 'owes you' : 'you owe', style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3)),
+        Text(
+          formatMoney(balanceMinor.abs()),
+          style: kNum.copyWith(
+            fontSize: 15,
+            height: 20 / 15,
+            fontWeight: FontWeight.w600,
+            color: theyOwe ? c.good : c.tx,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// The big figure on a person's page: "Owes you ₹1,000" in green, "You
+/// owe ₹1,840" in ink, or "Settled up".
+class _BalanceHero extends StatelessWidget {
+  const _BalanceHero({required this.balanceMinor});
+
+  final int balanceMinor;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final (label, colour) = balanceMinor > 0
+        ? ('Owes you', c.good)
+        : balanceMinor < 0
+            ? ('You owe', c.tx)
+            : ('Settled up', c.tx3);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        DsLabel(label),
+        if (balanceMinor != 0) ...[
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              formatMoney(balanceMinor.abs()),
+              style: kNum.copyWith(
+                fontSize: 34,
+                height: 40 / 34,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.68,
+                color: colour,
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
@@ -307,9 +406,9 @@ class _PersonScreenState extends State<PersonScreen> {
     final cleared = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: context.c.surface,
+      backgroundColor: context.c.sf,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(T.rLg)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(Ds.r3xl)),
       ),
       builder: (_) => _ClearSheet(contact: _contact),
     );
@@ -380,128 +479,118 @@ class _PersonScreenState extends State<PersonScreen> {
     final opening = contact.openingBalanceMinor;
 
     return Scaffold(
-      backgroundColor: c.paper,
+      backgroundColor: c.bg,
       appBar: AppBar(
-        title: Text(contact.name, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: c.ink)),
-        shape: Border(bottom: BorderSide(color: c.line)),
+        title: Text(contact.name, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
-          IconButton(tooltip: 'Edit name or number', onPressed: _edit, icon: const Icon(Icons.edit_outlined)),
+          IconButton(tooltip: 'Edit name or number', onPressed: _edit, icon: const DsIcon(DsIcons.pencil)),
           IconButton(
             tooltip: 'Remove this person',
             onPressed: _delete,
-            icon: Icon(Icons.delete_outline, color: c.debit),
+            icon: DsIcon(DsIcons.trash, color: c.crit),
           ),
+          const SizedBox(width: 4),
         ],
       ),
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+          padding: kPagePad,
           children: [
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: c.surface,
-                border: Border.all(color: c.line),
-                borderRadius: BorderRadius.circular(T.rLg),
-              ),
-              child: Row(
+            DsCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  PersonAvatar(name: contact.name, radius: 22),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        BalanceText(balanceMinor: contact.balanceMinor, fontSize: 18),
-                        const SizedBox(height: 4),
-                        Text(
-                          [
-                            'Lent ${formatMoney(contact.givenMinor)}',
-                            'paid back ${formatMoney(contact.returnedMinor)}',
-                            if (contact.clearedMinor != 0) 'cleared ${formatMoney(contact.clearedMinor.abs())}',
-                            if (contact.phone != null) contact.phone!,
-                          ].join(' · '),
-                          style: TextStyle(fontSize: 12, color: c.muted),
-                        ),
-                        if (opening != 0) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            opening > 0
-                                ? 'Owed you ${formatMoney(opening)} before SpendLog'
-                                : 'You owed them ${formatMoney(-opening)} before SpendLog',
-                            style: TextStyle(fontSize: 12, color: c.muted),
-                          ),
-                        ],
-                        Wrap(
-                          spacing: 12,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            TextButton(
-                              onPressed: _setOpening,
-                              style: TextButton.styleFrom(
-                                padding: EdgeInsets.zero,
-                                minimumSize: const Size(0, 32),
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
-                              child: Text(opening == 0 ? 'Set starting balance' : 'Change starting balance'),
-                            ),
-                            // Settled some other way: a gift, a favour.
-                            if (contact.balanceMinor != 0)
-                              FilledButton.tonalIcon(
-                                onPressed: _clear,
-                                style: FilledButton.styleFrom(
-                                  minimumSize: const Size(0, 32),
-                                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                ),
-                                icon: const Icon(Icons.done_all, size: 16),
-                                label: const Text('Clear'),
-                              ),
-                          ],
-                        ),
-                      ],
+                  Row(
+                    children: [
+                      DsAvatar(contact.name, size: 48),
+                      const SizedBox(width: 12),
+                      Expanded(child: _BalanceHero(balanceMinor: contact.balanceMinor)),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    [
+                      'Lent ${formatMoney(contact.givenMinor)}',
+                      'paid back ${formatMoney(contact.returnedMinor)}',
+                      if (contact.clearedMinor != 0) 'cleared ${formatMoney(contact.clearedMinor.abs())}',
+                      if (contact.phone != null) contact.phone!,
+                    ].join(' · '),
+                    style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx3),
+                  ),
+                  if (opening != 0) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      opening > 0
+                          ? 'Owed you ${formatMoney(opening)} before SpendLog'
+                          : 'You owed them ${formatMoney(-opening)} before SpendLog',
+                      style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx3),
                     ),
+                  ],
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      // Settled some other way: a gift, a favour.
+                      if (contact.balanceMinor != 0)
+                        FilledButton.icon(
+                          onPressed: _clear,
+                          style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
+                          icon: const DsIcon(DsIcons.check, size: 18),
+                          label: const Text('Clear'),
+                        ),
+                      OutlinedButton(
+                        onPressed: _setOpening,
+                        child: Text(opening == 0 ? 'Set starting balance' : 'Change starting balance'),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 18),
-            Text(
-              'HISTORY',
-              style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 1.1, color: c.muted),
-            ),
-            const SizedBox(height: 8),
+            const SizedBox(height: kCardGap),
             if (_failed)
-              Text("Couldn't load their history. Pull down to try again.",
-                  style: TextStyle(fontSize: 12.5, color: c.warn))
-            else if (_history == null)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 24),
-                child: Center(child: CircularProgressIndicator()),
+              const DsCallout(
+                tone: DsTone.warn,
+                title: "Couldn't load their history. Pull down to try again.",
               )
+            else if (_history == null)
+              const DsCard(child: DsSkeletonRows(count: 3))
             else if (_history!.isEmpty && _clearances.isEmpty && opening == 0)
-              Text(
-                'Nothing yet. On a transaction, tick Split or Settling up and add '
-                '${contact.name} under who it was with.',
-                style: TextStyle(fontSize: 12.5, height: 1.45, color: c.muted),
+              DsCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    DsSectionHeader('History with ${contact.name}'),
+                    const SizedBox(height: 12),
+                    DsEmpty(
+                      icon: DsIcons.users,
+                      message: 'Nothing yet. On a transaction, tick Split or Settling up and add '
+                          '${contact.name} under who it was with.',
+                    ),
+                  ],
+                ),
               )
             else
-              Container(
-                decoration: BoxDecoration(
-                  color: c.surface,
-                  border: Border.all(color: c.line),
-                  borderRadius: BorderRadius.circular(T.rMd),
-                ),
+              DsCard(
+                padding: EdgeInsets.zero,
+                clip: true,
                 child: Column(
                   children: [
+                    DsSectionHeader(
+                      'History with ${contact.name}',
+                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+                    ),
+                    const Divider(),
                     for (final (i, row) in _rows().indexed) ...[
-                      if (i > 0) Divider(height: 1, color: c.line),
+                      if (i > 0) const Divider(),
                       row,
                     ],
                     // Newest first, so what came before SpendLog goes last.
                     if (opening != 0) ...[
-                      if (_history!.isNotEmpty || _clearances.isNotEmpty) Divider(height: 1, color: c.line),
+                      if (_history!.isNotEmpty || _clearances.isNotEmpty) const Divider(),
                       _StartingRow(amountMinor: opening),
                     ],
                   ],
@@ -529,36 +618,13 @@ class _StartingRow extends StatelessWidget {
     final c = context.c;
     final theyOwed = amountMinor > 0;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Starting balance',
-                  style: TextStyle(fontSize: 13.4, fontWeight: FontWeight.w700, color: c.ink),
-                ),
-                const SizedBox(height: 2),
-                Text('Before SpendLog', style: TextStyle(fontSize: 11.5, color: c.muted)),
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '${theyOwed ? '+' : '−'}${formatMoney(amountMinor.abs())}',
-                style: kNum.copyWith(fontSize: 13.4, fontWeight: FontWeight.w700, color: c.ink),
-              ),
-              Text(theyOwed ? 'they owed' : 'you owed', style: TextStyle(fontSize: 11, color: c.muted)),
-            ],
-          ),
-        ],
-      ),
+    return _HistoryLine(
+      leading: const DsIconTile(DsIcons.calendar),
+      title: 'Starting balance',
+      meta: 'Before SpendLog',
+      amount: '${theyOwed ? '+' : '−'}${formatMoney(amountMinor.abs())}',
+      amountColour: c.tx,
+      caption: theyOwed ? 'they owed' : 'you owed',
     );
   }
 }
@@ -603,7 +669,7 @@ class _OpeningDialogState extends State<_OpeningDialog> {
             Text(
               'Money between you and ${widget.name} from before SpendLog - lent last year, say. '
               'Their balance starts from here.',
-              style: TextStyle(fontSize: 13, height: 1.45, color: context.c.ink70),
+              style: TextStyle(fontSize: 13, height: 1.45, color: context.c.tx2),
             ),
             const SizedBox(height: 14),
             OwedField(
@@ -649,29 +715,67 @@ class _HistoryRow extends StatelessWidget {
     // - when settling up in the other direction - money you paid them back.
     final what = added ? (t.isSettlement ? 'you paid' : 'lent') : 'paid back';
 
+    final title = t.merchant ?? t.note ?? (t.type == 'DEBIT' ? 'A payment' : 'Money in');
+    return _HistoryLine(
+      leading: DsMonogram(title, tone: added ? DsTone.neutral : DsTone.good),
+      title: title,
+      meta: [
+        formatShortDate(t.occurredAt),
+        if (t.split?.groupLabel != null) t.split!.groupLabel!,
+        'of ${formatMoney(t.amountMinor)}',
+      ].join(' · '),
+      amount: '${added ? '+' : '−'}${formatMoney(entry.amountMinor.abs())}',
+      // Money coming back is the good news, so it gets the colour.
+      amountColour: added ? c.tx : c.good,
+      caption: what,
+    );
+  }
+}
+
+/// One line of a person's history: a 40 leading tile, a 15/20 title over a
+/// 13/18 meta line, and the amount with what it was underneath.
+class _HistoryLine extends StatelessWidget {
+  const _HistoryLine({
+    required this.leading,
+    required this.title,
+    required this.meta,
+    required this.amount,
+    required this.amountColour,
+    required this.caption,
+    this.titleMaxLines = 1,
+    this.trailing,
+  });
+
+  final Widget leading;
+  final String title;
+  final String meta;
+  final String amount;
+  final Color amountColour;
+  final String caption;
+  final int titleMaxLines;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      padding: EdgeInsets.fromLTRB(16, 12, trailing == null ? 16 : 4, 12),
       child: Row(
         children: [
+          leading,
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  t.merchant ?? t.note ?? (t.type == 'DEBIT' ? 'A payment' : 'Money in'),
-                  maxLines: 1,
+                  title,
+                  maxLines: titleMaxLines,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 13.4, fontWeight: FontWeight.w700, color: c.ink),
+                  style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w500, color: c.tx),
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  [
-                    formatShortDate(t.occurredAt),
-                    if (t.split?.groupLabel != null) t.split!.groupLabel!,
-                    'of ${formatMoney(t.amountMinor)}',
-                  ].join(' · '),
-                  style: TextStyle(fontSize: 11.5, color: c.muted),
-                ),
+                Text(meta, style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx3)),
               ],
             ),
           ),
@@ -680,17 +784,13 @@ class _HistoryRow extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                '${added ? '+' : '−'}${formatMoney(entry.amountMinor.abs())}',
-                style: kNum.copyWith(
-                  fontSize: 13.4,
-                  fontWeight: FontWeight.w700,
-                  // Money coming back is the good news, so it gets the colour.
-                  color: added ? c.ink : c.credit,
-                ),
+                amount,
+                style: kNum.copyWith(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: amountColour),
               ),
-              Text(what, style: TextStyle(fontSize: 11, color: c.muted)),
+              Text(caption, style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3)),
             ],
           ),
+          if (trailing != null) trailing!,
         ],
       ),
     );
@@ -710,51 +810,21 @@ class _ClearanceRow extends StatelessWidget {
     final c = context.c;
     final effect = clearance.effectMinor;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 8, 4, 8),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  [
-                    'Cleared ${_plainMoney(clearance.amountMinor)}',
-                    if (clearance.note != null && clearance.note!.trim().isNotEmpty) clearance.note!,
-                  ].join(' · '),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 13.4, fontWeight: FontWeight.w700, color: c.ink),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '${formatShortDate(clearance.on)} · no money moved',
-                  style: TextStyle(fontSize: 11.5, color: c.muted),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '${effect > 0 ? '+' : '−'}${formatMoney(effect.abs())}',
-                style: kNum.copyWith(fontSize: 13.4, fontWeight: FontWeight.w700, color: c.muted),
-              ),
-              Text(
-                clearance.clearedTheirs ? 'they owed' : 'you owed',
-                style: TextStyle(fontSize: 11, color: c.muted),
-              ),
-            ],
-          ),
-          IconButton(
-            tooltip: 'Undo - it is owed again',
-            onPressed: onUndo,
-            icon: Icon(Icons.undo, size: 18, color: c.muted),
-          ),
-        ],
+    return _HistoryLine(
+      leading: const DsIconTile(DsIcons.check, tone: DsTone.neutral),
+      title: [
+        'Cleared ${_plainMoney(clearance.amountMinor)}',
+        if (clearance.note != null && clearance.note!.trim().isNotEmpty) clearance.note!,
+      ].join(' · '),
+      titleMaxLines: 2,
+      meta: '${formatShortDate(clearance.on)} · no money moved',
+      amount: '${effect > 0 ? '+' : '−'}${formatMoney(effect.abs())}',
+      amountColour: c.tx3,
+      caption: clearance.clearedTheirs ? 'they owed' : 'you owed',
+      trailing: IconButton(
+        tooltip: 'Undo - it is owed again',
+        onPressed: onUndo,
+        icon: DsIcon(DsIcons.undo, size: 18, color: c.tx3),
       ),
     );
   }
@@ -851,69 +921,94 @@ class _ClearSheetState extends State<_ClearSheet> {
     final left = _outstanding - _minor;
     final after = problem ?? (left == 0 ? 'settled up after this' : '${_plainMoney(left)} left after this');
 
+    final progress = _outstanding == 0 ? 0.0 : (_minor / _outstanding).clamp(0.0, 1.0);
+
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                'Clear with ${contact.name}',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: c.ink),
+              const DsDragHandle(),
+              DsSheetHeader(
+                title: 'Clear with ${contact.name}',
+                onClose: _saving ? null : () => Navigator.of(context).pop(),
               ),
               const SizedBox(height: 4),
               Text(
                 'Settled some other way - a gift, a favour. No money moves, and nothing counts as '
                 'spending or income.',
-                style: TextStyle(fontSize: 12.5, height: 1.45, color: c.muted),
+                style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2),
               ),
               const SizedBox(height: 16),
+              const DsLabel('Amount to clear', padding: EdgeInsets.only(bottom: 6)),
               TextField(
                 controller: _amount,
                 autofocus: true,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 onChanged: (_) => setState(() => _error = null),
-                style: kNum.copyWith(fontSize: 18, fontWeight: FontWeight.w700, color: c.ink),
-                decoration: const InputDecoration(
-                  labelText: 'Amount to clear',
+                style: kNum.copyWith(fontSize: 17, fontWeight: FontWeight.w600, color: c.tx),
+                decoration: InputDecoration(
                   prefixText: '₹ ',
-                  border: OutlineInputBorder(),
+                  errorText: problem == null ? null : '',
+                  errorStyle: const TextStyle(height: 0, fontSize: 0),
                 ),
               ),
-              const SizedBox(height: 6),
-              Text(
-                '$owing → $after',
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                  color: problem == null ? c.ink : c.debit,
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: c.sf2,
+                  border: Border.all(color: c.ln),
+                  borderRadius: BorderRadius.circular(Ds.rLg),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      '$owing → $after',
+                      style: kNum.copyWith(
+                        fontSize: 14,
+                        height: 20 / 14,
+                        fontWeight: FontWeight.w600,
+                        color: problem == null ? c.tx : c.crit,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    DsMeter(value: progress, height: 10, color: problem == null ? c.tx : c.critFill),
+                  ],
                 ),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 16),
+              const DsLabel('Note (optional)', padding: EdgeInsets.only(bottom: 6)),
               TextField(
                 controller: _note,
                 maxLength: 200,
                 textCapitalization: TextCapitalization.sentences,
                 decoration: const InputDecoration(
-                  labelText: 'Note (optional)',
                   hintText: 'Bought me a watch',
-                  border: OutlineInputBorder(),
                   counterText: '',
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
+              const DsLabel('Date', padding: EdgeInsets.only(bottom: 6)),
               OutlinedButton.icon(
                 onPressed: _pickDate,
-                style: OutlinedButton.styleFrom(alignment: Alignment.centerLeft),
-                icon: const Icon(Icons.calendar_today_outlined, size: 16),
+                style: OutlinedButton.styleFrom(
+                  alignment: Alignment.centerLeft,
+                  minimumSize: const Size.fromHeight(52),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Ds.rMd)),
+                  textStyle: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w400),
+                ),
+                icon: DsIcon(DsIcons.calendar, size: 18, color: c.tx2),
                 label: Text(DateFormat('EEE, d MMM yyyy').format(_on)),
               ),
               if (_error != null) ...[
-                const SizedBox(height: 10),
-                Text(_error!, style: TextStyle(fontSize: 12.5, color: c.debit)),
+                const SizedBox(height: 12),
+                DsCallout(tone: DsTone.crit, title: _error!),
               ],
               const SizedBox(height: 16),
               Row(
@@ -921,6 +1016,7 @@ class _ClearSheetState extends State<_ClearSheet> {
                 children: [
                   TextButton(
                     onPressed: _saving ? null : () => Navigator.of(context).pop(),
+                    style: TextButton.styleFrom(minimumSize: const Size(0, 48)),
                     child: const Text('Cancel'),
                   ),
                   const SizedBox(width: 8),

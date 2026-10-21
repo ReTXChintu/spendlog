@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/api_client.dart';
 import '../services/vault_session.dart';
-import '../theme.dart';
+import 'ds/ds.dart';
 
 /// The full card or bank account details, behind a PIN.
 ///
@@ -112,34 +112,43 @@ class _CardVaultPanelState extends State<CardVaultPanel> {
     final what = widget.isBank ? 'account' : 'card';
 
     return Container(
-      margin: const EdgeInsets.only(top: 14),
-      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: c.paper,
-        border: Border.all(color: details != null ? c.brand : c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
+        // Open details read as a selected item: the accent tint and ring.
+        color: details != null ? c.acSoft : c.sf,
+        border: Border.all(color: details != null ? c.acLine : c.ln),
+        borderRadius: BorderRadius.circular(Ds.rXl),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(unlocked ? Icons.lock_open_outlined : Icons.lock_outline, size: 16, color: c.muted),
-              const SizedBox(width: 8),
-              Text(widget.isBank ? 'Account details' : 'Card details',
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-              const Spacer(),
+              DsIconTile(
+                unlocked ? Icons.lock_open_outlined : DsIcons.lock,
+                tone: unlocked ? DsTone.ac : DsTone.neutral,
+                size: 36,
+                onTinted: details != null,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  widget.isBank ? 'Account details' : 'Card details',
+                  style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
+                ),
+              ),
               Text(
                 '•••• ${widget.last4 ?? '••••'}',
-                style: kNum.copyWith(fontSize: 13, color: c.muted, letterSpacing: 1.2),
+                style: kMono.copyWith(fontSize: 13, color: c.tx3, letterSpacing: 13 * .12),
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           if (!_available)
             Text(
               'The server has no encryption key set, so $what details cannot be stored yet.',
-              style: TextStyle(fontSize: 11.5, height: 1.45, color: c.muted),
+              style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2),
             )
           else if (!_hasPin)
             _hint(
@@ -163,27 +172,28 @@ class _CardVaultPanelState extends State<CardVaultPanel> {
               ),
             )
           else if (lockedOut)
-            Text(
-              'Too many wrong PINs. Try again after '
-              '${TimeOfDay.fromDateTime(_lockedUntil!).format(context)}.',
-              style: TextStyle(fontSize: 12, color: c.warn),
+            DsCallout(
+              tone: DsTone.warn,
+              icon: DsIcons.lock,
+              title: 'Too many wrong PINs. Try again after '
+                  '${TimeOfDay.fromDateTime(_lockedUntil!).format(context)}.',
             )
           else ...[
             OutlinedButton.icon(
               onPressed: _busy ? null : _unlock,
-              icon: const Icon(Icons.visibility_outlined, size: 17),
+              icon: const DsIcon(DsIcons.eye, size: 18),
               label: Text(_busy ? 'Checking…' : 'Show details'),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             Text(
               'One PIN shows every card and account for five minutes.',
-              style: TextStyle(fontSize: 11, color: c.mutedLight),
+              style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
             ),
           ],
           if (unlocked && details == null && _hasPin && _available) _unlockedNote(),
           if (_error != null) ...[
             const SizedBox(height: 8),
-            Text(_error!, style: TextStyle(fontSize: 11.5, color: c.debit)),
+            Text(_error!, style: TextStyle(fontSize: 12, height: 16 / 12, color: c.crit)),
           ],
         ],
       ),
@@ -193,8 +203,8 @@ class _CardVaultPanelState extends State<CardVaultPanel> {
   Widget _hint(String text, {required Widget action}) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(text, style: TextStyle(fontSize: 11.5, height: 1.45, color: context.c.muted)),
-          const SizedBox(height: 10),
+          Text(text, style: TextStyle(fontSize: 13, height: 18 / 13, color: context.c.tx2)),
+          const SizedBox(height: 12),
           action,
         ],
       );
@@ -212,12 +222,12 @@ class _CardVaultPanelState extends State<CardVaultPanel> {
             child: Text(
               'Unlocked for $minutes more ${minutes == 1 ? 'minute' : 'minutes'}'
               '${widget.isBank ? '.' : '. No CVV is stored.'}',
-              style: TextStyle(fontSize: 11, color: c.mutedLight),
+              style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
             ),
           ),
           TextButton.icon(
             onPressed: _session.lock,
-            icon: const Icon(Icons.lock_outline, size: 15),
+            icon: const DsIcon(DsIcons.lock, size: 16),
             label: const Text('Lock'),
           ),
         ],
@@ -247,7 +257,7 @@ class _CardVaultPanelState extends State<CardVaultPanel> {
             TextButton(onPressed: () => _edit(details), child: const Text('Change')),
             TextButton(
               onPressed: _busy ? null : _remove,
-              style: TextButton.styleFrom(foregroundColor: context.c.debit),
+              style: TextButton.styleFrom(foregroundColor: context.c.crit),
               child: const Text('Remove'),
             ),
           ],
@@ -261,34 +271,26 @@ class _CardVaultPanelState extends State<CardVaultPanel> {
     final c = context.c;
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(bottom: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            label.toUpperCase(),
-            style: TextStyle(
-              fontSize: 9.5,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.5,
-              color: c.muted,
-            ),
-          ),
-          const SizedBox(height: 3),
+          DsLabel(label),
+          const SizedBox(height: 4),
           Row(
             children: [
               Expanded(
                 child: Text(
                   value,
                   style: mono
-                      ? kNum.copyWith(fontSize: 16, letterSpacing: 1.4)
-                      : const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                      ? kMono.copyWith(fontSize: 16, letterSpacing: 16 * .1, color: c.tx)
+                      : TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w500, color: c.tx),
                 ),
               ),
               if (copyable != null && copyable.isNotEmpty)
                 IconButton(
                   visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.copy_outlined, size: 16),
+                  icon: Icon(Icons.copy_outlined, size: 18, color: c.tx2),
                   tooltip: 'Copy',
                   onPressed: () {
                     Clipboard.setData(ClipboardData(text: copyable));
@@ -405,12 +407,12 @@ class _VaultPinDialogState extends State<VaultPinDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Your PIN'),
-        content: TextField(
+        title: const _DialogTitle('Your PIN'),
+        content: DsPasswordField(
           controller: _pin,
+          noun: 'PIN',
+          pin: true,
           autofocus: true,
-          obscureText: true,
-          keyboardType: TextInputType.number,
           maxLength: 6,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           decoration: const InputDecoration(counterText: ''),
@@ -469,29 +471,34 @@ class _SetPinDialogState extends State<_SetPinDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Choose a PIN'),
+        title: const _DialogTitle('Choose a PIN'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            for (final (controller, label) in [(_pin, 'New PIN'), (_again, 'Again')])
-              TextField(
-                controller: controller,
-                obscureText: true,
-                keyboardType: TextInputType.number,
-                maxLength: 6,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                onChanged: (_) => setState(() {}),
-                decoration: InputDecoration(labelText: label, counterText: ''),
+            for (final (controller, label) in [(_pin, 'New PIN'), (_again, 'Again')]) ...[
+              DsField(
+                label: label,
+                child: DsPasswordField(
+                  controller: controller,
+                  noun: 'PIN',
+                  pin: true,
+                  maxLength: 6,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(counterText: ''),
+                ),
               ),
-            const SizedBox(height: 8),
+              const SizedBox(height: 12),
+            ],
             Text(
               'Four to six digits, and the same PIN unlocks every card and account. Five wrong '
               'tries locks it for fifteen minutes.',
-              style: TextStyle(fontSize: 11.5, height: 1.4, color: context.c.muted),
+              style: TextStyle(fontSize: 12, height: 16 / 12, color: context.c.tx3),
             ),
             if (_error != null) ...[
               const SizedBox(height: 8),
-              Text(_error!, style: TextStyle(fontSize: 12, color: context.c.debit)),
+              Text(_error!, style: TextStyle(fontSize: 12, height: 16 / 12, color: context.c.crit)),
             ],
           ],
         ),
@@ -586,102 +593,134 @@ class _EditDetailsSheetState extends State<_EditDetailsSheet> {
     final c = context.c;
     final isBank = widget.isBank;
 
+    final mono = kMono.copyWith(fontSize: 15, color: c.tx, letterSpacing: 15 * .06);
+
     return Padding(
-      padding: EdgeInsets.fromLTRB(16, 18, 16, MediaQuery.of(context).viewInsets.bottom + 20),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(isBank ? 'Account details' : 'Card details',
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 14),
-            TextField(
-              controller: _number,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: isBank ? 'Account number' : 'Card number',
-                hintText: isBank ? '50100123456789' : '5252 2525 2525 6623',
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const DsDragHandle(),
+              DsSheetHeader(
+                title: isBank ? 'Account details' : 'Card details',
+                icon: DsIcons.lock,
+                onClose: () => Navigator.of(context).pop(),
               ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: isBank
-                      ? TextField(
-                          controller: _ifsc,
-                          textCapitalization: TextCapitalization.characters,
-                          maxLength: 11,
-                          decoration: const InputDecoration(
-                            labelText: 'IFSC',
-                            hintText: 'HDFC0001234',
-                            counterText: '',
-                          ),
-                        )
-                      : TextField(
-                          controller: _expiry,
-                          decoration: const InputDecoration(labelText: 'Expires', hintText: '08/29'),
-                        ),
+              const SizedBox(height: 16),
+              DsField(
+                label: isBank ? 'Account number' : 'Card number',
+                child: TextField(
+                  controller: _number,
+                  keyboardType: TextInputType.number,
+                  style: mono,
+                  decoration: InputDecoration(hintText: isBank ? '50100123456789' : '5252 2525 2525 6623'),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextField(
-                    controller: _name,
-                    textCapitalization:
-                        isBank ? TextCapitalization.words : TextCapitalization.characters,
-                    decoration: InputDecoration(labelText: isBank ? 'Account holder' : 'Name on card'),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: isBank
+                        ? DsField(
+                            label: 'IFSC',
+                            child: TextField(
+                              controller: _ifsc,
+                              textCapitalization: TextCapitalization.characters,
+                              maxLength: 11,
+                              style: mono,
+                              decoration: const InputDecoration(hintText: 'HDFC0001234', counterText: ''),
+                            ),
+                          )
+                        : DsField(
+                            label: 'Expires',
+                            child: TextField(
+                              controller: _expiry,
+                              style: mono,
+                              decoration: const InputDecoration(hintText: '08/29'),
+                            ),
+                          ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: DsField(
+                      label: isBank ? 'Account holder' : 'Name on card',
+                      child: TextField(
+                        controller: _name,
+                        textCapitalization: isBank ? TextCapitalization.words : TextCapitalization.characters,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              DsField(label: 'Note', child: TextField(controller: _note)),
+              if (_sessionPin == null) ...[
+                const SizedBox(height: 16),
+                DsField(
+                  label: 'Your PIN',
+                  child: DsPasswordField(
+                    controller: _pin,
+                    noun: 'PIN',
+                    pin: true,
+                    maxLength: 6,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(counterText: ''),
                   ),
                 ),
               ],
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _note,
-              decoration: const InputDecoration(labelText: 'Note'),
-            ),
-            if (_sessionPin == null) ...[
-              const SizedBox(height: 12),
-              TextField(
-                controller: _pin,
-                obscureText: true,
-                keyboardType: TextInputType.number,
-                maxLength: 6,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(labelText: 'Your PIN', counterText: ''),
+              const SizedBox(height: 8),
+              Text(
+                isBank
+                    ? 'Stored encrypted, and shown only after your PIN.'
+                    : 'There is no CVV field, on purpose — it is the one thing that makes a stolen '
+                        'number spendable, and you already know yours.',
+                style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
               ),
-            ],
-            const SizedBox(height: 6),
-            Text(
-              isBank
-                  ? 'Stored encrypted, and shown only after your PIN.'
-                  : 'There is no CVV field, on purpose — it is the one thing that makes a stolen '
-                      'number spendable, and you already know yours.',
-              style: TextStyle(fontSize: 11.5, height: 1.45, color: c.muted),
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 10),
-              Text(_error!, style: TextStyle(fontSize: 12, color: c.debit)),
-            ],
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton(
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                DsCallout(tone: DsTone.crit, title: _error!),
+              ],
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
                     onPressed: _busy ? null : _save,
                     child: Text(_busy ? 'Saving…' : 'Save'),
                   ),
-                ),
-                const SizedBox(width: 10),
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
-                ),
-              ],
-            ),
-          ],
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
+}
+
+/// A dialog's header (§7.7): a 40 accent icon tile and the 19/24 title.
+class _DialogTitle extends StatelessWidget {
+  const _DialogTitle(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Row(
+        children: [
+          const DsIconTile(DsIcons.lock, tone: DsTone.ac),
+          const SizedBox(width: 12),
+          Expanded(child: Text(text)),
+        ],
+      );
 }

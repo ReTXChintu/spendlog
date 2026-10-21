@@ -2,8 +2,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
 import '../utils/format.dart';
+import 'ds/ds.dart';
 
 const _terms = [3, 6, 9, 12, 18, 24];
 
@@ -16,10 +16,6 @@ Future<bool?> showEmiSheet(BuildContext context, {required Transaction transacti
   return showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: context.c.surface,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(T.rLg)),
-    ),
     builder: (_) => Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: _EmiSheet(transaction: transaction),
@@ -105,56 +101,32 @@ class _EmiSheetState extends State<_EmiSheet> {
 
     return SafeArea(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Center(
-              child: Container(
-                width: 38,
-                height: 4,
-                decoration: BoxDecoration(color: c.lineStrong, borderRadius: BorderRadius.circular(100)),
-              ),
+            const DsDragHandle(),
+            DsSheetHeader(
+              icon: DsIcons.creditCard,
+              title: 'Convert to EMI',
+              subtitle: '${widget.transaction.merchant ?? 'This purchase'} · '
+                  '${formatMoney(widget.transaction.amountMinor)}',
             ),
-            const SizedBox(height: 14),
-            Text(
-              'Convert to EMI',
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: c.ink),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '${widget.transaction.merchant ?? 'This purchase'} · '
-              '${formatMoney(widget.transaction.amountMinor)}',
-              style: TextStyle(fontSize: 12.5, color: c.muted),
-            ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 20),
 
-            Text('Months', style: _label(c)),
+            const DsLabel('Months'),
             const SizedBox(height: 6),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
                 for (final term in _terms)
-                  GestureDetector(
+                  DsChip(
+                    label: '$term',
+                    selected: _months == term,
+                    showCheck: false,
                     onTap: () => setState(() => _months = term),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: _months == term ? c.brand50 : c.surface,
-                        border: Border.all(color: _months == term ? c.brand : c.lineStrong),
-                        borderRadius: BorderRadius.circular(100),
-                      ),
-                      child: Text(
-                        '$term',
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          color: _months == term ? c.brandDark : c.ink70,
-                        ),
-                      ),
-                    ),
                   ),
               ],
             ),
@@ -170,7 +142,7 @@ class _EmiSheetState extends State<_EmiSheet> {
                       controller: _monthly,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       onChanged: (_) => setState(() {}),
-                      style: kNum.copyWith(fontWeight: FontWeight.w700, color: c.ink),
+                      style: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w600, color: c.tx),
                       decoration: _decoration(
                         c,
                         hint: (_computedMonthlyMinor / 100).toStringAsFixed(2),
@@ -187,21 +159,21 @@ class _EmiSheetState extends State<_EmiSheet> {
                       controller: _rate,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       onChanged: (_) => setState(() {}),
-                      style: TextStyle(color: c.ink),
+                      style: TextStyle(color: c.tx),
                       decoration: _decoration(c, hint: '14'),
                     ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 16),
 
             _SheetField(
               label: 'Processing fee',
               child: TextField(
                 controller: _fee,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                style: TextStyle(color: c.ink),
+                style: TextStyle(color: c.tx),
                 decoration: _decoration(c, hint: 'Optional', prefix: '₹ '),
               ),
             ),
@@ -209,13 +181,17 @@ class _EmiSheetState extends State<_EmiSheet> {
             Text(
               'Take the monthly amount off your statement if you can — card EMIs are quoted flat with '
               'GST on the interest, so a calculated figure usually lands a few rupees out.',
-              style: TextStyle(fontSize: 11.8, height: 1.45, color: c.mutedLight),
+              style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
             ),
             const SizedBox(height: 16),
 
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(color: c.brand50, borderRadius: BorderRadius.circular(T.rMd)),
+              decoration: BoxDecoration(
+                color: c.sf2,
+                border: Border.all(color: c.ln),
+                borderRadius: BorderRadius.circular(Ds.rLg),
+              ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -229,12 +205,12 @@ class _EmiSheetState extends State<_EmiSheet> {
             Text(
               "The purchase stops counting as this month's spending. Each payment counts instead, as "
               'it is billed.',
-              style: TextStyle(fontSize: 11.8, height: 1.45, color: c.muted),
+              style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
             ),
 
             if (_error != null) ...[
               const SizedBox(height: 14),
-              Text(_error!, style: TextStyle(fontSize: 12.5, color: c.debit)),
+              DsCallout(tone: DsTone.crit, title: _error!),
             ],
 
             const SizedBox(height: 18),
@@ -242,6 +218,7 @@ class _EmiSheetState extends State<_EmiSheet> {
               children: [
                 const Spacer(),
                 TextButton(
+                  style: TextButton.styleFrom(minimumSize: const Size(0, 48)),
                   onPressed: _saving ? null : () => Navigator.of(context).pop(false),
                   child: const Text('Cancel'),
                 ),
@@ -259,25 +236,10 @@ class _EmiSheetState extends State<_EmiSheet> {
   }
 }
 
-TextStyle _label(SpendColors c) =>
-    TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: c.muted);
-
-InputDecoration _decoration(SpendColors c, {String? hint, String? prefix}) => InputDecoration(
+/// The theme's 52 px field; only the hint and prefix vary.
+InputDecoration _decoration(DsColors c, {String? hint, String? prefix}) => InputDecoration(
       hintText: hint,
       prefixText: prefix,
-      hintStyle: TextStyle(color: c.mutedLight, fontSize: 13),
-      isDense: true,
-      filled: true,
-      fillColor: c.surface,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(T.rSm),
-        borderSide: BorderSide(color: c.lineStrong),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(T.rSm),
-        borderSide: BorderSide(color: c.brand),
-      ),
     );
 
 class _SheetField extends StatelessWidget {
@@ -291,7 +253,7 @@ class _SheetField extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: _label(context.c)),
+        DsLabel(label),
         const SizedBox(height: 6),
         child,
       ],
@@ -311,9 +273,9 @@ class _Preview extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: c.muted)),
+        Text(label, style: TextStyle(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w600, color: c.tx2)),
         const SizedBox(height: 2),
-        Text(value, style: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w800, color: c.ink)),
+        Text(value, style: kNum.copyWith(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx)),
       ],
     );
   }

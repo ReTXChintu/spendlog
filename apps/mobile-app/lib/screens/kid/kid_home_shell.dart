@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/api_client.dart';
-import '../../theme.dart';
+import '../../widgets/ds/ds.dart';
 import '../login_screen.dart';
 import 'kid_analytics_screen.dart';
 import 'kid_money_screen.dart';
@@ -60,23 +60,20 @@ class _KidHomeShellState extends State<KidHomeShell> {
       appBar: AppBar(
         title: Row(
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(7),
-              child: Image.asset('assets/app_icon.png', width: 26, height: 26),
-            ),
+            const DsLogoMark(size: 28),
             const SizedBox(width: 10),
-            Text(_titles[_index], style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: c.ink)),
+            Text(_titles[_index]),
           ],
         ),
         actions: [
           if (_index < 2)
             IconButton(
               tooltip: 'Check for new transactions',
-              icon: Icon(Icons.refresh, color: c.ink70),
+              icon: DsIcon(DsIcons.refresh, color: c.tx2),
               onPressed: _refresh,
             ),
+          const SizedBox(width: 4),
         ],
-        shape: Border(bottom: BorderSide(color: c.line)),
       ),
       body: IndexedStack(
         index: _index,
@@ -86,30 +83,22 @@ class _KidHomeShellState extends State<KidHomeShell> {
           KidSettingsScreen(onSignedOut: _toLogin),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) {
-          setState(() => _index = i);
-          // Analytics is cheap to reload, and an add on Money changes it.
-          if (i == 1) _analytics.currentState?.load();
-        },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.account_balance_wallet_outlined),
-            selectedIcon: Icon(Icons.account_balance_wallet),
-            label: 'Money',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.insights_outlined),
-            selectedIcon: Icon(Icons.insights),
-            label: 'Analytics',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings),
-            label: 'Settings',
-          ),
-        ],
+      // sf with a top ln hairline; the selected tab is ac on an acSoft pill.
+      bottomNavigationBar: DecoratedBox(
+        decoration: BoxDecoration(border: Border(top: BorderSide(color: c.ln))),
+        child: NavigationBar(
+          selectedIndex: _index,
+          onDestinationSelected: (i) {
+            setState(() => _index = i);
+            // Analytics is cheap to reload, and an add on Money changes it.
+            if (i == 1) _analytics.currentState?.load();
+          },
+          destinations: const [
+            NavigationDestination(icon: DsIcon(DsIcons.piggyBank), label: 'Money'),
+            NavigationDestination(icon: DsIcon(DsIcons.barChart), label: 'Analytics'),
+            NavigationDestination(icon: DsIcon(DsIcons.sliders), label: 'Settings'),
+          ],
+        ),
       ),
     );
   }

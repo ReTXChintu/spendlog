@@ -232,7 +232,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(_assignedLine(tester), '₹14,500 of ₹15,000 assigned · ₹500 not assigned');
         final line = tester.widget<Text>(find.byKey(const ValueKey('loan-assigned-line')));
-        expect(line.style!.color, buildTheme(Brightness.light).extension<SpendColors>()!.warn);
+        expect(line.style!.color, buildTheme(Brightness.light).extension<DsColors>()!.warn);
 
         await _save(tester);
       }, () => _server(patches));

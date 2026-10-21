@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 import '../../models/models.dart';
 import '../../services/api_client.dart';
 import '../../services/vault_session.dart';
-import '../../theme.dart';
+import '../ds/ds.dart';
 import '../../utils/format.dart';
 import '../card_vault_panel.dart';
 
@@ -15,7 +15,7 @@ const double kCardAspect = 1.586;
 /// The size every face is laid out at before being scaled to fit. Drawn at
 /// one size, so the chip, the number and the bar keep their proportions on
 /// any phone and nothing can wrap into the next line.
-const double _designWidth = 340;
+const double _designWidth = 328;
 const double _designHeight = _designWidth / kCardAspect;
 
 /// The two ends of a card's gradient: the colour picked for the account
@@ -33,10 +33,11 @@ List<Color> cardGradient({String? color, String bankName = '', String? issuer, S
 
   final who = '${issuer ?? ''} $bankName'.toLowerCase();
   const banks = <String, List<int>>{
-    'hdfc': [0xFF0B2A5B, 0xFF1D4E9E],
-    'icici': [0xFF6E1A1A, 0xFFC2410C],
-    'sbi': [0xFF0E3A7A, 0xFF1F8FD1],
-    'axis': [0xFF5B0F2E, 0xFF97144D],
+    // The four the design draws (§3.4); the rest are close to the plastic.
+    'hdfc': [0xFF0B2554, 0xFF1C4F9C],
+    'icici': [0xFF7A1717, 0xFFC2522A],
+    'sbi': [0xFF0D4A8F, 0xFF2B8AD3],
+    'axis': [0xFF5E0F31, 0xFFA41E55],
     'kotak': [0xFF7F1D1D, 0xFFD3302F],
     'american express': [0xFF0F5E8C, 0xFF6FA8C9],
     'amex': [0xFF0F5E8C, 0xFF6FA8C9],
@@ -62,9 +63,16 @@ List<Color> cardGradient({String? color, String bankName = '', String? issuer, S
     'RUPAY' => const [Color(0xFF0B4F4A), Color(0xFF138A72)],
     'AMEX' => const [Color(0xFF0F5E8C), Color(0xFF6FA8C9)],
     'DINERS' => const [Color(0xFF263238), Color(0xFF607D8B)],
-    _ => const [Color(0xFF2F3540), Color(0xFF55606E)],
+    // Neutral graphite for an issuer the design has no gradient for.
+    _ => const [Color(0xFF2A2B30), Color(0xFF4C4D53)],
   };
 }
+
+/// The revealed side: the same card, darker (HDFC's #0B2554 → #071733).
+List<Color> revealedGradient(List<Color> gradient) => [
+      Color.lerp(gradient.first, Colors.black, 0.36)!,
+      Color.lerp(gradient.last, Colors.black, 0.3)!,
+    ];
 
 /// White on a dark card, ink on a pale one someone picked.
 Color _inkOn(List<Color> gradient) {
@@ -73,11 +81,12 @@ Color _inkOn(List<Color> gradient) {
 }
 
 /// The bar along the bottom of a face, coloured by where the card stands
-/// against whatever the bar measures. Bright enough to read on any card.
+/// against whatever the bar measures: mint, amber, coral (§3.4). Bright
+/// enough to read on any card.
 Color cardStateTint(String state) => switch (state) {
-      'over' => const Color(0xFFFF6B6B),
-      'close' => const Color(0xFFFFC145),
-      'ok' => const Color(0xFF5EE6A6),
+      'over' => const Color(0xFFFF9A90),
+      'close' => const Color(0xFFFFCB70),
+      'ok' => const Color(0xFF7EE2AE),
       _ => const Color(0xD9FFFFFF),
     };
 
@@ -336,7 +345,7 @@ class _CardFaceViewState extends State<CardFaceView> with SingleTickerProviderSt
           final back = details == null
               ? null
               : _Surface(
-                  gradient: [gradient.first, Color.lerp(gradient.first, gradient.last, 0.55)!],
+                  gradient: revealedGradient(gradient),
                   semanticLabel: 'Card details. Tap to hide.',
                   onTap: _turnBack,
                   child: _Back(
@@ -344,6 +353,7 @@ class _CardFaceViewState extends State<CardFaceView> with SingleTickerProviderSt
                     network: card.network,
                     ink: ink,
                     secondsLeft: _secondsLeft,
+                    totalSeconds: widget.showFor.inSeconds,
                     onCopy: () => _copyNumber(details),
                   ),
                 );
@@ -382,7 +392,8 @@ class _CardFaceViewState extends State<CardFaceView> with SingleTickerProviderSt
   }
 }
 
-/// The plastic: gradient, rounded corners, a soft shadow and a sheen.
+/// The plastic (§7.9): a 135° issuer gradient, radius 16, and the small
+/// lift card faces are allowed. White text on top.
 class _Surface extends StatelessWidget {
   const _Surface({required this.gradient, required this.child, this.onTap, required this.semanticLabel});
 
@@ -393,17 +404,12 @@ class _Surface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final radius = BorderRadius.circular(16);
+    final radius = BorderRadius.circular(Ds.r2xl);
     return Semantics(
       button: onTap != null,
       label: semanticLabel,
       child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: radius,
-          boxShadow: [
-            BoxShadow(color: gradient.first.withValues(alpha: .35), blurRadius: 18, offset: const Offset(0, 8)),
-          ],
-        ),
+        decoration: BoxDecoration(borderRadius: radius, boxShadow: context.c.shadow),
         child: ClipRRect(
           borderRadius: radius,
           child: Material(
@@ -418,37 +424,14 @@ class _Surface extends StatelessWidget {
               ),
               child: InkWell(
                 onTap: onTap,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    // Two faint rings and a diagonal sheen, the way printed
-                    // plastic catches the light.
-                    const Positioned(right: -70, top: -90, child: _Ring(size: 240)),
-                    const Positioned(left: -60, bottom: -120, child: _Ring(size: 220)),
-                    DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: const Alignment(-1, -1),
-                          end: const Alignment(1, 1),
-                          colors: [
-                            Colors.white.withValues(alpha: .14),
-                            Colors.white.withValues(alpha: 0),
-                            Colors.white.withValues(alpha: .05),
-                          ],
-                          stops: const [0, 0.45, 1],
-                        ),
-                      ),
-                    ),
-                    // The whole card scales as one, so the phone's text size
-                    // grows it with everything else rather than pushing the
-                    // number off the bottom.
-                    FittedBox(
-                      fit: BoxFit.contain,
-                      child: MediaQuery.withNoTextScaling(
-                        child: SizedBox(width: _designWidth, height: _designHeight, child: child),
-                      ),
-                    ),
-                  ],
+                // The whole card scales as one, so the phone's text size
+                // grows it with everything else rather than pushing the
+                // number off the bottom.
+                child: FittedBox(
+                  fit: BoxFit.contain,
+                  child: MediaQuery.withNoTextScaling(
+                    child: SizedBox(width: _designWidth, height: _designHeight, child: child),
+                  ),
                 ),
               ),
             ),
@@ -459,23 +442,14 @@ class _Surface extends StatelessWidget {
   }
 }
 
-class _Ring extends StatelessWidget {
-  const _Ring({required this.size});
-
-  final double size;
-
-  @override
-  Widget build(BuildContext context) => IgnorePointer(
-        child: Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white.withValues(alpha: .07), width: 26),
-          ),
-        ),
-      );
-}
+/// Plex Mono for the card number, as printed: tabular, widely tracked.
+TextStyle _cardNumberStyle(double size, double tracking, Color ink) => kMono.copyWith(
+      fontSize: size,
+      letterSpacing: size * tracking,
+      fontWeight: FontWeight.w500,
+      color: ink,
+      height: 1.2,
+    );
 
 class _Front extends StatelessWidget {
   const _Front({required this.card, required this.ink, required this.busy, this.onReveal, this.onAddDetails});
@@ -488,117 +462,116 @@ class _Front extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final soft = ink.withValues(alpha: .72);
     final title = card.bankName.isNotEmpty ? card.bankName : card.name;
     final subtitle = card.name != title ? card.name : null;
     final bar = cardBar(card);
+    final days = card.daysToDue;
+    final dueSoon = days != null && days <= 7 && (card.nextDueOn ?? '').isNotEmpty;
+    final due = _dueLabel(card);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 12, 16),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Bank · product, and the network's wordmark.
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title.toUpperCase(),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: 1.1, color: ink),
-                      ),
-                      if (subtitle != null)
-                        Text(
-                          subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w500, color: soft),
-                        ),
-                    ],
-                  ),
+                child: Text(
+                  subtitle == null ? title : '$title · $subtitle',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 13, height: 18 / 13, fontWeight: FontWeight.w600, color: ink),
                 ),
               ),
-              if (onReveal != null)
-                busy
-                    ? Padding(
-                        padding: const EdgeInsets.all(11),
-                        child: SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: ink),
-                        ),
-                      )
-                    : IconButton(
-                        onPressed: onReveal,
-                        tooltip: 'Show card details',
-                        constraints: const BoxConstraints.tightFor(width: 40, height: 40),
-                        padding: EdgeInsets.zero,
-                        icon: Icon(Icons.visibility_outlined, color: ink, size: 21),
-                      )
-              else if (onAddDetails != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 2, right: 4),
-                  child: _Pill(label: 'Add card details', ink: ink, onTap: onAddDetails!),
-                ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Row(
-            children: [
-              const _Chip(),
-              const SizedBox(width: 10),
-              Icon(Icons.contactless_outlined, size: 22, color: soft),
+              const SizedBox(width: 8),
+              NetworkMark(network: card.network, color: ink),
             ],
           ),
           const Spacer(),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              maskedCardNumber(card.last4),
-              maxLines: 1,
-              style: kNum.copyWith(fontSize: 19, letterSpacing: 2.2, fontWeight: FontWeight.w600, color: ink),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Expanded(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Flexible(
-                        child: _Field(
-                          label: 'THIS CYCLE',
-                          // No billing date, no cycle: nothing to put here
-                          // that would not be a guess.
-                          value: card.unbilledMinor == null ? '—' : formatMoneyShort(card.unbilledMinor!),
-                          ink: ink,
-                        ),
-                      ),
-                      const SizedBox(width: 22),
-                      Flexible(child: _Field(label: 'BILL DUE', value: _dueLabel(card), ink: ink)),
-                    ],
+          // Chip, the last four, and the eye.
+          Row(
+            children: [
+              const _Chip(),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    maskedCardNumber(card.last4),
+                    maxLines: 1,
+                    style: _cardNumberStyle(17, .12, ink),
                   ),
                 ),
-                const SizedBox(width: 8),
-                NetworkMark(network: card.network, color: ink),
-              ],
-            ),
+              ),
+              const SizedBox(width: 8),
+              if (onReveal != null)
+                busy
+                    ? SizedBox(
+                        width: 40,
+                        height: 40,
+                        child: Center(
+                          child: SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: ink),
+                          ),
+                        ),
+                      )
+                    : Material(
+                        color: Colors.white.withValues(alpha: .14),
+                        shape: const CircleBorder(),
+                        child: IconButton(
+                          onPressed: onReveal,
+                          tooltip: 'Show card details',
+                          constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+                          padding: EdgeInsets.zero,
+                          icon: DsIcon(DsIcons.eye, color: ink, size: 20),
+                        ),
+                      ),
+            ],
           ),
-          const SizedBox(height: 10),
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: _Bar(fraction: bar.fraction, tint: cardStateTint(bar.state), ink: ink),
+          // Not set up: the white button gets its own line, so the number
+          // keeps its size beside the chip.
+          if (onReveal == null && onAddDetails != null) ...[
+            const SizedBox(height: 10),
+            _AddDetailsButton(label: 'Add card details', ink: ink, onTap: onAddDetails!),
+          ],
+          const Spacer(),
+          // How much of the limit is gone, then the bill and the cycle.
+          _Bar(fraction: bar.fraction, tint: cardStateTint(bar.state), ink: ink),
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: Text(
+                  due == '—' ? 'No due date' : 'Bill due $due',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: kNum.copyWith(
+                    fontSize: 12,
+                    height: 16 / 12,
+                    fontWeight: dueSoon ? FontWeight.w600 : FontWeight.w400,
+                    color: ink,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Opacity(
+                opacity: .85,
+                child: Text(
+                  // No billing date, no cycle: nothing to put here that
+                  // would not be a guess.
+                  'This cycle ${card.unbilledMinor == null ? '—' : formatMoneyShort(card.unbilledMinor!)}',
+                  maxLines: 1,
+                  style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: ink),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -628,12 +601,15 @@ String _dueLabel(CardFace card) {
   return '$date · ${days}d';
 }
 
+/// The revealed side (§7.9): a magnetic stripe, the full number in Mono,
+/// valid thru and the name, and a ring counting down to turning back.
 class _Back extends StatelessWidget {
   const _Back({
     required this.details,
     required this.network,
     required this.ink,
     required this.secondsLeft,
+    required this.totalSeconds,
     required this.onCopy,
   });
 
@@ -641,11 +617,12 @@ class _Back extends StatelessWidget {
   final String? network;
   final Color ink;
   final int secondsLeft;
+  final int totalSeconds;
   final VoidCallback onCopy;
 
   @override
   Widget build(BuildContext context) {
-    final soft = ink.withValues(alpha: .72);
+    final soft = ink.withValues(alpha: .75);
     final note = details.note?.trim();
 
     return Column(
@@ -654,50 +631,49 @@ class _Back extends StatelessWidget {
         const SizedBox(height: 18),
         // The magnetic stripe. There is no signature panel and no CVV:
         // the CVV is never stored, so there is nothing to put there.
-        Container(height: 34, color: const Color(0xE6111111)),
+        Container(height: 36, color: const Color(0x8C000000)),
         Expanded(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('CARD NUMBER · HOLD TO COPY', style: _label(soft)),
-                const SizedBox(height: 3),
+                Text('Card number · hold to copy', style: _label(soft)),
+                const SizedBox(height: 2),
                 GestureDetector(
                   onLongPress: onCopy,
                   child: FittedBox(
                     fit: BoxFit.scaleDown,
                     alignment: Alignment.centerLeft,
-                    child: Text(
-                      spacedCardNumber(details.number),
-                      style: kNum.copyWith(fontSize: 20, letterSpacing: 1.8, fontWeight: FontWeight.w700, color: ink),
-                    ),
+                    child: Text(spacedCardNumber(details.number), style: _cardNumberStyle(19, .1, ink)),
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _Field(label: 'VALID THRU', value: details.expiry ?? '—', ink: ink),
-                    const SizedBox(width: 22),
+                    _Field(label: 'Valid thru', value: details.expiry ?? '—', ink: ink, mono: true),
+                    const SizedBox(width: 20),
                     Expanded(
-                      child: _Field(label: 'NAME ON CARD', value: (details.nameOnCard ?? '—').toUpperCase(), ink: ink),
+                      child: _Field(label: 'Name on card', value: (details.nameOnCard ?? '—').toUpperCase(), ink: ink),
                     ),
                   ],
                 ),
                 if (note != null && note.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(note, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10.5, color: soft)),
+                  const SizedBox(height: 2),
+                  Text(note, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: soft)),
                 ],
                 const Spacer(),
                 Row(
                   children: [
-                    Icon(Icons.timer_outlined, size: 13, color: soft),
-                    const SizedBox(width: 4),
+                    _CountdownRing(fraction: totalSeconds <= 0 ? 0 : secondsLeft / totalSeconds),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Hides in ${secondsLeft}s · tap to turn over',
-                        style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: soft),
+                        'Hides in $secondsLeft s · tap to turn over',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: kNum.copyWith(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w500, color: soft),
                       ),
                     ),
                     NetworkMark(network: network, color: ink),
@@ -712,34 +688,76 @@ class _Back extends StatelessWidget {
   }
 }
 
-TextStyle _label(Color color) =>
-    TextStyle(fontSize: 7.5, fontWeight: FontWeight.w800, letterSpacing: 1.1, color: color);
+TextStyle _label(Color color) => TextStyle(fontSize: 11, height: 14 / 11, fontWeight: FontWeight.w400, color: color);
 
-/// A small caps label over a value, the way "VALID THRU" sits on a card.
+/// A small label over a value, the way "Valid thru" sits on a card. The
+/// name keeps its printed capitals and spacing.
 class _Field extends StatelessWidget {
-  const _Field({required this.label, required this.value, required this.ink});
+  const _Field({required this.label, required this.value, required this.ink, this.mono = false});
 
   final String label;
   final String value;
   final Color ink;
+  final bool mono;
 
   @override
   Widget build(BuildContext context) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(label, style: _label(ink.withValues(alpha: .66))),
+          Text(label, style: _label(ink.withValues(alpha: .75))),
           const SizedBox(height: 2),
           Text(
             value,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: kNum.copyWith(fontSize: 13, fontWeight: FontWeight.w700, color: ink),
+            style: mono
+                ? _cardNumberStyle(14, .04, ink)
+                : TextStyle(fontSize: 13, height: 18 / 13, fontWeight: FontWeight.w600, letterSpacing: 13 * .08, color: ink),
           ),
         ],
       );
 }
 
+/// The 20 px countdown ring: a faint track and a white arc that shrinks.
+class _CountdownRing extends StatelessWidget {
+  const _CountdownRing({required this.fraction});
+
+  final double fraction;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        width: 20,
+        height: 20,
+        child: CustomPaint(painter: _RingPainter(fraction.clamp(0.0, 1.0))),
+      );
+}
+
+class _RingPainter extends CustomPainter {
+  _RingPainter(this.fraction);
+  final double fraction;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = (Offset.zero & size).deflate(1.25);
+    final track = Paint()
+      ..color = const Color(0x40FFFFFF)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.5;
+    final arc = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.5
+      ..strokeCap = StrokeCap.round;
+    canvas.drawOval(rect, track);
+    if (fraction > 0) canvas.drawArc(rect, -math.pi / 2, 2 * math.pi * fraction, false, arc);
+  }
+
+  @override
+  bool shouldRepaint(_RingPainter old) => old.fraction != fraction;
+}
+
+/// The in-card utilisation meter: 6 h on a translucent white track.
 class _Bar extends StatelessWidget {
   const _Bar({required this.fraction, required this.tint, required this.ink});
 
@@ -749,9 +767,9 @@ class _Bar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ClipRRect(
-        borderRadius: BorderRadius.circular(100),
+        borderRadius: BorderRadius.circular(3),
         child: SizedBox(
-          height: 5,
+          height: 6,
           child: Stack(
             fit: StackFit.expand,
             children: [
@@ -759,7 +777,9 @@ class _Bar extends StatelessWidget {
               FractionallySizedBox(
                 alignment: Alignment.centerLeft,
                 widthFactor: fraction,
-                child: ColoredBox(color: tint),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(color: tint, borderRadius: BorderRadius.circular(3)),
+                ),
               ),
             ],
           ),
@@ -767,82 +787,79 @@ class _Bar extends StatelessWidget {
       );
 }
 
-class _Pill extends StatelessWidget {
-  const _Pill({required this.label, required this.ink, required this.onTap});
+/// The "not set up" action on a face: a white button, issuer-coloured text.
+class _AddDetailsButton extends StatelessWidget {
+  const _AddDetailsButton({required this.label, required this.ink, required this.onTap});
 
   final String label;
   final Color ink;
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => Material(
-        color: ink.withValues(alpha: .16),
-        borderRadius: BorderRadius.circular(100),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(100),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.add, size: 13, color: ink),
-                const SizedBox(width: 3),
-                Text(label, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: ink)),
-              ],
-            ),
+  Widget build(BuildContext context) {
+    // On a pale card someone picked, ink is dark: the button inverts.
+    final light = ink == Colors.white;
+    final fill = light ? Colors.white : ink;
+    final text = light ? const Color(0xFF18191D) : Colors.white;
+    return Material(
+      color: fill,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          height: 32,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DsIcon(DsIcons.plus, size: 14, color: text),
+              const SizedBox(width: 4),
+              Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: text)),
+            ],
           ),
         ),
-      );
+      ),
+    );
+  }
 }
 
-/// The EMV chip: gold, with its contact pads.
+/// The EMV chip: 38×28, radius 6, gold, with two contact lines.
 class _Chip extends StatelessWidget {
   const _Chip();
 
   @override
   Widget build(BuildContext context) => Container(
-        width: 42,
-        height: 32,
+        width: 38,
+        height: 28,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(6),
           gradient: const LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Color(0xFFF3E2A9), Color(0xFFC9A24A), Color(0xFFE9D08A)],
+            colors: [Color(0xFFE8D7A6), Color(0xFFB8995A)],
           ),
-          border: Border.all(color: const Color(0x66000000), width: 0.6),
         ),
-        child: CustomPaint(painter: _ChipPads()),
+        child: CustomPaint(painter: _ChipLines()),
       );
 }
 
-class _ChipPads extends CustomPainter {
+class _ChipLines extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = const Color(0x55000000)
-      ..strokeWidth = 0.8
-      ..style = PaintingStyle.stroke;
-    final w = size.width;
-    final h = size.height;
-    canvas.drawLine(Offset(0, h * .34), Offset(w * .34, h * .34), paint);
-    canvas.drawLine(Offset(0, h * .66), Offset(w * .34, h * .66), paint);
-    canvas.drawLine(Offset(w * .66, h * .34), Offset(w, h * .34), paint);
-    canvas.drawLine(Offset(w * .66, h * .66), Offset(w, h * .66), paint);
-    canvas.drawLine(Offset(w * .5, 0), Offset(w * .5, h * .22), paint);
-    canvas.drawLine(Offset(w * .5, h * .78), Offset(w * .5, h), paint);
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(Rect.fromLTRB(w * .34, h * .22, w * .66, h * .78), const Radius.circular(3)),
-      paint,
-    );
+      ..color = const Color(0x40000000)
+      ..strokeWidth = 1;
+    canvas.drawLine(const Offset(0, 9.5), Offset(size.width, 9.5), paint);
+    canvas.drawLine(const Offset(0, 18.5), Offset(size.width, 18.5), paint);
   }
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-/// The network's name, set the way it is printed on the card.
+/// The network's name, set as text the way it is printed on the card
+/// (§7.9: wordmarks, not logos).
 class NetworkMark extends StatelessWidget {
   const NetworkMark({super.key, required this.network, required this.color, this.scale = 1});
 
@@ -853,80 +870,35 @@ class NetworkMark extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = scale;
+    TextStyle mark(double size, {bool italic = false, double tracking = 0, FontWeight weight = FontWeight.w700}) =>
+        TextStyle(
+          fontSize: size * s,
+          fontWeight: weight,
+          fontStyle: italic ? FontStyle.italic : FontStyle.normal,
+          letterSpacing: size * s * tracking,
+          color: color,
+          height: 1,
+        );
     switch (network) {
       case 'VISA':
-        return Text(
-          'VISA',
-          style: TextStyle(
-            fontSize: 22 * s,
-            fontWeight: FontWeight.w900,
-            fontStyle: FontStyle.italic,
-            letterSpacing: 0.5 * s,
-            color: color,
-            height: 1,
-          ),
-        );
+        return Text('VISA', style: mark(18, italic: true, tracking: .04, weight: FontWeight.w800));
       case 'MASTERCARD':
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              width: 30 * s,
-              height: 19 * s,
-              child: Stack(
-                children: [
-                  _dot(const Color(0xFFEB001B), 0, s),
-                  _dot(const Color(0xDDF79E1B), 11 * s, s),
-                ],
-              ),
-            ),
-            SizedBox(width: 4 * s),
-            Text(
-              'mastercard',
-              style: TextStyle(fontSize: 12 * s, fontWeight: FontWeight.w700, letterSpacing: -0.2, color: color),
-            ),
-          ],
-        );
+        return Text('Mastercard', style: mark(14));
       case 'RUPAY':
-        return Text.rich(
-          TextSpan(children: [
-            const TextSpan(text: 'Ru'),
-            TextSpan(text: 'Pay', style: TextStyle(color: color.withValues(alpha: .8))),
-          ]),
-          style: TextStyle(
-            fontSize: 19 * s,
-            fontWeight: FontWeight.w900,
-            fontStyle: FontStyle.italic,
-            color: color,
-            height: 1,
-          ),
-        );
+        return Text('RuPay', style: mark(15, italic: true, weight: FontWeight.w800));
       case 'AMEX':
         return Container(
           padding: EdgeInsets.symmetric(horizontal: 5 * s, vertical: 2 * s),
-          decoration: BoxDecoration(border: Border.all(color: color, width: 1.4 * s)),
-          child: Text(
-            'AMEX',
-            style: TextStyle(fontSize: 13 * s, fontWeight: FontWeight.w900, letterSpacing: 1.6 * s, color: color),
+          decoration: BoxDecoration(
+            border: Border.all(color: color, width: 1.2 * s),
+            borderRadius: BorderRadius.circular(3 * s),
           ),
+          child: Text('AMEX', style: mark(12, tracking: .08)),
         );
       case 'DINERS':
-        return Text(
-          'Diners Club',
-          style: TextStyle(fontSize: 13 * s, fontWeight: FontWeight.w700, fontStyle: FontStyle.italic, color: color),
-        );
+        return Text('Diners Club', style: mark(13, italic: true));
       default:
         return const SizedBox.shrink();
     }
   }
-
-  Widget _dot(Color colour, double left, double s) => Positioned(
-        left: left,
-        top: 0,
-        child: Container(
-          width: 19 * s,
-          height: 19 * s,
-          decoration: BoxDecoration(color: colour, shape: BoxShape.circle),
-        ),
-      );
 }

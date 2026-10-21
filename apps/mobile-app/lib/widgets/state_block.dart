@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
-import '../theme.dart';
+import 'ds/ds.dart';
 
-/// The empty/error treatment from the design: a soft icon tile, a plain
-/// title, an explanation, and at most one action.
+/// The full-page empty/error state (§7.11, proposed): a 48 icon tile, a
+/// plain title, one sentence of explanation and at most one action. One of
+/// the few centred elements in the system.
 class StateBlock extends StatelessWidget {
-  final IconData icon;
+  /// A [DsGlyph] or a Material [IconData].
+  final Object icon;
   final String title;
   final String body;
   final String? actionLabel;
@@ -23,33 +25,32 @@ class StateBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
     return Center(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 28),
+        padding: const EdgeInsets.symmetric(horizontal: 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Container(
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                color: warn ? context.c.warnBg : context.c.brand50,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Icon(icon, size: 26, color: warn ? context.c.warn : context.c.brand),
+            DsIconTile(
+              icon,
+              tone: warn ? DsTone.warn : DsTone.neutral,
+              color: warn ? null : c.tx3,
+              size: 48,
+              iconSize: 24,
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 16),
             Text(
               title,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: context.c.ink),
+              style: TextStyle(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
               body,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13.8, height: 1.55, color: context.c.ink70),
+              style: TextStyle(fontSize: 15, height: 22 / 15, color: c.tx2),
             ),
             if (actionLabel != null) ...[
               const SizedBox(height: 20),

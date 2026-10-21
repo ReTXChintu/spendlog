@@ -4,8 +4,8 @@ import '../models/kid_models.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
 import '../services/kid_service.dart';
-import '../theme.dart';
 import '../utils/format.dart';
+import 'ds/ds.dart';
 
 /// What stops a kid's transaction being saved, or null when it can be.
 /// Kept apart from the sheet so the rules can be tested on their own.
@@ -31,10 +31,6 @@ Future<bool?> showKidTransactionSheet(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
-    backgroundColor: context.c.surface,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(T.rLg)),
-    ),
     builder: (sheetContext) => Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(sheetContext).viewInsets.bottom),
       child: KidTransactionSheet(
@@ -220,62 +216,48 @@ class _KidTransactionSheetState extends State<KidTransactionSheet> {
     final c = context.c;
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Center(
-            child: Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(color: c.lineStrong, borderRadius: BorderRadius.circular(4)),
-            ),
-          ),
-          const SizedBox(height: 14),
+          const DsDragHandle(),
           Text(
             _editing ? 'Change this' : 'Add to your money',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: c.ink),
+            style: TextStyle(fontSize: 19, height: 24 / 19, fontWeight: FontWeight.w600, color: c.tx),
           ),
-          const SizedBox(height: 14),
-          SegmentedButton<bool>(
-            segments: const [
-              ButtonSegment(value: true, label: Text('Spent'), icon: Icon(Icons.north_east, size: 16)),
-              ButtonSegment(value: false, label: Text('Got money'), icon: Icon(Icons.south_west, size: 16)),
-            ],
-            selected: {_isDebit},
+          const SizedBox(height: 16),
+          DsSegmented<bool>(
+            segments: const [(true, 'Spent'), (false, 'Got money')],
+            selected: _isDebit,
             // Fixed once saved: the server doesn't let a kid flip it.
-            onSelectionChanged: _editing ? null : (value) => setState(() => _isDebit = value.first),
+            onChanged: _editing ? null : (value) => setState(() => _isDebit = value),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
+          _label('How much'),
+          const SizedBox(height: 6),
           TextField(
             key: const Key('kid-amount'),
             controller: _amount,
             autofocus: !_editing,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            style: kNum.copyWith(fontSize: 22, fontWeight: FontWeight.w800, color: c.ink),
-            decoration: const InputDecoration(
-              labelText: 'How much',
-              prefixText: '₹ ',
-              border: OutlineInputBorder(),
-            ),
+            style: kNum.copyWith(fontSize: 22, height: 28 / 22, fontWeight: FontWeight.w600, color: c.tx),
+            decoration: const InputDecoration(prefixText: '₹ '),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
+          _label(_isDebit ? 'Where or what' : 'From whom'),
+          const SizedBox(height: 6),
           TextField(
             controller: _merchant,
             textCapitalization: TextCapitalization.words,
             onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(
-              labelText: _isDebit ? 'Where or what' : 'From whom',
-              border: const OutlineInputBorder(),
-            ),
           ),
           _presetRow(),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           _label('Category'),
           const SizedBox(height: 6),
           _categoryPicker(),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           _label('When'),
           const SizedBox(height: 6),
           Row(
@@ -283,25 +265,26 @@ class _KidTransactionSheetState extends State<KidTransactionSheet> {
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed: _pickDate,
-                  icon: const Icon(Icons.event_outlined, size: 17),
+                  style: _fieldButton(c),
+                  icon: DsIcon(DsIcons.calendar, size: 18, color: c.tx2),
                   label: Text(DateFormat('EEE, d MMM yyyy').format(_occurredAt)),
                 ),
               ),
               const SizedBox(width: 8),
-              OutlinedButton.icon(
+              OutlinedButton(
                 onPressed: _pickTime,
-                icon: const Icon(Icons.schedule, size: 17),
-                label: Text(DateFormat('h:mm a').format(_occurredAt)),
+                style: _fieldButton(c),
+                child: Text(DateFormat('h:mm a').format(_occurredAt).replaceAll('AM', 'am').replaceAll('PM', 'pm')),
               ),
             ],
           ),
           if (widget.accounts.length > 1) ...[
-            const SizedBox(height: 14),
+            const SizedBox(height: 16),
             _label('Which money'),
             const SizedBox(height: 6),
             Wrap(
-              spacing: 6,
-              runSpacing: 6,
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 for (final account in widget.accounts)
                   ChoiceChip(
@@ -312,36 +295,40 @@ class _KidTransactionSheetState extends State<KidTransactionSheet> {
               ],
             ),
           ],
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
+          _label('Note (optional)'),
+          const SizedBox(height: 6),
           TextField(
             controller: _note,
             maxLines: 2,
             minLines: 1,
             textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(labelText: 'Note (optional)', border: OutlineInputBorder()),
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: c.debit50, borderRadius: BorderRadius.circular(T.rSm)),
-              child: Text(_error!, style: TextStyle(fontSize: 12.5, color: c.debit)),
-            ),
+            DsCallout(tone: DsTone.crit, title: _error!),
           ],
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
           FilledButton(
             onPressed: _saving ? null : _save,
-            child: _saving
-                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                : Text(_editing ? 'Save changes' : 'Add'),
+            child: _saving ? const DsSpinner(size: 18) : Text(_editing ? 'Save changes' : 'Add'),
           ),
         ],
       ),
     );
   }
 
-  Widget _label(String text) =>
-      Text(text, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: context.c.muted));
+  Widget _label(String text) => DsLabel(text);
+
+  /// An outlined button drawn as a 52 px field (a date or time "select").
+  ButtonStyle _fieldButton(DsColors c) => OutlinedButton.styleFrom(
+        minimumSize: const Size(0, 52),
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Ds.rMd)),
+        textStyle: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w400),
+        foregroundColor: c.tx,
+      );
 
   Widget _presetRow() {
     final c = context.c;
@@ -362,23 +349,23 @@ class _KidTransactionSheetState extends State<KidTransactionSheet> {
                   label: Text(preset.merchant),
                   selected: preset.merchant.toLowerCase() == typed.toLowerCase(),
                   showCheckmark: false,
-                  visualDensity: VisualDensity.compact,
-                  labelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.ink70),
-                  selectedColor: c.brand50,
                   onPressed: () => _applyPreset(preset),
-                  deleteIcon: Icon(Icons.close, size: 14, color: c.muted),
+                  deleteIcon: DsIcon(
+                    DsIcons.x,
+                    size: 14,
+                    color: preset.merchant.toLowerCase() == typed.toLowerCase() ? c.bg : c.tx3,
+                  ),
                   deleteButtonTooltipMessage: 'Remove shortcut',
                   onDeleted: () => _removePreset(preset),
                 ),
               ),
             if (canSave)
               ActionChip(
-                avatar: Icon(Icons.bookmark_add_outlined, size: 15, color: c.brand),
+                avatar: DsIcon(DsIcons.plus, size: 16, color: c.ac),
                 label: const Text('Save as a shortcut'),
-                labelStyle: TextStyle(fontSize: 11.5, color: c.brand, fontWeight: FontWeight.w600),
-                visualDensity: VisualDensity.compact,
-                side: BorderSide(color: c.brand100),
-                backgroundColor: c.surface,
+                labelStyle: TextStyle(fontSize: 13, color: c.ac, fontWeight: FontWeight.w600),
+                side: BorderSide(color: c.acLine),
+                backgroundColor: c.sf,
                 onPressed: _savePreset,
               ),
           ],
@@ -391,32 +378,23 @@ class _KidTransactionSheetState extends State<KidTransactionSheet> {
     final c = context.c;
     final categories = _categories;
     if (categories.isEmpty) {
-      return Text('No categories to choose from yet.', style: TextStyle(fontSize: 12.5, color: c.muted));
+      return Text('No categories to choose from yet.', style: TextStyle(fontSize: 13, color: c.tx3));
     }
 
     return Wrap(
-      spacing: 6,
-      runSpacing: 6,
+      spacing: 8,
+      runSpacing: 8,
       children: [
         for (final category in categories)
           ChoiceChip(
             avatar: Icon(
               categoryIcon(category.icon),
-              size: 15,
-              color: _categoryId == category.id ? c.brandDark : parseHexColor(category.color),
+              size: 16,
+              color: _categoryId == category.id ? c.bg : parseHexColor(category.color),
             ),
             label: Text(category.name),
             selected: _categoryId == category.id,
             showCheckmark: false,
-            visualDensity: VisualDensity.compact,
-            labelStyle: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: _categoryId == category.id ? c.brandDark : c.ink70,
-            ),
-            selectedColor: c.brand50,
-            backgroundColor: c.surface,
-            side: BorderSide(color: _categoryId == category.id ? c.brand : c.line),
             // Tapping the chosen one again clears it.
             onSelected: (_) => setState(() => _categoryId = _categoryId == category.id ? null : category.id),
           ),

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/fund_models.dart';
-import '../../theme.dart';
+import '../ds/ds.dart';
 import '../../utils/format.dart';
 import 'fund_text.dart';
 
@@ -322,19 +322,19 @@ Future<String?> pickMonth(
                     IconButton(
                       tooltip: 'Previous year',
                       onPressed: year > firstYear ? () => setState(() => year -= 1) : null,
-                      icon: const Icon(Icons.chevron_left),
+                      icon: DsIcon(DsIcons.chevronLeft, color: year > firstYear ? c.tx2 : c.ln2),
                     ),
                     Expanded(
                       child: Text(
                         '$year',
                         textAlign: TextAlign.center,
-                        style: kNum.copyWith(fontSize: 16, fontWeight: FontWeight.w800, color: c.ink),
+                        style: kNum.copyWith(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx),
                       ),
                     ),
                     IconButton(
                       tooltip: 'Next year',
                       onPressed: year < lastYear ? () => setState(() => year += 1) : null,
-                      icon: const Icon(Icons.chevron_right),
+                      icon: DsIcon(DsIcons.chevronRight, color: year < lastYear ? c.tx2 : c.ln2),
                     ),
                   ],
                 ),
@@ -349,18 +349,31 @@ Future<String?> pickMonth(
                         final month = '$year-${m.toString().padLeft(2, '0')}';
                         final allowed = month.compareTo(first) >= 0 && month.compareTo(last) <= 0;
                         final chosen = month == clamped;
+                        final cell = RoundedRectangleBorder(borderRadius: BorderRadius.circular(Ds.rMd));
                         return SizedBox(
                           width: 64,
                           child: chosen
                               ? FilledButton(
                                   key: ValueKey('pick-month-$month'),
-                                  style: FilledButton.styleFrom(padding: EdgeInsets.zero),
+                                  style: FilledButton.styleFrom(
+                                    padding: EdgeInsets.zero,
+                                    minimumSize: const Size(0, 40),
+                                    shape: cell,
+                                    backgroundColor: c.tx,
+                                    foregroundColor: c.bg,
+                                    textStyle: const TextStyle(fontFamily: Ds.sans, fontSize: 13, fontWeight: FontWeight.w600),
+                                  ),
                                   onPressed: allowed ? () => Navigator.of(context).pop(month) : null,
                                   child: Text(sipMonthLabel(month, withYear: false)),
                                 )
                               : OutlinedButton(
                                   key: ValueKey('pick-month-$month'),
-                                  style: OutlinedButton.styleFrom(padding: EdgeInsets.zero),
+                                  style: OutlinedButton.styleFrom(
+                                    padding: EdgeInsets.zero,
+                                    minimumSize: const Size(0, 40),
+                                    shape: cell,
+                                    textStyle: const TextStyle(fontFamily: Ds.sans, fontSize: 13, fontWeight: FontWeight.w500),
+                                  ),
                                   onPressed: allowed ? () => Navigator.of(context).pop(month) : null,
                                   child: Text(sipMonthLabel(month, withYear: false)),
                                 ),
@@ -391,15 +404,50 @@ class MonthField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    return InkWell(
-      onTap: onPick,
-      borderRadius: BorderRadius.circular(T.rSm),
-      child: InputDecorator(
-        decoration: InputDecoration(labelText: label, suffixIcon: const Icon(Icons.expand_more, size: 18)),
-        child: Text(sipMonthLabel(month), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, color: c.ink)),
+    return DsField(
+      label: label,
+      child: InkWell(
+        onTap: onPick,
+        borderRadius: BorderRadius.circular(Ds.rMd),
+        child: InputDecorator(
+          decoration: InputDecoration(suffixIcon: DsIcon(DsIcons.chevronDown, size: 20, color: c.tx2)),
+          child: Text(sipMonthLabel(month), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, color: c.tx)),
+        ),
       ),
     );
   }
+}
+
+/// A text field with its label above it (§7.2).
+class LabelledField extends StatelessWidget {
+  const LabelledField({
+    super.key,
+    required this.label,
+    required this.controller,
+    this.fieldKey,
+    this.hint,
+    this.prefix,
+    this.keyboardType,
+  });
+
+  final String label;
+  final TextEditingController controller;
+  final Key? fieldKey;
+  final String? hint;
+  final String? prefix;
+  final TextInputType? keyboardType;
+
+  @override
+  Widget build(BuildContext context) => DsField(
+        label: label,
+        child: TextField(
+          key: fieldKey,
+          controller: controller,
+          keyboardType: keyboardType,
+          style: kNum.copyWith(fontSize: 15, color: context.c.tx),
+          decoration: InputDecoration(hintText: hint, prefixText: prefix),
+        ),
+      );
 }
 
 /// A row that shows a date and opens the picker, with an optional clear.
@@ -422,19 +470,23 @@ class DateField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    return InkWell(
-      onTap: onPick,
-      borderRadius: BorderRadius.circular(T.rSm),
-      child: InputDecorator(
-        decoration: InputDecoration(
-          labelText: label,
-          suffixIcon: value != null && onClear != null
-              ? IconButton(tooltip: 'Clear', icon: const Icon(Icons.close, size: 18), onPressed: onClear)
-              : const Icon(Icons.calendar_today_outlined, size: 18),
-        ),
-        child: Text(
-          value == null ? placeholder : formatIsoLongDate(value!),
-          style: TextStyle(fontSize: 15, color: value == null ? c.mutedLight : c.ink),
+    return DsField(
+      label: label,
+      child: InkWell(
+        onTap: onPick,
+        borderRadius: BorderRadius.circular(Ds.rMd),
+        child: InputDecorator(
+          decoration: InputDecoration(
+            suffixIcon: value != null && onClear != null
+                ? IconButton(tooltip: 'Clear', icon: DsIcon(DsIcons.x, size: 18, color: c.tx2), onPressed: onClear)
+                : DsIcon(DsIcons.calendar, size: 20, color: c.tx2),
+          ),
+          child: Text(
+            value == null ? placeholder : formatIsoLongDate(value!),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: kNum.copyWith(fontSize: 15, color: value == null ? c.tx3 : c.tx),
+          ),
         ),
       ),
     );
@@ -460,47 +512,52 @@ class ToggleSection extends StatelessWidget {
   /// Null keeps it on - an editor for just this one section.
   final ValueChanged<bool>? onChanged;
   final Widget child;
-  final IconData? icon;
+
+  /// A [DsGlyph] or a Material [IconData].
+  final Object? icon;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
     return Container(
       decoration: BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: on ? c.brand100 : c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
+        color: c.sf,
+        border: Border.all(color: c.ln),
+        borderRadius: BorderRadius.circular(Ds.rXl),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           InkWell(
             onTap: onChanged == null ? null : () => onChanged!(!on),
-            borderRadius: BorderRadius.circular(T.rMd),
+            borderRadius: BorderRadius.circular(Ds.rXl),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+              padding: const EdgeInsets.fromLTRB(16, 14, 10, 14),
               child: Row(
                 children: [
                   if (icon != null) ...[
-                    Icon(icon, size: 20, color: on ? c.brand : c.muted),
+                    DsIconTile(icon!, tone: on ? DsTone.ac : DsTone.neutral),
                     const SizedBox(width: 12),
                   ],
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(title, style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: c.ink)),
+                        Text(title, style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx)),
                         const SizedBox(height: 2),
-                        Text(subtitle, style: TextStyle(fontSize: 12, height: 1.35, color: c.muted)),
+                        Text(subtitle, style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3)),
                       ],
                     ),
                   ),
-                  if (onChanged != null) Switch(value: on, onChanged: onChanged),
+                  if (onChanged != null) ...[const SizedBox(width: 8), Switch(value: on, onChanged: onChanged)],
                 ],
               ),
             ),
           ),
-          if (on) Padding(padding: const EdgeInsets.fromLTRB(14, 0, 14, 14), child: child),
+          if (on) ...[
+            Divider(height: 1, color: c.ln),
+            Padding(padding: const EdgeInsets.fromLTRB(16, 16, 16, 16), child: child),
+          ],
         ],
       ),
     );
@@ -524,25 +581,27 @@ class OpeningFields extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              child: TextField(
-                key: const ValueKey('opening-units'),
+              child: LabelledField(
+                fieldKey: const ValueKey('opening-units'),
+                label: 'Units',
                 controller: fields.units,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Units', hintText: '1234.567'),
+                hint: '1234.567',
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: TextField(
-                key: const ValueKey('opening-invested'),
+              child: LabelledField(
+                fieldKey: const ValueKey('opening-invested'),
+                label: 'Amount invested',
                 controller: fields.invested,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Amount invested', prefixText: '₹ '),
+                prefix: '₹ ',
               ),
             ),
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 14),
         DateField(
           label: 'As of',
           value: fields.asOf,
@@ -554,7 +613,7 @@ class OpeningFields extends StatelessWidget {
             }
           },
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 14),
         DateField(
           label: 'First invested on (optional)',
           value: fields.firstOn,
@@ -576,7 +635,7 @@ class OpeningFields extends StatelessWidget {
         Text(
           'Copy these off your statement or the fund app. The first date makes the yearly return (XIRR) '
           'honest about how long the money has been in.',
-          style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
+          style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
         ),
       ],
     );
@@ -604,26 +663,29 @@ class SipFields extends StatelessWidget {
           children: [
             Expanded(
               flex: 3,
-              child: TextField(
-                key: const ValueKey('sip-amount'),
+              child: LabelledField(
+                fieldKey: const ValueKey('sip-amount'),
+                label: 'Each month',
                 controller: fields.sipAmount,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Each month', prefixText: '₹ ', hintText: '5000'),
+                prefix: '₹ ',
+                hint: '5000',
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
               flex: 2,
-              child: TextField(
-                key: const ValueKey('sip-day'),
+              child: LabelledField(
+                fieldKey: const ValueKey('sip-day'),
+                label: 'On day',
                 controller: fields.sipDay,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'On day', hintText: '5'),
+                hint: '5',
               ),
             ),
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 14),
         DateField(
           label: 'Started on',
           value: fields.sipStart,
@@ -641,7 +703,7 @@ class SipFields extends StatelessWidget {
             }
           },
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 14),
         DateField(
           label: 'Ends on (optional)',
           value: fields.sipEnd,
@@ -668,20 +730,20 @@ class SipFields extends StatelessWidget {
               fields.sipActive = value;
               onChanged();
             },
-            title: Text('Still running', style: TextStyle(fontSize: 14, color: c.ink)),
+            title: Text('Still running', style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx)),
             subtitle: Text(
               'Turn off when you stop the SIP. Instalments up to today stay.',
-              style: TextStyle(fontSize: 12, color: c.muted),
+              style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
             ),
           ),
         ],
-        const SizedBox(height: 14),
+        const SizedBox(height: 16),
         SipHistoryFields(fields: fields, onChanged: onChanged),
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
         Text(
           "Each month's instalment is bought at that day's NAV. Link the bank debits too, and they replace the "
           'scheduled ones at what was really paid.',
-          style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
+          style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
         ),
       ],
     );
@@ -730,16 +792,19 @@ class SipHistoryFields extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('Changes along the way', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: c.ink)),
+        Text(
+          'Changes along the way',
+          style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
+        ),
         const SizedBox(height: 2),
         Text(
           'Raised or lowered the amount, or missed a month? Add it and every figure counts it.',
-          style: TextStyle(fontSize: 11.5, height: 1.4, color: c.muted),
+          style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
         ),
         for (final (i, change) in fields.sipChanges.indexed) ...[
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Expanded(
                 child: MonthField(
@@ -751,33 +816,38 @@ class SipHistoryFields extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: TextField(
-                  key: ValueKey('sip-change-amount-$i'),
+                child: LabelledField(
+                  fieldKey: ValueKey('sip-change-amount-$i'),
+                  label: 'New amount',
                   controller: change.amount,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'New amount', prefixText: '₹ '),
+                  prefix: '₹ ',
                 ),
               ),
-              IconButton(
-                tooltip: 'Remove this change',
-                icon: Icon(Icons.close, size: 18, color: c.muted),
-                onPressed: () {
-                  fields.removeChange(change);
-                  onChanged();
-                },
+              Padding(
+                padding: const EdgeInsets.only(bottom: 2),
+                child: IconButton(
+                  tooltip: 'Remove this change',
+                  icon: DsIcon(DsIcons.x, size: 18, color: c.tx3),
+                  onPressed: () {
+                    fields.removeChange(change);
+                    onChanged();
+                  },
+                ),
               ),
             ],
           ),
         ],
-        const SizedBox(height: 6),
+        const SizedBox(height: 12),
         Wrap(
           spacing: 8,
-          runSpacing: 6,
+          runSpacing: 8,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             for (final month in fields.sipSkips)
               InputChip(
                 label: Text('Skipped ${sipMonthLabel(month)}'),
+                deleteIcon: DsIcon(DsIcons.x, size: 14, color: c.tx2),
                 onDeleted: () {
                   fields.sipSkips.remove(month);
                   onChanged();
@@ -786,7 +856,7 @@ class SipHistoryFields extends StatelessWidget {
               ),
             ActionChip(
               key: const ValueKey('sip-add-change'),
-              avatar: const Icon(Icons.add, size: 16),
+              avatar: DsIcon(DsIcons.plus, size: 16, color: c.ac),
               label: const Text('Amount changed from…'),
               onPressed: () {
                 fields.addChange();
@@ -795,7 +865,7 @@ class SipHistoryFields extends StatelessWidget {
             ),
             ActionChip(
               key: const ValueKey('sip-add-skip'),
-              avatar: const Icon(Icons.add, size: 16),
+              avatar: DsIcon(DsIcons.plus, size: 16, color: c.ac),
               label: const Text('Skipped a month'),
               onPressed: () => _addSkip(context),
             ),

@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
-import '../theme.dart';
+import '../widgets/ds/ds.dart';
 import '../utils/format.dart';
 
 import '../services/perk_import_watcher.dart';
@@ -177,6 +177,7 @@ class _PerksScreenState extends State<PerksScreen> {
     final saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (_) => PerkSheet(
         perk: perk,
@@ -195,26 +196,30 @@ class _PerksScreenState extends State<PerksScreen> {
     final fromCamera = await showModalBottomSheet<bool>(
       context: context,
       builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('Read coupons from pictures',
-                  style: TextStyle(fontWeight: FontWeight.w700)),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Choose screenshots'),
-              subtitle: const Text('One or several'),
-              onTap: () => Navigator.of(context).pop(false),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_camera_outlined),
-              title: const Text('Take a photo'),
-              onTap: () => Navigator.of(context).pop(true),
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const DsDragHandle(),
+              const DsSheetHeader(title: 'Read coupons from pictures', icon: DsIcons.upload),
+              const SizedBox(height: 8),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const DsIconTile(Icons.photo_library_outlined),
+                title: const Text('Choose screenshots'),
+                subtitle: const Text('One or several'),
+                onTap: () => Navigator.of(context).pop(false),
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const DsIconTile(Icons.photo_camera_outlined),
+                title: const Text('Take a photo'),
+                onTap: () => Navigator.of(context).pop(true),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -266,71 +271,140 @@ class _PerksScreenState extends State<PerksScreen> {
     }
   }
 
-  /// How a batch is getting on, or what it did.
+  /// How a batch is getting on, or what it did: the processing card.
   Widget _importCard(PerkImportJob job) {
     final c = context.c;
     final running = job.isRunning;
+    final failed = job.status == 'FAILED';
 
-    return Container(
-      padding: const EdgeInsets.all(13),
-      decoration: BoxDecoration(
-        color: c.paper,
-        border: Border.all(color: running ? c.brand : c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
+    return DsCard(
+      borderColor: running ? c.acLine : c.ln,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (running)
+                const Padding(
+                  padding: EdgeInsets.only(top: 2, right: 12),
+                  child: DsSpinner(size: 24),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: DsIconTile(
+                    failed ? DsIcons.alertTriangle : DsIcons.check,
+                    tone: failed ? DsTone.crit : DsTone.good,
+                    size: 36,
+                  ),
+                ),
               Expanded(
                 child: Text(
                   running
                       ? 'Reading your screenshots — ${job.read} of ${job.total} done.'
-                      : job.status == 'FAILED'
+                      : failed
                           ? (job.problem ?? 'That batch did not finish.')
                           : job.summary,
-                  style: TextStyle(fontSize: 12.5, height: 1.45, color: c.ink),
+                  style: TextStyle(
+                    fontSize: 15,
+                    height: 20 / 15,
+                    fontWeight: FontWeight.w600,
+                    color: failed ? c.crit : c.tx,
+                    fontFeatures: Ds.tabular,
+                  ),
                 ),
               ),
               if (!running)
                 IconButton(
-                  icon: const Icon(Icons.close, size: 17),
+                  tooltip: 'Dismiss',
+                  icon: const DsIcon(DsIcons.x, size: 18),
                   onPressed: _watcher.dismiss,
                 ),
             ],
           ),
           if (job.total > 0) ...[
-            const SizedBox(height: 9),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(100),
-              child: LinearProgressIndicator(
-                value: job.read / job.total,
-                minHeight: 6,
-                backgroundColor: c.track,
-                valueColor: AlwaysStoppedAnimation(running ? c.brand : c.credit),
-              ),
-            ),
+            const SizedBox(height: 12),
+            DsMeter(value: job.read / job.total, color: running ? c.ac : c.good),
           ],
           if (running) ...[
             const SizedBox(height: 8),
             Text(
               'About 30 s a picture. Carry on with anything else, or close the app — you will '
               'get a notification when they are ready to review.',
-              style: TextStyle(fontSize: 11.5, height: 1.45, color: c.muted),
+              style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
             ),
           ],
           for (final failure in job.failures) ...[
-            const SizedBox(height: 6),
-            Text(
-              '${failure.fileName} — ${failure.problem ?? 'could not be read'}',
-              style: TextStyle(fontSize: 11, color: c.muted),
+            const SizedBox(height: 8),
+            // A file that couldn't be read sits on a critical tint.
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(color: c.critSoft, borderRadius: BorderRadius.circular(Ds.rMd)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    failure.fileName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: kMono.copyWith(fontSize: 13, color: c.tx),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    failure.problem ?? 'could not be read',
+                    style: TextStyle(fontSize: 12, height: 16 / 12, color: c.crit),
+                  ),
+                ],
+              ),
             ),
           ],
         ],
       ),
     );
   }
+
+  /// Where screenshots go in: a dashed drop area with one action.
+  Widget _dropzone() {
+    final c = context.c;
+    return DsDashedBorder(
+      radius: Ds.rXl,
+      strokeWidth: 1.5,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            const DsIconTile(DsIcons.upload, tone: DsTone.ac, iconSize: 24),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Read coupons from screenshots',
+                    style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'About 30 s a picture. You will get a notification when they are ready.',
+                    style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton(
+              onPressed: _sending ? null : _offerToRead,
+              child: const Text('Choose'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
 
   /// The ones a model wrote that nobody has confirmed. They count for
   /// everything meanwhile - this is a prompt to glance, not a gate.
@@ -339,15 +413,16 @@ class _PerksScreenState extends State<PerksScreen> {
     await _load();
   }
 
+
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final coupons = _perks.where((perk) => perk.isCoupon).length;
 
     return Scaffold(
-      backgroundColor: c.paper,
+      backgroundColor: c.bg,
       appBar: AppBar(
         title: const Text('Perks'),
-        shape: Border(bottom: BorderSide(color: c.line)),
         actions: [
           // Only where the server has a model. Without one this hides
           // rather than offering a button that fails - reading a picture
@@ -356,134 +431,101 @@ class _PerksScreenState extends State<PerksScreen> {
             IconButton(
               tooltip: 'Read coupons from screenshots',
               onPressed: _sending ? null : _offerToRead,
-              icon: _sending
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.document_scanner_outlined),
+              icon: _sending ? const DsSpinner(size: 18) : const DsIcon(DsIcons.upload),
             ),
+          const SizedBox(width: 4),
         ],
       ),
       floatingActionButton: FloatingActionButton(
+        tooltip: 'Add a perk',
         onPressed: () => _edit(null),
-        child: const Icon(Icons.add),
+        child: const DsIcon(DsIcons.plus, size: 24),
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 90),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
         children: [
-          // A batch being read on the server, or one that just finished.
-          if (_watcher.job != null) ...[
-            _importCard(_watcher.job!),
-            const SizedBox(height: 14),
-          ],
-
-          // The ones a model wrote that nobody has looked at. Offered for
-          // a glance rather than held back - they count meanwhile.
-          if (_unreviewed > 0) ...[
-            Container(
-              padding: const EdgeInsets.all(13),
-              decoration: BoxDecoration(
-                color: c.brand50,
-                border: Border.all(color: c.brand),
-                borderRadius: BorderRadius.circular(T.rMd),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '$_unreviewed ${_unreviewed == 1 ? 'perk was' : 'perks were'} read off a '
-                    'picture. Nobody has checked the figures yet — open any that look off.',
-                    style: TextStyle(fontSize: 12, height: 1.45, color: c.ink70),
-                  ),
-                  const SizedBox(height: 8),
-                  OutlinedButton(
-                    onPressed: _confirmAll,
-                    child: const Text('All look right'),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-          ],
-
           TextField(
             controller: _query,
             autofocus: true,
             textInputAction: TextInputAction.search,
             onSubmitted: (_) => _ask(),
-            style: TextStyle(color: c.ink, fontSize: 15),
+            style: TextStyle(color: c.tx, fontSize: 15),
             decoration: InputDecoration(
               hintText: 'Where are you?',
-              hintStyle: TextStyle(color: c.mutedLight),
-              prefixIcon: Icon(Icons.search, size: 19, color: c.mutedLight),
-              filled: true,
-              fillColor: c.surface,
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(T.rSm),
-                borderSide: BorderSide(color: c.lineStrong),
+              prefixIcon: Padding(
+                padding: const EdgeInsets.only(left: 14, right: 10),
+                child: DsIcon(DsIcons.search, size: 20, color: c.tx3),
               ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(T.rSm),
-                borderSide: BorderSide(color: c.brand),
-              ),
+              prefixIconConstraints: const BoxConstraints(minWidth: 44, minHeight: 52),
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Row(
             children: [
               Expanded(
                 child: TextField(
                   controller: _amount,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  style: TextStyle(color: c.ink),
-                  decoration: InputDecoration(
+                  style: TextStyle(color: c.tx, fontSize: 15, fontFeatures: Ds.tabular),
+                  decoration: const InputDecoration(
                     hintText: 'About to spend (optional)',
-                    hintStyle: TextStyle(color: c.mutedLight),
                     prefixText: '₹ ',
-                    isDense: true,
-                    filled: true,
-                    fillColor: c.surface,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(T.rSm),
-                      borderSide: BorderSide(color: c.lineStrong),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(T.rSm),
-                      borderSide: BorderSide(color: c.brand),
-                    ),
                   ),
                 ),
               ),
-              const SizedBox(width: 10),
-              FilledButton(
-                onPressed: _asking ? null : _ask,
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+              const SizedBox(width: 8),
+              SizedBox(
+                height: 52,
+                child: FilledButton(
+                  onPressed: _asking ? null : _ask,
+                  child: Text(_asking ? '…' : 'Ask'),
                 ),
-                child: Text(_asking ? '…' : 'Ask'),
               ),
             ],
           ),
 
           if (_answer != null) ...[
-            const SizedBox(height: 18),
+            const SizedBox(height: 16),
             _Answer(answer: _answer!, onUsed: (perk) => _setUsed(perk, true)),
           ],
 
-          const SizedBox(height: 26),
-          Text(
-            "EVERYTHING YOU'RE HOLDING",
-            style: TextStyle(
-              fontSize: 10.5,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.5,
-              color: c.muted,
+          // A batch being read on the server, or one that just finished.
+          if (_watcher.job != null) ...[
+            const SizedBox(height: 16),
+            _importCard(_watcher.job!),
+          ] else if (_canRead) ...[
+            const SizedBox(height: 16),
+            _dropzone(),
+          ],
+
+          // The ones a model wrote that nobody has looked at. Offered for
+          // a glance rather than held back - they count meanwhile.
+          if (_unreviewed > 0) ...[
+            const SizedBox(height: 12),
+            DsCallout(
+              tone: DsTone.ac,
+              icon: DsIcons.sparkles,
+              title: '$_unreviewed ${_unreviewed == 1 ? 'perk was' : 'perks were'} read off a '
+                  'picture. Nobody has checked the figures yet — open any that look off.',
+              action: Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: OutlinedButton(
+                  onPressed: _confirmAll,
+                  style: OutlinedButton.styleFrom(minimumSize: const Size(64, 36)),
+                  child: const Text('All look right'),
+                ),
+              ),
             ),
+          ],
+
+          const SizedBox(height: 24),
+          DsSectionHeader(
+            "Everything you're holding",
+            badge: _perks.isEmpty
+                ? null
+                : DsBadge('$coupons ${coupons == 1 ? 'coupon' : 'coupons'}'),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
 
           // Which app or bank they came from, built from what is saved, so
           // "what do I have on CRED?" is one tap.
@@ -494,18 +536,17 @@ class _PerksScreenState extends State<PerksScreen> {
                 children: [
                   for (final source in [null, ..._sources])
                     Padding(
-                      padding: const EdgeInsets.only(right: 6),
+                      padding: const EdgeInsets.only(right: 8),
                       child: ChoiceChip(
                         label: Text(source ?? 'All'),
                         selected: _sourceFilter == source,
                         onSelected: (_) => setState(() => _sourceFilter = source),
-                        visualDensity: VisualDensity.compact,
                       ),
                     ),
                 ],
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
           ],
 
           if (_perks.isEmpty)
@@ -520,7 +561,7 @@ class _PerksScreenState extends State<PerksScreen> {
           else
             for (final perk in _shown)
               Padding(
-                padding: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.only(bottom: kCardGap),
                 child: _PerkRow(
                   perk: perk,
                   onEdit: () => _edit(perk),
@@ -532,6 +573,67 @@ class _PerksScreenState extends State<PerksScreen> {
                 ),
               ),
         ],
+      ),
+    );
+  }
+}
+
+/// A coupon code in Plex Mono on a sunk strip, with a Copy action.
+class _CodeStrip extends StatelessWidget {
+  final String code;
+
+  const _CodeStrip({required this.code});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    // Tappable because the next thing after reading a code is typing it
+    // somewhere else.
+    return Material(
+      color: c.sunk,
+      borderRadius: BorderRadius.circular(Ds.rMd),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(Ds.rMd),
+        onTap: () {
+          Clipboard.setData(ClipboardData(text: code));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Copied $code')),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  code,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: kMono.copyWith(fontSize: 14, fontWeight: FontWeight.w500, color: c.tx),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                height: 32,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: c.sf,
+                  border: Border.all(color: c.ln2),
+                  borderRadius: BorderRadius.circular(Ds.rMd),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.copy, size: 14, color: c.tx2),
+                    const SizedBox(width: 6),
+                    Text('Copy', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.tx)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -551,40 +653,49 @@ class _Answer extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: c.line),
-        borderRadius: BorderRadius.circular(T.rMd),
-      ),
-      clipBehavior: Clip.antiAlias,
+    return DsCard(
+      padding: EdgeInsets.zero,
+      clip: true,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-            color: c.brand50,
-            child: Text(
-              answer.verdict,
-              style: TextStyle(fontSize: 13.8, fontWeight: FontWeight.w700, color: c.brandDark, height: 1.4),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            color: c.acSoft,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: DsIcon(DsIcons.tag, size: 20, color: c.ac),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    answer.verdict,
+                    style: TextStyle(fontSize: 15, height: 22 / 15, fontWeight: FontWeight.w600, color: c.tx),
+                  ),
+                ),
+              ],
             ),
           ),
           for (final match in answer.matches) _MatchRow(match: match, onUsed: () => onUsed(match)),
           if (answer.floatAlternative != null)
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(border: Border(top: BorderSide(color: c.line))),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(color: c.sf2, border: Border(top: BorderSide(color: c.ln))),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.account_balance_wallet_outlined, size: 15, color: c.muted),
-                  const SizedBox(width: 9),
+                  DsIcon(DsIcons.creditCard, size: 18, color: c.tx3),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       'Longest to pay: ${answer.floatAlternative!.name}, '
                       '${answer.floatAlternative!.floatDays} days'
                       '${answer.matches.isNotEmpty ? ' — but no offer here.' : '.'}',
-                      style: TextStyle(fontSize: 12.3, height: 1.45, color: c.muted),
+                      style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2),
                     ),
                   ),
                 ],
@@ -616,76 +727,57 @@ class _MatchRow extends StatelessWidget {
     ];
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: match.isCoupon ? c.paper : c.surface,
-        border: Border(top: BorderSide(color: c.line)),
-      ),
+      padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+      decoration: BoxDecoration(border: Border(top: BorderSide(color: c.ln))),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Text.rich(
-                  TextSpan(
-                    children: [
-                      TextSpan(
-                        text: match.title,
-                        style: TextStyle(fontSize: 13.8, fontWeight: FontWeight.w700, color: c.ink),
-                      ),
-                      if (match.card != null)
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
                         TextSpan(
-                          text: '  on ${match.card!.name}',
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.muted),
+                          text: match.title,
+                          style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
                         ),
-                      if (match.reach == 'ANYWHERE')
-                        TextSpan(
-                          text: '  everywhere',
-                          style: TextStyle(fontSize: 11, color: c.mutedLight),
-                        ),
-                    ],
+                        if (match.card != null)
+                          TextSpan(
+                            text: '  on ${match.card!.name}',
+                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: c.tx3),
+                          ),
+                        if (match.reach == 'ANYWHERE')
+                          TextSpan(
+                            text: '  everywhere',
+                            style: TextStyle(fontSize: 12, color: c.tx3),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-              if (match.isCoupon)
-                TextButton(onPressed: onUsed, child: const Text('Used it')),
+              if (match.isCoupon) TextButton(onPressed: onUsed, child: const Text('Used it')),
             ],
           ),
           if (detail.isNotEmpty) ...[
-            const SizedBox(height: 3),
-            Text(
-              '${detail.join(' · ')}.',
-              style: TextStyle(fontSize: 12.3, height: 1.45, color: c.ink70),
+            const SizedBox(height: 2),
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Text(
+                '${detail.join(' · ')}.',
+                style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2, fontFeatures: Ds.tabular),
+              ),
             ),
           ],
           if (match.code != null) ...[
-            const SizedBox(height: 8),
-            // Tappable because the next thing after reading a code is
-            // typing it somewhere else.
-            InkWell(
-              onTap: () {
-                Clipboard.setData(ClipboardData(text: match.code!));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Copied ${match.code}')),
-                );
-              },
-              borderRadius: BorderRadius.circular(T.rSm),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                decoration: BoxDecoration(color: c.track, borderRadius: BorderRadius.circular(T.rSm)),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      match.code!,
-                      style: kNum.copyWith(fontSize: 13, fontWeight: FontWeight.w700, color: c.ink),
-                    ),
-                    const SizedBox(width: 7),
-                    Icon(Icons.copy, size: 13, color: c.muted),
-                  ],
-                ),
-              ),
+            const SizedBox(height: 10),
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: _CodeStrip(code: match.code!),
             ),
           ],
         ],
@@ -721,7 +813,7 @@ class _PerkRowState extends State<_PerkRow> {
 
   /// "from Google Pay", then the T&C and the screenshot text, each closed
   /// until asked for - they are long and only sometimes wanted.
-  Widget _extras(SpendColors c) {
+  Widget _extras(DsColors c) {
     final perk = widget.perk;
     final source = perk.source?.trim() ?? '';
     final terms = perk.terms?.trim() ?? '';
@@ -730,14 +822,16 @@ class _PerkRowState extends State<_PerkRow> {
 
     Widget toggle(_Fold fold, String label) => InkWell(
           onTap: () => _toggle(fold),
-          borderRadius: BorderRadius.circular(100),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          borderRadius: BorderRadius.circular(Ds.rMd),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 32),
+            padding: const EdgeInsets.symmetric(horizontal: 6),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(label, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: c.brand)),
-                Icon(_open == fold ? Icons.expand_less : Icons.expand_more, size: 15, color: c.brand),
+                Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.ac)),
+                const SizedBox(width: 2),
+                DsIcon(_open == fold ? DsIcons.chevronUp : DsIcons.chevronDown, size: 16, color: c.ac),
               ],
             ),
           ),
@@ -750,7 +844,7 @@ class _PerkRowState extends State<_PerkRow> {
     };
 
     return Padding(
-      padding: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.only(top: 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -759,12 +853,7 @@ class _PerkRowState extends State<_PerkRow> {
             runSpacing: 4,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              if (source.isNotEmpty)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(color: c.track, borderRadius: BorderRadius.circular(100)),
-                  child: Text('from $source', style: TextStyle(fontSize: 11, color: c.ink70)),
-                ),
+              if (source.isNotEmpty) DsBadge('from $source'),
               if (terms.isNotEmpty) toggle(_Fold.terms, 'T&C'),
               if (text.isNotEmpty) toggle(_Fold.text, 'Text read from the screenshot'),
             ],
@@ -773,10 +862,14 @@ class _PerkRowState extends State<_PerkRow> {
             const SizedBox(height: 6),
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: c.paper, borderRadius: BorderRadius.circular(T.rSm)),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: c.sf2,
+                border: Border.all(color: c.ln),
+                borderRadius: BorderRadius.circular(Ds.rMd),
+              ),
               // Selectable so a code or a line of small print can be copied.
-              child: SelectableText(body, style: TextStyle(fontSize: 12, height: 1.5, color: c.ink70)),
+              child: SelectableText(body, style: TextStyle(fontSize: 12, height: 17 / 12, color: c.tx2)),
             ),
           ],
         ],
@@ -804,6 +897,7 @@ class _PerkRowState extends State<_PerkRow> {
       // is findable rather than just a number.
       if (perk.needsReview) 'read from a picture',
     ];
+    final name = perk.merchants.isNotEmpty ? perk.merchants.first : perk.title;
 
     return Dismissible(
       key: ValueKey(perk.id),
@@ -811,93 +905,80 @@ class _PerkRowState extends State<_PerkRow> {
       onDismissed: (_) => onRemove(),
       background: Container(
         alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 16),
-        decoration: BoxDecoration(color: c.debit50, borderRadius: BorderRadius.circular(T.rMd)),
-        child: Icon(Icons.delete_outline, size: 18, color: c.debit),
+        padding: const EdgeInsets.only(right: 20),
+        decoration: BoxDecoration(color: c.critSoft, borderRadius: BorderRadius.circular(Ds.rXl)),
+        child: DsIcon(DsIcons.trash, size: 20, color: c.crit),
       ),
       child: Opacity(
         opacity: perk.isLive ? 1 : 0.5,
-        child: InkWell(
+        child: DsCard(
           onTap: onEdit,
-          borderRadius: BorderRadius.circular(T.rMd),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 12),
-            decoration: BoxDecoration(
-              color: c.surface,
-              borderRadius: BorderRadius.circular(T.rMd),
-              // A thicker edge down the left on one a machine wrote, so it
-              // is visible without reading the line under it.
-              border: Border(
-                top: BorderSide(color: c.line),
-                right: BorderSide(color: c.line),
-                bottom: BorderSide(color: c.line),
-                left: BorderSide(
-                  color: perk.needsReview ? c.brand : c.line,
-                  width: perk.needsReview ? 3 : 1,
-                ),
+          // One a machine wrote carries an accent edge, so it is visible
+          // without reading the line under it.
+          color: perk.needsReview ? c.acSoft : null,
+          borderColor: perk.needsReview ? c.acLine : null,
+          padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              DsMonogram(
+                name,
+                tone: perk.isCoupon ? DsTone.good : DsTone.ac,
+                onTinted: perk.needsReview,
               ),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: perk.isCoupon ? c.credit50 : c.brand50,
-                    borderRadius: BorderRadius.circular(100),
-                  ),
-                  child: Text(
-                    perk.isCoupon ? 'COUPON' : 'OFFER',
-                    style: TextStyle(
-                      fontSize: 8.5,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.4,
-                      color: perk.isCoupon ? c.credit : c.brandDark,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 11),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              perk.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: c.ink),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            perk.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 15,
+                              height: 20 / 15,
+                              fontWeight: FontWeight.w600,
+                              color: c.tx,
                             ),
                           ),
-                          if (perk.worth.isNotEmpty) ...[
-                            const SizedBox(width: 7),
-                            Text(
-                              perk.worth,
-                              style: kNum.copyWith(fontSize: 12.3, color: c.brand),
-                            ),
-                          ],
-                        ],
-                      ),
+                        ),
+                        const SizedBox(width: 8),
+                        DsBadge(
+                          perk.isCoupon ? 'Coupon' : 'Offer',
+                          tone: perk.isCoupon ? DsTone.good : DsTone.ac,
+                          onTinted: perk.needsReview,
+                        ),
+                      ],
+                    ),
+                    if (perk.worth.isNotEmpty) ...[
                       const SizedBox(height: 2),
                       Text(
-                        sub.join(' · '),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 11.8, color: c.muted),
+                        perk.worth,
+                        style: kNum.copyWith(fontSize: 17, height: 24 / 17, fontWeight: FontWeight.w600, color: c.tx),
                       ),
-                      _extras(c),
                     ],
-                  ),
+                    const SizedBox(height: 2),
+                    Text(
+                      sub.join(' · '),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
+                    ),
+                    _extras(c),
+                  ],
                 ),
-                if (perk.isCoupon)
-                  TextButton(
-                    onPressed: onUsed,
-                    style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
-                    child: Text(perk.usedAt != null ? 'Unuse' : 'Used'),
-                  ),
-              ],
-            ),
+              ),
+              if (perk.isCoupon)
+                TextButton(
+                  onPressed: onUsed,
+                  style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
+                  child: Text(perk.usedAt != null ? 'Unuse' : 'Used'),
+                ),
+            ],
           ),
         ),
       ),
