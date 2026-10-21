@@ -205,7 +205,20 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          # The runner's route to the VPS is sometimes slow to answer: one
+          # ssh-keyscan with its 5-second default lost three releases. Retry
+          # with a longer wait, and have every ssh/scp after this retry too.
+          for attempt in 1 2 3 4 5 6; do
+            if ssh-keyscan -T 20 -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null \
+               && [ -s ~/.ssh/known_hosts ]; then
+              break
+            fi
+            echo "The VPS didn't answer (attempt $attempt); trying again in 15s." >&2
+            [ "$attempt" = 6 ] && exit 1
+            sleep 15
+          done
+          printf 'Host *\n  ConnectTimeout 30\n  ConnectionAttempts 6\n  ServerAliveInterval 20\n  ServerAliveCountMax 6\n' >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
 
       # The APK lands first so the build that follows copies it into dist/
       # along with everything else in public/ — one build, no second step to
