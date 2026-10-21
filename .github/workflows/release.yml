@@ -1,14 +1,16 @@
 name: Release
 
-# Runs when a GitHub release is published — cut one with `npm run release`.
+# Runs when a version tag is pushed — cut one with `npm run release`, which
+# bumps, tags and pushes. The GitHub release page is created here, with the
+# APK attached, so cutting a release needs no browser step.
 #
 # Tests and builds everything on the runner first, then builds the Android
 # APK, publishes it to the VPS, and updates the web apps there to the same
 # tag — so the phone and the website are never running different versions
 # of SpendLog, and nothing ships at all if the tests do not pass.
 on:
-  release:
-    types: [published]
+  push:
+    tags: ["v*"]
   # Re-run a release by hand (for a failed deploy), naming the tag to ship.
   workflow_dispatch:
     inputs:
@@ -32,7 +34,7 @@ jobs:
     steps:
       - name: Work out which tag is being released
         id: release
-        run: echo "tag=${{ github.event.release.tag_name || inputs.tag }}" >> "$GITHUB_OUTPUT"
+        run: echo "tag=${{ inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
 
       # The exact released commit, not whatever the branch has moved on to.
       - uses: actions/checkout@v4
@@ -115,7 +117,8 @@ jobs:
       - name: Check the mobile secrets are set
         env:
           MOBILE_API_URL: ${{ secrets.MOBILE_API_URL }}
-          OIDC_ISSUER: ${{ secrets.OIDC_ISSUER }}
+          # Public, not secret: the repo secret overrides it if set.
+          OIDC_ISSUER: ${{ secrets.OIDC_ISSUER || 'https://pass-port.duckdns.org:50011' }}
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -154,7 +157,7 @@ jobs:
         run: |
           flutter build apk --release \
             --dart-define=API_URL="${{ secrets.MOBILE_API_URL }}" \
-            --dart-define=OIDC_ISSUER="${{ secrets.OIDC_ISSUER }}"
+            --dart-define=OIDC_ISSUER="${{ secrets.OIDC_ISSUER || 'https://pass-port.duckdns.org:50011' }}"
 
       # Prints the certificate the APK actually carries, so the SHA-1 that
       # has to be registered with Google is in the build log. apksigner
@@ -180,15 +183,17 @@ jobs:
           path: apps/mobile-app/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
 
-      # So the release page itself is a download, not just the VPS.
+      # So the release page itself is a download, not just the VPS. The page
+      # is made here, from the tag, when it doesn't exist yet.
       - name: Attach the APK to the release
-        if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
           cp apps/mobile-app/build/app/outputs/flutter-apk/app-release.apk "$ARTIFACT_NAME"
-          gh release upload "${{ steps.release.outputs.tag }}" "$ARTIFACT_NAME" --clobber
+          gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --generate-notes --verify-tag
+          gh release upload "$TAG" "$ARTIFACT_NAME" --clobber
 
       - name: Open an SSH connection to the VPS
         env:
