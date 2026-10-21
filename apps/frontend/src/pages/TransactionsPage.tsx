@@ -385,10 +385,66 @@ export function TransactionsPage() {
     setCustomRange(false);
   }
 
+  const editorOpen = Boolean(editing || adding);
+  // The date inputs stay folded behind a chip until wanted.
+  const [showDates, setShowDates] = useState(false);
+  const allOn = !direction && categoryId !== "none";
+
+  function openEditor(transaction: Transaction) {
+    setAdding(false);
+    setEditing(transaction);
+  }
+
   return (
-    <section className="screen">
+    <section className="screen txn-page">
       <div className="screen-header">
         <h1 className="screen-title">Transactions</h1>
+
+        {customRange ? (
+          <div className="txn-period is-custom" role="group" aria-label="Dates">
+            <span className="txn-period-label num">
+              {from || to ? `${from ? shortDay(from) : "The start"} – ${to ? shortDay(to) : "today"}` : "All time"}
+            </span>
+            <button className="btn btn-sm" onClick={backToMonths}>
+              Back to months
+            </button>
+          </div>
+        ) : (
+          <div className="txn-period" role="group" aria-label="Month">
+            <button
+              className="icon-btn"
+              onClick={() => setMonthIndex((index) => index + 1)}
+              disabled={!months || monthIndex >= months.months.length - 1}
+              aria-label="Previous month"
+            >
+              <Icon name="ic-chevron-left" />
+            </button>
+            <span className="txn-period-label num">
+              {month ? `${shortDay(month.from)} – ${shortDay(month.to)}` : monthsFailed ? "All time" : "…"}
+            </span>
+            <button
+              className="icon-btn"
+              onClick={() => setMonthIndex((index) => Math.max(0, index - 1))}
+              disabled={monthIndex === 0}
+              aria-label="Next month"
+            >
+              <Icon name="ic-chevron-right" />
+            </button>
+          </div>
+        )}
+        {!customRange && monthIndex > 0 && (
+          <button className="btn btn-sm btn-ghost" onClick={() => setMonthIndex(0)}>
+            This month
+          </button>
+        )}
+
+        <nav className="seg txn-views" aria-label="View">
+          <Link to="/transactions" className="on" aria-current="page">
+            List
+          </Link>
+          <Link to="/?tab=analytics">Analytics</Link>
+        </nav>
+
         <div className="screen-actions">
           {selecting ? (
             <>
@@ -398,227 +454,255 @@ export function TransactionsPage() {
                   : `${selectedIds.length} selected`}
               </span>
               <button
-                className="btn btn-sm btn-primary"
+                className="btn btn-primary"
                 onClick={mergeSelected}
                 disabled={selectedIds.length < 2 || merging}
               >
                 {merging ? "Merging…" : "Merge"}
               </button>
-              <button className="btn btn-ghost btn-sm" onClick={stopSelecting}>
+              <button className="btn btn-ghost" onClick={stopSelecting}>
                 Cancel
               </button>
             </>
           ) : (
             <>
-              <button className="btn btn-ghost btn-sm" onClick={() => setSelecting(true)}>
-                <Icon name="ic-updown" /> Merge rows
+              <button className="btn btn-ghost" onClick={() => setSelecting(true)}>
+                <Icon name="ic-link" /> Merge rows
               </button>
-              <button className="btn btn-ghost btn-sm" onClick={syncNow} disabled={syncing}>
-                <Icon name="ic-sync" /> {syncing ? "Syncing…" : "Sync now"}
-              </button>
-              <button className="btn btn-sm btn-primary" onClick={() => setAdding(true)}>
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  setEditing(null);
+                  setAdding(true);
+                }}
+              >
                 <Icon name="ic-plus" /> Add
               </button>
             </>
           )}
         </div>
       </div>
-      <div className="month-bar" role="group" aria-label="Month">
-        {customRange ? (
-          <>
-            <span className="month-bar-label">
-              {from || to ? `${from ? shortDay(from) : "The start"} – ${to ? shortDay(to) : "today"}` : "All time"}
-              <span className="month-bar-note">your own range</span>
-            </span>
-            <button className="btn btn-sm" onClick={backToMonths}>
-              Back to months
-            </button>
-          </>
-        ) : (
-          <>
-            <button
-              className="month-bar-step"
-              onClick={() => setMonthIndex((index) => index + 1)}
-              disabled={!months || monthIndex >= months.months.length - 1}
-              aria-label="Previous month"
-            >
-              <Icon name="ic-chevron-left" />
-            </button>
-            <span className="month-bar-label">
-              {month ? `${shortDay(month.from)} – ${shortDay(month.to)}` : monthsFailed ? "All time" : "…"}
-              {month && monthIndex === 0 && <span className="month-bar-note">this month</span>}
-            </span>
-            <button
-              className="month-bar-step"
-              onClick={() => setMonthIndex((index) => Math.max(0, index - 1))}
-              disabled={monthIndex === 0}
-              aria-label="Next month"
-            >
-              <Icon name="ic-chevron-right" />
-            </button>
-            {monthIndex > 0 && (
-              <button className="btn btn-sm btn-ghost" onClick={() => setMonthIndex(0)}>
-                This month
-              </button>
-            )}
-            {monthBudget && monthBudget.month.key === month?.month && <MonthBudgetLine budget={monthBudget} />}
-          </>
-        )}
-      </div>
 
-      {syncProblem && (
-        <div className="sync-problem" role="alert">
-          <Icon name="ic-alert" />
-          <span>{syncProblem}</span>
-          <Link to="/settings">Connect Gmail</Link>
-        </div>
-      )}
+      <div className={`txn-layout${editorOpen ? " has-editor" : ""}`}>
+        <div className="txn-main">
+          <MonthSummary
+            label={
+              customRange
+                ? from || to
+                  ? `${from ? shortDay(from) : "The start"} – ${to ? shortDay(to) : "today"}`
+                  : "All time"
+                : month
+                  ? `${shortDay(month.from)} – ${shortDay(month.to)}`
+                  : "…"
+            }
+            isThisMonth={!customRange && monthIndex === 0 && !!month}
+            budget={!customRange && monthBudget && monthBudget.month.key === month?.month ? monthBudget : null}
+            summary={summary}
+          />
 
-      <CardStrip cards={cards} pace={pace} />
+          {syncProblem && (
+            <div className="callout callout-warn sync-problem" role="alert">
+              <Icon name="ic-alert-triangle" />
+              <span className="callout-body">{syncProblem}</span>
+              <Link to="/settings">Connect Gmail</Link>
+            </div>
+          )}
 
-      <div className="layout-ledger">
-        <div className="filters-panel">
-          <div className="filter-group">
-            <label htmlFor="f-search">Search</label>
-            <div className="filter-input-icon">
+          <CardStrip cards={cards} pace={pace} />
+
+          <div className="txn-toolbar">
+            <div className="filter-input-icon txn-search">
               <Icon name="ic-search" />
               <input
                 id="f-search"
                 className="filter-input"
-                placeholder="Merchant or note"
+                placeholder="Search merchant, amount, note…"
+                aria-label="Search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
+            <button className="btn txn-check" onClick={syncNow} disabled={syncing}>
+              <Icon name="ic-refresh" /> {syncing ? "Checking…" : "Check messages"}
+            </button>
           </div>
 
-          <div className="filter-group">
-            <label htmlFor="f-category">Category</label>
-            <select
-              id="f-category"
-              className="filter-select"
-              value={categoryId}
-              onChange={(e) => changeFilter(setCategoryId)(e.target.value)}
-            >
-              <option value="">All categories</option>
-              <option value="none">Uncategorized</option>
-              {categories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="filter-group">
-            <label htmlFor="f-from">Date range</label>
-            <div className="filter-daterange">
-              <input
-                id="f-from"
-                type="date"
-                className="filter-input"
-                value={from}
-                onChange={(e) => {
-                  setFrom(e.target.value);
-                  setCustomRange(Boolean(e.target.value || to));
+          <div className="txn-filters" role="group" aria-label="Filters">
+            <div className="chip-row">
+              <button
+                type="button"
+                className={`chip${allOn ? " on" : ""}`}
+                aria-pressed={allOn}
+                onClick={() => {
+                  setDirection("");
+                  if (categoryId === "none") setCategoryId("");
                 }}
-              />
-              <span style={{ color: "var(--muted-light)" }}>–</span>
-              <input
-                type="date"
-                className="filter-input"
-                value={to}
-                onChange={(e) => {
-                  setTo(e.target.value);
-                  setCustomRange(Boolean(from || e.target.value));
-                }}
-              />
-            </div>
-          </div>
-
-          <div className="filter-group">
-            <label htmlFor="f-account">Account</label>
-            <select
-              id="f-account"
-              className="filter-select"
-              value={accountId}
-              onChange={(e) => changeFilter(setAccountId)(e.target.value)}
-            >
-              <option value="">All accounts</option>
-              {accounts
-                .filter((account) => account.isActive || account.id === accountId)
-                .map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {accountLabel(account)}
-                  </option>
-                ))}
-            </select>
-          </div>
-
-          {cycles && cycles.cycleKnown === false && (
-            <div className="filter-group">
-              <label>Statement cycle</label>
-              <p className="field-hint">No billing date set for this card — showing all of it.</p>
-            </div>
-          )}
-
-          {cycles && cycles.cycles.length > 0 && (
-            <div className="filter-group">
-              <label htmlFor="f-cycle">{cycles.byStatement ? "Statement cycle" : "Month"}</label>
-              <select
-                id="f-cycle"
-                className="filter-select"
-                value={selectedCycle ? `${selectedCycle.from}|${selectedCycle.to}` : from || to ? "custom" : "all"}
-                onChange={(e) => pickCycle(e.target.value)}
               >
-                {cycles.cycles.map((cycle) => (
-                  <option key={cycle.from} value={`${cycle.from}|${cycle.to}`}>
-                    {cycleLabel(cycle.from, cycle.to)}
-                    {cycle.current ? " (current)" : ""}
-                  </option>
-                ))}
-                <option value="all">All time</option>
-                {!selectedCycle && (from || to) && <option value="custom">Dates chosen above</option>}
-              </select>
-              {selectedCycle && (
-                <p className="field-hint">
-                  {formatMoney(selectedCycle.spentMinor)} spent across {selectedCycle.count}{" "}
-                  {selectedCycle.count === 1 ? "payment" : "payments"}
-                  {cycles.byStatement ? " — statement day to the day before the next" : ""}
-                </p>
-              )}
-            </div>
-          )}
-
-          <div className="filter-group">
-            <label>Direction</label>
-            <div className="filter-radio-row">
+                {allOn && <Icon name="ic-check" />}
+                All
+              </button>
+              <button
+                type="button"
+                className={`chip${categoryId === "none" ? " on" : ""}`}
+                aria-pressed={categoryId === "none"}
+                onClick={() => setCategoryId(categoryId === "none" ? "" : "none")}
+              >
+                {categoryId === "none" && <Icon name="ic-check" />}
+                Needs a category
+              </button>
               {(
                 [
-                  ["", "All"],
-                  ["DEBIT", "Debit"],
-                  ["CREDIT", "Credit"],
-                ] as [TransactionType | "", string][]
+                  ["DEBIT", "Money out"],
+                  ["CREDIT", "Money in"],
+                ] as [TransactionType, string][]
               ).map(([value, label]) => (
                 <button
-                  key={label}
-                  className={`filter-radio${direction === value ? " on" : ""}`}
-                  onClick={() => changeFilter(setDirection)(value)}
+                  key={value}
+                  type="button"
+                  className={`chip${direction === value ? " on" : ""}`}
+                  aria-pressed={direction === value}
+                  onClick={() => changeFilter(setDirection)(direction === value ? "" : value)}
                 >
+                  {direction === value && <Icon name="ic-check" />}
                   {label}
                 </button>
               ))}
             </div>
+
+            <div className="chip-row">
+              <label className={`chip chip-select${accountId ? " on" : ""}`}>
+                <span className="sr-only">Account</span>
+                <select
+                  id="f-account"
+                  value={accountId}
+                  onChange={(e) => changeFilter(setAccountId)(e.target.value)}
+                >
+                  <option value="">Accounts</option>
+                  {accounts
+                    .filter((account) => account.isActive || account.id === accountId)
+                    .map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {accountLabel(account)}
+                      </option>
+                    ))}
+                </select>
+                <Icon name="ic-chevron-down" />
+              </label>
+
+              <label className={`chip chip-select${categoryId && categoryId !== "none" ? " on" : ""}`}>
+                <span className="sr-only">Category</span>
+                <select
+                  id="f-category"
+                  value={categoryId}
+                  onChange={(e) => changeFilter(setCategoryId)(e.target.value)}
+                >
+                  <option value="">Category</option>
+                  <option value="none">Uncategorized</option>
+                  {categories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+                <Icon name="ic-chevron-down" />
+              </label>
+
+              {cycles && cycles.cycles.length > 0 && (
+                <label className={`chip chip-select${selectedCycle ? " on" : ""}`}>
+                  <span className="sr-only">{cycles.byStatement ? "Statement cycle" : "Month"}</span>
+                  <select
+                    id="f-cycle"
+                    value={selectedCycle ? `${selectedCycle.from}|${selectedCycle.to}` : from || to ? "custom" : "all"}
+                    onChange={(e) => pickCycle(e.target.value)}
+                  >
+                    {cycles.cycles.map((cycle) => (
+                      <option key={cycle.from} value={`${cycle.from}|${cycle.to}`}>
+                        {cycleLabel(cycle.from, cycle.to)}
+                        {cycle.current ? " (current)" : ""}
+                      </option>
+                    ))}
+                    <option value="all">All time</option>
+                    {!selectedCycle && (from || to) && <option value="custom">Dates chosen</option>}
+                  </select>
+                  <Icon name="ic-chevron-down" />
+                </label>
+              )}
+
+              {!(showDates || from || to) ? (
+                <button type="button" className="chip" onClick={() => setShowDates(true)}>
+                  <Icon name="ic-calendar" />
+                  Custom dates
+                </button>
+              ) : (
+              <div className="txn-dates">
+                <Icon name="ic-calendar" />
+                <input
+                  id="f-from"
+                  type="date"
+                  aria-label="From"
+                  value={from}
+                  onChange={(e) => {
+                    setFrom(e.target.value);
+                    setCustomRange(Boolean(e.target.value || to));
+                  }}
+                />
+                <span aria-hidden="true">–</span>
+                <input
+                  type="date"
+                  aria-label="To"
+                  value={to}
+                  onChange={(e) => {
+                    setTo(e.target.value);
+                    setCustomRange(Boolean(from || e.target.value));
+                  }}
+                />
+              </div>
+              )}
+
+              {filtersActive && (
+                <button className="btn btn-sm btn-ghost" onClick={clearFilters}>
+                  Clear filters
+                </button>
+              )}
+            </div>
+
+            {cycles && cycles.cycleKnown === false && (
+              <p className="field-hint">No billing date set for this card — showing all of it.</p>
+            )}
+            {selectedCycle && (
+              <p className="field-hint">
+                {formatMoney(selectedCycle.spentMinor)} spent across {selectedCycle.count}{" "}
+                {selectedCycle.count === 1 ? "payment" : "payments"}
+                {cycles?.byStatement ? " — statement day to the day before the next" : ""}
+              </p>
+            )}
           </div>
 
-          {filtersActive && (
-            <button className="btn btn-sm btn-ghost" onClick={clearFilters}>
-              Clear filters
-            </button>
+          {uncategorized && categoryId !== "none" && (
+            <div className="callout callout-info txn-nudge">
+              <Icon name="ic-tag" />
+              <div className="callout-body">
+                <div className="callout-title">
+                  <span className="num">{formatMoneyShort(uncategorized.amountMinor)}</span> of spending{" "}
+                  {monthIndex === 0 ? "this month" : "that month"} has no category yet
+                </div>
+                <div className="callout-detail">
+                  Mostly UPI codes and person-to-person payments, which nothing can guess from the message alone.
+                </div>
+              </div>
+              <a
+                href="#uncategorized"
+                className="btn-link"
+                onClick={(event) => {
+                  event.preventDefault();
+                  setCategoryId("none");
+                }}
+              >
+                Show them <Icon name="ic-chevron-right" />
+              </a>
+            </div>
           )}
-        </div>
 
-        <div>
           {error ? (
             <StateBlock
               warn
@@ -627,12 +711,14 @@ export function TransactionsPage() {
               body="The connection to SpendLog's server failed. Your data is safe — this is just a connection problem. Check your internet and try again."
               actions={
                 <button className="btn btn-primary" onClick={() => load()}>
-                  <Icon name="ic-sync" /> Retry
+                  <Icon name="ic-refresh" /> Retry
                 </button>
               }
             />
           ) : !days ? (
-            <LedgerSkeleton />
+            <div className="card txn-ledger-card">
+              <LedgerSkeleton />
+            </div>
           ) : days.length === 0 ? (
             filtersActive ? (
               <StateBlock
@@ -658,7 +744,7 @@ export function TransactionsPage() {
               />
             ) : (
               <StateBlock
-                icon="ic-receipt"
+                icon="ic-list"
                 title="Nothing here yet"
                 body="SpendLog fills in on its own once a bank message arrives. Connect Gmail or install the Android app from Settings — or add a transaction by hand."
                 actions={
@@ -670,37 +756,55 @@ export function TransactionsPage() {
             )
           ) : (
             <>
-              {days.map((day) => (
-                <div className="day-group" key={day.date}>
-                  <div className="day-header">
-                    <span className="day-label">{formatDayLabel(day.date)}</span>
-                    <span className="day-totals">
-                      {day.spendMinor > 0 && <span className="spend num">− {formatMoney(day.spendMinor)}</span>}
-                      {day.spendMinor > 0 && day.incomeMinor > 0 && <span className="dsep">·</span>}
-                      {day.incomeMinor > 0 && <span className="income num">+ {formatMoney(day.incomeMinor)}</span>}
-                    </span>
+              <div className="card card-flush txn-ledger-card">
+                <div className="txn-ledger">
+                  <div className="txn-head" aria-hidden="true">
+                    <span>Time</span>
+                    <span>Merchant</span>
+                    <span className="txn-head-category">Category</span>
+                    <span className="txn-head-account">Account</span>
+                    <span className="txn-head-amount">Amount</span>
                   </div>
-                  {day.transactions.map((transaction) => (
-                    <TransactionRow
-                      key={transaction.id}
-                      transaction={transaction}
-                      categories={categories}
-                      onUpdated={replaceTransaction}
-                      onShowRaw={setRawFor}
-                      onEdit={setEditing}
-                      selectable={selecting}
-                      selected={selectedIds.includes(transaction.id)}
-                      onToggleSelected={toggleSelected}
-                    />
+                  {days.map((day) => (
+                    <div className="day-group" key={day.date} role="group" aria-label={formatDayLabel(day.date)}>
+                      <div className="day-header">
+                        <span className="day-label">{dayHeading(day.date)}</span>
+                        <span className="day-totals num">
+                          {day.spendMinor > 0 && <span className="spend">−{formatMoneyShort(day.spendMinor)}</span>}
+                          {day.spendMinor > 0 && day.incomeMinor > 0 && <span className="dsep"> · </span>}
+                          {day.incomeMinor > 0 && <span className="income">+{formatMoneyShort(day.incomeMinor)}</span>}
+                        </span>
+                      </div>
+                      {day.transactions.map((transaction) => (
+                        <TransactionRow
+                          key={transaction.id}
+                          transaction={transaction}
+                          categories={categories}
+                          onUpdated={replaceTransaction}
+                          onShowRaw={setRawFor}
+                          onEdit={openEditor}
+                          selectable={selecting}
+                          selected={selectedIds.includes(transaction.id)}
+                          onToggleSelected={toggleSelected}
+                          active={editing?.id === transaction.id}
+                        />
+                      ))}
+                    </div>
                   ))}
                 </div>
-              ))}
+              </div>
 
               {hasMore && (
                 <div className="load-more" ref={sentinel}>
-                  <button className="btn" onClick={loadMore} disabled={loadingMore}>
-                    {loadingMore ? "Loading the week before…" : "Load the week before"}
-                  </button>
+                  {loadingMore ? (
+                    <div className="card txn-ledger-card txn-more-skel">
+                      <LedgerSkeleton caption="Loading the week before…" />
+                    </div>
+                  ) : (
+                    <button className="btn" onClick={loadMore}>
+                      Load the week before
+                    </button>
+                  )}
                 </div>
               )}
               {!hasMore && !customRange && month && months && monthIndex < months.months.length - 1 && (
@@ -712,74 +816,40 @@ export function TransactionsPage() {
               )}
             </>
           )}
-        </div>
 
-        <div className="rail">
-          <div className="card">
-            <div className="rail-title" title={summary?.label}>{monthIndex === 0 ? "This month" : "That month"}{summary?.label ? ` · ${summary.label}` : ""}</div>
-            <div className="stat-line">
-              <span className="label">Spent</span>
-              <span className="value num" style={{ color: "var(--debit)" }}>
-                {formatMoney(summary?.totalSpendMinor ?? 0)}
-              </span>
-            </div>
-            <div className="stat-line">
-              <span className="label">Received</span>
-              <span className="value num" style={{ color: "var(--credit)" }}>
-                {formatMoney(summary?.totalIncomeMinor ?? 0)}
-              </span>
-            </div>
-          </div>
-
-          {uncategorized && (
-            <div className="nudge">
-              <div className="nudge-title">
-                <Icon name="ic-question" />
-                Needs a category
-              </div>
-              <p>
-                {formatMoney(uncategorized.amountMinor)} of spending this month has no category yet — mostly UPI
-                codes and person-to-person payments, which nothing can guess from the message alone.
-              </p>
-              <a
-                href="#uncategorized"
-                onClick={(event) => {
-                  event.preventDefault();
-                  setCategoryId("none");
-                }}
-              >
-                Show them <Icon name="ic-arrow-right" />
-              </a>
+          {mergeError && (
+            <div className="callout callout-crit merge-error" role="alert">
+              <Icon name="ic-alert-triangle" />
+              <span className="callout-body">{mergeError}</span>
             </div>
           )}
         </div>
+
+        {editorOpen && (
+          <EditTransactionModal
+            key={editing?.id ?? "new"}
+            transaction={editing}
+            categories={categories}
+            accounts={accounts}
+            onSaved={reloadAfterEdit}
+            onDeleted={reloadAfterEdit}
+            onConvertToEmi={(transaction) => {
+              setEditing(null);
+              setEmiFor(transaction);
+            }}
+            onMarkRefund={(transaction) => {
+              setEditing(null);
+              setRefundFor(transaction);
+            }}
+            onClose={() => {
+              setEditing(null);
+              setAdding(false);
+            }}
+          />
+        )}
       </div>
 
-      {mergeError && <div className="merge-error">{mergeError}</div>}
-
       {rawFor && <RawMessageModal transaction={rawFor} onClose={() => setRawFor(null)} />}
-
-      {(editing || adding) && (
-        <EditTransactionModal
-          transaction={editing}
-          categories={categories}
-          accounts={accounts}
-          onSaved={reloadAfterEdit}
-          onDeleted={reloadAfterEdit}
-          onConvertToEmi={(transaction) => {
-            setEditing(null);
-            setEmiFor(transaction);
-          }}
-          onMarkRefund={(transaction) => {
-            setEditing(null);
-            setRefundFor(transaction);
-          }}
-          onClose={() => {
-            setEditing(null);
-            setAdding(false);
-          }}
-        />
-      )}
 
       {refundFor && (
         <RefundModal
@@ -807,31 +877,107 @@ export function TransactionsPage() {
 }
 
 /**
- * The month's budget, on the month bar: how much of it the month on
- * screen has used, and what is left or how far over it went. Nothing for
- * a month with no budget - a bar of nothing says nothing.
+ * The month on screen, summed up: where it is against the budget (a compact
+ * pace bar with today's tick, when a budget is set) and what went out, came
+ * in and how many payments there were.
  */
-function MonthBudgetLine({ budget }: { budget: MonthlyBudgetStatus }) {
-  if (!budget.configured || budget.budgetMinor === null) return null;
-  const left = budget.leftMinor ?? budget.budgetMinor - budget.spentMinor;
-  const state = budget.isOver ? "over" : budget.month.isCurrent && budget.pace?.status === "high" ? "high" : "ok";
-  const share = Math.min(100, Math.round((budget.spentMinor / Math.max(1, budget.budgetMinor)) * 100));
+function MonthSummary({
+  label,
+  isThisMonth,
+  budget,
+  summary,
+}: {
+  label: string;
+  isThisMonth: boolean;
+  budget: MonthlyBudgetStatus | null;
+  summary: AnalyticsSummary | null;
+}) {
+  const hasBudget = !!budget && budget.configured && budget.budgetMinor !== null;
+  const budgetMinor = Math.max(1, budget?.budgetMinor ?? 1);
+  const spentShare = hasBudget ? Math.min(100, (budget!.spentMinor / budgetMinor) * 100) : 0;
+  const expected = hasBudget && budget!.month.isCurrent ? budget!.pace?.expectedSpentMinor ?? null : null;
+  const tickAt = expected !== null ? Math.min(100, (expected / budgetMinor) * 100) : null;
+  const left = hasBudget ? budget!.leftMinor ?? budget!.budgetMinor! - budget!.spentMinor : 0;
+  const state = hasBudget ? (budget!.isOver ? "over" : budget!.month.isCurrent && budget!.pace?.status === "high" ? "high" : "ok") : "ok";
+  const day = budget?.month.isCurrent && budget.month.dayOfMonth ? `day ${budget.month.dayOfMonth} of ${budget.month.daysInMonth}` : null;
 
   return (
-    <div className={`month-bar-budget is-${state}`}>
-      <div
-        className="month-bar-budget-bar"
-        role="img"
-        aria-label={`${share}% of the ${formatMoney(budget.budgetMinor)} budget used`}
-      >
-        <div className="month-bar-budget-fill" style={{ width: `${share}%` }} />
+    <div className="card txn-summary">
+      <div className="txn-summary-main">
+        <div className="txn-summary-title">
+          <span className="t-title-card num">
+            {label}
+            {isThisMonth ? " · this month" : ""}
+          </span>
+          {day && <span className="t-caption">{day}</span>}
+        </div>
+        {hasBudget ? (
+          <>
+            <div
+              className={`pace compact txn-pace is-${state}`}
+              role="img"
+              aria-label={`${formatMoneyShort(budget!.spentMinor)} spent of a ${formatMoneyShort(budget!.budgetMinor!)} budget${
+                expected !== null ? `; ${formatMoneyShort(expected)} expected by today` : ""
+              }`}
+            >
+              <div className="pace-track">
+                <div className={`seg-spent${spentShare >= 100 ? " is-full" : ""}`} style={{ width: `${spentShare}%` }} />
+                {tickAt !== null && <span className="pace-tick" style={{ left: `${tickAt}%` }} />}
+              </div>
+            </div>
+            <p className="txn-summary-line">
+              <b className="num">{formatMoneyShort(budget!.spentMinor)}</b> of{" "}
+              <span className="num">{formatMoneyShort(budget!.budgetMinor!)}</span>
+              {expected !== null ? (
+                <>
+                  {" "}
+                  · should be <span className="num">{formatMoneyShort(expected)}</span> by today
+                </>
+              ) : (
+                <>
+                  {" "}
+                  ·{" "}
+                  <span className={`num${budget!.isOver ? " is-crit" : ""}`}>{formatMoneyShort(Math.abs(left))}</span>{" "}
+                  {budget!.isOver ? "over" : budget!.month.isClosed ? "saved" : "left"}
+                </>
+              )}
+            </p>
+          </>
+        ) : (
+          <p className="txn-summary-line">Every payment in this range, newest first.</p>
+        )}
       </div>
-      <span className="month-bar-budget-text">
-        <b>{formatMoneyShort(budget.spentMinor)}</b> of {formatMoneyShort(budget.budgetMinor)} ·{" "}
-        <b>{formatMoneyShort(Math.abs(left))}</b> {budget.isOver ? "over" : budget.month.isClosed ? "saved" : "left"}
-      </span>
+      <div className="kpis txn-summary-kpis">
+        <div className="kpi">
+          <span className="kpi-label">Money out</span>
+          <span className="kpi-value num money-out">
+            {summary && summary.totalSpendMinor > 0 ? "−" : ""}
+            {formatMoneyShort(summary?.totalSpendMinor ?? 0)}
+          </span>
+        </div>
+        <div className="kpi">
+          <span className="kpi-label">Money in</span>
+          <span className="kpi-value num money-in">
+            {summary && summary.totalIncomeMinor > 0 ? "+" : ""}
+            {formatMoneyShort(summary?.totalIncomeMinor ?? 0)}
+          </span>
+        </div>
+        <div className="kpi">
+          <span className="kpi-label">Payments</span>
+          <span className="kpi-value num">{summary?.transactionCount ?? "—"}</span>
+        </div>
+      </div>
     </div>
   );
+}
+
+/** "Today · Wed 21 Oct", "Yesterday · Tue 20 Oct", "Mon 19 Oct". */
+function dayHeading(day: string): string {
+  const relative = formatDayLabel(day);
+  const full = new Date(`${day}T12:00:00+05:30`)
+    .toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", timeZone: "Asia/Kolkata" })
+    .replace(",", "");
+  return relative === "Today" || relative === "Yesterday" ? `${relative} · ${full}` : full;
 }
 
 /** "17 Sep – 16 Oct" for a billing cycle. */

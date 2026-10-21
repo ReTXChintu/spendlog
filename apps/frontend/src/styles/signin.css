@@ -1,0 +1,51 @@
+/* Sign-in (design-system.md §6.2): a brand panel and a form panel in a
+   wrapping row; the auth card is the only width-capped column (440). */
+#screen-signin{display:flex;flex-wrap:wrap;min-height:100vh;background:var(--bg)}
+
+.signin-brand{flex:1 1 520px;min-width:0;background:var(--sf2);border-right:1px solid var(--ln);padding:40px 48px;
+  display:flex;flex-direction:column;gap:32px}
+.signin-lockup{display:flex;align-items:center;gap:10px}
+.signin-lockup .word{font-size:18px;line-height:24px;font-weight:700;letter-spacing:-.01em;color:var(--tx)}
+.signin-pitch{display:flex;flex-direction:column;gap:16px;max-width:560px}
+.signin-headline{margin:0;font-size:40px;line-height:48px;font-weight:600;letter-spacing:-.02em;color:var(--tx)}
+.signin-tagline{margin:0;font-size:15px;line-height:24px;color:var(--tx2)}
+.signin-benefits{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+.signin-benefits li{display:flex;align-items:center;gap:12px;font-size:14px;line-height:20px;color:var(--tx)}
+
+.signin-glimpse{display:flex;flex-direction:column;gap:12px;max-width:560px}
+.glimpse-card{background:var(--sf);border:1px solid var(--ln);border-radius:var(--r-xl);padding:20px;box-shadow:var(--shadow);
+  display:flex;flex-direction:column;gap:6px}
+.glimpse-row{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:13px;line-height:18px}
+.glimpse-figure{font-size:34px;line-height:40px;font-weight:600;letter-spacing:-.02em;color:var(--tx)}
+.glimpse-legend{margin-top:6px;font-size:12px;gap:6px 16px}
+.glimpse-title{font-size:14px;line-height:20px;font-weight:600;color:var(--tx)}
+.glimpse-amount{font-size:15px;font-weight:600;margin-left:auto}
+.glimpse-balances{text-align:right}
+.glimpse-badges{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid var(--ln);padding-top:12px;margin-top:6px}
+
+.signin-panel{flex:1 1 480px;min-width:0;padding:40px 48px;display:flex;justify-content:center;align-items:center}
+.signin-col{width:100%;max-width:440px;display:flex;flex-direction:column;gap:24px}
+.signin-card{background:var(--sf);border:1px solid var(--ln);border-radius:var(--r-xl);padding:32px;display:flex;flex-direction:column;gap:20px}
+.signin-card h2{margin:0}
+.signin-lede{margin:-12px 0 0;font-size:15px;line-height:22px;color:var(--tx2)}
+.btn-sso{gap:10px}
+.sso-mark{width:20px;height:20px;border-radius:10px;background:var(--ac-tx);color:var(--ac);display:inline-flex;align-items:center;justify-content:center}
+.btn-sso .sso-mark svg{width:12px;height:12px;stroke-width:2}
+.signin-notice{display:flex;gap:10px;background:var(--sunk);border-radius:var(--r-lg);padding:12px 14px;font-size:13px;line-height:18px;color:var(--tx2)}
+.signin-notice b{color:var(--tx);font-weight:600}
+.signin-notice svg{width:18px;height:18px;flex-shrink:0;margin-top:0;color:var(--tx2)}
+.signin-legal{margin:0;font-size:12px;line-height:17px;color:var(--tx3)}
+
+.auth-callback{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
+  color:var(--tx2);font-size:15px;line-height:22px}
+.auth-callback p{margin:0}
+
+@media (max-width:999px){
+  .signin-brand{border-right:0;border-bottom:1px solid var(--ln)}
+}
+@media (max-width:599px){
+  .signin-brand,.signin-panel{padding:24px 16px}
+  .signin-headline{font-size:28px;line-height:34px}
+  .signin-glimpse{display:none}
+  .signin-card{padding:20px}
+}

@@ -9,10 +9,11 @@ import { Icon } from "../components/Icon";
 import { LedgerStartCard } from "../components/LedgerStartCard";
 import { LoanModal } from "../components/LoanModal";
 import { StatementShelf } from "../components/StatementShelf";
-import { ThemeToggle } from "../components/ThemeToggle";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { formatMoney } from "../lib/format";
+import { formatMoney, formatMoneyShort } from "../lib/format";
+import { ThemeChoice, onThemeChange, setStoredTheme, storedTheme } from "../lib/theme";
+import { SecretInput } from "../components/SecretInput";
 import {
   Account,
   AccountOverview,
@@ -82,36 +83,127 @@ export function SettingsPage() {
     setSearchParams(next === "connections" ? {} : { tab: next }, { replace: true });
   }
 
+  // Accounts, Budget and Family have places of their own in the sidebar, so
+  // they read as pages of their own: their own title, no settings list
+  // beside them. The rest share the settings list on the left.
+  const standalone = STANDALONE[tab as keyof typeof STANDALONE];
+
+  if (standalone) {
+    return (
+      <section className="screen settings-screen">
+        <div className="screen-header">
+          <h1 className="screen-title">{standalone.title}</h1>
+          <span className="screen-header-note">{standalone.note}</span>
+        </div>
+        {tab === "accounts" && <AccountsTab />}
+        {tab === "budget" && <BudgetTab />}
+        {tab === "family" && <FamilyTab />}
+      </section>
+    );
+  }
+
+  const current = TABS.find((candidate) => candidate.id === tab)!;
+
   return (
-    <section className="screen">
+    <section className="screen settings-screen">
       <div className="screen-header">
         <h1 className="screen-title">Settings</h1>
       </div>
 
-      <div className="tabs" role="tablist">
-        {TABS.map((candidate) => (
-          <button
-            key={candidate.id}
-            role="tab"
-            aria-selected={tab === candidate.id}
-            className={`tab${tab === candidate.id ? " on" : ""}`}
-            onClick={() => selectTab(candidate.id)}
-          >
-            <Icon name={candidate.icon} />
-            {candidate.label}
-          </button>
-        ))}
+      <div className="settings-layout">
+        <SettingsNav tab={tab} onSelect={selectTab} />
+
+        <div className="settings-pane">
+          <div className="settings-pane-head">
+            <h2 className="section-title">{current.label}</h2>
+            <p className="settings-pane-sub">{SECTION_SUB[tab]}</p>
+          </div>
+          {tab === "connections" && <ConnectionsTab />}
+          {tab === "presets" && <PresetsTab />}
+          {tab === "ai" && <AiTab />}
+          {tab === "you" && <YouTab />}
+          {tab === "about" && <AboutTab />}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const STANDALONE = {
+  accounts: { title: "Accounts & cards", note: "Every account, its passbook and its statements" },
+  budget: { title: "Budget", note: "Pay day, the monthly budget, fixed costs and loans" },
+  family: { title: "Family", note: "Kids' logins for the phone app" },
+} as const;
+
+/** The one line under each section's heading. */
+const SECTION_SUB: Record<TabId, string> = {
+  connections: "Where SpendLog reads your payments from.",
+  accounts: "",
+  budget: "",
+  presets: "Shortcuts for the payments you type in by hand.",
+  family: "",
+  ai: "Ask AI and daily insights use your own Gemini key.",
+  you: "Who you're signed in as, and how this browser looks.",
+  about: "What this app is, and what it can and can't know.",
+};
+
+/** The second line of each entry in the settings list. */
+const NAV_SUB: Partial<Record<TabId, string>> = {
+  you: "Account and appearance",
+  connections: "Gmail and the phone app",
+  presets: "Merchant shortcuts",
+  ai: "Gemini key and model",
+  about: `SpendLog ${__APP_VERSION__}`,
+};
+
+/** The settings list: who you are on top, then each section, then Sign out. */
+function SettingsNav({ tab, onSelect }: { tab: TabId; onSelect: (next: TabId) => void }) {
+  const { user, logout } = useAuth();
+  const order: TabId[] = ["you", "connections", "presets", "ai", "about"];
+  const name = user?.name?.trim() || user?.email?.split("@")[0] || "You";
+  const initials = name
+    .split(/[\s._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+
+  return (
+    <nav className="card settings-nav" aria-label="Settings">
+      <div className="settings-nav-profile">
+        <span className="avatar lg" aria-hidden="true">
+          {initials || "?"}
+        </span>
+        <div className="settings-nav-who">
+          <span className="settings-nav-name">{name}</span>
+          <span className="settings-nav-email">{user?.email ?? ""}</span>
+        </div>
       </div>
 
-      {tab === "connections" && <ConnectionsTab />}
-      {tab === "accounts" && <AccountsTab />}
-      {tab === "budget" && <BudgetTab />}
-      {tab === "presets" && <PresetsTab />}
-      {tab === "family" && <FamilyTab />}
-      {tab === "ai" && <AiTab />}
-      {tab === "you" && <YouTab />}
-      {tab === "about" && <AboutTab />}
-    </section>
+      <div className="settings-nav-list" role="tablist" aria-orientation="vertical">
+        {order.map((id) => {
+          const entry = TABS.find((candidate) => candidate.id === id)!;
+          return (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={tab === id}
+              className={`settings-nav-item${tab === id ? " on" : ""}`}
+              onClick={() => onSelect(id)}
+            >
+              <span className="settings-nav-title">{entry.label}</span>
+              <span className="settings-nav-sub">{NAV_SUB[id]}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <button className="btn btn-danger-text btn-block settings-nav-signout" onClick={logout}>
+        Sign out
+      </button>
+      <p className="settings-nav-foot">SpendLog {__APP_VERSION__}</p>
+    </nav>
   );
 }
 
@@ -165,61 +257,115 @@ function ConnectionsTab() {
 
   const connection = connections[0];
 
+  const stopped = Boolean(connection?.needsReconnect);
+
   return (
     <div className="settings-grid">
-      <LedgerStartCard />
+      {gmailStatus === "connected" && (
+        <p className="callout callout-good set-card-wide">
+          <Icon name="ic-check" />
+          <span>Gmail connected successfully.</span>
+        </p>
+      )}
+      {gmailStatus === "denied" && (
+        <p className="callout callout-warn set-card-wide">
+          <Icon name="ic-alert" />
+          <span>Gmail access wasn't granted. Email import stays off until you allow it.</span>
+        </p>
+      )}
 
-      <div className="card set-card">
+      <div className="card set-card conn-card">
         <div className="set-card-head">
-          <div className="set-card-icon">
+          <div className="set-card-icon tile-good">
+            <Icon name="ic-message" />
+          </div>
+          <div className="set-card-titles">
+            <h4>Bank SMS</h4>
+            <p className="set-card-sub">Read on your Android phone — never OTPs or chats</p>
+          </div>
+          <span className="badge badge-neutral">Phone only</span>
+        </div>
+        <p className="desc">
+          Reading text messages isn't something a browser is allowed to do, and most Indian banks only
+          text. The Android app is the only route to that data.
+        </p>
+        {apkAvailable === false ? (
+          <p className="callout callout-neutral">
+            <Icon name="ic-info" />
+            <span>No build has been published yet. Gmail import works in the meantime.</span>
+          </p>
+        ) : (
+          <>
+            <div className="set-card-actions">
+              <a className="btn" href="/SpendLog.apk" download>
+                <Icon name="ic-download" /> Download the Android app
+              </a>
+            </div>
+            <p className="field-hint">
+              Android warns about installing outside the Play Store — expected for a direct download.
+            </p>
+          </>
+        )}
+      </div>
+
+      <div className={`card set-card conn-card${stopped ? " is-crit" : ""}`}>
+        <div className="set-card-head">
+          <div className={`set-card-icon ${stopped ? "tile-on-tint conn-icon-crit" : connection ? "tile-good" : ""}`}>
             <Icon name="ic-mail" />
           </div>
-          <div>
-            <h4>Email import</h4>
-            <p className="set-card-sub">Gmail, read-only</p>
+          <div className="set-card-titles">
+            <h4>{stopped ? "Google stopped letting SpendLog read your mail" : "Gmail"}</h4>
+            <p className="set-card-sub">{connection?.email ?? "Read-only — bank alerts and statements"}</p>
           </div>
+          {stopped ? (
+            <span className="badge badge-on-tint conn-badge-crit">
+              <Icon name="ic-alert" /> Stopped
+            </span>
+          ) : connection ? (
+            <span className="badge badge-good">
+              <Icon name="ic-check" /> Connected
+            </span>
+          ) : (
+            <span className="badge badge-neutral">Not connected</span>
+          )}
         </div>
 
-        {gmailStatus === "connected" && <p className="desc">Gmail connected successfully.</p>}
-        {gmailStatus === "denied" && (
-          <p className="desc">Gmail access wasn't granted. Email import stays off until you allow it.</p>
-        )}
-
-        {connection?.needsReconnect ? (
+        {stopped ? (
           <>
             <p className="desc">
-              <span className="status-pill status-off">Not connected</span>
-              &nbsp;{connection.email}
-              <br />
               Google stopped letting SpendLog read this mailbox, so it has been unlinked. Nothing already
               imported is lost — connect it again to carry on reading new emails and statements.
             </p>
-            <div className="set-card-actions">
-              <button className="btn btn-sm btn-primary" onClick={connect}>
-                Connect Gmail
+            <div className="set-card-actions conn-actions">
+              <button className="btn btn-lg btn-primary" onClick={connect}>
+                <Icon name="ic-refresh" /> Reconnect Gmail
               </button>
             </div>
           </>
         ) : connection ? (
           <>
-            <p className="desc">
-              <span className="status-pill status-on">
-                <Icon name="ic-check" />
-                Connected
-              </span>
-              &nbsp;{connection.email}
-              <br />
-              {connection.lastSyncedAt
-                ? `Last synced ${new Date(connection.lastSyncedAt).toLocaleString("en-IN")}.`
-                : "Not synced yet."}
-            </p>
-            <div className="set-card-actions">
-              <button className="btn btn-sm" onClick={syncNow} disabled={syncing}>
+            <div className="conn-stats">
+              <div>
+                <span className="kpi-label">Last synced</span>
+                <span className="kpi-value num">
+                  {connection.lastSyncedAt
+                    ? new Date(connection.lastSyncedAt).toLocaleString("en-IN", {
+                        day: "numeric",
+                        month: "short",
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })
+                    : "Not yet"}
+                </span>
+              </div>
+            </div>
+            <div className="set-card-actions conn-actions">
+              <button className="btn" onClick={syncNow} disabled={syncing}>
                 <Icon name="ic-sync" />
                 {syncing ? "Syncing…" : "Sync now"}
               </button>
               <button
-                className="btn btn-sm btn-ghost btn-danger-text"
+                className="btn btn-ghost btn-danger-text"
                 onClick={async () => {
                   await api.delete(`/ingestion/email/${connection.id}`);
                   reload();
@@ -233,65 +379,25 @@ function ConnectionsTab() {
         ) : (
           <>
             <p className="desc">
-              <span className="status-pill status-off">Not connected</span>
-              <br />
               Connect a Gmail account to pick up bank alerts and statements from email. SpendLog only ever reads
               it.
             </p>
-            <div className="set-card-actions">
-              <button className="btn btn-sm btn-primary" onClick={connect}>
-                Connect Gmail
+            <div className="set-card-actions conn-actions">
+              <button className="btn btn-primary" onClick={connect}>
+                <Icon name="ic-mail" /> Connect Gmail
               </button>
             </div>
           </>
         )}
       </div>
 
-      <div className="card set-card">
-        <div className="set-card-head">
-          <div className="set-card-icon">
-            <Icon name="ic-message" />
-          </div>
-          <div>
-            <h4>SMS import</h4>
-            <p className="set-card-sub">Android only</p>
-          </div>
-        </div>
-        <p className="desc">
-          <span className="status-pill status-off">Not available here</span>
-          <br />
-          Reading text messages isn't something a browser is allowed to do, and most Indian banks only
-          text. The Android app is the only route to that data.
-        </p>
-        {apkAvailable === false ? (
-          <p className="desc">No build has been published yet. Gmail import works in the meantime.</p>
-        ) : (
-          <>
-            <div className="set-card-actions">
-              <a className="btn btn-sm btn-primary" href="/SpendLog.apk" download>
-                <Icon name="ic-download" /> Download the Android app
-              </a>
-            </div>
-            <p className="field-hint" style={{ marginTop: 10 }}>
-              Android warns about installing outside the Play Store — expected for a direct download.
-            </p>
-          </>
-        )}
-      </div>
+      <LedgerStartCard />
     </div>
   );
 }
 
 /** The group the server files a statement under when it has no account. */
 const UNFILED = "unfiled";
-
-const ACCOUNT_ICON: Record<string, string> = {
-  BANK: "ic-bank",
-  CARD: "ic-wallet",
-  DEBIT: "ic-wallet",
-  CASH: "ic-bag",
-  UPI: "ic-phone",
-};
 
 /**
  * Every account, one at a time.
@@ -438,91 +544,118 @@ function AccountsTab() {
     );
   }
 
+  const groups = [
+    {
+      label: "Banks & cash",
+      items: accounts.filter((account) => account.accountType !== "CARD" && !account.pocketMoney),
+    },
+    { label: "Credit cards", items: accounts.filter((account) => account.accountType === "CARD") },
+    {
+      label: "Pocket money",
+      items: accounts.filter((account) => account.accountType !== "CARD" && account.pocketMoney),
+    },
+  ].filter((group) => group.items.length > 0);
+
   return (
     <div className="accounts-layout">
-      <div className="accounts-bar">
-        {/* The one action that changes what is under every card. Up here,
-            in the same tab as the cards, so what it finds is one scroll
-            away rather than one tab away. */}
-        <div className="accounts-toolbar">
-          <button className="btn btn-sm" onClick={scanStatements} disabled={scanning}>
-            <Icon name="ic-sync" /> {scanning ? "Reading…" : "Read statements"}
+      <aside className="card accounts-list" aria-label="Accounts">
+        <div className="card-head accounts-list-head">
+          <h2>All accounts</h2>
+          <span className="spacer" />
+          <button className="btn btn-sm btn-primary" onClick={() => setEditing({ account: null })}>
+            <Icon name="ic-plus" /> Add
           </button>
-          <span className="accounts-toolbar-note">
-            {scanResult ?? "Reads the monthly PDFs from your mailbox and files each under its card."}
-          </span>
         </div>
-        <div className="accounts-rail" role="tablist" aria-label="Accounts">
-          {accounts.map((account) => (
-            <button
-              key={account.id}
-              role="tab"
-              aria-selected={selected?.id === account.id}
-              className={`account-tab${selected?.id === account.id ? " on" : ""}${
-                account.isActive ? "" : " is-closed"
-              }`}
-              onClick={() => select(account.id)}
-            >
-              <span className="account-tab-badge">
-                <Icon name={ACCOUNT_ICON[account.accountType] ?? "ic-wallet"} />
-              </span>
-              <span className="account-tab-main">
-                <span className="account-tab-name">{account.nickname || account.bankName}</span>
-                <span className="account-tab-sub">
-                  {[
-                    account.last4 ? `•••• ${account.last4}` : null,
-                    networkLabel(account.cardNetwork),
-                    account.isActive ? null : "closed",
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
+
+        {!loaded && (
+          <div aria-busy="true">
+            <p className="skel-caption">Loading your accounts…</p>
+            {[0, 1, 2, 3].map((row) => (
+              <div className="skel-row" key={row}>
+                <span className="skel skel-circle" />
+                <span>
+                  <span className="skel skel-line" style={{ width: "62%", marginBottom: 6 }} />
+                  <span className="skel skel-line sm" style={{ width: "40%" }} />
                 </span>
-              </span>
-            </button>
+                <span className="skel skel-line" />
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="accounts-rail" role="tablist" aria-label="Accounts" aria-orientation="vertical">
+          {groups.map((group) => (
+            <div className="accounts-group" key={group.label}>
+              <p className="accounts-group-label">{group.label}</p>
+              {group.items.map((account) => (
+                <AccountListRow
+                  key={account.id}
+                  account={account}
+                  selected={selected?.id === account.id}
+                  onSelect={() => select(account.id)}
+                />
+              ))}
+            </div>
           ))}
 
           {/* Last, and only while there is something in it: the statements
               no account could be found for. A to-do list rather than a
               place, so it says how long it is. */}
           {unfiled > 0 && (
-            <button
-              role="tab"
-              aria-selected={showingUnfiled}
-              className={`account-tab is-unfiled${showingUnfiled ? " on" : ""}`}
-              onClick={() => select(UNFILED)}
-            >
-              <span className="account-tab-badge">
-                <Icon name="ic-question" />
-              </span>
-              <span className="account-tab-main">
-                <span className="account-tab-name">Not on an account</span>
-                <span className="account-tab-sub">
-                  {unfiled} statement{unfiled === 1 ? "" : "s"}
+            <div className="accounts-group">
+              <p className="accounts-group-label">To sort out</p>
+              <button
+                role="tab"
+                aria-selected={showingUnfiled}
+                className={`account-tab is-unfiled${showingUnfiled ? " on" : ""}`}
+                onClick={() => select(UNFILED)}
+              >
+                <span className="icon-tile sm tile-warn">
+                  <Icon name="ic-question" />
                 </span>
-              </span>
-            </button>
+                <span className="account-tab-main">
+                  <span className="account-tab-name">Not on an account</span>
+                  <span className="account-tab-sub">
+                    {unfiled} statement{unfiled === 1 ? "" : "s"}
+                  </span>
+                </span>
+              </button>
+            </div>
           )}
         </div>
 
-        <button className="btn btn-sm btn-primary" onClick={() => setEditing({ account: null })}>
-          <Icon name="ic-plus" /> Add card or account
-        </button>
-      </div>
+        {/* The one action that changes what is under every card, beside
+            the cards, so what it finds is one scroll away rather than one
+            tab away. */}
+        <div className="accounts-toolbar">
+          <button className="btn btn-block" onClick={scanStatements} disabled={scanning}>
+            <Icon name="ic-sync" /> {scanning ? "Reading…" : "Read statements"}
+          </button>
+          <span className="accounts-toolbar-note">
+            {scanResult ?? "Reads the monthly PDFs from your mailbox and files each under its card."}
+          </span>
+        </div>
+      </aside>
 
       <div className="accounts-body">
         {missingNetwork.length > 0 && (
-          <p className="desc set-warn">
+          <p className="callout callout-warn">
             <Icon name="ic-alert" />
-            {missingNetwork.length === 1
-              ? `${accountLabel(missingNetwork[0])} has no network set, so it never gets suggested at a till.`
-              : `${missingNetwork.length} cards have no network set, so they never get suggested at a till.`}
+            <span>
+              {missingNetwork.length === 1
+                ? `${accountLabel(missingNetwork[0])} has no network set, so it never gets suggested at a till.`
+                : `${missingNetwork.length} cards have no network set, so they never get suggested at a till.`}
+            </span>
           </p>
         )}
 
         {showingUnfiled ? (
-          <p className="desc">
-            These were read but no account could be matched to what was printed inside. Point each
-            one at the account it belongs to, or forget it.
+          <p className="callout callout-info">
+            <Icon name="ic-info" />
+            <span>
+              These were read but no account could be matched to what was printed inside. Point each
+              one at the account it belongs to, or forget it.
+            </span>
           </p>
         ) : (
           selected && (
@@ -562,6 +695,123 @@ function AccountsTab() {
         />
       )}
     </div>
+  );
+}
+
+/** Two letters for an account's monogram, from its own name. */
+function accountInitials(account: AccountOverview): string {
+  if (account.accountType === "CASH") return "₹";
+  const words = (account.nickname || account.bankName).split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "?";
+  return (words.length === 1 ? words[0].slice(0, 2) : words[0][0] + words[1][0]).toUpperCase();
+}
+
+/**
+ * One account in the list: its name, what it is, and the one figure that
+ * says where it stands — what a card owes against its limit, what a bank
+ * account should hold, or else what it spent this month.
+ */
+function AccountListRow({
+  account,
+  selected,
+  onSelect,
+}: {
+  account: AccountOverview;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const cycle = account.cycle;
+  const isCard = account.accountType === "CARD";
+  const owed = isCard && cycle?.cycleKnown ? (cycle.usedMinor ?? cycle.outstandingMinor) : null;
+  const limit = cycle?.creditLimitMinor ?? null;
+  const share = owed != null && limit && limit > 0 ? Math.min(1, owed / limit) : null;
+  const state = cycle?.state ?? "unset";
+
+  let figure: string;
+  let figureNote: string | null = null;
+  if (owed != null) {
+    figure = formatMoneyShort(owed);
+  } else if (account.balance) {
+    figure = formatMoney(account.balance.expectedMinor);
+    figureNote = "should hold";
+  } else {
+    figure = formatMoneyShort(account.month?.spentMinor ?? 0);
+    figureNote = "this month";
+  }
+
+  const sub = [
+    account.accountType === "CARD"
+      ? "Credit card"
+      : account.accountType === "DEBIT"
+        ? "Debit card"
+        : account.accountType === "BANK"
+          ? account.isSavings
+            ? "Savings"
+            : "Bank account"
+          : account.accountType === "CASH"
+            ? "Cash"
+            : "UPI",
+    networkLabel(account.cardNetwork),
+    account.pocketMoney?.holder ?? null,
+    account.isActive ? null : "closed",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <button
+      role="tab"
+      aria-selected={selected}
+      className={`account-tab${selected ? " on" : ""}${account.isActive ? "" : " is-closed"}`}
+      onClick={onSelect}
+    >
+      <span className="monogram">{accountInitials(account)}</span>
+      <span className="account-tab-main">
+        <span className="account-tab-top">
+          <span className="account-tab-name">
+            {account.nickname || account.bankName}
+            {account.last4 && <span className="account-tab-last4"> ••{account.last4}</span>}
+          </span>
+          <span className="account-tab-figure num">{figure}</span>
+        </span>
+        <span className="account-tab-sub">
+          {sub}
+          {figureNote && <> · {figureNote}</>}
+        </span>
+        {share != null && (
+          <span className="meter account-tab-meter" aria-hidden="true">
+            <span
+              className={`meter-fill ${state === "over" ? "is-crit" : state === "close" ? "is-warn" : "is-good"}`}
+              style={{ width: `${Math.round(share * 100)}%`, display: "block" }}
+            />
+          </span>
+        )}
+        {(share != null || account.bill) && (
+          <span className="account-tab-badges">
+            {share != null && (
+              <span className={`account-tab-caption${state === "over" ? " is-crit" : ""}`}>
+                {Math.round(share * 100)}% of {formatMoneyShort(limit!)}
+              </span>
+            )}
+            {account.bill &&
+              (account.bill.isPaid ? (
+                <span className="badge badge-good">
+                  <Icon name="ic-check" /> Bill paid
+                </span>
+              ) : account.bill.daysUntilDue != null && account.bill.daysUntilDue >= 0 ? (
+                <span className="badge badge-warn">
+                  {formatMoneyShort(account.bill.totalDueMinor)} due in {account.bill.daysUntilDue}{" "}
+                  {account.bill.daysUntilDue === 1 ? "day" : "days"}
+                </span>
+              ) : account.bill.daysUntilDue != null ? (
+                <span className="badge badge-crit">
+                  {formatMoneyShort(account.bill.totalDueMinor)} overdue
+                </span>
+              ) : null)}
+          </span>
+        )}
+      </span>
+    </button>
   );
 }
 
@@ -725,17 +975,17 @@ function BudgetTab() {
   }
 
   return (
-    <div className="settings-grid">
+    <div className="settings-grid settings-budget">
       <div className="card set-card">
         <div className="set-card-head">
           <div className="set-card-icon">
-            <Icon name="ic-wallet" />
+            <Icon name="ic-banknote" />
           </div>
           <div>
             <h4>What lands each month</h4>
             <p className="set-card-sub">
               {profile?.salaryAmountMinor
-                ? `${formatMoney(profile.salaryAmountMinor)} on the ${profile.salaryDay}th`
+                ? `${formatMoneyShort(profile.salaryAmountMinor)} on the ${profile.salaryDay}th`
                 : "Not set"}
             </p>
           </div>
@@ -785,7 +1035,7 @@ function BudgetTab() {
             <p className="set-card-sub">
               {commitments.length === 0
                 ? "None yet"
-                : `${formatMoney(commitments.reduce((sum, c) => sum + c.amountMinor, 0))} a month`}
+                : `${formatMoneyShort(commitments.reduce((sum, c) => sum + c.amountMinor, 0))} a month`}
             </p>
           </div>
         </div>
@@ -797,21 +1047,21 @@ function BudgetTab() {
         </p>
 
         {commitments.length > 0 && (
-          <div className="account-list">
+          <div className="item-list">
             {commitments.map((commitment) => (
               <button
-                className="account-row"
+                className="item-row"
                 key={commitment.id}
                 onClick={() => setEditingCommitment({ commitment })}
               >
-                <span className="account-badge">
+                <span className="icon-tile sm tile-neutral">
                   <Icon name="ic-calendar" />
                 </span>
-                <span className="account-row-main">
-                  <span className="account-row-name">{commitment.name}</span>
-                  <span className="account-row-sub">
+                <span className="item-row-main">
+                  <span className="item-row-name">{commitment.name}</span>
+                  <span className="item-row-sub">
                     {[
-                      `${commitmentAmountLabel(commitment, formatMoney)} on the ${commitment.dayOfMonth}${ordinal(
+                      `${commitmentAmountLabel(commitment, formatMoneyShort)} on the ${commitment.dayOfMonth}${ordinal(
                         commitment.dayOfMonth
                       )}`,
                       commitment.merchant,
@@ -821,7 +1071,7 @@ function BudgetTab() {
                       .join(" · ")}
                   </span>
                 </span>
-                <span className="account-row-type">Edit</span>
+                <span className="item-row-action">Edit</span>
               </button>
             ))}
           </div>
@@ -847,7 +1097,7 @@ function BudgetTab() {
             <p className="set-card-sub">
               {loans.filter((loan) => loan.status === "ACTIVE").length === 0
                 ? "None yet"
-                : `${formatMoney(
+                : `${formatMoneyShort(
                     loans
                       .filter((loan) => loan.status === "ACTIVE")
                       .reduce((sum, loan) => sum + loan.monthlyAmountMinor, 0)
@@ -863,23 +1113,23 @@ function BudgetTab() {
         </p>
 
         {loans.length > 0 && (
-          <div className="account-list">
+          <div className="item-list">
             {loans.map((loan) => (
-              <button className="account-row" key={loan.id} onClick={() => setEditingLoan({ loan })}>
-                <span className="account-badge">
+              <button className="item-row" key={loan.id} onClick={() => setEditingLoan({ loan })}>
+                <span className="icon-tile sm tile-neutral">
                   <Icon name="ic-wallet" />
                 </span>
-                <span className="account-row-main">
-                  <span className="account-row-name">{loan.label}</span>
-                  <span className="account-row-sub">
+                <span className="item-row-main">
+                  <span className="item-row-name">{loan.label}</span>
+                  <span className="item-row-sub">
                     {loan.status !== "ACTIVE"
                       ? loan.status === "CLOSED"
                         ? "Closed"
                         : "Cancelled"
-                      : `${formatMoney(loan.monthlyAmountMinor)} a month · ${loan.paidCount} of ${loan.months} paid · ${formatMoney(loan.remainingMinor)} left`}
+                      : `${formatMoneyShort(loan.monthlyAmountMinor)} a month · ${loan.paidCount} of ${loan.months} paid · ${formatMoneyShort(loan.remainingMinor)} left`}
                   </span>
                 </span>
-                <span className="account-row-type">Edit</span>
+                <span className="item-row-action">Edit</span>
               </button>
             ))}
           </div>
@@ -957,7 +1207,7 @@ function MonthlyBudgetSettings({
           <h4>Monthly budget</h4>
           <p className="set-card-sub">
             {set
-              ? `${formatMoney(budget!.budgetMinor!)} a month${
+              ? `${formatMoneyShort(budget!.budgetMinor!)} a month${
                   budget!.categories.length > 0
                     ? ` · ${budget!.categories.length} category ${budget!.categories.length === 1 ? "limit" : "limits"}`
                     : ""
@@ -977,12 +1227,12 @@ function MonthlyBudgetSettings({
         <ul className="budget-summary-limits">
           {budget!.categories.map((category) => (
             <li key={category.categoryId}>
-              {category.name} <b>{formatMoney(category.limitMinor)}</b>
+              {category.name} <b>{formatMoneyShort(category.limitMinor)}</b>
             </li>
           ))}
           {budget!.unassigned && (
             <li>
-              Everything else <b>{formatMoney(budget!.unassigned.amountMinor)}</b>
+              Everything else <b>{formatMoneyShort(budget!.unassigned.amountMinor)}</b>
             </li>
           )}
         </ul>
@@ -990,10 +1240,10 @@ function MonthlyBudgetSettings({
 
       {bucket?.configured && (
         <>
-          <div className="trip-settle-title">
-            Savings bucket · {formatMoney(bucket.balanceMinor)}
+          <div className="settings-bucket-title">
+            Savings bucket · {formatMoneyShort(bucket.balanceMinor)}
             {bucket.balanceIfMonthEndedNowMinor !== bucket.balanceMinor &&
-              ` · ${formatMoney(bucket.balanceIfMonthEndedNowMinor)} if this month ended now`}
+              ` · ${formatMoneyShort(bucket.balanceIfMonthEndedNowMinor)} if this month ended now`}
           </div>
           <ul className="bucket-months">
             {months.map((month) => (
@@ -1002,11 +1252,11 @@ function MonthlyBudgetSettings({
                   <span>{month.label}</span>
                   <span className={month.toBucketMinor < 0 ? "is-down" : "is-up"}>
                     {month.toBucketMinor < 0 ? "−" : "+"}
-                    {formatMoney(Math.abs(month.toBucketMinor))}
+                    {formatMoneyShort(Math.abs(month.toBucketMinor))}
                   </span>
                 </div>
                 <span className="bucket-month-sub">
-                  {formatMoney(month.spentMinor)} of {formatMoney(month.budgetMinor)}
+                  {formatMoneyShort(month.spentMinor)} of {formatMoneyShort(month.budgetMinor)}
                   {month.era === "daily" ? " · on the old daily budget" : ""}
                   {month.settled ? "" : " · still running"}
                 </span>
@@ -1015,7 +1265,7 @@ function MonthlyBudgetSettings({
           </ul>
           {bucket.openingFromDailyMinor !== 0 && (
             <p className="field-hint" style={{ marginBottom: 12 }}>
-              Includes {formatMoney(bucket.openingFromDailyMinor)} carried over from the old daily budget.
+              Includes {formatMoneyShort(bucket.openingFromDailyMinor)} carried over from the old daily budget.
             </p>
           )}
         </>
@@ -1091,13 +1341,19 @@ function AiTab() {
           <div className="set-card-icon">
             <Icon name="ic-spark" />
           </div>
-          <div>
-            <h4>Gemini API key</h4>
-            <p className="set-card-sub">
-              {settings.hasKey ? `Saved — ends in ${settings.keyHint}` : "Not set"}
-            </p>
+          <div className="set-card-titles">
+            <h4>AI</h4>
+            <p className="set-card-sub">Your own Gemini key, stored encrypted</p>
           </div>
         </div>
+
+        {settings.hasKey ? (
+          <span className="badge badge-good ai-key-badge">
+            <Icon name="ic-check" /> Key saved · ends in {settings.keyHint}
+          </span>
+        ) : (
+          <span className="badge badge-neutral ai-key-badge">No key yet</span>
+        )}
 
         <p className="desc">
           Ask questions like “how much did I spend on eating out this month?” and get answers from your own
@@ -1115,17 +1371,17 @@ function AiTab() {
           </p>
         ) : (
           <form
-            className="budget-setup"
+            className="budget-setup ai-key-form"
             onSubmit={(event) => {
               event.preventDefault();
               if (key.trim()) save({ apiKey: key.trim() }, "Key saved.");
             }}
           >
             <label className="field ai-key-field">
-              <span>{settings.hasKey ? "Replace with a new key" : "Paste your key"}</span>
-              <input
-                className="filter-input"
-                type="password"
+              <span>{settings.hasKey ? "Replace with a new Gemini API key" : "Gemini API key"}</span>
+              <SecretInput
+                noun="key"
+                className="filter-input input-lg"
                 autoComplete="off"
                 spellCheck={false}
                 value={key}
@@ -1133,12 +1389,12 @@ function AiTab() {
                 placeholder="AIza…"
               />
             </label>
-            <button className="btn btn-sm btn-primary" type="submit" disabled={busy || !key.trim()}>
-              {busy ? "Checking…" : "Save"}
+            <button className="btn btn-lg btn-primary" type="submit" disabled={busy || !key.trim()}>
+              {busy ? "Checking…" : "Save key"}
             </button>
             {settings.hasKey && (
               <button
-                className="btn btn-sm btn-ghost btn-danger-text"
+                className="btn btn-lg btn-danger-text"
                 type="button"
                 disabled={busy}
                 onClick={() => save({ apiKey: null }, "Key removed.")}
@@ -1222,20 +1478,78 @@ function YouTab() {
 
       <div className="card set-card">
         <div className="set-card-head">
-          <div className="set-card-icon">
-            <Icon name="ic-sun" />
+          <div className="set-card-icon tile-neutral">
+            <Icon name="ic-sliders" />
           </div>
-          <div>
+          <div className="set-card-titles">
             <h4>Appearance</h4>
-            <p className="set-card-sub">Light or dark, on this device</p>
+            <p className="set-card-sub">Applies to this browser. Your phone keeps its own.</p>
           </div>
         </div>
-        <p className="desc">
+        <AppearanceControl />
+        <p className="field-hint">
           Follows the system by default. The choice is remembered in this browser and nowhere else.
         </p>
-        <div className="set-card-actions">
-          <ThemeToggle />
-        </div>
+      </div>
+    </div>
+  );
+}
+
+const THEME_OPTIONS: { id: ThemeChoice; label: string }[] = [
+  { id: "light", label: "Light" },
+  { id: "dark", label: "Dark" },
+  { id: "system", label: "System" },
+];
+
+/**
+ * Light, Dark or System as a segmented control, with a small preview of
+ * each, through the same lib/theme functions the sidebar's toggle uses.
+ */
+function AppearanceControl() {
+  const [choice, setChoice] = useState<ThemeChoice>(storedTheme);
+
+  // Follow the sidebar toggle if it changes the theme while this is open.
+  useEffect(() => onThemeChange(setChoice), []);
+
+  function pick(next: ThemeChoice) {
+    setStoredTheme(next);
+    setChoice(next);
+  }
+
+  return (
+    <div className="appearance">
+      <p className="t-label">Theme</p>
+      <div className="seg appearance-seg" role="radiogroup" aria-label="Theme">
+        {THEME_OPTIONS.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            role="radio"
+            aria-checked={choice === option.id}
+            className={choice === option.id ? "on" : ""}
+            onClick={() => pick(option.id)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      <div className="theme-previews" aria-hidden="true">
+        {(["light", "dark"] as const).map((look) => (
+          <button
+            type="button"
+            tabIndex={-1}
+            key={look}
+            className={`theme-preview is-${look}${choice === look ? " on" : ""}`}
+            onClick={() => pick(look)}
+          >
+            <span className="theme-preview-name">{look === "light" ? "Light" : "Dark"}</span>
+            <span className="theme-preview-bar">
+              <span className="theme-preview-spent" />
+              <span className="theme-preview-tick" />
+            </span>
+            <span className="theme-preview-figure">₹22,060</span>
+          </button>
+        ))}
       </div>
     </div>
   );

@@ -46,35 +46,37 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
     const inComponent = componentStack?.trim().split("\n")[0]?.trim().replace(/^at\s+/, "");
 
     return (
-      <section className="screen">
-        <div className="crash">
-          <div className="crash-icon">
+      <section className="screen crash-screen">
+        <div className="alert-card crash" role="alert">
+          <div className="icon-tile">
             <Icon name="ic-alert" />
           </div>
-          <h2>This screen stopped working</h2>
-          <p className="desc">
-            Something on it threw an error while drawing. Nothing has been changed or lost — it is
-            the page that broke, not your data.
-          </p>
+          <div className="crash-body">
+            <h2 className="alert-card-title">This screen stopped working</h2>
+            <p className="alert-card-body">
+              Something on it threw an error while drawing. Nothing has been changed or lost — it is
+              the page that broke, not your data.
+            </p>
 
-          <pre className="crash-detail">
-            {error.message}
-            {inComponent && `\n\nin ${inComponent}`}
-          </pre>
+            <pre className="crash-detail">
+              {error.message}
+              {inComponent && `\n\nin ${inComponent}`}
+            </pre>
 
-          <div className="set-card-actions">
-            <button className="btn btn-primary" onClick={() => window.location.reload()}>
-              <Icon name="ic-sync" /> Reload
-            </button>
-            <a className="btn btn-ghost" href="/">
-              Go to the dashboard
-            </a>
+            <div className="set-card-actions">
+              <button className="btn btn-primary" onClick={() => window.location.reload()}>
+                <Icon name="ic-sync" /> Reload
+              </button>
+              <a className="btn" href="/">
+                Go to the dashboard
+              </a>
+            </div>
+
+            <p className="field-hint">
+              If this started after an update, the page may be older than the server. A reload
+              usually settles it.
+            </p>
           </div>
-
-          <p className="field-hint">
-            If this started after an update, the page may be older than the server. A reload
-            usually settles it.
-          </p>
         </div>
       </section>
     );

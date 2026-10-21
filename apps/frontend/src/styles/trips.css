@@ -1,0 +1,78 @@
+/* Trips (design screenshot 09): the trip list on the left, the open trip
+   on the right. */
+.trip-messages{display:flex;flex-direction:column;gap:8px;margin-bottom:20px}
+.trips-left{flex:4 1 320px;gap:12px}
+.trips-right{flex:8 1 560px}
+
+.trips-left-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.trips-left-head h2{margin:0}
+.trip-join-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.trip-join-row .filter-input{width:130px;min-height:40px;letter-spacing:.1em;text-transform:uppercase}
+.trip-join-row .filter-input::placeholder{text-transform:none;letter-spacing:0;font-family:var(--font-sans)}
+.trip-group-label{font-size:12px;line-height:16px;font-weight:600;letter-spacing:.02em;color:var(--tx2);margin-top:8px}
+
+.trip-start{display:flex;flex-direction:column;gap:16px}
+.trip-start-top{display:flex;align-items:flex-start;gap:12px}
+.trip-start-main{flex:1;min-width:0}
+.trip-start-name{font-size:15px;line-height:20px;font-weight:600;color:var(--tx)}
+.trip-start-sub{font-size:13px;line-height:18px;color:var(--tx3);margin-top:2px}
+.trip-start-note{margin:0;font-size:12px;line-height:17px;color:var(--tx3)}
+
+.trip-list{display:flex;flex-direction:column;gap:12px}
+.trip-card{background:var(--sf);border:1px solid var(--ln);border-radius:var(--r-xl);overflow:hidden;
+  transition:background var(--dur-fast) var(--ease)}
+.trip-card.is-selected{background:var(--ac-soft);border-color:var(--ac-line)}
+.trip-card-head{display:flex;align-items:flex-start;gap:12px;width:100%;text-align:left;padding:16px;border:0;background:none;color:inherit}
+.trip-card-head:hover{background:var(--sf2)}
+.trip-card.is-selected .trip-card-head:hover{background:transparent}
+.trip-mono{width:40px;height:40px}
+.trip-mono.is-on{background:var(--sf);color:var(--ac)}
+.trip-card-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;align-items:flex-start}
+.trip-card-name{font-size:15px;line-height:20px;font-weight:600;color:var(--tx)}
+.trip-card-sub{display:block;font-size:13px;line-height:18px;color:var(--tx3)}
+.trip-live{margin-top:6px}
+.trip-card-total{font-size:15px;line-height:20px;font-weight:600;color:var(--tx);white-space:nowrap}
+
+/* The link back to Trippin. */
+.trip-source{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;padding:0 16px 14px 68px}
+.trips-right > .trip-source{padding:0}
+.trip-source-chip{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border-radius:var(--r-sm);font-size:12px;
+  font-weight:600;background:var(--ac-soft);color:var(--ac);text-decoration:none;white-space:nowrap}
+.trip-card.is-selected .trip-source-chip{background:var(--sf)}
+.trip-source-chip svg{width:14px;height:14px}
+.trip-source-chip.is-past{background:var(--sunk);color:var(--tx2)}
+a.trip-source-chip:hover{color:var(--tx)}
+.trip-source-note{flex:1;min-width:200px;font-size:12px;line-height:16px;color:var(--tx3)}
+
+/* The open trip. */
+.trip-head{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.trip-head-main{flex:1;min-width:220px}
+.trip-head-main h2{margin:2px 0 0}
+.trip-card-pad{padding:20px 20px 0;margin-bottom:8px}
+.trip-cell-name{color:var(--tx) !important}
+.trip-who{display:inline-flex;align-items:center;gap:10px}
+.trip-who .avatar{width:28px;height:28px;font-size:11px}
+
+.trip-settle{display:flex;flex-direction:column;gap:8px}
+.trip-settle .card-head{margin-bottom:4px}
+.trip-transfer{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:var(--r-lg);background:var(--good-soft);
+  font-size:15px;line-height:20px;color:var(--tx)}
+.trip-transfer b{font-weight:600}
+.trip-transfer .avatar{background:var(--sf);color:var(--tx2)}
+.trip-transfer-amount{margin-left:auto;font-weight:600;color:var(--good)}
+.trip-transfer.is-square{color:var(--good)}
+
+.trip-members{display:flex;flex-direction:column;gap:12px}
+.trip-members .card-head{margin-bottom:0}
+.trip-code-box{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:14px 16px;background:var(--sf2);border:1px solid var(--ln);
+  border-radius:var(--r-lg)}
+.trip-code{display:block;font-size:22px;line-height:28px;font-weight:500;letter-spacing:.12em;color:var(--tx);margin-top:2px}
+.trip-code-note{flex:1;min-width:200px;font-size:12px;line-height:16px;color:var(--tx3)}
+.trip-people{display:flex;flex-direction:column}
+.trip-person{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:14px;color:var(--tx);
+  padding:10px 0;border-bottom:1px solid var(--ln)}
+.trip-person:last-child{border-bottom:none}
+
+.trip-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.trip-actions p{margin:0}
+.trips-pick{padding:32px 16px}

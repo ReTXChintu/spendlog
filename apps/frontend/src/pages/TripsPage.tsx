@@ -3,11 +3,26 @@ import { useSearchParams } from "react-router-dom";
 import { Icon } from "../components/Icon";
 import { StateBlock } from "../components/States";
 import { api } from "../lib/api";
-import { formatDayLabel, formatMoney, formatMoneyShort, istDayOf } from "../lib/format";
+import { formatDayLabel, formatMoneyShort, istDayOf } from "../lib/format";
 import { Trip, TripMember, TripSettlement, TripSummary } from "../types";
 
 /** The trip detail, where members are resolved to people. */
 type TripDetail = Trip & { members: TripMember[] };
+
+/** Two initials, for a monogram or avatar. */
+function initialsOf(name: string | null | undefined): string {
+  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
+
+/** "9 Oct – 12 Oct" or "9 Oct – now". */
+function tripDates(trip: Trip): string {
+  return `${formatDayLabel(istDayOf(trip.startedAt))}${
+    trip.endedAt ? ` – ${formatDayLabel(istDayOf(trip.endedAt))}` : " – now"
+  }`;
+}
 
 /**
  * Where a trip planned in Trippin says so: a chip back to it while
@@ -27,6 +42,7 @@ function TripSourceRow({ trip }: { trip: Trip }) {
       rel="noopener noreferrer"
     >
       <Icon name="ic-link" /> {label}
+      <Icon name="ic-arrow-up-right" />
     </a>
   ) : (
     <span className={`trip-source-chip${source.linked ? "" : " is-past"}`}>
@@ -98,6 +114,8 @@ export function TripsPage() {
   }, [openId, trips]);
 
   const active = trips?.find((trip) => trip.isActive) ?? null;
+  const openTrip = trips?.find((trip) => trip.id === openId) ?? null;
+  const past = trips?.filter((trip) => !trip.isActive) ?? [];
 
   async function run<T>(action: () => Promise<T>, after?: (result: T) => void) {
     setBusy(true);
@@ -147,263 +165,385 @@ export function TripsPage() {
     );
   }
 
+  function tripCard(trip: Trip) {
+    const selected = openId === trip.id;
+    return (
+      <div key={trip.id} className={`trip-card${selected ? " is-selected" : ""}${trip.isActive ? " is-active" : ""}`}>
+        <button
+          className="trip-card-head"
+          aria-pressed={selected}
+          onClick={() => setOpenId(openId === trip.id ? null : trip.id)}
+        >
+          <span className={`monogram trip-mono${selected ? " is-on" : ""}`}>{initialsOf(trip.name)}</span>
+          <span className="trip-card-main">
+            <span className="trip-card-name">{trip.name}</span>
+            <span className="trip-card-sub num">
+              {tripDates(trip)} · {trip.transactionCount} {trip.transactionCount === 1 ? "payment" : "payments"}
+              {trip.members.length > 1 && ` · ${trip.members.length} members`}
+            </span>
+            {trip.isActive && <span className="badge badge-ac trip-live">Running</span>}
+          </span>
+          <span className="trip-card-total num">{formatMoneyShort(trip.totalMinor)}</span>
+        </button>
+        <TripSourceRow trip={trip} />
+      </div>
+    );
+  }
+
   return (
-    <section className="screen">
+    <section className="screen trips-screen">
       <div className="screen-header">
         <h1 className="screen-title">Trips</h1>
-      </div>
-
-      <div className="trip-start">
-        {active ? (
-          <>
-            <div className="trip-start-main">
-              <div className="trip-start-label">Trip mode is on</div>
-              <div className="trip-start-name">{active.name}</div>
-              <div className="trip-start-sub">
-                Since {formatDayLabel(istDayOf(active.startedAt))} ·{" "}
-                {formatMoney(active.totalMinor)} so far
-              </div>
-              {active.source?.linked && (
-                <div className="trip-start-sub">
-                  Planned in Trippin, so it runs on Trippin's dates. Ending it here works, but
-                  Trippin's next change to the trip puts its dates back.
-                </div>
-              )}
-            </div>
-            <button
-              className="btn btn-primary"
-              disabled={busy}
-              onClick={() =>
-                run(() => api.patch(`/trips/${active.id}`, { endedAt: new Date().toISOString() }))
-              }
-            >
-              End trip
-            </button>
-          </>
-        ) : (
-          <>
-            <div className="trip-start-main">
-              <div className="trip-start-label">Trip mode is off</div>
-              <div className="trip-start-sub">
-                Start one and everything spent from now on goes onto it, until you end it.
-              </div>
-            </div>
-            <input
-              className="filter-input"
-              placeholder="Goa, Dec"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && start()}
-            />
-            <button className="btn btn-primary" disabled={busy} onClick={start}>
-              Start trip
-            </button>
-          </>
+        {active && (
+          <span className="status-pill status-on">
+            <span className="dot dot-good" /> Trip mode on · {active.name}
+          </span>
         )}
       </div>
 
-      <div className="trip-join-row">
-        <span className="field-hint">Someone shared a code with you?</span>
-        <input
-          className="filter-input"
-          placeholder="Join code"
-          value={joinCode}
-          onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-          onKeyDown={(e) => e.key === "Enter" && joinTrip()}
-        />
-        <button className="btn btn-sm" disabled={busy || !joinCode.trim()} onClick={joinTrip}>
-          Join
-        </button>
-      </div>
+      {(error || notice) && (
+        <div className="trip-messages">
+          {error && (
+            <div className="callout callout-crit" role="alert">
+              <Icon name="ic-alert-triangle" />
+              <div className="callout-body">{error}</div>
+            </div>
+          )}
+          {notice && (
+            <div className="callout callout-info" role="status">
+              <Icon name="ic-info" />
+              <div className="callout-body">{notice}</div>
+            </div>
+          )}
+        </div>
+      )}
 
-      {error && <div className="merge-error">{error}</div>}
-      {notice && <p className="field-hint">{notice}</p>}
-
-      {trips === null ? null : trips.length === 0 ? (
-        <StateBlock
-          icon="ic-calendar"
-          title="No trips yet"
-          body="Start one when you set off. Everything spent until you end it gets totalled together, so you can see what the whole thing cost rather than picking it out of a month."
-        />
-      ) : (
-        <div className="trip-list">
-          {trips.map((trip) => (
-            <div key={trip.id} className={`trip-card${trip.isActive ? " is-active" : ""}`}>
-              <button
-                className="trip-card-head"
-                onClick={() => setOpenId(openId === trip.id ? null : trip.id)}
-              >
-                <span className="trip-card-main">
-                  <span className="trip-card-name">
-                    {trip.name}
-                    {trip.isActive && <span className="trip-live">Running</span>}
-                  </span>
-                  <span className="trip-card-sub">
-                    {formatDayLabel(istDayOf(trip.startedAt))}
-                    {trip.endedAt ? ` – ${formatDayLabel(istDayOf(trip.endedAt))}` : " – now"} ·{" "}
-                    {trip.transactionCount} {trip.transactionCount === 1 ? "payment" : "payments"}
-                  </span>
-                </span>
-                <span className="trip-card-total num">{formatMoney(trip.totalMinor)}</span>
-                <Icon name={openId === trip.id ? "ic-chevron-down" : "ic-chevron-right"} />
+      <div className="flow">
+        <div className="trips-left stack">
+          <div className="trips-left-head">
+            <h2 className="t-title-section">Your trips</h2>
+            <div className="trip-join-row">
+              <input
+                className="filter-input mono"
+                placeholder="Join code"
+                aria-label="Join code"
+                value={joinCode}
+                onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                onKeyDown={(e) => e.key === "Enter" && joinTrip()}
+              />
+              <button className="btn" disabled={busy || !joinCode.trim()} onClick={joinTrip}>
+                Join with a code
               </button>
+            </div>
+          </div>
 
-              <TripSourceRow trip={trip} />
-
-              {openId === trip.id && summary && (
-                <div className="trip-detail">
-                  <div className="emi-preview">
-                    <div>
-                      <span className="emi-preview-label">Total</span>
-                      <span className="emi-preview-value num">{formatMoney(summary.totalMinor)}</span>
-                    </div>
-                    <div>
-                      <span className="emi-preview-label">Days with spending</span>
-                      <span className="emi-preview-value num">{summary.dayCount}</span>
-                    </div>
-                    <div>
-                      <span className="emi-preview-label">Per day</span>
-                      <span className="emi-preview-value num">{formatMoney(summary.perDayMinor)}</span>
+          <div className="trip-group-label">{active ? "Running now" : "Start one"}</div>
+          <div className="card trip-start">
+            {active ? (
+              <>
+                <div className="trip-start-top">
+                  <span className="icon-tile">
+                    <Icon name="ic-briefcase" />
+                  </span>
+                  <div className="trip-start-main">
+                    <div className="trip-start-name">{active.name}</div>
+                    <div className="trip-start-sub num">
+                      Since {formatDayLabel(istDayOf(active.startedAt))} · {formatMoneyShort(active.totalMinor)} so far
                     </div>
                   </div>
-
-                  {summary.byMember.length > 1 && (
-                    <div className="trip-people">
-                      {summary.byMember.map((entry) => (
-                        <div className="trip-person" key={entry.userId}>
-                          <span>{entry.name ?? "Someone"} paid</span>
-                          <span className="num">{formatMoney(entry.spentMinor)}</span>
-                        </div>
-                      ))}
+                  <span className="badge badge-good">Trip mode on</span>
+                </div>
+                {active.source?.linked && (
+                  <p className="trip-start-note">
+                    Planned in Trippin, so it runs on Trippin's dates. Ending it here works, but Trippin's next
+                    change to the trip puts its dates back.
+                  </p>
+                )}
+                <button
+                  className="btn btn-primary btn-lg btn-block"
+                  disabled={busy}
+                  onClick={() => run(() => api.patch(`/trips/${active.id}`, { endedAt: new Date().toISOString() }))}
+                >
+                  End trip
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="trip-start-top">
+                  <span className="icon-tile">
+                    <Icon name="ic-briefcase" />
+                  </span>
+                  <div className="trip-start-main">
+                    <div className="trip-start-name">Trip mode is off</div>
+                    <div className="trip-start-sub">
+                      Start one and everything spent from now on goes onto it, until you end it.
                     </div>
-                  )}
+                  </div>
+                </div>
+                <label className="field">
+                  <span>Trip name</span>
+                  <input
+                    className="filter-input"
+                    placeholder="Goa, Dec"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && start()}
+                  />
+                </label>
+                <button className="btn btn-primary btn-lg btn-block" disabled={busy} onClick={start}>
+                  Start trip
+                </button>
+                <p className="trip-start-note">
+                  While it’s on, new payments join the trip, so the whole thing is totalled for you.
+                </p>
+              </>
+            )}
+          </div>
 
-                  {summary.byCategory.length > 0 && (
-                    <div className="trip-breakdown">
-                      {summary.byCategory.map((entry) => (
-                        <div className="trip-breakdown-row" key={entry.categoryId ?? "none"}>
-                          <span>{entry.name}</span>
-                          <span className="num">{formatMoneyShort(entry.amountMinor)}</span>
-                        </div>
-                      ))}
+          {trips === null ? null : trips.length === 0 ? (
+            <StateBlock
+              icon="ic-briefcase"
+              title="No trips yet"
+              body="Start one when you set off. Everything spent until you end it gets totalled together, so you can see what the whole thing cost rather than picking it out of a month."
+            />
+          ) : (
+            <>
+              {active && <div className="trip-list">{tripCard(active)}</div>}
+              {past.length > 0 && (
+                <>
+                  <div className="trip-group-label">Past trips</div>
+                  <div className="trip-list">{past.map(tripCard)}</div>
+                </>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="trips-right stack">
+          {openTrip && summary ? (
+            <>
+              <div className="trip-head">
+                <div className="trip-head-main">
+                  <div className="t-label num">
+                    {openTrip.isActive ? "Running" : "Ended"} · {tripDates(openTrip)}
+                    {detail && detail.id === openTrip.id && (
+                      <>
+                        {" "}
+                        · code <span className="mono">{detail.joinCode}</span>
+                      </>
+                    )}
+                  </div>
+                  <h2 className="t-title-page">{openTrip.name}</h2>
+                </div>
+                {detail && detail.id === openTrip.id && detail.members.length > 0 && (
+                  <div className="avatar-stack" aria-label={`${detail.members.length} members`}>
+                    {detail.members.slice(0, 5).map((member) => (
+                      <span className="avatar" key={member.userId} title={member.name ?? "Someone"}>
+                        {initialsOf(member.name)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <button
+                  className="btn"
+                  disabled={busy}
+                  onClick={() =>
+                    run(
+                      () => api.post<{ claimedCount: number }>(`/trips/${openTrip.id}/rescan`),
+                      (result) =>
+                        setNotice(
+                          result.claimedCount === 0
+                            ? "Nothing else from those dates to add."
+                            : `Added ${result.claimedCount} more.`
+                        )
+                    )
+                  }
+                >
+                  <Icon name="ic-refresh" /> Re-scan trip
+                </button>
+              </div>
+
+              <TripSourceRow trip={openTrip} />
+
+              <div className="stat-tiles">
+                <div className="stat-tile">
+                  <div className="label">Trip total</div>
+                  <div className="value num">{formatMoneyShort(summary.totalMinor)}</div>
+                  <div className="foot">
+                    {summary.transactionCount} {summary.transactionCount === 1 ? "payment" : "payments"}
+                    {summary.byMember.length > 1 && ` by ${summary.byMember.length} people`}
+                  </div>
+                </div>
+                <div className="stat-tile">
+                  <div className="label">Length</div>
+                  <div className="value num">
+                    {summary.dayCount} {summary.dayCount === 1 ? "day" : "days"}
+                  </div>
+                  <div className="foot">with spending</div>
+                </div>
+                <div className="stat-tile">
+                  <div className="label">Per day</div>
+                  <div className="value num">{formatMoneyShort(summary.perDayMinor)}</div>
+                  <div className="foot">for the whole group</div>
+                </div>
+              </div>
+
+              <div className="flow">
+                {summary.byCategory.length > 0 && (
+                  <div className="card card-flush span-4">
+                    <div className="card-head trip-card-pad">
+                      <h2>By category</h2>
                     </div>
-                  )}
-
-                  {settlement && settlement.balances.length > 1 && (
-                    <div className="trip-settle">
-                      <div className="trip-settle-title">Settling up</div>
-                      {settlement.transfers.length === 0 ? (
-                        <div className="trip-square">
-                          Everyone is square — nobody owes anybody anything.
-                        </div>
-                      ) : (
-                        settlement.transfers.map((transfer) => (
-                          <div
-                            className="trip-transfer"
-                            key={`${transfer.fromUserId}-${transfer.toUserId}`}
-                          >
-                            <span>{transfer.fromName}</span>
-                            <Icon name="ic-arrow-right" />
-                            <span>{transfer.toName}</span>
-                            <span className="trip-transfer-amount">
-                              {formatMoney(transfer.amountMinor)}
-                            </span>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  )}
-
-                  {detail && detail.id === trip.id && (
-                    <>
-                      <div className="trip-code-box">
-                        <span className="trip-code">{detail.joinCode}</span>
-                        <span className="trip-code-note">
-                          Read this out, or show the QR from the phone app, to add someone. They see
-                          what was spent on this trip and nothing else of yours.
-                        </span>
-                        <button
-                          className="btn btn-sm btn-ghost"
-                          disabled={busy}
-                          onClick={() =>
-                            run(
-                              () => api.post<{ joinCode: string }>(`/trips/${trip.id}/rotate-code`),
-                              () => {
-                                setDetail(null);
-                                setNotice("New code. The old one no longer works.");
-                              }
-                            )
-                          }
-                        >
-                          New code
-                        </button>
-                      </div>
-
-                      <div className="trip-people">
-                        {detail.members.map((member) => (
-                          <div className="trip-person" key={member.userId}>
-                            <span>{member.name ?? "Someone"}</span>
-                            {member.isOwner ? (
-                              <span className="field-hint">Started it</span>
-                            ) : (
-                              <button
-                                className="btn btn-sm btn-ghost btn-danger-text"
-                                disabled={busy}
-                                onClick={() =>
-                                  run(
-                                    () => api.delete(`/trips/${trip.id}/members/${member.userId}`),
-                                    () => {
-                                      setDetail(null);
-                                      setNotice("Removed. What they spent stays on the trip.");
-                                    }
-                                  )
-                                }
-                              >
-                                Remove
-                              </button>
-                            )}
-                          </div>
+                    <table className="data-table">
+                      <tbody>
+                        {summary.byCategory.map((entry) => (
+                          <tr key={entry.categoryId ?? "none"}>
+                            <td className="trip-cell-name">{entry.name}</td>
+                            <td className="num">{formatMoneyShort(entry.amountMinor)}</td>
+                          </tr>
                         ))}
-                      </div>
-                    </>
-                  )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
 
-                  <div className="trip-actions">
+                {summary.byMember.length > 1 && (
+                  <div className="card card-flush span-4">
+                    <div className="card-head trip-card-pad">
+                      <h2>Who paid</h2>
+                    </div>
+                    <table className="data-table">
+                      <tbody>
+                        {summary.byMember.map((entry) => (
+                          <tr key={entry.userId}>
+                            <td className="trip-cell-name">
+                              <span className="trip-who">
+                                <span className="avatar">{initialsOf(entry.name)}</span>
+                                {entry.name ?? "Someone"}
+                              </span>
+                            </td>
+                            <td className="num">{formatMoneyShort(entry.spentMinor)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {settlement && settlement.balances.length > 1 && (
+                <div className="card trip-settle">
+                  <div className="card-head">
+                    <h2>Settle up</h2>
+                  </div>
+                  {settlement.transfers.length === 0 ? (
+                    <div className="trip-transfer is-square">
+                      <span className="icon-tile tile-good tile-on-tint">
+                        <Icon name="ic-check" />
+                      </span>
+                      Everyone is square — nobody owes anybody anything.
+                    </div>
+                  ) : (
+                    settlement.transfers.map((transfer) => (
+                      <div className="trip-transfer" key={`${transfer.fromUserId}-${transfer.toUserId}`}>
+                        <span className="avatar tile-on-tint">{initialsOf(transfer.fromName)}</span>
+                        <span>
+                          <b>{transfer.fromName}</b> pays <b>{transfer.toName}</b>
+                        </span>
+                        <span className="trip-transfer-amount num">{formatMoneyShort(transfer.amountMinor)}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {detail && detail.id === openTrip.id && (
+                <div className="card trip-members">
+                  <div className="card-head">
+                    <h2>Members</h2>
+                  </div>
+                  <div className="trip-code-box">
+                    <div>
+                      <div className="t-label">Join code</div>
+                      <span className="trip-code mono">{detail.joinCode}</span>
+                    </div>
+                    <span className="trip-code-note">
+                      Read this out, or show the QR from the phone app, to add someone. They see what was spent on
+                      this trip and nothing else of yours.
+                    </span>
                     <button
-                      className="btn btn-sm btn-ghost"
+                      className="btn btn-sm"
                       disabled={busy}
                       onClick={() =>
                         run(
-                          () => api.post<{ claimedCount: number }>(`/trips/${trip.id}/rescan`),
-                          (result) =>
-                            setNotice(
-                              result.claimedCount === 0
-                                ? "Nothing else from those dates to add."
-                                : `Added ${result.claimedCount} more.`
-                            )
+                          () => api.post<{ joinCode: string }>(`/trips/${openTrip.id}/rotate-code`),
+                          () => {
+                            setDetail(null);
+                            setNotice("New code. The old one no longer works.");
+                          }
                         )
                       }
                     >
-                      <Icon name="ic-sync" /> Re-scan those dates
-                    </button>
-                    <span className="modal-actions-spacer" />
-                    <button
-                      className="btn btn-sm btn-ghost btn-danger-text"
-                      disabled={busy}
-                      onClick={() => run(() => api.delete(`/trips/${trip.id}`))}
-                    >
-                      Delete trip
+                      <Icon name="ic-refresh" /> New code
                     </button>
                   </div>
-                  <p className="field-hint">
-                    Deleting a trip keeps every payment — only the label goes.
-                  </p>
+
+                  <div className="trip-people">
+                    {detail.members.map((member) => (
+                      <div className="trip-person" key={member.userId}>
+                        <span className="trip-who">
+                          <span className="avatar">{initialsOf(member.name)}</span>
+                          {member.name ?? "Someone"}
+                        </span>
+                        {member.isOwner ? (
+                          <span className="badge badge-neutral">Started it</span>
+                        ) : (
+                          <button
+                            className="btn btn-sm btn-danger-text"
+                            disabled={busy}
+                            onClick={() =>
+                              run(
+                                () => api.delete(`/trips/${openTrip.id}/members/${member.userId}`),
+                                () => {
+                                  setDetail(null);
+                                  setNotice("Removed. What they spent stays on the trip.");
+                                }
+                              )
+                            }
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
-            </div>
-          ))}
+
+              <div className="trip-actions">
+                <p className="t-caption">Deleting a trip keeps every payment — only the label goes.</p>
+                <button
+                  className="btn btn-danger-text"
+                  disabled={busy}
+                  onClick={() => run(() => api.delete(`/trips/${openTrip.id}`))}
+                >
+                  <Icon name="ic-trash" /> Delete trip
+                </button>
+              </div>
+            </>
+          ) : (
+            trips &&
+            trips.length > 0 && (
+              <div className="empty-inline trips-pick">
+                <span className="icon-tile tile-neutral">
+                  <Icon name="ic-briefcase" />
+                </span>
+                Pick a trip to see what it cost, who paid and who owes whom.
+              </div>
+            )
+          )}
         </div>
-      )}
+      </div>
     </section>
   );
 }

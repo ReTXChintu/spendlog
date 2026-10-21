@@ -28,11 +28,10 @@ import {
  * app? A card near its limit changes which card comes out of the wallet; a
  * chart of last March changes nothing, and lives on the Analytics tab.
  *
- * The wallet comes first, every card and account in full, so nothing needs
- * a trip into Settings to find. Then the month's budget across the whole
- * width - the one figure the rest of the month is measured against - and
- * below it a grid of compact cards, two to a row, so a wide screen is used
- * side to side instead of as one long column.
+ * Laid out as the design lays it out: the month's "Free to spend" hero
+ * beside the "Needs you" queue, then the wallet of cards and accounts
+ * across the full width, then this month's figures and the card to use
+ * today, then fixed costs, loans and earmarked money.
  *
  * One request draws the whole thing. Seven round trips to paint the screen
  * you land on is the slowest possible place to spend them.
@@ -76,185 +75,285 @@ export function DashboardTab() {
     );
   }
 
-  if (!data) return <div className="home-loading" aria-busy="true" />;
+  if (!data) return <HomeSkeleton />;
 
   const { pace, budget, monthSoFar, needsCategory, emis, loans, owed, expiringPerks, statements, bills } = data;
   const change = monthSoFar.changeMinor;
+  const changePct = monthSoFar.previousMinor > 0 ? Math.round((change / monthSoFar.previousMinor) * 100) : null;
   const earmarks = data.earmarks;
   const pocketMoney = data.pocketMoney ?? [];
   const commitments = pace.configured ? pace.commitments : [];
+  const paidCount = commitments.filter((commitment) => commitment.isPaid).length;
+  const paidMinor = commitments.reduce(
+    (sum, commitment) =>
+      sum +
+      (commitment.isPaid
+        ? (commitment.thisPeriodAmountMinor ?? commitment.amountMinor)
+        : (commitment.paidMinor ?? 0)),
+    0
+  );
+  const fixedRemaining = pace.configured ? pace.commitmentsRemainingMinor : 0;
+  const fixedTotal = paidMinor + fixedRemaining;
 
   return (
-    <>
-      {/* What there is, card by card and account by account, comes first:
-          every other figure on the page is a question about it. */}
-      <Wallet money={data.money} cards={data.wallet?.cards ?? []} banks={data.wallet?.banks ?? []} />
-
-      {/* The plan's broken rules, while there is still month left to fix them. */}
-      <PlanWarnings warnings={data.planWarnings ?? []} />
-
-      {/* Jobs before figures: the things that want doing are the reason to
-          have opened the app at all. */}
-      <TodoStrip
-        needsCategory={needsCategory}
-        stuckStatements={statements.stuckCount}
-        expiring={expiringPerks.length}
-        bills={bills}
-        pocketMoney={pocketMoney}
-      />
-
-      <div className="home-grid">
+    <div className="home-dash">
+      <div className="flow">
         {budget && (
-          <MonthlyBudgetCard
-            budget={budget}
-            onEdit={(startFromMinor) => setEditingBudget({ startFromMinor: startFromMinor ?? null })}
-            onSaved={load}
-          />
+          <div className="span-8">
+            <MonthlyBudgetCard
+              budget={budget}
+              onEdit={(startFromMinor) => setEditingBudget({ startFromMinor: startFromMinor ?? null })}
+              onSaved={load}
+            />
+          </div>
         )}
 
-        <div className="home-card">
-          <h3 className="home-card-title">Which card today</h3>
-          <p className="section-sub">
+        <div className="span-4 stack">
+          {/* Jobs before figures: the things that want doing are the reason
+              to have opened the app at all. */}
+          <NeedsYou
+            needsCategory={needsCategory}
+            stuckStatements={statements.stuckCount}
+            expiring={expiringPerks.length}
+            bills={bills}
+            pocketMoney={pocketMoney}
+          />
+
+          {/* The plan's broken rules, while there is still month left to fix them. */}
+          <PlanWarnings warnings={data.planWarnings ?? []} />
+        </div>
+      </div>
+
+      {/* What there is, card by card and account by account: every other
+          figure on the page is a question about it. */}
+      <Wallet money={data.money} cards={data.wallet?.cards ?? []} banks={data.wallet?.banks ?? []} />
+
+      <div className="flow">
+        <section className="card span-8" aria-labelledby="this-month-title">
+          <div className="card-head">
+            <h2 id="this-month-title">This month</h2>
+            <span className="meta">
+              Day {monthSoFar.dayOfMonth}
+              {monthSoFar.label ? ` of ${monthSoFar.label}` : ""}, against the same point last month — not the whole
+              of it
+            </span>
+          </div>
+
+          <div className="tile-grid home-tiles">
+            <Link className="stat-tile" to="/?tab=analytics">
+              <span className="label">
+                <Icon name="ic-list" /> Spent so far
+              </span>
+              <span className="value num">{formatMoneyShort(monthSoFar.spentMinor)}</span>
+              <span className={`home-delta num${change > 0 ? " is-up" : change < 0 ? " is-down" : ""}`}>
+                {change === 0
+                  ? "Level with last month"
+                  : `${change > 0 ? "+" : "−"}${formatMoneyShort(Math.abs(change))}${
+                      changePct !== null ? ` (${change > 0 ? "+" : "−"}${Math.abs(changePct)}%)` : ""
+                    } ${change > 0 ? "more" : "less"} than last month`}
+              </span>
+              <span className="foot home-tile-link">
+                See where it went <Icon name="ic-chevron-right" />
+              </span>
+            </Link>
+
+            {pace.configured && commitments.length > 0 && (
+              <div className="stat-tile">
+                <span className="label">
+                  <Icon name="ic-list-checks" /> Fixed costs
+                </span>
+                <span className="value num">
+                  {paidCount} of {commitments.length} paid
+                </span>
+                <span className="foot">
+                  {fixedRemaining > 0 ? `${formatMoneyShort(fixedRemaining)} still to go out` : "All gone out for this month"}
+                </span>
+              </div>
+            )}
+
+            {emis.count > 0 && (
+              <div className="stat-tile">
+                <span className="label">
+                  <Icon name="ic-repeat" /> EMIs running
+                </span>
+                <span className="value num">
+                  {formatMoneyShort(emis.monthlyMinor)}
+                  <small className="home-unit">/month</small>
+                </span>
+                <span className="foot">
+                  Across {emis.count === 1 ? "one plan" : `${emis.count} plans`} · {formatMoneyShort(emis.remainingMinor)}{" "}
+                  still to pay
+                </span>
+              </div>
+            )}
+
+            {loans.count > 0 && (
+              <div className="stat-tile">
+                <span className="label">
+                  <Icon name="ic-banknote" /> Loans
+                </span>
+                <span className="value num">
+                  {formatMoneyShort(loans.monthlyMinor)}
+                  <small className="home-unit">/month</small>
+                </span>
+                <span className="foot">
+                  {loans.count === 1 ? "One loan" : `${loans.count} loans`} · {formatMoneyShort(loans.remainingMinor)} still to
+                  repay
+                </span>
+              </div>
+            )}
+
+            {owed.balanceMinor !== 0 && (
+              <Link className="stat-tile" to="/people">
+                <span className="label">
+                  <Icon name="ic-users" /> Split bills
+                </span>
+                <span className={`value num${owed.balanceMinor > 0 ? " is-good" : ""}`}>
+                  {formatMoneyShort(Math.abs(owed.balanceMinor))}
+                </span>
+                <span className="foot">{owed.balanceMinor > 0 ? "owed to you" : "you owe"} · see who</span>
+              </Link>
+            )}
+          </div>
+        </section>
+
+        <section className="card span-4" aria-labelledby="pick-title">
+          <div className="card-head">
+            <h2 id="pick-title">Which card today</h2>
+          </div>
+          <p className="home-meta">
             The card that gives you longest before the money actually has to leave, on each network.
           </p>
           <CardPicker picks={data.picks} />
-        </div>
+        </section>
+      </div>
 
-        <div className="home-card">
-          <h3 className="home-card-title">This month so far</h3>
-          <p className="section-sub">
-            Day {monthSoFar.dayOfMonth}
-            {monthSoFar.label ? ` of ${monthSoFar.label}` : ""}, against the same point last month — not the
-            whole of it, which would look like overspending every time.
-          </p>
-          <div className="home-figure">{formatMoney(monthSoFar.spentMinor)}</div>
-          <div className={`month-delta${change > 0 ? " is-up" : change < 0 ? " is-down" : ""}`}>
-            <Icon name="ic-updown" />
-            {change === 0
-              ? "Level with last month"
-              : `${formatMoneyShort(Math.abs(change))} ${change > 0 ? "more" : "less"} than last month`}
-          </div>
-          <Link className="home-card-link" to="/?tab=analytics">
-            See where it went <Icon name="ic-arrow-right" />
-          </Link>
-        </div>
-
-        {earmarks && earmarks.count > 0 && <EarmarksCard earmarks={earmarks} />}
-
+      <div className="flow">
         {/* Rent, SIPs and the like count against the budget like anything
             else; ticking one off here is how the budget's pace knows it has
             gone out and stops holding money back for it. */}
         {pace.configured && commitments.length > 0 && (
-          <div className="home-card">
-            <h3 className="home-card-title">Fixed each month</h3>
-            <p className="section-sub">
-              {pace.commitmentsRemainingMinor > 0
-                ? `${formatMoneyShort(pace.commitmentsRemainingMinor)} still to go out — the budget's safe-a-day figure already sets it aside.`
+          <section className="card span-5" aria-labelledby="fixed-title">
+            <div className="card-head">
+              <h2 id="fixed-title">Fixed each month</h2>
+              <span className="badge badge-neutral">
+                {paidCount} of {commitments.length} settled
+              </span>
+              <span className="spacer" />
+              <Link className="btn-link" to="/settings?tab=budget">
+                Change fixed costs <Icon name="ic-chevron-right" />
+              </Link>
+            </div>
+
+            {fixedTotal > 0 && (
+              <div
+                className="pace-track compact home-fixed-bar"
+                role="img"
+                aria-label={`${formatMoneyShort(paidMinor)} settled, ${formatMoneyShort(fixedRemaining)} still to come`}
+              >
+                <span className="seg-spent" style={{ width: `${(paidMinor / fixedTotal) * 100}%` }} />
+                <span className="seg-promised" style={{ width: `${(fixedRemaining / fixedTotal) * 100}%` }} />
+              </div>
+            )}
+            <p className="home-meta num">
+              {fixedRemaining > 0
+                ? `${formatMoneyShort(paidMinor)} settled · ${formatMoneyShort(fixedRemaining)} still to come — the budget's safe-a-day figure already sets it aside.`
                 : "All gone out for this month."}
             </p>
 
             {/* Sending less than usual is worth a sentence rather than a
                 silently unticked box. */}
             {pace.shortfallNote && (
-              <p className="budget-verdict">
+              <div className="callout callout-warn home-callout-sm">
                 <Icon name="ic-info" />
-                {pace.shortfallNote}
-              </p>
+                <div className="callout-body">{pace.shortfallNote}</div>
+              </div>
             )}
 
-            <div className="budget-commitments">
+            <ul className="home-fixed">
               {commitments.map((commitment) => (
-                <label className="budget-commitment" key={commitment.id}>
-                  <input
-                    type="checkbox"
-                    checked={commitment.isPaid ?? false}
-                    onChange={(e) => togglePaid(commitment, e.target.checked)}
-                  />
-                  <span className={commitment.isPaid ? "is-paid" : ""}>
-                    {commitment.name} · {commitment.dayOfMonth}
-                    {ordinal(commitment.dayOfMonth)}
-                    {commitment.isPartial && (
-                      <em className="commitment-short">{formatMoneyShort(commitment.shortfallMinor ?? 0)} short</em>
-                    )}
-                  </span>
-                  <span className="num">
-                    {commitment.isPartial
-                      ? `${formatMoney(commitment.paidMinor ?? 0)} of ${formatMoney(
-                          commitment.thisPeriodAmountMinor ?? commitment.amountMinor
-                        )}`
-                      : commitmentAmountLabel(commitment, formatMoney)}
-                  </span>
-                </label>
+                <li key={commitment.id}>
+                  <label className={`home-fixed-row${commitment.isPaid ? " is-paid" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={commitment.isPaid ?? false}
+                      onChange={(e) => togglePaid(commitment, e.target.checked)}
+                    />
+                    <span className="home-fixed-main">
+                      <span className="home-fixed-name">{commitment.name}</span>
+                      <span className="home-fixed-sub">
+                        Due on the {commitment.dayOfMonth}
+                        {ordinal(commitment.dayOfMonth)}
+                        {commitment.isPartial && (
+                          <em className="home-fixed-short">
+                            {" · "}
+                            {formatMoneyShort(commitment.shortfallMinor ?? 0)} short
+                          </em>
+                        )}
+                      </span>
+                    </span>
+                    <span className="home-fixed-amount num">
+                      {commitment.isPartial
+                        ? `${formatMoneyShort(commitment.paidMinor ?? 0)} of ${formatMoneyShort(
+                            commitment.thisPeriodAmountMinor ?? commitment.amountMinor
+                          )}`
+                        : commitmentAmountLabel(commitment, formatMoneyShort)}
+                      {commitment.isPaid && <span className="badge badge-good">Paid</span>}
+                    </span>
+                  </label>
+                </li>
               ))}
-            </div>
-            <Link className="home-card-link" to="/settings?tab=budget">
-              Change fixed costs <Icon name="ic-arrow-right" />
-            </Link>
-          </div>
-        )}
-
-        {(emis.count > 0 || owed.balanceMinor !== 0) && (
-          <div className="home-card">
-            <h3 className="home-card-title">Owed and owing</h3>
-            {emis.count > 0 && (
-              <div className="home-stat">
-                <span className="home-stat-label">EMIs running</span>
-                <span className="home-stat-figure num">{formatMoney(emis.monthlyMinor)}</span>
-                <span className="home-stat-sub">
-                  a month across {emis.count === 1 ? "one plan" : `${emis.count} plans`} ·{" "}
-                  {formatMoneyShort(emis.remainingMinor)} still to pay
-                </span>
-              </div>
-            )}
-            {owed.balanceMinor !== 0 && (
-              <div className="home-stat">
-                <span className="home-stat-label">Split bills</span>
-                <span className={`home-stat-figure num ${owed.balanceMinor > 0 ? "credit" : "debit"}`}>
-                  {formatMoney(Math.abs(owed.balanceMinor))}
-                </span>
-                <span className="home-stat-sub">
-                  {owed.balanceMinor > 0 ? "owed to you" : "you owe"} · <Link to="/people">see who</Link>
-                </span>
-              </div>
-            )}
-          </div>
+            </ul>
+          </section>
         )}
 
         {loans.count > 0 && (
-          <div className={`home-card${loans.count > 1 ? " is-wide" : ""}`}>
-            <h3 className="home-card-title">Loans · {formatMoney(loans.monthlyMinor)} a month</h3>
-            <p className="section-sub">
-              Across {loans.count === 1 ? "one loan" : `${loans.count} loans`} ·{" "}
-              {formatMoney(loans.remainingMinor)} still to repay. Soonest due first.
-            </p>
-            <div className="loan-list">
-              {loans.loans.map((loan) => (
-                <button className="loan-row" key={loan.id} onClick={() => setEditingLoan(loan)}>
-                  <div className="loan-row-top">
-                    <span className="loan-row-name">{loan.label}</span>
-                    <span className="loan-row-left num">{formatMoney(loan.remainingMinor)} left</span>
-                  </div>
-                  <div className="emi-progress">
-                    <div
-                      className="emi-progress-fill"
-                      style={{ width: `${Math.round((loan.paidCount / Math.max(1, loan.months)) * 100)}%` }}
-                    />
-                  </div>
-                  <div className="loan-row-sub">
-                    <span>
-                      {loan.paidCount} of {loan.months} paid · {formatMoney(loan.monthlyAmountMinor)} a month
-                    </span>
-                    {loan.nextDue && (
-                      <span>
-                        Next {formatShortDate(loan.nextDue.dueDate)}
-                        {loan.nextDue.amountMinor !== loan.monthlyAmountMinor &&
-                          ` · ${formatMoney(loan.nextDue.amountMinor)}`}
-                      </span>
-                    )}
-                  </div>
-                </button>
-              ))}
+          <section className="card span-4" aria-labelledby="loans-title">
+            <div className="card-head">
+              <h2 id="loans-title">Loans</h2>
+              <span className="meta num">
+                {formatMoneyShort(loans.monthlyMinor)} a month · {formatMoneyShort(loans.remainingMinor)} still to repay. Soonest due
+                first.
+              </span>
             </div>
+            <div className="home-loans">
+              {loans.loans.map((loan) => {
+                const share = Math.round((loan.paidCount / Math.max(1, loan.months)) * 100);
+                return (
+                  <button className="home-loan" key={loan.id} onClick={() => setEditingLoan(loan)}>
+                    <span className="home-loan-top">
+                      <span className="home-loan-name">{loan.label}</span>
+                      <span className="home-loan-left num">{formatMoneyShort(loan.remainingMinor)} left</span>
+                    </span>
+                    <span className="home-loan-figure num">
+                      {formatMoneyShort(loan.monthlyAmountMinor)}
+                      <small> /month</small>
+                    </span>
+                    <span className="meter home-loan-meter" aria-hidden="true">
+                      <span className="meter-fill is-ink" style={{ width: `${share}%` }} />
+                    </span>
+                    <span className="home-loan-sub num">
+                      <span>
+                        {loan.paidCount} of {loan.months} paid
+                      </span>
+                      {loan.nextDue && (
+                        <span>
+                          Next {formatShortDate(loan.nextDue.dueDate)}
+                          {loan.nextDue.amountMinor !== loan.monthlyAmountMinor &&
+                            ` · ${formatMoneyShort(loan.nextDue.amountMinor)}`}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {earmarks && earmarks.count > 0 && (
+          <div className="span-3">
+            <EarmarksCard earmarks={earmarks} />
           </div>
         )}
       </div>
@@ -281,17 +380,46 @@ export function DashboardTab() {
           onClose={() => setEditingLoan(null)}
         />
       )}
-    </>
+    </div>
   );
 }
 
+/** The page's shape while it loads: the hero beside the queue, then the wallet. */
+function HomeSkeleton() {
+  return (
+    <div className="home-dash" aria-busy="true">
+      <p className="skel-caption">Loading your month…</p>
+      <div className="flow">
+        <div className="card card-hero span-8 home-skel">
+          <span className="skel skel-line" style={{ width: "24%" }} />
+          <span className="skel" style={{ width: "40%", height: 44 }} />
+          <span className="skel skel-line sm" style={{ width: "32%" }} />
+          <span className="skel" style={{ width: "100%", height: 14, borderRadius: 7 }} />
+        </div>
+        <div className="card span-4 home-skel">
+          {[0, 1, 2].map((row) => (
+            <div className="skel-row" key={row}>
+              <span className="skel skel-circle" />
+              <span>
+                <span className="skel skel-line" style={{ width: "70%", marginBottom: 6 }} />
+                <span className="skel skel-line sm" style={{ width: "50%" }} />
+              </span>
+              <span />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type Job = { to: string; icon: string; tone: "ac" | "warn" | "crit" | "neutral"; text: string; verb: string; urgent?: boolean };
+
 /**
- * The jobs, across the top.
- *
- * Nothing here when there is nothing to do — a row that is always on screen
- * stops being read, and then so does the real one.
+ * "Needs you": the jobs, as a calm queue of rows, each with one verb-led
+ * action. An empty queue is one quiet line.
  */
-function TodoStrip({
+function NeedsYou({
   needsCategory,
   stuckStatements,
   expiring,
@@ -304,24 +432,24 @@ function TodoStrip({
   bills: UpcomingBill[];
   pocketMoney: (PocketMoneyStatus & { accountId: string; name: string })[];
 }) {
-  const jobs: { to: string; icon: string; text: string; urgent?: boolean }[] = [];
+  const jobs: Job[] = [];
 
   if (needsCategory.yesterday > 0) {
     jobs.push({
       to: "/transactions?category=none",
-      icon: "ic-question",
-      text: `${needsCategory.yesterday} from yesterday ${
-        needsCategory.yesterday === 1 ? "needs" : "need"
-      } a category`,
+      icon: "ic-tag",
+      tone: "warn",
+      text: `${needsCategory.yesterday} from yesterday ${needsCategory.yesterday === 1 ? "needs" : "need"} a category`,
+      verb: "Pick categories",
       urgent: true,
     });
   } else if (needsCategory.month > 0) {
     jobs.push({
       to: "/transactions?category=none",
-      icon: "ic-question",
-      text: `${needsCategory.month} this month still ${
-        needsCategory.month === 1 ? "needs" : "need"
-      } a category`,
+      icon: "ic-tag",
+      tone: "ac",
+      text: `${needsCategory.month} this month still ${needsCategory.month === 1 ? "needs" : "need"} a category`,
+      verb: "Pick categories",
     });
   }
 
@@ -336,12 +464,15 @@ function TodoStrip({
           : bill.daysUntilDue === 0
             ? " — due today"
             : ` — due in ${bill.daysUntilDue} days`;
+    const urgent = (bill.daysUntilDue ?? 99) <= 3;
 
     jobs.push({
       to: "/transactions",
-      icon: "ic-wallet",
-      text: `${bill.cardName} bill ${formatMoney(bill.totalDueMinor)}${due}`,
-      urgent: (bill.daysUntilDue ?? 99) <= 3,
+      icon: "ic-credit-card",
+      tone: (bill.daysUntilDue ?? 0) < 0 ? "crit" : "warn",
+      text: `${bill.cardName} bill ${formatMoneyShort(bill.totalDueMinor)}${due}`,
+      verb: "See payments",
+      urgent,
     });
   }
 
@@ -352,7 +483,9 @@ function TodoStrip({
     jobs.push({
       to: `/settings?tab=accounts&account=${pocket.accountId}`,
       icon: "ic-wallet",
-      text: `Top up ${possessive(pocket.holder)} pocket money ${formatMoney(pocket.lastMonthSpentMinor)} today`,
+      tone: "warn",
+      text: `Top up ${possessive(pocket.holder)} pocket money ${formatMoneyShort(pocket.lastMonthSpentMinor)} today`,
+      verb: "Open the account",
       urgent: true,
     });
   }
@@ -360,8 +493,10 @@ function TodoStrip({
   if (stuckStatements > 0) {
     jobs.push({
       to: "/settings?tab=accounts",
-      icon: "ic-alert",
+      icon: "ic-mail",
+      tone: "crit",
       text: `${stuckStatements} ${stuckStatements === 1 ? "statement" : "statements"} could not be read`,
+      verb: "See statements",
       urgent: true,
     });
   }
@@ -369,23 +504,42 @@ function TodoStrip({
   if (expiring > 0) {
     jobs.push({
       to: "/perks",
-      icon: "ic-percent",
+      icon: "ic-tag",
+      tone: "neutral",
       text: `${expiring} ${expiring === 1 ? "perk" : "perks"} expiring soon`,
+      verb: "See perks",
     });
   }
 
-  if (jobs.length === 0) return null;
-
   return (
-    <div className="todo-strip">
-      {jobs.map((job) => (
-        <Link className={`todo-chip${job.urgent ? " is-urgent" : ""}`} key={job.text} to={job.to}>
-          <Icon name={job.icon} />
-          {job.text}
-          <Icon name="ic-arrow-right" />
-        </Link>
-      ))}
-    </div>
+    <section className="card needs" aria-labelledby="needs-title">
+      <div className="card-head">
+        <h2 id="needs-title">Needs you</h2>
+        {jobs.length > 0 && <span className="badge badge-crit num">{jobs.length}</span>}
+      </div>
+
+      {jobs.length === 0 ? (
+        <p className="needs-empty">Nothing needs you right now.</p>
+      ) : (
+        <ul className="needs-list">
+          {jobs.map((job) => (
+            <li className="list-row" key={job.text}>
+              <span className={`icon-tile tile-${job.tone}`} aria-hidden="true">
+                <Icon name={job.icon} />
+              </span>
+              <div className="list-row-main">
+                <div className={`list-row-title${job.urgent ? " is-urgent" : ""}`}>{job.text}</div>
+                <div className="list-row-actions">
+                  <Link className="btn-link" to={job.to}>
+                    {job.verb} <Icon name="ic-chevron-right" />
+                  </Link>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

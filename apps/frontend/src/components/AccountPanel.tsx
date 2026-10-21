@@ -2,11 +2,12 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { AccountOverview } from "../types";
 import { api, ApiError } from "../lib/api";
-import { formatMoney } from "../lib/format";
+import { formatMoneyShort as formatMoney } from "../lib/format";
 import { BalancePanel } from "./BalancePanel";
 import { CardVaultPanel } from "./CardVaultPanel";
 import { Icon } from "./Icon";
 import { PocketMoneyPanel } from "./PocketMoneyPanel";
+import { SecretInput } from "./SecretInput";
 
 /**
  * One account, everything about it.
@@ -103,10 +104,13 @@ export function AccountPanel({
   return (
     <div className="account-panel">
       <header className="account-panel-head">
-        <div>
+        <div className="account-panel-title">
+          <p className="t-label">
+            {isCard ? "Card" : "Passbook"}
+          </p>
           <h3>
             {account.nickname || account.bankName}
-            {account.last4 && <span className="account-last4">•••• {account.last4}</span>}
+            {account.last4 && <span className="account-last4">••{account.last4}</span>}
           </h3>
           <p className="account-panel-sub">
             {TYPE_LABEL[account.accountType] ?? account.accountType}
@@ -124,10 +128,10 @@ export function AccountPanel({
         </div>
         <div className="account-panel-actions">
           {/* Opens on this account's current statement cycle. */}
-          <Link className="btn btn-sm btn-ghost" to={`/transactions?account=${account.id}`}>
-            <Icon name="ic-receipt" /> Transactions
+          <Link className="btn btn-md" to={`/transactions?account=${account.id}`}>
+            <Icon name="ic-list" /> Transactions
           </Link>
-          <button className="btn btn-sm btn-ghost" onClick={onEdit}>
+          <button className="btn btn-md" onClick={onEdit}>
             <Icon name="ic-pencil" /> Edit
           </button>
           {/* Cash is a fixture rather than something that was added -
@@ -135,11 +139,11 @@ export function AccountPanel({
               of a pocket - so it is closed rather than deleted. */}
           {account.accountType !== "CASH" && (
             <button
-              className="btn btn-sm btn-ghost btn-danger-text"
+              className="btn btn-md btn-danger-text"
               disabled={busy}
               onClick={() => (removing ? setRemoving(null) : remove(false))}
             >
-              <Icon name="ic-x" /> Remove
+              <Icon name="ic-trash" /> Remove
             </button>
           )}
         </div>
@@ -171,7 +175,7 @@ export function AccountPanel({
         </div>
       )}
 
-      {error && <p className="desc set-warn">{error}</p>}
+      {error && <p className="callout callout-crit">{error}</p>}
 
       <div className="account-figures">
         {/* Only a credit card has a cycle. A savings account or a debit
@@ -295,18 +299,24 @@ export function AccountPanel({
       {!isDebit && (
       <div className="account-row">
         <span className="account-row-label">
-          <Icon name="ic-receipt" /> Statement password
+          <span className="icon-tile sm tile-neutral">
+            <Icon name="ic-lock" />
+          </span>
+          <span>
+            Statement password
+            <span className="account-row-hint">Opens the PDF statements this account emails</span>
+          </span>
         </span>
         <span className="account-row-value">
           {account.hasStatementPassword ? (
-            <span className="status-pill status-on">
+            <span className="badge badge-good">
               <Icon name="ic-check" /> Set
             </span>
           ) : (
-            <span className="status-pill status-off">Not set</span>
+            <span className="badge badge-neutral">Not set</span>
           )}
         </span>
-        <button className="btn btn-sm btn-ghost" onClick={() => setPasswordOpen((open) => !open)}>
+        <button className="btn btn-sm" onClick={() => setPasswordOpen((open) => !open)}>
           {passwordOpen ? "Cancel" : account.hasStatementPassword ? "Change" : "Add"}
         </button>
       </div>
@@ -362,10 +372,9 @@ function StatementPasswordForm({
         if (password.trim()) save(password.trim());
       }}
     >
-      <input
+      <SecretInput
         autoFocus
         className="filter-input"
-        type="password"
         autoComplete="off"
         placeholder={hasPassword ? "Type the new password" : "The password that opens this account's statement PDF"}
         value={password}

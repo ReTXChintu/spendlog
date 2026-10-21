@@ -53,7 +53,56 @@ const RESOLUTION_LABEL: Record<Line["resolution"], string> = {
   SKIPPED: "Not counted",
 };
 
+const RESOLUTION_BADGE: Record<Line["resolution"], string> = {
+  MATCHED: "badge-good",
+  ADDED: "badge-ac",
+  UNCERTAIN: "badge-warn",
+  SKIPPED: "badge-neutral",
+};
+
 type Pane = "lines" | "text" | "file";
+
+/**
+ * The statement's own spend beside what SpendLog already knew for the same
+ * period, and how far apart they are — the figures the detail already
+ * carries, laid out as the design's statement compare.
+ */
+function CompareStrip({ detail }: { detail: Detail }) {
+  const apart = detail.statementSpendMinor - detail.knownSpendMinor;
+  const counts = detail.lines.reduce(
+    (tally, line) => ({ ...tally, [line.resolution]: (tally[line.resolution] ?? 0) + 1 }),
+    {} as Partial<Record<Line["resolution"], number>>
+  );
+  return (
+    <div className="compare-strip">
+      <div className="compare-figures">
+        <div className="compare-figure">
+          <span className="kpi-label">On the statement</span>
+          <span className="kpi-value num">{formatMoney(detail.statementSpendMinor)}</span>
+        </div>
+        <div className="compare-figure">
+          <span className="kpi-label">SpendLog knew</span>
+          <span className="kpi-value num">{formatMoney(detail.knownSpendMinor)}</span>
+        </div>
+        <div className={`compare-figure${apart !== 0 ? " is-apart" : ""}`}>
+          <span className="kpi-label">Apart</span>
+          <span className="kpi-value num">{formatMoney(Math.abs(apart))}</span>
+        </div>
+      </div>
+      <div className="compare-badges">
+        {apart === 0 ? (
+          <span className="badge badge-good">
+            <Icon name="ic-check" /> Everything matches
+          </span>
+        ) : (
+          <span className="badge badge-warn">{formatMoney(Math.abs(apart))} apart</span>
+        )}
+        {(counts.ADDED ?? 0) > 0 && <span className="badge badge-ac">{counts.ADDED} added from the statement</span>}
+        {(counts.UNCERTAIN ?? 0) > 0 && <span className="badge badge-warn">{counts.UNCERTAIN} not sure</span>}
+      </div>
+    </div>
+  );
+}
 
 export function StatementDetailModal({
   statementId,
@@ -104,7 +153,11 @@ export function StatementDetailModal({
     <div className="overlay" onClick={onClose}>
       <div className="modal modal-statement" onClick={(event) => event.stopPropagation()}>
         <div className="modal-head">
-          <div>
+          <div className="icon-tile">
+            <Icon name="ic-credit-card" />
+          </div>
+          <div className="modal-head-main">
+            <p className="t-label">Compare with the statement</p>
             <h3>{detail?.subject ?? detail?.fileName ?? "Statement"}</h3>
             <p className="modal-sub">{summaryLine(detail)}</p>
           </div>
@@ -113,12 +166,14 @@ export function StatementDetailModal({
           </button>
         </div>
 
-        {error && <p className="desc set-warn">{error}</p>}
+        {error && <p className="callout callout-crit">{error}</p>}
+
+        {detail && <CompareStrip detail={detail} />}
 
         {detail && <BillEditor detail={detail} onChanged={() => { load(); onChanged(); }} />}
         {detail?.totalDueMinor ? <WaiveRow detail={detail} onChanged={() => { load(); onChanged(); }} /> : null}
 
-        <div className="tabs tabs-inline" role="tablist">
+        <div className="tabs tabs-sm tabs-inline" role="tablist">
           <button
             role="tab"
             aria-selected={pane === "lines"}
@@ -145,7 +200,21 @@ export function StatementDetailModal({
           </button>
         </div>
 
-        {!detail && !error && <p className="desc">Opening…</p>}
+        {!detail && !error && (
+          <div aria-busy="true">
+            <p className="skel-caption">Opening the statement…</p>
+            {[0, 1, 2].map((row) => (
+              <div className="skel-row" key={row}>
+                <span className="skel skel-circle" />
+                <span>
+                  <span className="skel skel-line" style={{ width: "40%", marginBottom: 6 }} />
+                  <span className="skel skel-line sm" style={{ width: "24%" }} />
+                </span>
+                <span className="skel skel-line" />
+              </div>
+            ))}
+          </div>
+        )}
 
         {detail && pane === "lines" && (
           <LinesPane detail={detail} busyLine={busyLine} onResolve={resolve} />
@@ -191,7 +260,7 @@ function LinesPane({
 
   return (
     <div className="statement-lines">
-      <table className="data-table">
+      <table className="data-table is-inset">
         <thead>
           <tr>
             <th>Date</th>
@@ -210,11 +279,11 @@ function LinesPane({
                 {line.kind !== "SPEND" && <span className="line-kind">{line.kind.toLowerCase()}</span>}
               </td>
               <td className={`num ${line.type === "CREDIT" ? "amount-in" : ""}`}>
-                {line.type === "CREDIT" ? "+" : ""}
+                {line.type === "CREDIT" ? "+" : "−"}
                 {formatMoney(line.amountMinor)}
               </td>
               <td>
-                <span className={`statement-pill is-${line.resolution.toLowerCase()}`}>
+                <span className={`badge ${RESOLUTION_BADGE[line.resolution]}`}>
                   {RESOLUTION_LABEL[line.resolution]}
                 </span>
                 {line.transaction && <span className="line-match">{line.transaction.merchant}</span>}

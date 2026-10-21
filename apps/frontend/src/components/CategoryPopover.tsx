@@ -49,8 +49,8 @@ export function CategoryPopover({
   }
 
   return (
-    <div className="cat-popover" ref={ref}>
-      <div className="cat-popover-title">Set category</div>
+    <div className="cat-popover" ref={ref} role="dialog" aria-label="Pick a category">
+      <div className="cat-popover-title">Pick a category</div>
       <div className="cat-grid">
         {/* Money out is never income, and a refund is never a way of
             spending, so offering either is offering a mistake. */}
@@ -61,7 +61,7 @@ export function CategoryPopover({
             onClick={() => pick(category)}
             disabled={saving}
           >
-            <span className="cat-opt-chip" style={{ background: category.color ?? "var(--muted)" }}>
+            <span className="cat-opt-chip" style={{ ["--cat" as string]: category.color ?? "var(--tx3)" }}>
               <Icon name={category.icon ?? "ic-dots"} />
             </span>
             {category.name}

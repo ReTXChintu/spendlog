@@ -88,13 +88,17 @@ export function EmiModal({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="modal modal-wide">
+      <div className="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="emi-title">
         <button className="modal-close" onClick={onClose} aria-label="Close">
           <Icon name="ic-x" />
         </button>
-        <h3>Convert to EMI</h3>
+        <div className="raw-modal-head">
+          <span className="icon-tile tile-ac" aria-hidden="true">
+            <Icon name="ic-calendar" />
+          </span>
+          <h3 id="emi-title">Convert to EMI</h3>
+        </div>
         <div className="modal-sub">
-          <Icon name="ic-calendar" />
           <span>
             {transaction.merchant ?? "This purchase"} · {formatMoney(transaction.amountMinor)}
           </span>
@@ -197,10 +201,10 @@ export function EmiModal({
 
         <div className="modal-actions">
           <span className="modal-actions-spacer" />
-          <button className="btn btn-sm btn-ghost" onClick={onClose} disabled={saving}>
+          <button className="btn btn-ghost" onClick={onClose} disabled={saving}>
             Cancel
           </button>
-          <button className="btn btn-sm btn-primary" onClick={save} disabled={saving}>
+          <button className="btn btn-primary" onClick={save} disabled={saving}>
             {saving ? "Saving…" : "Set up EMI"}
           </button>
         </div>

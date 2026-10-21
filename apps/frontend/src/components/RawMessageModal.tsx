@@ -50,13 +50,17 @@ export function RawMessageModal({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="modal">
+      <div className="modal raw-modal" role="dialog" aria-modal="true" aria-labelledby="raw-title">
         <button className="modal-close" onClick={onClose} aria-label="Close">
           <Icon name="ic-x" />
         </button>
-        <h3>{sources.length > 1 ? "Original messages" : "Original message"}</h3>
+        <div className="raw-modal-head">
+          <span className="icon-tile tile-neutral" aria-hidden="true">
+            <Icon name={sources.length > 1 || sources[0].source !== "EMAIL" ? "ic-message" : "ic-mail"} />
+          </span>
+          <h3 id="raw-title">{sources.length > 1 ? "Original messages" : "Original message"}</h3>
+        </div>
         <div className="modal-sub">
-          <Icon name="ic-receipt" />
           <span>
             {sources.length > 1
               ? `Reported ${sources.length} times — a statement is the bank's own list, so it is the last word`

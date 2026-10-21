@@ -189,9 +189,13 @@ export function LoanModal({
         <button className="modal-close" onClick={onClose} aria-label="Close">
           <Icon name="ic-x" />
         </button>
-        <h3>{isNew ? "Add a loan" : "Edit loan"}</h3>
+        <div className="dialog-head">
+          <div className="icon-tile">
+            <Icon name="ic-banknote" />
+          </div>
+          <h3>{isNew ? "Add a loan" : "Edit loan"}</h3>
+        </div>
         <div className="modal-sub">
-          <Icon name="ic-wallet" />
           <span>A bank's personal loan, an employer advance, money from a relative — anything repaid on a schedule.</span>
         </div>
 
@@ -335,7 +339,7 @@ export function LoanModal({
           )}
           {!isNew && (
             <button
-              className={`btn btn-sm ${confirmDelete ? "btn-primary" : "btn-ghost btn-danger-text"}`}
+              className={`btn btn-sm ${confirmDelete ? "btn-danger" : "btn-danger-text"}`}
               onClick={() => (confirmDelete ? remove() : setConfirmDelete(true))}
               disabled={saving}
             >
@@ -343,10 +347,10 @@ export function LoanModal({
             </button>
           )}
           <span className="modal-actions-spacer" />
-          <button className="btn btn-sm btn-ghost" onClick={onClose} disabled={saving}>
+          <button className="btn btn-ghost" onClick={onClose} disabled={saving}>
             Cancel
           </button>
-          <button className="btn btn-sm btn-primary" onClick={save} disabled={saving}>
+          <button className="btn btn-primary" onClick={save} disabled={saving}>
             {saving ? "Saving…" : isNew ? "Add loan" : "Save"}
           </button>
         </div>

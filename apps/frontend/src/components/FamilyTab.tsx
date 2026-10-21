@@ -3,6 +3,15 @@ import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { Account, Kid, KidsResponse, accountLabel } from "../types";
 import { Icon } from "./Icon";
+import { SecretInput } from "./SecretInput";
+
+/** Two initials for a kid's avatar. */
+function kidInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
 
 /** The server's own words when it refuses, otherwise a plain fallback. */
 function errorText(error: unknown, fallback: string): string {
@@ -38,42 +47,60 @@ export function FamilyTab() {
   const kids = data?.kids ?? [];
 
   return (
-    <div className="settings-grid">
-      <div className="card set-card set-card-wide">
-        <div className="set-card-head">
-          <div className="set-card-icon">
-            <Icon name="ic-people" />
-          </div>
-          <div>
-            <h4>Kids' logins</h4>
-            <p className="set-card-sub">For the SpendLog phone app only</p>
+    <div className="flow family-page">
+      <div className="stack span-6">
+        <div className="family-head">
+          <h2 className="section-title">Kids' logins</h2>
+          <span className="badge badge-neutral">
+            {kids.length} {kids.length === 1 ? "kid" : "kids"}
+          </span>
+        </div>
+
+        <div className="callout callout-info">
+          <Icon name="ic-info" />
+          <div className="callout-body">
+            <div className="callout-title">
+              Kids sign in on the phone app only — the web app won't accept kid logins.
+            </div>
+            <div className="callout-detail">
+              Give a child their own login to see and add their pocket money on the SpendLog phone app. They
+              can't see anything else, and can't create an account themselves.
+            </div>
           </div>
         </div>
-        <p className="desc">
-          Give a child their own login to see and add their pocket money on the SpendLog phone app. They can't
-          see anything else, and can't create an account themselves.
-        </p>
+
         {data && !data.pushAvailable && (
-          <p className="field-hint">
-            Kids' refresh can't wake your phone yet — Firebase isn't set up on the server.
+          <p className="callout callout-neutral">
+            <Icon name="ic-info" />
+            <span>Kids' refresh can't wake your phone yet — Firebase isn't set up on the server.</span>
           </p>
         )}
         {loadError && (
-          <p className="form-error" role="alert">
-            {loadError}
+          <p className="callout callout-crit" role="alert">
+            <Icon name="ic-alert" />
+            <span>{loadError}</span>
           </p>
         )}
 
-        {kids.length > 0 && (
+        {kids.length > 0 ? (
           <ul className="kid-list">
             {kids.map((kid) => (
               <KidRow key={kid.id} kid={kid} kids={kids} pocketAccounts={pocketAccounts} onChanged={reload} />
             ))}
           </ul>
+        ) : (
+          data && (
+            <div className="empty-inline">
+              <div className="icon-tile tile-neutral">
+                <Icon name="ic-users" />
+              </div>
+              <span>No kids' logins yet.</span>
+            </div>
+          )
         )}
       </div>
 
-      <div className="card set-card set-card-wide">
+      <div className="card set-card span-4 kid-add-card">
         <div className="set-card-head">
           <div className="set-card-icon">
             <Icon name="ic-plus" />
@@ -117,7 +144,12 @@ function AccountChoices({
         // An account belongs to one kid at most — the server refuses a second.
         const holder = kids.find((kid) => kid.id !== selfId && kid.accountIds.includes(account.id));
         return (
-          <label className="checkbox-row" key={account.id}>
+          <label
+            className={`checkbox-row kid-choice${selected.includes(account.id) ? " is-on" : ""}${
+              holder ? " is-taken" : ""
+            }`}
+            key={account.id}
+          >
             <input
               type="checkbox"
               checked={selected.includes(account.id)}
@@ -154,31 +186,19 @@ function PasswordInput({
   label: string;
   placeholder?: string;
 }) {
-  const [shown, setShown] = useState(false);
   const id = useId();
   return (
     <div className="form-row">
       <label htmlFor={id}>{label}</label>
-      <div className="kid-password">
-        <input
-          id={id}
-          className="filter-input"
-          type={shown ? "text" : "password"}
-          autoComplete="new-password"
-          minLength={6}
-          placeholder={placeholder}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        />
-        <button
-          type="button"
-          className="btn btn-sm btn-ghost"
-          aria-pressed={shown}
-          onClick={() => setShown((current) => !current)}
-        >
-          {shown ? "Hide" : "Show"}
-        </button>
-      </div>
+      <SecretInput
+        id={id}
+        className="filter-input input-lg"
+        autoComplete="new-password"
+        minLength={6}
+        placeholder={placeholder}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
     </div>
   );
 }
@@ -330,39 +350,58 @@ function KidRow({
   });
 
   return (
-    <li className="kid-row">
+    <li className="kid-row card">
       <div className="kid-row-top">
+        <span className="avatar lg kid-avatar" aria-hidden="true">
+          {kidInitials(kid.name)}
+        </span>
         <div className="kid-row-who">
           <span className="kid-row-name">{kid.name}</span>
-          <span className="kid-row-email">{kid.email}</span>
-          <span className="kid-row-accounts">
-            {accountNames.length > 0 ? accountNames.join(", ") : "No pocket money accounts yet"}
-          </span>
+          <span className="kid-row-email mono">{kid.email}</span>
         </div>
-        {mode === "view" && (
-          <div className="set-card-actions">
-            <button className="btn btn-sm btn-ghost" onClick={() => open("edit")}>
-              Edit
-            </button>
-            <button className="btn btn-sm btn-ghost" onClick={() => open("password")}>
-              Reset password
-            </button>
-            <button className="btn btn-sm btn-ghost btn-danger-text" onClick={() => open("remove")}>
-              Remove
-            </button>
-          </div>
-        )}
       </div>
 
+      <div className="kid-sees">
+        <p className="t-label">What {kid.name} sees</p>
+        {accountNames.length > 0 ? (
+          <ul className="kid-sees-list">
+            {accountNames.map((label, index) => (
+              <li className="kid-choice is-on is-static" key={`${label}-${index}`}>
+                <Icon name="ic-check" />
+                <span>{label}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="kid-row-accounts">No pocket money accounts yet</p>
+        )}
+        <p className="field-hint">They can't see anything else you have in SpendLog.</p>
+      </div>
+
+      {mode === "view" && (
+        <div className="set-card-actions kid-actions">
+          <button className="btn" onClick={() => open("password")}>
+            <Icon name="ic-lock" /> Reset password
+          </button>
+          <button className="btn" onClick={() => open("edit")}>
+            <Icon name="ic-eye" /> Change what {kid.name} sees
+          </button>
+          <button className="btn btn-danger-text" onClick={() => open("remove")}>
+            <Icon name="ic-trash" /> Remove
+          </button>
+        </div>
+      )}
+
       {notice && mode === "view" && (
-        <p className="field-hint" role="status">
-          {notice}
+        <p className="callout callout-good" role="status">
+          <Icon name="ic-check" />
+          <span>{notice}</span>
         </p>
       )}
 
       {mode === "edit" && (
         <form
-          className="kid-form"
+          className="kid-form kid-panel"
           onSubmit={(event) => {
             event.preventDefault();
             if (!name.trim()) return;
@@ -401,7 +440,7 @@ function KidRow({
 
       {mode === "password" && (
         <form
-          className="kid-form"
+          className="kid-form kid-panel kid-reset"
           onSubmit={(event) => {
             event.preventDefault();
             if (password.length < 6) return;
@@ -412,8 +451,27 @@ function KidRow({
             );
           }}
         >
+          <div className="kid-panel-head">
+            <div className="icon-tile">
+              <Icon name="ic-lock" />
+            </div>
+            <div>
+              <h4>Reset {kid.name}'s password</h4>
+              <p className="set-card-sub">
+                This signs {kid.name} out of the phone app until they use the new one.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="icon-btn round"
+              aria-label="Close"
+              onClick={() => setMode("view")}
+            >
+              <Icon name="ic-x" />
+            </button>
+          </div>
           <PasswordInput label="New password (at least 6 characters)" value={password} onChange={setPassword} />
-          <p className="field-hint">This signs {kid.name} out of the phone app until they use the new one.</p>
+          <p className="field-hint">Use the eye to check what you typed before you tell them.</p>
           {error && (
             <p className="form-error" role="alert">
               {error}
@@ -431,7 +489,7 @@ function KidRow({
       )}
 
       {mode === "remove" && (
-        <div className="kid-form" role="group" aria-label={`Remove ${kid.name}`}>
+        <div className="kid-form kid-panel kid-remove" role="group" aria-label={`Remove ${kid.name}`}>
           <p className="desc">
             Remove {kid.name}'s login? They'll be signed out of the phone app. What they added stays in your
             ledger.

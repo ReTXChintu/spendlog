@@ -53,7 +53,12 @@ export function StatementTextModal({ statementId, onClose }: { statementId: stri
           <Icon name="ic-x" />
         </button>
 
-        <h3>What this statement says</h3>
+        <div className="dialog-head">
+          <div className="icon-tile tile-neutral">
+            <Icon name="ic-list" />
+          </div>
+          <h3>What this statement says</h3>
+        </div>
         <div className="modal-sub">
           The text the PDF extracts to, and how many rows each reader can make of it.
         </div>
@@ -66,11 +71,11 @@ export function StatementTextModal({ statementId, onClose }: { statementId: stri
             <div className="reader-tally">
               {text.readers.map((reader) => (
                 <span
-                  className={`reader-chip${reader.lines > 0 ? " is-live" : ""}`}
+                  className={`badge ${reader.lines > 0 ? "badge-good" : "badge-neutral"}`}
                   key={reader.name}
                 >
                   {reader.name}
-                  <b>{reader.lines}</b>
+                  <b className="num">{reader.lines}</b>
                 </span>
               ))}
             </div>
@@ -87,7 +92,7 @@ export function StatementTextModal({ statementId, onClose }: { statementId: stri
 
             <div className="modal-actions">
               <button
-                className="btn btn-sm"
+                className="btn"
                 onClick={() => navigator.clipboard?.writeText(text.rows.join("\n"))}
               >
                 Copy the text

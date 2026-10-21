@@ -7,15 +7,14 @@ import { CardFace } from "./CardFace";
 import "../../styles/wallet.css";
 
 /**
- * Every card and account, at the top of Home, without going looking.
+ * Every card and account on Home, without going looking: the Wallet card.
  *
  * The headline is bank plus cash and nothing else: the savings account is
  * for emergencies, and a total that included it would make an ordinary
  * month look richer than it is. Cards come first, drawn as cards; the
  * accounts follow as tiles, the savings account last.
  *
- * Both are grids that fill the width, a card never stretched past the size
- * it reads well at: a wide screen gets more to a row, not bigger cards.
+ * Both fill the width: a wide screen gets more to a row, not bigger cards.
  */
 export function Wallet({
   money,
@@ -44,18 +43,30 @@ export function Wallet({
   );
 
   return (
-    <section className="wallet" aria-labelledby="wallet-title">
-      <div className="wallet-head">
-        <div>
-          <h2 className="money-label" id="wallet-title">
+    <section className="card wallet" aria-labelledby="wallet-title">
+      <div className="card-head wallet-head">
+        <h2 id="wallet-title">Wallet</h2>
+        <span className="badge badge-neutral">
+          {cards.length} {cards.length === 1 ? "card" : "cards"} · {banks.length}{" "}
+          {banks.length === 1 ? "account" : "accounts"}
+        </span>
+        <span className="spacer" />
+        <Link className="btn-link" to="/settings?tab=accounts">
+          All accounts
+        </Link>
+      </div>
+
+      <div className="wallet-summary">
+        <div className="kpi">
+          <span className="kpi-label" id="wallet-onhand">
             Money on hand
-          </h2>
-          <div className="money-figure">{money ? formatMoney(money.onHandMinor) : "—"}</div>
-          <p className="money-sub">
+          </span>
+          <span className="wallet-onhand num">{money ? formatMoneyShort(money.onHandMinor) : "—"}</span>
+          <span className="wallet-onhand-sub">
             {money ? (
               <>
-                {formatMoney(money.inBankMinor)} in the bank
-                {money.cashMinor !== null && <> · {formatMoney(money.cashMinor)} cash</>}
+                {formatMoneyShort(money.inBankMinor)} in the bank
+                {money.cashMinor !== null && <> · {formatMoneyShort(money.cashMinor)} cash</>}
                 {savings && " · savings left out"}
                 {untracked > 0 && (
                   <>
@@ -67,23 +78,23 @@ export function Wallet({
             ) : (
               "Balances arrive with a newer server."
             )}
-          </p>
+          </span>
         </div>
 
-        {cards.length > 0 && (
-          <dl className="wallet-totals">
+        {cards.length > 0 && (creditTotal > 0 || billsOwed > 0) && (
+          <dl className="kpis wallet-totals">
             {creditTotal > 0 && (
-              <div>
-                <dt>Credit free</dt>
-                <dd className="num">
+              <div className="kpi">
+                <dt className="kpi-label">Credit free</dt>
+                <dd className="kpi-value num">
                   {formatMoneyShort(creditFree)} <small>of {formatMoneyShort(creditTotal)}</small>
                 </dd>
               </div>
             )}
             {billsOwed > 0 && (
-              <div>
-                <dt>Card bills to pay</dt>
-                <dd className="num">{formatMoneyShort(billsOwed)}</dd>
+              <div className="kpi">
+                <dt className="kpi-label">Card bills to pay</dt>
+                <dd className="kpi-value num">{formatMoneyShort(billsOwed)}</dd>
               </div>
             )}
           </dl>
@@ -91,31 +102,23 @@ export function Wallet({
       </div>
 
       {cards.length > 0 && (
-        <>
-          <h3 className="wallet-label">
-            Cards <span>{cards.length}</span>
-          </h3>
-          <div className="wallet-cards" role="list">
-            {cards.map((card) => (
-              <div role="listitem" key={card.accountId}>
-                <CardFace card={card} />
-              </div>
-            ))}
-          </div>
-        </>
+        <div className="wallet-cards" role="list" aria-label="Cards">
+          {cards.map((card) => (
+            <div role="listitem" key={card.accountId}>
+              <CardFace card={card} />
+            </div>
+          ))}
+        </div>
       )}
 
-      <h3 className="wallet-label">
-        Accounts <span>{banks.length}</span>
-      </h3>
-      <div className="wallet-banks" role="list">
+      <div className="wallet-banks" role="list" aria-label="Accounts">
         {banks.map((bank) => (
           <div role="listitem" key={bank.accountId}>
             <BankTile bank={bank} />
           </div>
         ))}
         {/* Always there, and the only tile when there is nothing yet. */}
-        <Link className="btile btile-add" to="/settings?tab=accounts" role="listitem">
+        <Link className="btile-add" to="/settings?tab=accounts" role="listitem">
           <Icon name="ic-plus" /> Add an account or card
         </Link>
       </div>

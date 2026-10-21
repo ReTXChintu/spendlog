@@ -21,10 +21,10 @@ export interface Look {
 
 /** Two stops per bank, matched on the name as typed. First match wins. */
 const BANKS: [RegExp, string, string][] = [
-  [/hdfc/i, "#0b2c63", "#1f56b0"],
-  [/icici/i, "#7a1d1d", "#c2502a"],
-  [/\bsbi\b|state bank/i, "#0b3a86", "#2a86d9"],
-  [/axis/i, "#5e0f33", "#a51b55"],
+  [/hdfc/i, "#0B2554", "#1C4F9C"],
+  [/icici/i, "#7A1717", "#C2522A"],
+  [/\bsbi\b|state bank/i, "#0D4A8F", "#2B8AD3"],
+  [/axis/i, "#5E0F31", "#A41E55"],
   [/kotak/i, "#9c0f1d", "#e2353f"],
   [/idfc/i, "#6b1825", "#a3303f"],
   [/indusind/i, "#4a2615", "#94552c"],
@@ -52,7 +52,7 @@ const NETWORKS: Record<CardNetwork, [string, string]> = {
   DINERS: ["#22303f", "#4f6378"],
 };
 
-const PLAIN: [string, string] = ["#1e293b", "#475569"];
+const PLAIN: [string, string] = ["#2A2B30", "#4C4D53"];
 
 /** How light a #rrggbb colour is, 0 to 1. Anything else counts as dark. */
 function lightness(hex: string): number {

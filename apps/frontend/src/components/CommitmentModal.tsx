@@ -85,7 +85,12 @@ export function CommitmentModal({
           <Icon name="ic-x" />
         </button>
 
-        <h3>{isNew ? "Add a fixed cost" : "Edit fixed cost"}</h3>
+        <div className="dialog-head">
+          <div className="icon-tile">
+            <Icon name="ic-list-checks" />
+          </div>
+          <h3>{isNew ? "Add a fixed cost" : "Edit fixed cost"}</h3>
+        </div>
         <div className="modal-sub">
           Rent, a SIP, insurance — anything that goes out every month whatever else happens.
         </div>

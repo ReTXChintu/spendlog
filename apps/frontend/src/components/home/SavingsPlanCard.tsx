@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
-import { formatDateTime, formatMoney, formatShortDate } from "../../lib/format";
+import { formatDateTime, formatMoneyShort, formatShortDate } from "../../lib/format";
 import { SavingsPlan } from "../../types";
 import { Icon } from "../Icon";
 import { RuleLine } from "./PlanWarnings";
@@ -69,11 +69,15 @@ export function SavingsPlanCard() {
   const plan = state.kind === "ready" ? state.plan : null;
 
   return (
-    <div className="home-card ai-card">
-      <div className="home-card-head">
-        <h3 className="home-card-title">
-          <Icon name="ic-percent" /> Savings plan
-        </h3>
+    <section className="card ai-card" aria-labelledby="ai-plan-title">
+      <div className="ai-head">
+        <span className="icon-tile tile-good" aria-hidden="true">
+          <Icon name="ic-piggy-bank" />
+        </span>
+        <div className="ai-head-text">
+          <h2 id="ai-plan-title">Savings plan</h2>
+          <p className="ai-byline">Written by Gemini with your key · never applied on its own</p>
+        </div>
         {plan && !writing && (
           <button className="btn btn-sm" onClick={write}>
             <Icon name="ic-pencil" /> Rewrite plan
@@ -83,34 +87,30 @@ export function SavingsPlanCard() {
 
       {writing ? (
         <div className="ai-wait" aria-live="polite">
-          <span className="ask-dots" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-          </span>
+          <span className="spinner sm" aria-hidden="true" />
           <p>{STEPS[step]} This takes up to half a minute.</p>
         </div>
       ) : state.kind === "loading" ? (
-        <p className="section-sub">Loading the plan…</p>
+        <p className="ai-sub">Loading the plan…</p>
       ) : state.kind === "noKey" ? (
         <div className="ai-empty">
-          <p className="section-sub">The plan is written by Gemini using your own key.</p>
+          <p className="ai-sub">The plan is written by Gemini using your own key.</p>
           <Link className="btn btn-primary btn-sm" to="/settings?tab=ai">
             Add a key in Settings
           </Link>
         </div>
       ) : state.kind === "failed" ? (
-        <p className="section-sub set-warn">
-          <Icon name="ic-alert" /> {state.message}
+        <p className="ai-sub ai-error">
+          <Icon name="ic-alert-triangle" /> {state.message}
         </p>
       ) : !plan ? (
         <div className="ai-empty">
-          <p className="section-sub">
+          <p className="ai-sub">
             A few plain rules for saving more, worked out from where your money actually goes — then checked
             against every month, with a warning on the Dashboard whenever one slips.
           </p>
           <button className="btn btn-primary btn-sm" onClick={write}>
-            <Icon name="ic-spark" /> Make my savings plan
+            <Icon name="ic-sparkles" /> Make my savings plan
           </button>
         </div>
       ) : (
@@ -118,8 +118,8 @@ export function SavingsPlanCard() {
           <p className="plan-summary">{plan.summary}</p>
           {plan.monthlyTargetMinor != null && (
             <div className="plan-target">
-              <span className="home-figure-sub">Aim to save each month</span>
-              <span className="plan-target-figure">{formatMoney(plan.monthlyTargetMinor)}</span>
+              <span className="plan-target-label">Aim to save each month</span>
+              <span className="plan-target-figure num">{formatMoneyShort(plan.monthlyTargetMinor)}</span>
             </div>
           )}
           <ul className="plan-rules">
@@ -137,10 +137,10 @@ export function SavingsPlanCard() {
       )}
 
       {writeError && (
-        <p className="section-sub set-warn">
-          <Icon name="ic-alert" /> {writeError}
+        <p className="ai-sub ai-error">
+          <Icon name="ic-alert-triangle" /> {writeError}
         </p>
       )}
-    </div>
+    </section>
   );
 }

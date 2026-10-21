@@ -88,6 +88,9 @@ export function AskPage() {
   if (loadFailed) {
     return (
       <section className="screen">
+        <div className="screen-header">
+          <h1 className="screen-title">Ask</h1>
+        </div>
         <StateBlock
           icon="ic-wifioff"
           title="Couldn't reach the server"
@@ -130,8 +133,8 @@ export function AskPage() {
         <h1 className="screen-title">Ask</h1>
         <div className="screen-actions">
           {turns.length > 0 && (
-            <button className="btn btn-sm btn-ghost" onClick={() => setTurns([])} disabled={asking}>
-              Start over
+            <button className="btn" onClick={() => setTurns([])} disabled={asking}>
+              <Icon name="ic-refresh" /> Start over
             </button>
           )}
         </div>
@@ -139,15 +142,23 @@ export function AskPage() {
 
       <div className="ask-thread" aria-live="polite">
         {turns.length === 0 && (
-          <div className="ask-intro">
-            <p>
-              Ask anything about your spending, income, budget or loans. Answers come from your own
-              transactions, looked up as you ask.
-            </p>
-            <div className="ask-suggestions">
+          <div className="card ask-intro">
+            <div className="ask-intro-head">
+              <span className="icon-tile">
+                <Icon name="ic-sparkles" />
+              </span>
+              <div>
+                <h2 className="t-title-section">Ask about your money</h2>
+                <p>
+                  Ask anything about your spending, income, budget or loans. Answers come from your own
+                  transactions, looked up as you ask.
+                </p>
+              </div>
+            </div>
+            <div className="chip-row ask-suggestions">
               {SUGGESTIONS.map((suggestion) => (
-                <button key={suggestion} className="ask-chip" onClick={() => ask(suggestion)}>
-                  <Icon name="ic-spark" />
+                <button key={suggestion} className="chip ask-chip" onClick={() => ask(suggestion)}>
+                  <Icon name="ic-sparkles" />
                   {suggestion}
                 </button>
               ))}
@@ -213,8 +224,8 @@ export function AskPage() {
             }
           }}
         />
-        <button className="btn btn-primary" type="submit" disabled={asking || !draft.trim()}>
-          Ask
+        <button className="btn btn-primary btn-lg" type="submit" disabled={asking || !draft.trim()}>
+          <Icon name="ic-sparkles" /> Ask
         </button>
       </form>
     </section>

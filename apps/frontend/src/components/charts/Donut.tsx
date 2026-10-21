@@ -1,32 +1,35 @@
 import { useState } from "react";
 import { formatMoney, formatMoneyShort } from "../../lib/format";
+import { Icon } from "../Icon";
 
 export interface DonutSlice {
   key: string;
   name: string;
   amountMinor: number;
   color: string;
-  /** Uncategorised spending: drawn hatched-grey, never given a hue of its own. */
+  /** Uncategorised spending: drawn in the "other" grey, never given a hue of its own. */
   muted?: boolean;
+  /** Change against last month, when it can be said honestly; null leaves the column blank. */
+  deltaMinor?: number | null;
 }
 
 const SIZE = 168;
-const STROKE = 22;
-const RADIUS = (SIZE - STROKE) / 2;
+const RADIUS = 52;
+const STROKE = 16;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
-/** The surface gap between segments, in px along the ring. */
+/** The gap between segments, in px along the ring. */
 const GAP = 2;
 
 /**
- * Category share as a ring, with the list beside it doing the reading.
- *
- * The ring is for "how lopsided is this month" at a glance; the list
- * carries every name and figure, so nothing depends on matching a colour.
- * Hovering or focusing either side lights up the same slice.
+ * Category share as a ring (design-system §7.13), with the legend table
+ * under it doing the reading: swatch, name, amount, share and the change
+ * against last month. Hovering or focusing either side lights up the same
+ * slice.
  */
 export function Donut({ slices, total }: { slices: DonutSlice[]; total: number }) {
   const [active, setActive] = useState<string | null>(null);
   const activeSlice = slices.find((slice) => slice.key === active) ?? null;
+  const showDelta = slices.some((slice) => slice.deltaMinor != null);
 
   let offset = 0;
   const arcs = slices.map((slice) => {
@@ -62,7 +65,7 @@ export function Donut({ slices, total }: { slices: DonutSlice[]; total: number }
                 cy={SIZE / 2}
                 r={RADIUS}
                 fill="none"
-                stroke={slice.muted ? "var(--muted-light)" : slice.color}
+                stroke={slice.muted ? "var(--c-other)" : slice.color}
                 strokeWidth={STROKE}
                 strokeDasharray={`${drawn} ${CIRCUMFERENCE - drawn}`}
                 strokeDashoffset={-start}
@@ -77,16 +80,17 @@ export function Donut({ slices, total }: { slices: DonutSlice[]; total: number }
           })}
         </g>
         <text className="donut-centre-label" x={SIZE / 2} y={SIZE / 2 - 6} textAnchor="middle">
-          {activeSlice ? truncate(activeSlice.name, 14) : "Spent"}
+          {activeSlice ? truncate(activeSlice.name, 12) : "Spent"}
         </text>
         <text className="donut-centre-value" x={SIZE / 2} y={SIZE / 2 + 14} textAnchor="middle">
           {formatMoneyShort(activeSlice ? activeSlice.amountMinor : total)}
         </text>
       </svg>
 
-      <ul className="donut-legend">
+      <ul className={`donut-legend${showDelta ? " has-delta" : ""}`}>
         {slices.map((slice) => {
           const pct = total > 0 ? Math.round((slice.amountMinor / total) * 100) : 0;
+          const delta = slice.deltaMinor;
           return (
             <li
               key={slice.key}
@@ -97,13 +101,33 @@ export function Donut({ slices, total }: { slices: DonutSlice[]; total: number }
               onFocus={() => setActive(slice.key)}
               onBlur={() => setActive(null)}
             >
-              <i
-                className={`donut-swatch${slice.muted ? " is-muted" : ""}`}
-                style={slice.muted ? undefined : { background: slice.color }}
-              />
+              <i className="donut-swatch" style={{ background: slice.muted ? "var(--c-other)" : slice.color }} />
               <span className="donut-name">{slice.name}</span>
               <span className="donut-val num">{formatMoneyShort(slice.amountMinor)}</span>
               <span className="donut-pct num">{pct}%</span>
+              {showDelta && (
+                <span
+                  className={`donut-delta num${delta == null || delta === 0 ? "" : delta > 0 ? " is-up" : " is-down"}`}
+                  aria-label={
+                    delta == null
+                      ? undefined
+                      : delta === 0
+                        ? "same as last month"
+                        : `${formatMoneyShort(Math.abs(delta))} ${delta > 0 ? "more" : "less"} than last month`
+                  }
+                >
+                  {delta == null ? (
+                    ""
+                  ) : delta === 0 ? (
+                    "same"
+                  ) : (
+                    <>
+                      <Icon name={delta > 0 ? "ic-chevron-up" : "ic-chevron-down"} />
+                      {formatMoneyShort(Math.abs(delta))}
+                    </>
+                  )}
+                </span>
+              )}
             </li>
           );
         })}

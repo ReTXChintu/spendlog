@@ -49,25 +49,25 @@ export function AiInsightsCard() {
   const insight = state.kind === "ready" ? state.insight : null;
 
   return (
-    <div className="home-card ai-card">
-      <div className="home-card-head">
-        <h3 className="home-card-title">
-          <Icon name="ic-spark" /> AI insights
-        </h3>
+    <section className="card ai-card" aria-labelledby="ai-insight-title">
+      <div className="ai-head">
+        <span className="icon-tile tile-ac" aria-hidden="true">
+          <Icon name="ic-sparkles" />
+        </span>
+        <div className="ai-head-text">
+          <h2 id="ai-insight-title">Today’s insight</h2>
+          <p className="ai-byline">Uses your Gemini key</p>
+        </div>
         {(state.kind === "ready" || state.kind === "failed") && (
           <button className="btn btn-sm" onClick={refresh} disabled={refreshing}>
-            <Icon name="ic-sync" /> {refreshing ? "Writing…" : "New insight"}
+            <Icon name="ic-refresh" /> {refreshing ? "Writing…" : "New insight"}
           </button>
         )}
       </div>
 
       {state.kind === "loading" || refreshing ? (
         <div className="ai-wait" aria-live="polite">
-          <span className="ask-dots" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-          </span>
+          <span className="spinner sm" aria-hidden="true" />
           <p>
             Reading this month's spending. The first look each day takes up to half a minute — the charts
             are ready in the meantime.
@@ -75,7 +75,7 @@ export function AiInsightsCard() {
         </div>
       ) : state.kind === "noKey" ? (
         <div className="ai-empty">
-          <p className="section-sub">
+          <p className="ai-sub">
             Insights and the savings plan use your own free Gemini key. Add one and a fresh read of your
             month appears here once a day.
           </p>
@@ -84,19 +84,19 @@ export function AiInsightsCard() {
           </Link>
         </div>
       ) : state.kind === "failed" ? (
-        <p className="section-sub set-warn">
-          <Icon name="ic-alert" /> {state.message}
+        <p className="ai-sub ai-error">
+          <Icon name="ic-alert-triangle" /> {state.message}
         </p>
       ) : insight ? (
         <>
-          <Markdown text={insight.text} className="ask-answer ai-text" />
+          <Markdown text={insight.text} className="ai-text" />
           <p className="ai-meta">
             Written {formatDateTime(insight.updatedAt)} · {insight.model} · refreshes once a day
           </p>
         </>
       ) : (
-        <p className="section-sub">Nothing to say yet — a few transactions in, there will be.</p>
+        <p className="ai-sub">Nothing to say yet — a few transactions in, there will be.</p>
       )}
-    </div>
+    </section>
   );
 }

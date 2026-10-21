@@ -117,23 +117,19 @@ export function PerkImportWatcher() {
   const good = toast.status === "DONE" && toast.added > 0;
 
   return (
-    <div className="perk-toast-wrap">
-      <div className={`perk-toast${good ? "" : " is-quiet"}`} role="status" aria-live="polite">
+    <div className="toast-dock perk-toast-dock">
+      <div className="toast perk-toast" role="status" aria-live="polite">
         <Icon name={good ? "ic-check" : "ic-info"} />
-        <div className="perk-toast-body">
+        <div className="toast-text perk-toast-body">
           <b>{finishedHeadline(toast)}</b>
           {detail && <span>{detail}</span>}
         </div>
         {good && (
-          <Link className="btn btn-sm btn-primary" to="/perks" onClick={() => setToast(null)}>
+          <Link className="toast-action" to="/perks" onClick={() => setToast(null)}>
             Review
           </Link>
         )}
-        <button
-          className="btn btn-sm btn-ghost perk-toast-close"
-          onClick={() => setToast(null)}
-          aria-label="Dismiss"
-        >
+        <button className="toast-action perk-toast-close" onClick={() => setToast(null)} aria-label="Dismiss">
           <Icon name="ic-x" />
         </button>
       </div>

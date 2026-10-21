@@ -1,82 +1,111 @@
-/* Perks: screenshot import, source filter, T&C and the text read off a
-   picture. Tokens only, so both themes come for free. */
+/* Perks (design screenshot 12, right half): ask before you pay, the
+   screenshot dropzone and its processing card, filter chips, and the
+   coupon grid. Tokens only, so both themes come for free. */
 
-/* ------------------------------------------ "we've got them, carry on" */
-.perk-notice{display:flex;align-items:flex-start;gap:10px;margin:14px 0 0;padding:11px 13px;
-  background:var(--credit-50);border:1px solid var(--credit);border-radius:var(--radius-md);
-  font-size:12.8px;line-height:1.5;color:var(--ink-70)}
-.perk-notice p{margin:0;flex:1;min-width:0}
-.perk-notice>svg{width:15px;height:15px;flex-shrink:0;margin-top:2px;color:var(--credit)}
-.perk-notice .btn{flex-shrink:0;padding:2px 6px}
-.perk-notice.is-warn{background:var(--warn-bg);border-color:var(--warn)}
-.perk-notice.is-warn>svg{color:var(--warn)}
+.perks-top{display:flex;flex-wrap:wrap;gap:20px;align-items:stretch;margin-bottom:20px}
+.perks-top>*{min-width:0}
 
-/* The small "Reading 2 of 5…" line: present, never in the way. */
-.perk-reading{display:inline-flex;align-items:center;gap:9px;margin:12px 0 0;padding:6px 12px;
-  border:1px solid var(--line);border-radius:100px;background:var(--surface);
-  font-size:12.3px;font-weight:600;color:var(--ink-70)}
-.perk-reading-dot{width:8px;height:8px;border-radius:50%;background:var(--brand);
-  animation:perk-pulse 1.4s ease-in-out infinite}
-.perk-reading-meter{width:70px;height:4px;border-radius:100px;background:var(--track);overflow:hidden}
-.perk-reading-meter>span{display:block;height:100%;background:var(--brand);transition:width .4s ease}
-@keyframes perk-pulse{0%,100%{opacity:1}50%{opacity:.3}}
-@media (prefers-reduced-motion: reduce){.perk-reading-dot{animation:none}}
+/* ------------------------------------------------- "do I have anything?" */
+.ask-bar{flex:7 1 520px;display:flex;flex-direction:column;gap:16px}
+.ask-bar-head{display:flex;gap:12px;align-items:flex-start}
+.ask-bar-head h2{margin:0}
+.ask-bar-sub{margin:2px 0 0;font-size:13px;line-height:18px;color:var(--tx3)}
+.ask-bar-row{display:flex;gap:8px;flex-wrap:wrap}
+.ask-field{flex:1 1 260px}
+.ask-amount{flex:0 1 200px}
+.ask-submit{min-height:44px}
+.ask-amount input::placeholder{font-weight:400}
 
-/* ----------------------------------------------------- filter by source */
-.perk-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
-.perk-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;font:inherit;
-  font-size:12.3px;font-weight:600;color:var(--ink-70);background:var(--surface);
-  border:1px solid var(--line);border-radius:100px;cursor:pointer}
-.perk-chip:hover{border-color:var(--brand)}
-.perk-chip:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
-.perk-chip.is-on{background:var(--brand-50);border-color:var(--brand);color:var(--brand-dark)}
-.perk-chip-count{font-size:11px;color:var(--muted);font-weight:700}
-.perk-chip.is-on .perk-chip-count{color:var(--brand-dark)}
+/* The dropzone: 1.5px dashed --ln2. */
+.perk-dropzone{flex:5 1 380px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:20px;border:1.5px dashed var(--ln2);
+  border-radius:var(--r-xl);background:var(--sf2)}
+.perk-dropzone .icon-tile svg{width:24px;height:24px}
+.perk-dropzone-text{flex:1;min-width:200px}
+.perk-dropzone-text h2{margin:0}
+.perk-dropzone-text p{margin:2px 0 0;font-size:13px;line-height:18px;color:var(--tx2)}
 
-/* ------------------------------------------------------------- the row */
-/* The row grows a second line for the expandable sections, so the old
-   single flex line becomes the top of a column. */
-.perk-row.perk-row-full{flex-direction:column;align-items:stretch;gap:0}
-.perk-row-top{display:flex;align-items:center;gap:12px;min-width:0}
-.perk-title{flex-wrap:wrap}
-.perk-source{font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:100px;
-  background:var(--chip-neutral);color:var(--ink-70);white-space:nowrap}
+/* --------------------------------------- notices, processing, review */
+.perk-notice{margin:0 0 16px;align-items:center}
+.perk-notice p{margin:0}
+.perk-notice .icon-btn{color:inherit}
+.review-bar{margin:0 0 20px;align-items:center}
+.review-bar .btn{flex-shrink:0}
 
-.perk-more{display:flex;flex-direction:column;gap:6px;margin:10px 0 0;padding:8px 0 0;
-  border-top:1px dashed var(--line)}
-.perk-details>summary{cursor:pointer;font-size:12px;font-weight:700;color:var(--muted);
-  padding:2px 0;width:fit-content;border-radius:4px}
-.perk-details>summary:hover{color:var(--ink)}
-.perk-details>summary:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
-.perk-details[open]>summary{color:var(--ink)}
-.perk-terms{margin:6px 0 4px;font-size:12.5px;line-height:1.55;color:var(--ink-70);
-  white-space:pre-wrap;overflow-wrap:anywhere}
-.perk-extracted{margin:6px 0 4px;padding:10px 12px;max-height:260px;overflow:auto;
-  font-family:var(--font-mono);font-size:11.8px;line-height:1.55;white-space:pre-wrap;
-  overflow-wrap:anywhere;color:var(--ink-70);background:var(--paper);
-  border:1px solid var(--line);border-radius:var(--radius-sm);user-select:text}
-.perk-copy{padding:3px 8px}
+.import-card{display:flex;flex-direction:column;gap:12px;margin:0 0 20px}
+.import-head{display:flex;align-items:center;gap:12px}
+.import-head-main{flex:1;min-width:0}
+.import-title{font-size:15px;line-height:20px;font-weight:600;color:var(--tx)}
+.import-sub{font-size:13px;line-height:18px;color:var(--tx2);margin-top:2px}
+.import-count{font-size:13px;font-weight:600;color:var(--tx2);white-space:nowrap}
+.import-meter{margin:0}
+.import-failures{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.import-failures li{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 14px;
+  border-radius:var(--r-md);background:var(--crit-soft)}
+.import-file{font-size:13px;color:var(--tx)}
+.import-problem{font-size:13px;line-height:18px;color:var(--crit)}
 
+/* ------------------------------------------------------------ the answer */
+.answer{margin:0 0 20px}
+.answer-verdict{display:flex;align-items:center;gap:10px;padding:14px 20px;font-size:15px;line-height:22px;font-weight:500;
+  background:var(--ac-soft);color:var(--tx)}
+.answer-verdict svg{width:20px;height:20px;color:var(--ac)}
+.answer-row{display:flex;align-items:center;gap:12px;padding:14px 20px;border-top:1px solid var(--ln)}
+.answer-main{flex:1;min-width:0}
+.answer-title{font-size:15px;line-height:20px;font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--tx)}
+.answer-card{font-size:13px;font-weight:500;color:var(--tx3)}
+.answer-sub{font-size:13px;line-height:18px;color:var(--tx2);margin-top:2px}
+.answer-sub b{font-weight:600}
+.answer-code{padding:8px 12px;border-radius:var(--r-md);background:var(--sunk)}
+.answer-float{display:flex;align-items:center;gap:10px;padding:12px 20px;font-size:13px;line-height:18px;color:var(--tx3);
+  border-top:1px solid var(--ln)}
+.answer-float b{color:var(--tx);font-weight:600}
+.answer-float svg{width:18px;height:18px;flex-shrink:0}
+
+/* ---------------------------------------------------------- the holding */
+.perks-holding{display:flex;flex-direction:column;gap:16px}
+.perks-holding-head h2{margin:0}
+.perks-holding-head p{margin:2px 0 0}
+.perk-chips{margin:0}
+
+.perk-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;align-items:start}
+.perk-row{display:flex;flex-direction:column;gap:12px;padding:20px;background:var(--sf);border:1px solid var(--ln);border-radius:var(--r-xl);min-width:0}
+.perk-row.is-dead{opacity:.55}
+.perk-row.needs-review{border-color:var(--ac-line);box-shadow:inset 0 0 0 1px var(--ac-line)}
+.perk-row-top{display:flex;align-items:flex-start;gap:12px;min-width:0}
+.perk-main{flex:1;min-width:0}
+.perk-title{font-size:15px;line-height:20px;font-weight:600;color:var(--tx);overflow-wrap:anywhere}
+.perk-sub{font-size:12px;line-height:16px;color:var(--tx3);margin-top:2px}
+.perk-actions{display:flex;gap:0;flex-shrink:0;margin:-6px -8px 0 0}
+.perk-actions .perk-delete:hover{color:var(--crit);background:var(--crit-soft)}
+.perk-headline{font-size:20px;line-height:26px;font-weight:600;color:var(--tx);overflow-wrap:anywhere}
+.perk-badges{display:flex;flex-wrap:wrap;gap:6px}
+.perk-where{margin:0;font-size:13px;line-height:18px;color:var(--tx2)}
+.perk-code{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:6px 6px 6px 14px;border-radius:var(--r-md);
+  background:var(--sunk)}
+.perk-code-text{font-family:var(--font-mono);font-size:14px;font-weight:500;letter-spacing:.06em;color:var(--tx);overflow-wrap:anywhere}
+.perk-code .perk-copy{background:var(--sf)}
+.perk-used{align-self:flex-start}
+
+.perk-more{display:flex;flex-direction:column;gap:6px;padding:10px 0 0;border-top:1px solid var(--ln)}
+.perk-details>summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--ac);padding:2px 0;width:fit-content;border-radius:4px}
+.perk-details>summary:hover,.perk-details[open]>summary{color:var(--tx)}
+.perk-terms{margin:6px 0 4px;font-size:13px;line-height:18px;color:var(--tx2);white-space:pre-wrap;overflow-wrap:anywhere}
+.perk-extracted{margin:6px 0 8px;padding:10px 12px;max-height:260px;overflow:auto;font-family:var(--font-mono);font-size:12px;line-height:1.55;
+  white-space:pre-wrap;overflow-wrap:anywhere;color:var(--tx2);background:var(--sf2);border:1px solid var(--ln);border-radius:var(--r-md);user-select:text}
+
+/* ------------------------------------------------------- the dialog */
+.perk-kind-seg{margin-bottom:16px}
+.read-banner{margin:0 0 16px}
 .perk-details-modal{margin:16px 0 0}
-.perk-textarea{font:inherit;font-size:13.5px;line-height:1.5;padding:9px 11px;resize:vertical;
-  min-height:84px;color:var(--ink);background:var(--surface);border:1px solid var(--line-strong);
-  border-radius:var(--radius-sm)}
-.perk-textarea:focus{outline:none;border-color:var(--brand)}
+.perk-textarea{width:100%;font:inherit;font-size:14px;line-height:20px;padding:11px 14px;resize:vertical;min-height:88px;color:var(--tx);
+  background:var(--sf);border:1px solid var(--ln2);border-radius:var(--r-md)}
+.perk-textarea:focus{outline:none;border:2px solid var(--ac);padding:10px 13px}
 
-/* ---------------------------------------- "done", wherever you are now */
-.perk-toast-wrap{position:fixed;right:16px;bottom:16px;left:16px;z-index:200;
-  display:flex;justify-content:flex-end;pointer-events:none}
-.perk-toast{pointer-events:auto;display:flex;align-items:center;gap:10px;max-width:440px;
-  padding:12px 12px 12px 14px;background:var(--surface);color:var(--ink);
-  border:1px solid var(--line-strong);border-left:4px solid var(--credit);
-  border-radius:var(--radius-md);box-shadow:0 10px 30px rgba(0,0,0,.18);
-  animation:perk-toast-in .2s ease-out}
-.perk-toast.is-quiet{border-left-color:var(--muted)}
-.perk-toast>svg{width:17px;height:17px;flex-shrink:0;color:var(--credit)}
-.perk-toast.is-quiet>svg{color:var(--muted)}
-.perk-toast-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;font-size:13px;line-height:1.4}
-.perk-toast-body span{font-size:12px;color:var(--muted)}
-.perk-toast .btn{flex-shrink:0;text-decoration:none}
-.perk-toast-close{padding:2px 6px}
-@keyframes perk-toast-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-@media (prefers-reduced-motion: reduce){.perk-toast{animation:none}}
+/* -------------------------------- "done", wherever you are now (toast) */
+.perk-toast-dock{z-index:200}
+.perk-toast-body{display:flex;flex-direction:column;gap:2px}
+.perk-toast-body b{font-weight:600}
+.perk-toast-body span{font-size:13px;line-height:18px;opacity:.8}
+.perk-toast a.toast-action{display:inline-flex;align-items:center;text-decoration:underline;color:var(--bg)}
+.perk-toast .perk-toast-close{display:inline-flex;align-items:center;text-decoration:none;padding:0 8px}
+.perk-toast .perk-toast-close svg{width:18px;height:18px}

@@ -34,8 +34,8 @@ export function CardStrip({ cards, pace }: { cards: CardStatus[]; pace: BudgetPa
   return (
     <div className="card-strip">
       {warnings.map((card) => (
-        <div className={`card-strip-row is-${card.state}`} key={card.accountId}>
-          <Icon name="ic-alert" />
+        <div className={`card-strip-row callout is-${card.state}`} key={card.accountId}>
+          <Icon name="ic-credit-card" />
           <span>
             <b>{card.name}</b>{" "}
             {creditWarning(card)}
@@ -47,8 +47,8 @@ export function CardStrip({ cards, pace }: { cards: CardStatus[]; pace: BudgetPa
       ))}
 
       {paceWarning && (
-        <div className={`card-strip-row is-${paceWarning.state === "over" ? "over" : "close"}`}>
-          <Icon name="ic-trend" />
+        <div className={`card-strip-row callout is-${paceWarning.state === "over" ? "over" : "close"}`}>
+          <Icon name="ic-alert-triangle" />
           <span>
             {paceWarning.state === "over" ? (
               <>

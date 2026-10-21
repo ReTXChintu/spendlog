@@ -15,7 +15,7 @@ export interface ColumnGroup {
   empty?: boolean;
 }
 
-const PAD_LEFT = 48;
+const PAD_LEFT = 44;
 const PAD_RIGHT = 6;
 const PAD_TOP = 18;
 const AXIS = 22;
@@ -23,7 +23,7 @@ const AXIS = 22;
 /**
  * Columns, one group per label, one column per series, all on one scale.
  *
- * Columns are capped at 24px and the rest of each slot is left as air;
+ * Columns are capped at 20px and the rest of each slot is left as air;
  * touching columns in a group keep a 2px gap between them. One value gets
  * a direct label (the largest), the axis and the tooltip carry the rest.
  */
@@ -33,12 +33,15 @@ export function ColumnChart({
   height = 170,
   ariaLabel,
   tooltip,
+  current,
 }: {
   groups: ColumnGroup[];
   series: ColumnSeries[];
   height?: number;
   ariaLabel: string;
   tooltip: (group: ColumnGroup) => ReactNode;
+  /** The group that is "now": its first column is drawn in the accent. */
+  current?: number;
 }) {
   const [wrapRef, width] = useWidth<HTMLDivElement>();
   const [active, setActive] = useState<number | null>(null);
@@ -46,7 +49,7 @@ export function ColumnChart({
   const max = niceMax(Math.max(0, ...groups.flatMap((group) => group.values)));
   const plotWidth = Math.max(0, width - PAD_LEFT - PAD_RIGHT);
   const slot = groups.length ? plotWidth / groups.length : 0;
-  const columnWidth = Math.max(4, Math.min(24, (slot * 0.62 - 2 * (series.length - 1)) / series.length));
+  const columnWidth = Math.max(4, Math.min(20, (slot * 0.62 - 2 * (series.length - 1)) / series.length));
   const groupWidth = columnWidth * series.length + 2 * (series.length - 1);
   const baseline = PAD_TOP + height;
   const yAt = (value: number) => baseline - (value / max) * height;
@@ -61,14 +64,14 @@ export function ColumnChart({
   const centre = (index: number) => PAD_LEFT + slot * index + slot / 2;
 
   return (
-    <div className="viz" ref={wrapRef}>
+    <div className="chart" ref={wrapRef}>
       {width > 0 && groups.length > 0 && (
         <svg
           width={width}
           height={baseline + AXIS}
           role="img"
           tabIndex={0}
-          className="viz-svg"
+          className="chart-svg"
           aria-label={`${ariaLabel} Use the arrow keys to read each one.`}
           onMouseLeave={() => setActive(null)}
           onKeyDown={(event) => stepKeys(event, groups.length, active, setActive)}
@@ -76,8 +79,8 @@ export function ColumnChart({
         >
           {ticks.map((tick) => (
             <g key={tick}>
-              <line className="viz-grid" x1={PAD_LEFT} x2={width - PAD_RIGHT} y1={yAt(tick)} y2={yAt(tick)} />
-              <text className="viz-axis" x={PAD_LEFT - 8} y={yAt(tick) + 4} textAnchor="end">
+              <line className="chart-grid" x1={PAD_LEFT} x2={width - PAD_RIGHT} y1={yAt(tick)} y2={yAt(tick)} />
+              <text className="chart-axis" x={PAD_LEFT - 4} y={yAt(tick) + 4} textAnchor="end">
                 {formatCompact(tick)}
               </text>
             </g>
@@ -86,29 +89,29 @@ export function ColumnChart({
           {groups.map((group, index) => {
             const left = centre(index) - groupWidth / 2;
             return (
-              <g key={group.key} className={active === index ? "viz-group is-active" : "viz-group"}>
+              <g key={group.key} className={active === index ? "chart-group is-active" : "chart-group"}>
                 {group.empty ? (
-                  <rect className="viz-empty" x={centre(index) - 12} y={baseline - 6} width={24} height={6} rx={2} />
+                  <rect className="chart-empty" x={centre(index) - 12} y={baseline - 6} width={24} height={6} rx={2} />
                 ) : (
                   series.map((one, s) => (
                     <path
                       key={one.name}
-                      className={`viz-col ${one.tone}`}
+                      className={`chart-col ${one.tone}${s === 0 && index === current ? " is-current" : ""}`}
                       d={columnPath(left + s * (columnWidth + 2), baseline, columnWidth, baseline - yAt(group.values[s] ?? 0))}
                     />
                   ))
                 )}
-                <text className="viz-axis" x={centre(index)} y={baseline + 15} textAnchor="middle">
+                <text className="chart-axis" x={centre(index)} y={baseline + 15} textAnchor="middle">
                   {group.label}
                 </text>
                 {index === peak && (
-                  <text className="viz-value" x={left + columnWidth / 2} y={yAt(group.values[0]) - 5} textAnchor="middle">
+                  <text className="chart-value" x={left + columnWidth / 2} y={yAt(group.values[0]) - 5} textAnchor="middle">
                     {formatCompact(group.values[0])}
                   </text>
                 )}
                 {/* The hit target is the whole slot, far bigger than the column. */}
                 <rect
-                  className="viz-hit"
+                  className="chart-hit"
                   x={PAD_LEFT + slot * index}
                   y={PAD_TOP - 10}
                   width={slot}
@@ -118,7 +121,7 @@ export function ColumnChart({
               </g>
             );
           })}
-          <line className="viz-base" x1={PAD_LEFT} x2={width - PAD_RIGHT} y1={baseline} y2={baseline} />
+          <line className="chart-base" x1={PAD_LEFT} x2={width - PAD_RIGHT} y1={baseline} y2={baseline} />
         </svg>
       )}
 
@@ -129,10 +132,10 @@ export function ColumnChart({
       )}
 
       {series.length > 1 && (
-        <div className="viz-legend">
+        <div className="chart-legend">
           {series.map((one) => (
             <span key={one.name}>
-              <i className={`viz-key ${one.tone}`} /> {one.name}
+              <i className={`chart-key ${one.tone}`} /> {one.name}
             </span>
           ))}
         </div>

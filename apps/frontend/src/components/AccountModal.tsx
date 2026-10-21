@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { Account, AccountType, CardNetwork, NETWORK_LABELS, accountLabel } from "../types";
 import { Icon } from "./Icon";
+import { SecretInput } from "./SecretInput";
 
 const ACCOUNT_TYPES: { value: AccountType; label: string }[] = [
   { value: "BANK", label: "Bank account" },
@@ -181,9 +182,13 @@ export function AccountModal({
         <button className="modal-close" onClick={onClose} aria-label="Close">
           <Icon name="ic-x" />
         </button>
-        <h3>{isNew ? "Add an account" : "Edit account"}</h3>
+        <div className="dialog-head">
+          <div className="icon-tile">
+            <Icon name="ic-bank" />
+          </div>
+          <h3>{isNew ? "Add an account" : "Edit account"}</h3>
+        </div>
         <div className="modal-sub">
-          <Icon name="ic-lock" />
           <span>
             {isNew
               ? "For anything your bank doesn't text you about — cash, or an account that never sends alerts."
@@ -312,8 +317,8 @@ export function AccountModal({
 
               <label className="field field-wide">
                 <span>Statement password</span>
-                <input
-                  type="password"
+                <SecretInput
+                  className=""
                   value={statementPassword}
                   onChange={(e) => setStatementPassword(e.target.value)}
                   placeholder={account?.hasStatementPassword ? "•••••••• (set)" : "Opens the PDF this card emails"}
@@ -394,7 +399,7 @@ export function AccountModal({
                 </button>
               </>
             ) : (
-              <button className="btn btn-sm btn-ghost btn-danger-text" onClick={() => setConfirmDelete(true)}>
+              <button className="btn btn-sm btn-danger-text" onClick={() => setConfirmDelete(true)}>
                 Delete
               </button>
             ))}

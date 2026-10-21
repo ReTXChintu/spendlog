@@ -1,0 +1,410 @@
+/* Settings, Accounts & cards, Budget (the tab), Family, the vault, the
+   statement shelf and the dialogs that hang off them. Built on the shared
+   primitives in index.css; see docs/design-system.md (screens 04, 05, 12,
+   13). Tokens only, so light and dark both follow. */
+
+/* ------------------------------------------------------------ settings shell */
+.settings-layout{display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start}
+.settings-nav{flex:1 1 240px;max-width:300px;padding:12px;display:flex;flex-direction:column;gap:4px;position:sticky;top:24px}
+.settings-nav-profile{display:flex;align-items:center;gap:12px;padding:8px 8px 16px;margin-bottom:8px;border-bottom:1px solid var(--ln)}
+.settings-nav-who{display:flex;flex-direction:column;min-width:0}
+.settings-nav-name{font-size:15px;line-height:20px;font-weight:600;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.settings-nav-email{font-size:12px;line-height:16px;color:var(--tx3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.settings-nav-list{display:flex;flex-direction:column;gap:2px}
+.settings-nav-item{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px;width:100%;min-height:48px;
+  padding:6px 10px;border:0;border-radius:var(--r-md);background:none;text-align:left;color:var(--tx);
+  transition:background var(--dur-fast) var(--ease)}
+.settings-nav-item:hover{background:var(--sf2)}
+.settings-nav-title{font-size:14px;line-height:20px;font-weight:500}
+.settings-nav-sub{font-size:12px;line-height:16px;color:var(--tx3)}
+.settings-nav-item.on{background:var(--ac-soft)}
+.settings-nav-item.on .settings-nav-title{color:var(--ac);font-weight:600}
+.settings-nav-item.on .settings-nav-sub{color:var(--tx2)}
+.settings-nav-signout{margin-top:12px}
+.settings-nav-foot{margin:8px 0 2px;text-align:center;font-size:12px;line-height:16px;color:var(--tx3)}
+
+.settings-pane{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:16px}
+.settings-pane-head{display:flex;flex-direction:column;gap:2px}
+.settings-pane-sub{margin:0;font-size:14px;line-height:20px;color:var(--tx2)}
+
+@media (max-width:860px){
+  .settings-nav{max-width:none;position:static}
+}
+
+/* A grid of setting cards, as many across as fit at 340 px. */
+.settings-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:20px;align-items:start}
+
+/* --------------------------------------------------------------- set cards */
+/* A section card with a leading icon tile; also used by People and Pocket
+   money, so it stays a plain flat card. */
+.set-card{display:flex;flex-direction:column;gap:12px;min-width:0}
+.set-card-head{display:flex;align-items:flex-start;gap:12px}
+.set-card-head>div:not(.set-card-icon){min-width:0;flex:1}
+.set-card-head .badge{flex-shrink:0;margin-left:auto}
+.set-card h4{margin:0;font-size:15px;line-height:20px;font-weight:600;color:var(--tx)}
+.set-card-sub{font-size:13px;line-height:18px;color:var(--tx3);margin:2px 0 0}
+.set-card p.desc,.set-card .desc{margin:0}
+.set-card-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.set-card .field-hint{margin:0}
+.set-card.is-warning{background:var(--warn-soft);border-color:transparent}
+.set-card.is-warning .desc{color:var(--tx2)}
+
+/* Connections: a working card, and a whole-card critical state. */
+.conn-card{align-self:stretch}
+.conn-card .conn-actions{margin-top:auto;padding-top:4px}
+.conn-stats{display:flex;gap:24px;flex-wrap:wrap;padding:12px 14px;background:var(--sf2);border:1px solid var(--ln);border-radius:var(--r-lg)}
+.conn-stats>div{display:flex;flex-direction:column;gap:2px}
+.conn-card.is-crit{background:var(--crit-soft);border-color:var(--crit-soft)}
+.conn-card.is-crit h4{color:var(--tx)}
+.conn-card.is-crit .desc{color:var(--tx)}
+.conn-icon-crit{color:var(--crit)}
+.conn-badge-crit{color:var(--crit)}
+
+/* AI key and appearance. */
+.ai-key-badge{align-self:flex-start}
+.settings-screen .ai-key-form{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap;margin:0}
+.ai-key-field{flex:1 1 280px;min-width:0}
+.settings-screen .ai-key-field .filter-input{width:100%}
+.settings-screen .ai-key-form .btn{min-height:52px}
+
+.appearance{display:flex;flex-direction:column;gap:8px}
+.appearance .t-label{margin:0}
+.appearance-seg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:100%}
+.appearance-seg button{min-height:40px}
+.theme-previews{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:4px}
+.theme-preview{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:var(--r-lg);text-align:left;cursor:pointer;
+  border:1px solid}
+.theme-preview.is-light{background:#FAF9F5;color:#18191D;border-color:#E2DED4}
+.theme-preview.is-dark{background:#111214;color:#EDEBE6;border-color:#2B2D32}
+.theme-preview.on{outline:2px solid var(--ac);outline-offset:2px}
+.theme-preview-name{font-size:12px;line-height:16px;font-weight:600;opacity:.8}
+.theme-preview-bar{position:relative;display:block;width:100%;height:6px;border-radius:3px;background:#ECE9E1}
+.theme-preview.is-dark .theme-preview-bar{background:#2B2D32}
+.theme-preview-spent{position:absolute;left:0;top:0;height:100%;width:36%;border-radius:3px 0 0 3px;background:currentColor}
+.theme-preview-tick{position:absolute;left:40%;top:-3px;width:2px;height:12px;border-radius:1px;background:#2C4FCB}
+.theme-preview.is-dark .theme-preview-tick{background:#93A8FF}
+.theme-preview-figure{font-size:15px;line-height:20px;font-weight:600;font-variant-numeric:tabular-nums}
+
+/* Presets and the budget tab's inline forms. */
+.settings-screen .budget-setup{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap;margin:0}
+.settings-screen .budget-setup .field{flex:1 1 180px}
+.settings-screen .budget-setup>.filter-input{flex:1 1 200px;width:auto}
+.settings-screen .budget-setup .btn{min-height:44px}
+.settings-screen .preset-list{display:flex;flex-wrap:wrap;gap:8px}
+.settings-screen .preset-chip{display:inline-flex;align-items:center;gap:8px;min-height:36px;padding:0 6px 0 14px;border-radius:var(--r-full);
+  border:1px solid var(--ln2);background:var(--sf);color:var(--tx);font-size:13px;font-weight:500}
+.settings-screen .preset-chip em{font-style:normal;color:var(--tx3);font-size:12px}
+.settings-screen .preset-remove{width:24px;height:24px;border-radius:12px;border:0;background:none;color:var(--tx3);font-size:16px;line-height:1}
+.settings-screen .preset-remove:hover{background:var(--crit-soft);color:var(--crit)}
+
+/* Commitments and loans: rows that open their editor. */
+.item-list{display:flex;flex-direction:column;border-top:1px solid var(--ln)}
+.item-row{display:flex;align-items:center;gap:12px;width:100%;padding:10px 4px;border:0;border-bottom:1px solid var(--ln);background:none;
+  text-align:left;color:var(--tx);font:inherit;border-radius:0;transition:background var(--dur-fast) var(--ease)}
+.item-row:hover{background:var(--sf2)}
+.item-row-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.item-row-name{font-size:14px;line-height:20px;font-weight:500}
+.item-row-sub{font-size:12px;line-height:16px;color:var(--tx3);font-variant-numeric:tabular-nums}
+.item-row-action{font-size:13px;font-weight:600;color:var(--ac)}
+.settings-bucket-title{font-size:12px;line-height:16px;font-weight:600;letter-spacing:.02em;color:var(--tx2)}
+
+/* A fixed cost that went out for less than its usual amount (Home uses it too). */
+.commitment-short{font-style:normal;font-size:12px;font-weight:600;color:var(--warn);margin-left:8px;white-space:nowrap}
+
+/* ======================================================= accounts & cards */
+.accounts-layout{display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start}
+.accounts-list{flex:1 1 300px;max-width:420px;padding:16px 12px;display:flex;flex-direction:column;gap:4px}
+.accounts-list-head{margin:0 4px 4px}
+.accounts-rail{display:flex;flex-direction:column;gap:2px}
+.accounts-group{display:flex;flex-direction:column;gap:2px}
+.accounts-group-label{margin:12px 8px 4px;font-size:12px;line-height:16px;font-weight:600;letter-spacing:.02em;color:var(--tx2)}
+
+.account-tab{display:flex;align-items:flex-start;gap:12px;width:100%;padding:12px 10px;border:0;border-radius:var(--r-lg);background:none;
+  text-align:left;color:var(--tx);font:inherit;cursor:pointer;transition:background var(--dur-fast) var(--ease)}
+.account-tab:hover{background:var(--sf2)}
+.account-tab.on{background:var(--ac-soft);box-shadow:inset 0 0 0 1px var(--ac-line)}
+.account-tab.on .monogram{background:var(--sf);color:var(--ac)}
+.account-tab.is-closed{opacity:.55}
+.account-tab.is-unfiled{box-shadow:inset 0 0 0 1px var(--ln2);border-radius:var(--r-lg)}
+.account-tab.is-unfiled{outline:1px dashed var(--ln2);outline-offset:-1px;box-shadow:none}
+.account-tab.is-unfiled.on{background:var(--warn-soft);outline-color:transparent}
+.account-tab-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.account-tab-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.account-tab-name{font-size:14px;line-height:20px;font-weight:500;min-width:0;overflow-wrap:anywhere}
+.account-tab-last4{white-space:nowrap}
+.account-tab-figure{font-size:14px;line-height:20px;font-weight:600;white-space:nowrap}
+.account-tab-sub{font-size:12px;line-height:16px;color:var(--tx3)}
+.account-tab-meter{display:block;margin:6px 0 2px}
+.account-tab-badges{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;margin-top:2px}
+.account-tab-caption{font-size:12px;line-height:16px;color:var(--tx3);font-variant-numeric:tabular-nums}
+.account-tab-caption.is-crit{color:var(--crit);font-weight:600}
+
+.accounts-toolbar{display:flex;flex-direction:column;gap:6px;margin-top:12px;padding:12px 4px 0;border-top:1px solid var(--ln)}
+.accounts-toolbar-note{font-size:12px;line-height:16px;color:var(--tx3)}
+
+.accounts-body{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:20px}
+@media (max-width:860px){.accounts-list{max-width:none}}
+
+/* ------------------------------------------------- one account: the passbook */
+.account-panel{background:var(--sf);border:1px solid var(--ln);border-radius:var(--r-xl);padding:20px;display:flex;flex-direction:column;gap:16px}
+.account-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.account-panel-title .t-label{margin:0 0 2px}
+.account-panel-head h3{margin:0;font-size:22px;line-height:28px;font-weight:600;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.account-last4{font-size:22px;font-weight:600;color:var(--tx);white-space:nowrap}
+.account-panel-sub{margin:2px 0 0;font-size:13px;line-height:18px;color:var(--tx3)}
+.account-panel-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+.account-figures{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.figure-card{display:flex;flex-direction:column;gap:4px;padding:16px;background:var(--sf2);border:1px solid var(--ln);border-radius:var(--r-xl);min-width:0}
+.figure-label{font-size:12px;line-height:16px;font-weight:600;letter-spacing:.02em;color:var(--tx2)}
+.figure-value{font-size:28px;line-height:34px;font-weight:600;letter-spacing:-.02em;font-family:var(--font-sans);
+  font-variant-numeric:tabular-nums lining-nums;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;color:var(--tx)}
+.figure-value.is-none{color:var(--tx3)}
+.figure-value.is-paid{color:var(--good)}
+.figure-of{font-size:13px;line-height:18px;font-weight:500;letter-spacing:0;color:var(--tx3);font-family:var(--font-sans)}
+.figure-note{font-size:12px;line-height:16px;color:var(--tx3)}
+.figure-rows{margin:4px 0 0;display:flex;flex-direction:column;gap:6px}
+.figure-rows>div{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.figure-rows dt{font-size:13px;line-height:18px;color:var(--tx2)}
+.figure-rows dd{margin:0;font-size:14px;line-height:20px;font-weight:600;font-variant-numeric:tabular-nums}
+.figure-card.is-meter .meter-fill{background:var(--good)}
+.figure-card.is-close .meter-fill{background:var(--warn-fill)}
+.figure-card.is-close .figure-note{color:var(--warn)}
+.figure-card.is-over .meter-fill{background:var(--crit-fill)}
+.figure-card.is-over .figure-note{color:var(--crit);font-weight:600}
+
+.savings-toggle{padding:4px 0}
+
+/* One fact and one control, on a line (the statement password). */
+.account-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 14px;background:var(--sf2);border:1px solid var(--ln);
+  border-radius:var(--r-lg)}
+.account-row-label{flex:1;min-width:220px;display:flex;align-items:center;gap:12px;font-size:14px;line-height:20px;font-weight:600;color:var(--tx)}
+.account-row-hint{display:block;font-size:12px;line-height:16px;font-weight:400;color:var(--tx3)}
+.account-row-value{flex-shrink:0}
+
+/* Removing an account: the refusal states the cost first. */
+.account-remove{padding:14px 16px;background:var(--warn-soft);border-radius:var(--r-lg);display:flex;flex-direction:column;gap:10px}
+.account-remove .desc{margin:0;color:var(--tx)}
+
+.statement-password-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:14px;background:var(--sf2);border:1px solid var(--ln);
+  border-radius:var(--r-lg)}
+.statement-password-form .secret-field{flex:1 1 260px;width:auto}
+.statement-password-form .field-hint{flex-basis:100%}
+.statement-password-form .form-error{margin:0;flex-basis:100%}
+
+/* ------------------------------------------------------------- the balance */
+.balance-panel{display:flex;flex-direction:column;gap:12px;padding-top:16px;border-top:1px solid var(--ln)}
+.balance-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.balance-title{font-size:15px;line-height:20px;font-weight:600}
+.balance-actions{display:flex;gap:8px;flex-wrap:wrap}
+.balance-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.balance-diff.is-off{background:var(--crit-soft);border-color:transparent}
+.balance-diff.is-off .figure-label,.balance-diff.is-off .figure-value{color:var(--crit)}
+.balance-diff.is-off .figure-note{color:var(--tx2)}
+.balance-diff.is-match{background:var(--good-soft);border-color:transparent}
+.balance-diff.is-match .figure-label,.balance-diff.is-match .figure-value{color:var(--good)}
+.balance-empty{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.balance-empty .desc{margin:0;flex:1;min-width:220px}
+.balance-form{display:flex;flex-direction:column;gap:12px}
+.balance-form .filter-input{max-width:280px}
+.balance-asof{border:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;font-size:14px;color:var(--tx2)}
+.balance-asof legend{font-size:12px;line-height:16px;font-weight:600;letter-spacing:.02em;color:var(--tx2);margin-bottom:6px;padding:0}
+.balance-asof label{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.balance-asof .filter-input{width:auto;min-height:40px}
+.balance-verdict{margin:0}
+
+/* --------------------------------------------------------------- the vault */
+/* Locked is the resting state; unlocking reads like the design's PIN
+   dialog, inline. Nothing survives a reload. */
+.vault{padding:16px;background:var(--sf2);border:1px solid var(--ln);border-radius:var(--r-xl);display:flex;flex-direction:column;gap:12px}
+.vault.is-open{border-color:var(--ac-line)}
+.vault-head{display:flex;align-items:center;gap:12px}
+.vault-head-main{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.vault-title{font-size:15px;line-height:20px;font-weight:600;color:var(--tx)}
+.vault-masked{font-family:var(--font-mono);font-size:13px;line-height:18px;color:var(--tx3);letter-spacing:.12em}
+.vault-state{margin-left:auto;flex-shrink:0}
+.vault .field-hint{margin:0}
+.vault>.btn{align-self:flex-start}
+.vault .desc.set-warn{color:var(--crit)}
+
+.vault-pin{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.vault .vault-pin-field{width:200px;flex:0 0 auto}
+.vault-pin-input{font-size:22px !important;letter-spacing:.4em;min-height:52px}
+.vault-pin-input::placeholder{font-size:15px;letter-spacing:0}
+.vault .vault-pin .btn{min-height:48px;padding:0 20px;font-size:15px}
+.vault .vault-pin .field-hint{flex-basis:100%}
+
+.vault-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:0}
+.vault-fields>div{display:flex;flex-direction:column;gap:2px;padding:12px 14px;background:var(--sf);border:1px solid var(--ln);border-radius:var(--r-lg)}
+.vault-fields .vault-note{grid-column:1/-1}
+.vault-fields dt{font-size:12px;line-height:16px;font-weight:600;letter-spacing:.02em;color:var(--tx2)}
+.vault-fields dd{margin:0;font-size:15px;line-height:22px;font-weight:500;color:var(--tx)}
+.vault-number{font-family:var(--font-mono);font-size:17px !important;letter-spacing:.12em;word-break:break-all}
+.vault-copy{font-family:var(--font-sans);font-size:13px;letter-spacing:0;margin-left:8px}
+
+.vault-edit{display:flex;flex-direction:column;gap:12px}
+.vault-edit-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.vault-setpin{display:flex;flex-direction:column;gap:12px}
+
+/* --------------------------------------------- clearing out the old months */
+.ledger-purge{padding:14px 16px;background:var(--sf2);border:1px solid var(--ln);border-radius:var(--r-lg);display:flex;flex-direction:column;gap:10px}
+.ledger-purge .desc{margin:0}
+
+/* Statements read more than once: the cost in rows before the button. */
+.reset-figures{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:0;padding:0}
+.reset-figures>div{padding:12px 14px;background:var(--sf);border:1px solid var(--ln);border-radius:var(--r-lg)}
+.reset-figures dt{font-size:12px;line-height:16px;font-weight:600;letter-spacing:.02em;color:var(--tx2);margin:0}
+.reset-figures dd{margin:2px 0 0;font-size:17px;line-height:24px;font-weight:600;font-variant-numeric:tabular-nums}
+.reset-figures dd.is-going{color:var(--crit)}
+.reset-figures dd.is-staying{color:var(--good)}
+
+/* ------------------------------------------------------- the statement shelf */
+.statements-card{gap:12px}
+.statements-card .card-head{margin-bottom:0}
+.statements-card .empty-inline .desc{margin:0;font-size:13px;line-height:18px}
+.shelf{display:flex;flex-direction:column;gap:12px}
+.shelf-account{border:1px solid var(--ln);border-radius:var(--r-lg);overflow:hidden}
+.shelf-head{display:flex;align-items:center;gap:10px;width:100%;padding:12px 16px;background:var(--sf2);border:0;border-bottom:1px solid var(--ln);
+  cursor:pointer;text-align:left;color:var(--tx);font:inherit}
+.shelf-head:hover{background:var(--sunk)}
+.shelf-head svg{width:16px;height:16px;flex-shrink:0;color:var(--tx3)}
+.shelf-name{flex:1;min-width:0;display:flex;align-items:center;gap:8px;font-size:14px;line-height:20px;font-weight:600;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.shelf-last4{font-size:13px;font-weight:500;color:var(--tx3)}
+.shelf-network{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:var(--r-sm);background:var(--sunk);color:var(--tx2);
+  font-size:12px;font-weight:600}
+.shelf-count{display:flex;align-items:center;gap:8px;font-size:12px;line-height:16px;color:var(--tx3);white-space:nowrap;flex-shrink:0}
+.shelf-stuck{font-weight:600;color:var(--warn)}
+.shelf-account .table-wrap{padding:0 16px}
+
+.statement-table td{vertical-align:middle}
+.statement-month{white-space:nowrap;color:var(--tx2)}
+.statement-main{min-width:220px}
+.statement-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.statement-name{font-size:14px;line-height:20px;font-weight:500;color:var(--tx)}
+.statement-sub{font-size:12px;line-height:16px;color:var(--tx3);margin-top:2px}
+.statement-actions{white-space:nowrap;text-align:right}
+.statement-actions>*+*{margin-left:6px}
+.statement-actions .filter-select{width:auto;min-height:36px;font-size:13px}
+.statement-forget{color:var(--tx3)}
+.statement-forget:hover{color:var(--crit);background:var(--crit-soft)}
+.statement-table tr.is-unreadable td{background:var(--crit-soft)}
+.statement-table tr.is-unreadable .badge,.statement-table tr.is-unreadable .btn{background:var(--sf)}
+.statement-locked-note{font-size:14px;line-height:20px}
+
+/* -------------------------------------------------- one statement, opened */
+.modal-statement{width:1080px;max-width:100%}
+.modal-statement .modal-head{display:flex;align-items:flex-start;gap:12px;margin-bottom:16px}
+.modal-statement .modal-head-main{flex:1;min-width:0;padding-right:48px}
+.modal-statement .modal-head-main .t-label{margin:0}
+.modal-statement .modal-head h3{margin:2px 0;overflow-wrap:anywhere}
+.modal-statement .modal-sub{margin:0;font-size:13px;line-height:18px;color:var(--tx3)}
+.modal-statement>.callout{margin-bottom:12px}
+
+.compare-strip{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px 24px;padding:14px 16px;margin-bottom:16px;
+  background:var(--sf2);border:1px solid var(--ln);border-radius:var(--r-lg)}
+.compare-figures{display:flex;gap:24px;flex-wrap:wrap}
+.compare-figure{display:flex;flex-direction:column;gap:2px}
+.compare-figure.is-apart .kpi-value{color:var(--warn)}
+.compare-badges{display:flex;flex-wrap:wrap;gap:6px}
+
+.tabs-inline{margin:0 0 12px}
+.waive-toggle{display:flex;width:fit-content;margin:0 0 8px}
+.waive-row{display:flex;align-items:center;gap:10px;margin:0 0 8px;padding:10px 14px;border-radius:var(--r-lg);background:var(--sf2);
+  border:1px solid var(--ln);font-size:14px;line-height:20px;color:var(--tx)}
+.waive-row>svg{width:18px;height:18px;color:var(--tx2);flex-shrink:0}
+.waive-row button{margin-left:auto}
+.waive-editor{margin:0 0 12px;padding:14px;border:1px solid var(--ln);border-radius:var(--r-lg);display:flex;flex-direction:column;gap:10px}
+.waive-editor .field-hint{margin:0}
+.waive-editor-fields{display:flex;gap:12px;flex-wrap:wrap}
+.waive-editor-fields .field{flex:0 1 200px}
+.waive-editor-fields .field-wide{flex:1 1 260px}
+.waive-editor-actions{display:flex;gap:8px}
+
+.statement-lines{max-height:52vh;overflow:auto}
+.line-desc{display:block;max-width:40ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--tx)}
+.line-kind{display:inline-flex;align-items:center;height:20px;margin-top:4px;padding:0 6px;border-radius:var(--r-sm);font-size:11px;font-weight:600;
+  background:var(--sunk);color:var(--tx2)}
+.line-match{display:block;margin-top:4px;font-size:12px;line-height:16px;color:var(--tx3);max-width:24ch;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.statement-line-actions{white-space:nowrap;text-align:right}
+.statement-line-actions .btn{min-height:32px;padding:0 10px;font-size:13px}
+
+.statement-text{max-height:52vh;overflow:auto;margin:12px 0 0;padding:14px 16px;background:var(--sf2);border:1px solid var(--ln);
+  border-radius:var(--r-lg);font-family:var(--font-mono);font-size:12px;line-height:1.6;white-space:pre;color:var(--tx2)}
+.statement-rows{list-style:none;margin:0;padding:0;white-space:normal}
+.statement-rows li{display:flex;gap:10px;padding:1px 0}
+.statement-row-n{flex-shrink:0;width:3ch;text-align:right;color:var(--tx3)}
+.statement-rows code{white-space:pre-wrap;word-break:break-word;font-family:var(--font-mono)}
+.statement-pdf{height:62vh;border:1px solid var(--ln);border-radius:var(--r-lg);overflow:hidden;background:var(--sf)}
+.statement-pdf object{width:100%;height:100%;border:none}
+.reader-tally{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
+.reader-tally b{margin-left:4px}
+
+/* ------------------------------------------------------------- the dialogs */
+.dialog-head{display:flex;align-items:center;gap:12px;margin:0 48px 8px 0}
+.dialog-head h3{margin:0}
+.modal .modal-sub>span{flex:1;min-width:0}
+.modal .modal-error{color:var(--crit);font-size:13px;line-height:18px;margin:12px 0 0}
+.form-grid .field-wide{grid-column:1/-1}
+.modal .checkbox-row{margin-top:16px}
+
+/* ---------------------------------------------------------------- family */
+.family-page{align-items:flex-start}
+.family-head{display:flex;align-items:center;gap:10px}
+.kid-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:16px}
+.kid-row{display:flex;flex-direction:column;gap:16px}
+.kid-row-top{display:flex;align-items:center;gap:14px}
+.avatar.kid-avatar{width:56px;height:56px;border-radius:28px;font-size:18px;background:var(--warn-soft);color:var(--warn)}
+.kid-row-who{display:flex;flex-direction:column;gap:2px;min-width:0}
+.kid-row-name{font-size:20px;line-height:26px;font-weight:600;color:var(--tx)}
+.kid-row-email{font-size:12px;line-height:16px;color:var(--tx3);overflow-wrap:anywhere}
+.kid-row-accounts{margin:0;font-size:14px;line-height:20px;color:var(--tx2)}
+.kid-sees{display:flex;flex-direction:column;gap:8px}
+.kid-sees .t-label{margin:0}
+.kid-sees-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
+
+.kid-choice{display:flex;align-items:center;gap:12px;min-height:48px;padding:0 14px;border:1px solid var(--ln2);border-radius:var(--r-lg);
+  background:var(--sf);font-size:14px;line-height:20px;color:var(--tx);cursor:pointer}
+.kid-choice.is-on{background:var(--ac-soft);border-color:var(--ac-line)}
+.kid-choice.is-static{cursor:default}
+.kid-choice.is-static svg{width:22px;height:22px;padding:3px;border-radius:6px;background:var(--ac);color:var(--ac-tx);stroke-width:2.4;flex-shrink:0}
+.kid-choice input{width:22px;height:22px;margin:0}
+.kid-choice.is-taken{opacity:.6;cursor:not-allowed}
+.kid-taken{font-style:normal;color:var(--tx3)}
+
+.kid-actions{gap:8px}
+.kid-form{display:flex;flex-direction:column;gap:12px}
+.kid-form .modal-actions{margin-top:4px}
+.kid-panel{border:1px solid var(--ln);border-radius:var(--r-xl);padding:20px;background:var(--sf);display:flex;flex-direction:column;gap:14px}
+.kid-reset{border:1.5px solid var(--ac-line)}
+.kid-remove{background:var(--crit-soft);border-color:transparent}
+.kid-panel-head{display:flex;align-items:flex-start;gap:12px}
+.kid-panel-head>div:not(.icon-tile){flex:1;min-width:0}
+.kid-panel-head h4{margin:0;font-size:15px;line-height:20px;font-weight:600}
+.kid-panel .modal-actions{flex-direction:row-reverse;justify-content:flex-start}
+.kid-panel .modal-actions .btn{min-height:48px;padding:0 20px;font-size:15px}
+.kid-accounts{border:0;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;min-width:0}
+.kid-accounts legend{font-size:12px;line-height:16px;font-weight:600;letter-spacing:.02em;color:var(--tx2);padding:0;margin-bottom:8px}
+.kid-accounts input:disabled+span{color:var(--tx3)}
+.kid-add-card{align-self:flex-start}
+.kid-add-card .modal-actions{justify-content:flex-start}
+.kid-add-card .modal-actions .btn{min-height:48px;padding:0 20px;font-size:15px}
+
+/* --------------------------------------------------- when a screen throws */
+.crash-screen{padding-top:24px}
+.alert-card.crash{padding:20px;max-width:none}
+.alert-card.crash .icon-tile{width:40px;height:40px}
+.crash-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:12px}
+.crash-body .alert-card-title{font-size:17px;line-height:24px}
+.crash-body .alert-card-body{margin:0;font-size:14px;line-height:20px}
+.alert-card.crash .crash-detail{margin:0;background:var(--sf)}
+
+@media (max-width:720px){
+  .account-panel{padding:16px}
+  .vault-edit-row{grid-template-columns:1fr}
+  .figure-value{font-size:22px;line-height:28px}
+  .line-desc{max-width:18ch}
+  .statement-lines{max-height:46vh}
+  .statement-pdf{height:52vh}
+}

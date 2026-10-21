@@ -63,9 +63,11 @@ const FIXED_KINDS: Kind[] = ["normal", "split", "loan"];
  * person might need to correct is editable here, including creating a
  * transaction that no message ever produced (cash).
  *
- * Laid out as the basics on the left (amount, who, when, which account)
- * and "what kind of transaction is this?" on the right, where only the
- * chosen kind's own questions are asked.
+ * A side panel beside the ledger (design-system.md §7.7) rather than a
+ * modal: the amount and direction lead, then "what kind of transaction is
+ * this?" with only the chosen kind's own questions, then the details, and
+ * links to the original message and the less common actions. On a narrow
+ * screen the same panel floats over the list.
  */
 export function EditTransactionModal({
   transaction,
@@ -100,7 +102,14 @@ export function EditTransactionModal({
     (account) => account.accountType === "CARD" && (account.isActive || account.id === transaction?.cardPaymentFor)
   );
 
-  const [amount, setAmount] = useState(transaction ? (transaction.amountMinor / 100).toFixed(2) : "");
+  // Whole rupees read as "10000", not "10000.00"; paise are kept when there are some.
+  const [amount, setAmount] = useState(
+    transaction
+      ? transaction.amountMinor % 100 === 0
+        ? String(transaction.amountMinor / 100)
+        : (transaction.amountMinor / 100).toFixed(2)
+      : ""
+  );
   const [type, setType] = useState<TransactionType>(transaction?.type ?? "DEBIT");
   const [kind, setKind] = useState<Kind>(() => initialKind(transaction));
   const [merchant, setMerchant] = useState(transaction?.merchant ?? "");
@@ -689,7 +698,7 @@ export function EditTransactionModal({
         return (
           <p className="field-hint">
             Left out of spending and income — the money only moved. Cash counts as an account, so an ATM
-            withdrawal is a transfer to Cash. {otherAccount ? "" : "Pick the other account on the left."}
+            withdrawal is a transfer to Cash. {otherAccount ? "" : "Pick the other account below."}
           </p>
         );
       case "cardBill":
@@ -815,107 +824,161 @@ export function EditTransactionModal({
   const showTrip = type === "DEBIT" && !!transaction?.trip;
   const showFixed = fixedApplies && (commitments.length > 0 || fixedOn);
   const hasAlso = specialApplies || showFixed || showTrip;
+  const canConvertToEmi = !isNew && !!onConvertToEmi && type === "DEBIT" && !transaction.emiPlanId;
+  const hasMore = !isNew;
+
+  const categoryField = (
+    <div className="form-row">
+      <label htmlFor="e-category">Category</label>
+      <select
+        id="e-category"
+        className="filter-select"
+        value={categoryId}
+        onChange={(e) => changeCategory(e.target.value)}
+      >
+        <option value="">Uncategorized</option>
+        {categoriesFor(categories, type).map((category) => (
+          <option key={category.id} value={category.id}>
+            {category.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+
+  const title = isNew ? "Add a payment" : type === "DEBIT" ? "Payment" : "Money in";
+  const sourceNote = isNew
+    ? "Record something by hand"
+    : `From ${
+        transaction!.source === "EMAIL"
+          ? "an email"
+          : transaction!.source === "SMS"
+            ? "an SMS"
+            : transaction!.source === "STATEMENT"
+              ? "a statement"
+              : "manual entry"
+      }`;
 
   return (
-    <div
-      className="overlay"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div className="modal tx-editor" role="dialog" aria-modal="true" aria-labelledby="tx-editor-title">
-        <header className="tx-head">
-          <h3 id="tx-editor-title">{isNew ? "Add transaction" : "Edit transaction"}</h3>
-          <div className="tx-dir" role="radiogroup" aria-label="Direction">
-            {(
-              [
-                ["DEBIT", "Debit", "money out"],
-                ["CREDIT", "Credit", "money in"],
-              ] as [TransactionType, string, string][]
-            ).map(([value, label, sub]) => (
-              <button
-                key={value}
-                type="button"
-                role="radio"
-                aria-checked={type === value}
-                className={`tx-dir-btn is-${value.toLowerCase()}${type === value ? " on" : ""}`}
-                onClick={() => changeType(value)}
-              >
-                <b>{label}</b>
-                <span>{sub}</span>
-              </button>
-            ))}
-          </div>
-          <span className="tx-head-sub">
-            {isNew
-              ? "Record something by hand"
-              : `From ${transaction!.source === "EMAIL" ? "an email" : transaction!.source === "SMS" ? "an SMS" : transaction!.source === "STATEMENT" ? "a statement" : "manual entry"} — change anything that's wrong`}
-          </span>
-          <button className="tx-close icon-button" onClick={onClose} aria-label="Close">
-            <Icon name="ic-x" />
-          </button>
-        </header>
+    <>
+      {/* Only shown when the panel floats over the list on a narrow screen. */}
+      <div className="txn-editor-scrim" onClick={onClose} aria-hidden="true" />
+      <div className="txn-editor-pane">
+        <aside className="txn-editor" role="dialog" aria-labelledby="tx-editor-title">
+          <header className="txn-editor-head">
+            <div className="txn-editor-heading">
+              <h2 id="tx-editor-title">{title}</h2>
+              <span className="txn-editor-note">{sourceNote}</span>
+            </div>
+            <button className="icon-btn round" onClick={onClose} aria-label="Close editor" title="Close (Esc)">
+              <Icon name="ic-x" />
+            </button>
+          </header>
 
-        <div className="tx-body">
-          <section className="tx-main" aria-label="Details">
-            <div className={`tx-hero is-${type.toLowerCase()}`}>
-              <label htmlFor="e-amount">Amount</label>
-              <div className="tx-hero-input">
-                <span className="tx-hero-sign" aria-hidden="true">
-                  {type === "DEBIT" ? "−₹" : "+₹"}
-                </span>
-                <input
-                  id="e-amount"
-                  inputMode="decimal"
-                  placeholder="0.00"
-                  value={amount}
-                  onChange={(e) => changeAmount(e.target.value)}
-                  autoFocus
-                  autoComplete="off"
-                />
+          <div className="txn-editor-body">
+            <section className="tx-hero-block" aria-label="Amount and direction">
+              <div className="tx-amount-row">
+                <div className={`tx-hero is-${type.toLowerCase()}`}>
+                  <label htmlFor="e-amount" className="sr-only">
+                    Amount
+                  </label>
+                  <div className="tx-hero-input">
+                    <span className="tx-hero-sign" aria-hidden="true">
+                      ₹
+                    </span>
+                    <input
+                      id="e-amount"
+                      inputMode="decimal"
+                      placeholder="0"
+                      value={amount}
+                      onChange={(e) => changeAmount(e.target.value)}
+                      autoFocus={isNew}
+                      autoComplete="off"
+                    />
+                  </div>
+                </div>
+                <div className="seg tx-dir" role="radiogroup" aria-label="Direction">
+                  {(
+                    [
+                      ["DEBIT", "Out", "Money out"],
+                      ["CREDIT", "In", "Money in"],
+                    ] as [TransactionType, string, string][]
+                  ).map(([value, label, full]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      role="radio"
+                      aria-checked={type === value}
+                      aria-label={full}
+                      className={type === value ? "on" : ""}
+                      onClick={() => changeType(value)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
               <p className={`tx-counts is-${counts.tone}`} aria-live="polite">
-                <Icon name="ic-info" />
                 {counts.text}
               </p>
-            </div>
+            </section>
+
+            <section className="field" aria-labelledby="tx-kind-title">
+              <span id="tx-kind-title">Kind</span>
+              <div className="tx-kinds" role="radiogroup" aria-labelledby="tx-kind-title">
+                {kindOptions.map((option) => (
+                  <button
+                    key={option.kind}
+                    type="button"
+                    role="radio"
+                    aria-checked={kind === option.kind}
+                    title={option.hint}
+                    className={`chip${kind === option.kind ? " on" : ""}`}
+                    onClick={() => chooseKind(option.kind)}
+                  >
+                    {kind === option.kind && <Icon name="ic-check" />}
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            {panel && <div className="tx-panel">{panel}</div>}
 
             <div className="tx-pair">
-              <MerchantField
-                value={merchant}
-                placeholder={type === "DEBIT" ? "Who was paid" : "Who paid you"}
-                presets={presets}
-                people={contacts}
-                personPicked={
-                  kind === "lent" || kind === "split"
-                    ? (splitDraft.people[0]?.contactId ?? null)
-                    : kind === "settle"
-                      ? (settlePeople[0]?.contactId ?? null)
-                      : null
-                }
-                onType={typeMerchant}
-                onPreset={applyPreset}
-                onPerson={pickPerson}
-                onSavePreset={savePreset}
-                onRemovePreset={removePreset}
-              />
-              <div className="form-row">
-                <label htmlFor="e-category">Category</label>
-                <select
-                  id="e-category"
-                  className="filter-select"
-                  value={categoryId}
-                  onChange={(e) => changeCategory(e.target.value)}
-                >
-                  <option value="">Uncategorized</option>
-                  {categoriesFor(categories, type).map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {accountRow}
+              {kind !== "transfer" && categoryField}
             </div>
+
+            {cardWarning && (
+              <div className={`card-strip-row callout is-${cardWarning.state}`}>
+                <Icon name="ic-credit-card" />
+                <span>
+                  <b>{cardWarning.name}</b> {creditWarning(cardWarning)}.
+                </span>
+              </div>
+            )}
+
+            <MerchantField
+              value={merchant}
+              placeholder={type === "DEBIT" ? "Who was paid" : "Who paid you"}
+              presets={presets}
+              people={contacts}
+              personPicked={
+                kind === "lent" || kind === "split"
+                  ? (splitDraft.people[0]?.contactId ?? null)
+                  : kind === "settle"
+                    ? (settlePeople[0]?.contactId ?? null)
+                    : null
+              }
+              onType={typeMerchant}
+              onPreset={applyPreset}
+              onPerson={pickPerson}
+              onSavePreset={savePreset}
+              onRemovePreset={removePreset}
+            />
+
+            {kind === "transfer" && categoryField}
 
             <div className="tx-pair">
               <div className="form-row">
@@ -940,44 +1003,7 @@ export function EditTransactionModal({
               </div>
             </div>
 
-            <div className="tx-pair">
-              {accountRow}
-              {kind !== "transfer" && noteField}
-            </div>
-            {kind === "transfer" && noteField}
-
-            {cardWarning && (
-              <div className={`card-strip-row is-${cardWarning.state}`}>
-                <Icon name="ic-alert" />
-                <span>
-                  <b>{cardWarning.name}</b> {creditWarning(cardWarning)}.
-                </span>
-              </div>
-            )}
-          </section>
-
-          <section className="tx-side" aria-labelledby="tx-kind-title">
-            <h4 id="tx-kind-title" className="tx-side-title">
-              What kind of transaction is this?
-            </h4>
-            <div className="tx-kinds" role="radiogroup" aria-labelledby="tx-kind-title">
-              {kindOptions.map((option) => (
-                <button
-                  key={option.kind}
-                  type="button"
-                  role="radio"
-                  aria-checked={kind === option.kind}
-                  title={option.hint}
-                  className={`tx-chip${kind === option.kind ? " on" : ""}`}
-                  onClick={() => chooseKind(option.kind)}
-                >
-                  <Icon name={option.icon} />
-                  {option.label}
-                </button>
-              ))}
-            </div>
-
-            {panel && <div className="tx-panel">{panel}</div>}
+            {noteField}
 
             {hasAlso && (
               <div className="tx-also">
@@ -1049,61 +1075,94 @@ export function EditTransactionModal({
                 )}
               </div>
             )}
-          </section>
-        </div>
 
-        {error && (
-          <p className="form-error tx-error" role="alert">
-            {error}
-          </p>
-        )}
+            {hasMore && (
+              <section className="tx-more" aria-labelledby="tx-more-title">
+                <span id="tx-more-title" className="field-label">
+                  More
+                </span>
+                <button type="button" className="link-row" onClick={() => setRawOpen(true)} disabled={saving}>
+                  <Icon name="ic-message" />
+                  <span className="link-row-label">
+                    {mergedCount > 1 ? "See the original messages" : "See the original message"}
+                  </span>
+                  <span className="link-row-value">
+                    {mergedCount > 1
+                      ? `${mergedCount} messages`
+                      : transaction!.source === "EMAIL"
+                        ? "Email"
+                        : transaction!.source === "SMS"
+                          ? "SMS"
+                          : transaction!.source === "STATEMENT"
+                            ? "Statement"
+                            : "Added by hand"}
+                  </span>
+                  <Icon name="ic-chevron-right" />
+                </button>
+                {mergedCount > 1 && (
+                  <button
+                    type="button"
+                    className="link-row"
+                    onClick={unmerge}
+                    disabled={saving}
+                    title="Undo the merge: one transaction per message"
+                  >
+                    <Icon name="ic-link" />
+                    <span className="link-row-label">Separate into {mergedCount}</span>
+                    <span className="link-row-value">Undo the merge</span>
+                    <Icon name="ic-chevron-right" />
+                  </button>
+                )}
+                {canConvertToEmi && (
+                  <button
+                    type="button"
+                    className="link-row"
+                    onClick={() => onConvertToEmi!(transaction!)}
+                    disabled={saving}
+                  >
+                    <Icon name="ic-calendar" />
+                    <span className="link-row-label">Convert to EMI</span>
+                    <span className="link-row-value">Spread it over months</span>
+                    <Icon name="ic-chevron-right" />
+                  </button>
+                )}
+              </section>
+            )}
+          </div>
 
-        <footer className="tx-foot">
-          {!isNew && onDeleted && (
-            <button
-              className={`btn btn-sm ${confirmDelete ? "btn-primary tx-danger" : "btn-ghost btn-danger-text"}`}
-              onClick={() => (confirmDelete ? remove() : setConfirmDelete(true))}
-              disabled={saving}
-            >
-              {confirmDelete ? "Really delete?" : "Delete"}
-            </button>
+          {error && (
+            <p className="form-error tx-error" role="alert">
+              {error}
+            </p>
           )}
-          {!isNew && (
-            <button className="btn btn-sm btn-ghost" onClick={() => setRawOpen(true)} disabled={saving}>
-              <Icon name="ic-message" />
-              {mergedCount > 1 ? "Original messages" : "Original message"}
+
+          <footer className="txn-editor-foot">
+            {!isNew && onDeleted && (
+              <button
+                className={`btn btn-lg ${confirmDelete ? "btn-danger" : "btn-danger-text"}`}
+                onClick={() => (confirmDelete ? remove() : setConfirmDelete(true))}
+                disabled={saving}
+              >
+                <Icon name="ic-trash" />
+                {confirmDelete ? "Really delete?" : "Delete"}
+              </button>
+            )}
+            <span className="modal-actions-spacer" />
+            <button className="btn btn-lg" onClick={onClose} disabled={saving}>
+              Cancel
             </button>
-          )}
-          {mergedCount > 1 && (
-            <button
-              className="btn btn-sm btn-ghost"
-              onClick={unmerge}
-              disabled={saving}
-              title="Undo the merge: one transaction per message"
-            >
-              Separate into {mergedCount}
+            <button className="btn btn-lg btn-primary" onClick={() => save()} disabled={saving}>
+              {saving ? "Saving…" : isNew ? "Add" : "Save"}
             </button>
-          )}
-          {!isNew && onConvertToEmi && type === "DEBIT" && !transaction.emiPlanId && (
-            <button className="btn btn-sm btn-ghost" onClick={() => onConvertToEmi(transaction)} disabled={saving}>
-              <Icon name="ic-calendar" />
-              Convert to EMI
-            </button>
-          )}
-          <span className="modal-actions-spacer" />
-          <span className="tx-shortcut" aria-hidden="true">
-            Ctrl+Enter to save
-          </span>
-          <button className="btn btn-sm btn-ghost" onClick={onClose} disabled={saving}>
-            Cancel
-          </button>
-          <button className="btn btn-sm btn-primary" onClick={() => save()} disabled={saving}>
-            {saving ? "Saving…" : isNew ? "Add transaction" : "Save changes"}
-          </button>
-        </footer>
+          </footer>
+        </aside>
+        <p className="txn-editor-footnote">
+          The editor opens beside the list. Click another row to switch; unsaved changes are dropped. Ctrl+Enter saves,
+          Esc closes.
+        </p>
       </div>
 
       {rawOpen && transaction && <RawMessageModal transaction={transaction} onClose={() => setRawOpen(false)} />}
-    </div>
+    </>
   );
 }

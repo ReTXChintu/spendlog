@@ -1,0 +1,222 @@
+/* Transactions (design-system.md §7.6, screen 01): the month summary,
+   search and filter chips, the day-grouped ledger and its rows. The editor
+   beside the list is in edit-transaction.css. Tokens only, so light and
+   dark both work without overrides. */
+
+/* ------------------------------------------------------------ header bits */
+.txn-period{display:inline-flex;align-items:center;gap:2px;height:40px;padding:0 1px;border:1px solid var(--ln2);
+  border-radius:var(--r-lg);background:var(--sf)}
+.txn-period .icon-btn{width:36px;height:36px}
+.txn-period-label{padding:0 8px;font-size:14px;font-weight:600;white-space:nowrap;color:var(--tx)}
+.txn-period.is-custom{padding:0 2px 0 6px;gap:6px}
+.txn-period.is-custom .btn{min-height:32px}
+
+.txn-views{padding:4px}
+.txn-views a{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:0 18px;border-radius:9px;
+  font-size:14px;font-weight:500;color:var(--tx2);text-decoration:none;white-space:nowrap;
+  transition:background var(--dur) var(--ease),color var(--dur) var(--ease)}
+.txn-views a:hover{color:var(--tx)}
+.txn-views a.on{background:var(--sf);color:var(--tx);font-weight:600;box-shadow:var(--shadow)}
+
+.select-count{font-size:13px;color:var(--tx3);font-weight:600;margin-right:4px}
+
+/* ------------------------------------------------------------- the layout */
+/* The list, and the editor beside it when a row is open. */
+.txn-layout{display:flex;gap:20px;align-items:flex-start}
+.txn-main{flex:8 1 600px;min-width:0;display:flex;flex-direction:column;gap:16px}
+
+/* -------------------------------------------------------- month summary */
+.txn-summary{display:flex;align-items:center;gap:16px 32px;flex-wrap:wrap;padding:16px 20px}
+.txn-summary-main{flex:1 1 300px;min-width:0}
+.txn-summary-title{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.txn-pace{padding-top:8px;max-width:420px}
+.txn-pace.is-over .seg-spent{background:var(--crit-fill)}
+.txn-summary-line{margin:6px 0 0;font-size:13px;line-height:18px;color:var(--tx2)}
+.txn-summary-line b{font-weight:600;color:var(--tx)}
+.txn-summary-kpis{gap:24px 32px}
+.txn-summary-kpis .kpi-value{font-size:18px;line-height:24px}
+
+/* ------------------------------------------------------- search, filters */
+.txn-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.txn-search{flex:0 1 380px;min-width:220px}
+.txn-check{min-height:44px}
+
+.txn-filters{display:flex;flex-direction:column;gap:8px}
+.txn-filters .field-hint{margin:0 2px}
+
+/* A select dressed as a dropdown chip: the native control does the work. */
+.chip-select{position:relative;padding:0 10px 0 14px;gap:4px;cursor:pointer}
+.chip-select select{appearance:none;-webkit-appearance:none;border:0;background:none;color:inherit;font:inherit;
+  padding:0;margin:0;cursor:pointer;max-width:220px;outline:none;text-overflow:ellipsis;field-sizing:content}
+.chip-select select option{color:var(--tx);background:var(--sf)}
+.chip-select svg{width:16px;height:16px;pointer-events:none}
+.chip-select:focus-within{outline:3px solid var(--ac);outline-offset:3px}
+
+.txn-dates{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 12px;border:1px solid var(--ln2);
+  border-radius:var(--r-full);background:var(--sf);color:var(--tx2);font-size:13px}
+.txn-dates svg{width:16px;height:16px;color:var(--tx3)}
+.txn-dates input{border:0;background:none;color:var(--tx);font:inherit;font-size:13px;padding:0;width:120px;
+  font-variant-numeric:tabular-nums}
+.txn-dates input:focus{outline:none}
+.txn-dates:focus-within{outline:3px solid var(--ac);outline-offset:3px}
+
+.txn-nudge{align-items:center}
+.txn-nudge .btn-link{margin-left:auto;flex-shrink:0;color:var(--ac);text-decoration:none}
+.txn-nudge .btn-link:hover{color:var(--tx)}
+.sync-problem{align-items:center}
+.sync-problem a{margin-left:auto;font-weight:600;color:inherit}
+.merge-error{margin:0}
+
+/* Card limit and pace warnings above the ledger. */
+.card-strip{display:flex;flex-direction:column;gap:8px}
+.card-strip-row{align-items:flex-start}
+.card-strip-row b{font-weight:600}
+.card-strip-row.is-tip{background:var(--ac-soft);color:var(--tx)}
+.card-strip-row.is-tip>svg{color:var(--ac)}
+.card-strip-row.is-close{background:var(--warn-soft);color:var(--warn)}
+.card-strip-row.is-over{background:var(--crit-soft);color:var(--crit)}
+
+/* ------------------------------------------------------------- the ledger */
+.txn-ledger-card{padding:0;overflow:hidden}
+.txn-ledger-card .ledger-skeleton{padding:16px 20px}
+.txn-more-skel{width:100%}
+.txn-ledger{container-type:inline-size;container-name:ledger}
+
+/* Columns (§7.6): time, merchant, category, account, amount. */
+.txn-head,.txn-row{display:grid;grid-template-columns:100px minmax(200px,2.4fr) minmax(110px,1fr) minmax(130px,1.2fr) minmax(96px,auto);
+  column-gap:0;align-items:center}
+.txn-head{padding:12px 0;border-bottom:1px solid var(--ln);background:var(--sf);font-size:12px;line-height:16px;font-weight:600;color:var(--tx2)}
+.txn-head>span{padding:0 8px}
+.txn-head>span:first-child{padding-left:20px}
+.txn-head .txn-head-amount{text-align:right;padding-right:20px}
+
+.day-group{display:block}
+.day-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 20px;background:var(--sf2);
+  border-bottom:1px solid var(--ln);font-size:12px;line-height:16px;font-weight:600;color:var(--tx2)}
+.day-label{font-weight:600}
+.day-totals{white-space:nowrap}
+.day-totals .spend{color:var(--tx)}
+.day-totals .income{color:var(--good)}
+.day-totals .dsep{color:var(--tx3)}
+
+.txn-row-wrap{position:relative}
+.txn-row{min-height:56px;border-bottom:1px solid var(--ln);cursor:pointer;background:var(--sf);
+  transition:background var(--dur-fast) var(--ease)}
+.txn-row:hover{background:var(--sf2)}
+.txn-row.is-attention{background:var(--warn-soft)}
+.txn-row.is-attention .monogram{background:var(--sf)}
+.txn-row.is-active,.txn-row.is-selected{background:var(--ac-soft);box-shadow:inset 0 0 0 2px var(--ac)}
+.txn-row.is-active .monogram:not(.has-cat),.txn-row.is-selected .monogram:not(.has-cat),
+.txn-row.is-active .icon-tile{background:var(--sf)}
+
+.txn-cell{padding:10px 8px;min-width:0;font-size:14px;line-height:20px;color:var(--tx2)}
+.txn-time{padding-left:20px;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--tx3)}
+.row-select{flex-shrink:0;pointer-events:none}
+
+.txn-merchant{display:flex;align-items:center;gap:12px}
+.txn-lead{flex-shrink:0}
+.monogram.has-cat{background:color-mix(in srgb,var(--cat) 16%,var(--sf));color:color-mix(in srgb,var(--cat) 70%,var(--tx))}
+.txn-merchant-main{flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
+.txn-merchant-line{display:flex;align-items:center;gap:4px;min-width:0;max-width:100%}
+.txn-name{border:0;background:none;padding:0;font:inherit;font-size:14px;font-weight:500;color:var(--tx);text-align:left;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;min-width:0}
+.txn-name:hover{text-decoration:underline;text-underline-offset:2px}
+.txn-info{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border:0;background:none;
+  border-radius:6px;color:var(--tx3);flex-shrink:0;padding:0}
+.txn-info:hover{color:var(--ac);background:var(--sf)}
+.txn-info svg{width:16px;height:16px}
+.txn-badges{display:flex;flex-wrap:wrap;gap:6px}
+.txn-sub{display:none;flex-basis:100%;font-size:13px;line-height:18px;color:var(--tx3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.txn-cat-btn{border:0;background:none;padding:0;font:inherit;color:var(--tx2);text-align:left;cursor:pointer}
+.txn-cat-btn:hover{color:var(--tx);text-decoration:underline;text-underline-offset:2px}
+.txn-pick{background:var(--sf);white-space:nowrap}
+.txn-pick svg{width:16px;height:16px}
+
+.txn-account{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px}
+.txn-account-name{min-width:0}
+.txn-sources{display:inline-flex;gap:4px;color:var(--tx3)}
+.txn-sources svg{width:14px;height:14px}
+
+.txn-amount{padding-right:20px;text-align:right;font-weight:600;white-space:nowrap}
+.txn-amount.money-out{color:var(--tx)}
+.txn-amount.money-in{color:var(--good)}
+.txn-amount.money-neutral{color:var(--tx3)}
+
+/* Tighter when the editor takes the right of the screen. */
+@container ledger (max-width:820px){
+  .txn-head,.txn-row{grid-template-columns:92px minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) minmax(88px,auto)}
+  .txn-sources{display:none}
+  .txn-pick{padding:0 10px;max-width:100%}
+  .txn-pick svg{display:none}
+}
+
+/* The phone row (§7.6): monogram, two lines, amount. */
+@container ledger (max-width:620px){
+  .txn-head{display:none}
+  .txn-row{grid-template-columns:minmax(0,1fr) auto;min-height:64px}
+  .txn-time,.txn-account,.txn-category{display:none}
+  .txn-row.is-selectable{grid-template-columns:auto minmax(0,1fr) auto}
+  .txn-row.is-selectable .txn-time{display:flex;padding-left:16px}
+  .txn-row.is-selectable .txn-time span{display:none}
+  .txn-merchant{padding:12px 8px 12px 16px}
+  .txn-row.is-selectable .txn-merchant{padding-left:0}
+  .txn-lead.monogram,.txn-lead.icon-tile{width:40px;height:40px}
+  .txn-name{font-size:15px}
+  .txn-sub{display:block}
+  .txn-amount{font-size:15px;padding-right:16px}
+  .txn-row.is-attention .txn-merchant{grid-row:1;grid-column:1}
+  .txn-row.is-attention .txn-amount{grid-row:1;grid-column:2}
+  .txn-row.is-attention .txn-category{display:block;grid-row:2;grid-column:1 / -1;padding:0 16px 12px 68px}
+  .day-header{padding:10px 16px}
+}
+
+/* "Remember this merchant?", under the row it was asked about. */
+.remember-banner{margin:8px 20px 12px;align-items:center;flex-wrap:wrap}
+.remember-banner>svg{color:var(--ac)}
+.remember-banner b{font-weight:600}
+.remember-actions{display:flex;gap:8px;flex-shrink:0}
+
+/* --------------------------------------------------- the category picker */
+.cat-popover{position:fixed;z-index:60;width:300px;max-height:min(420px,70vh);overflow-y:auto;padding:12px;background:var(--sf);
+  border:1px solid var(--ln);border-radius:var(--r-xl);box-shadow:var(--shadow2)}
+.cat-popover-title{font-size:12px;line-height:16px;font-weight:600;letter-spacing:.02em;color:var(--tx2);margin:2px 4px 10px}
+.cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.cat-opt{display:flex;align-items:center;gap:10px;min-height:40px;padding:6px 8px;border-radius:var(--r-md);border:none;background:none;
+  text-align:left;font-size:13px;line-height:18px;font-weight:500;color:var(--tx2)}
+.cat-opt:hover{background:var(--sf2);color:var(--tx)}
+.cat-opt-chip{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  background:color-mix(in srgb,var(--cat) 16%,var(--sf));color:color-mix(in srgb,var(--cat) 70%,var(--tx))}
+.cat-opt-chip svg{width:16px;height:16px}
+
+/* ------------------------------------------------- the original message */
+.raw-modal{width:560px}
+.raw-modal-head{display:flex;align-items:center;gap:12px;margin:0 48px 8px 0}
+.raw-modal-head h3{margin:0}
+.raw-source + .raw-source{margin-top:14px}
+.raw-source-head{display:flex;align-items:center;gap:8px;font-size:12px;line-height:16px;font-weight:600;color:var(--tx2);margin-bottom:6px}
+.raw-source-head svg{width:14px;height:14px}
+
+/* --------------------------------------------------------- refund picker */
+.refund-search{width:100%;margin:12px 0 6px}
+.refund-list{display:flex;flex-direction:column;gap:8px;margin:10px 0 4px;max-height:340px;overflow-y:auto}
+.refund-option{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:10px 12px;cursor:pointer;
+  background:var(--sf);border:1px solid var(--ln);border-radius:var(--r-lg);transition:background var(--dur-fast) var(--ease)}
+.refund-option:hover{background:var(--sf2)}
+.refund-option.is-picked{background:var(--ac-soft);border-color:var(--ac-line)}
+.refund-option-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.refund-option-name{font-size:14px;line-height:20px;font-weight:600;color:var(--tx)}
+.refund-option-sub{font-size:12px;line-height:16px;color:var(--tx3)}
+.refund-option-amount{font-size:14px;font-weight:600;color:var(--tx);white-space:nowrap}
+.refund-option-input{width:120px;flex-shrink:0}
+.refund-option-input input{min-height:36px !important;font-size:13px !important}
+.refund-summary{display:flex;gap:24px;flex-wrap:wrap;margin-top:16px;padding:14px 16px;background:var(--good-soft);
+  border-radius:var(--r-lg)}
+.refund-summary>div{display:flex;flex-direction:column;gap:2px}
+
+/* ------------------------------------------------------------ narrow */
+@media (max-width:599px){
+  .txn-summary{padding:16px}
+  .txn-search{flex:1 1 100%}
+  .txn-views{display:none}
+}

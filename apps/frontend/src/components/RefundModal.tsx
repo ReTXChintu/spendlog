@@ -119,13 +119,17 @@ export function RefundModal({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="modal modal-wide">
+      <div className="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="refund-title">
         <button className="modal-close" onClick={onClose} aria-label="Close">
           <Icon name="ic-x" />
         </button>
-        <h3>{earmarked ? "What did this pay for?" : "What is this a refund of?"}</h3>
+        <div className="raw-modal-head">
+          <span className="icon-tile tile-good" aria-hidden="true">
+            <Icon name="ic-undo" />
+          </span>
+          <h3 id="refund-title">{earmarked ? "What did this pay for?" : "What is this a refund of?"}</h3>
+        </div>
         <div className="modal-sub">
-          <Icon name="ic-updown" />
           <span>
             {refund.merchant ?? "This credit"} · {formatMoney(refund.amountMinor)}{" "}
             {earmarked ? "set aside · pick the purchases it paid for" : "back · pick as many purchases as it covers"}
@@ -231,16 +235,16 @@ export function RefundModal({
 
         <div className="modal-actions">
           {refund.refundOf.length > 0 && (
-            <button className="btn btn-sm btn-ghost" onClick={() => save([])} disabled={saving}>
+            <button className="btn btn-danger-text" onClick={() => save([])} disabled={saving}>
               {earmarked ? "Unlink all" : "Not a refund"}
             </button>
           )}
           <span className="modal-actions-spacer" />
-          <button className="btn btn-sm btn-ghost" onClick={onClose} disabled={saving}>
+          <button className="btn btn-ghost" onClick={onClose} disabled={saving}>
             Cancel
           </button>
           <button
-            className="btn btn-sm btn-primary"
+            className="btn btn-primary"
             onClick={() => save(chosenIds.map((id) => ({ transactionId: id, amountMinor: picked[id] })))}
             disabled={saving || chosenIds.length === 0 || unallocatedMinor < 0}
           >

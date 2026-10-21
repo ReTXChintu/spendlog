@@ -62,6 +62,13 @@ const STATUS_LABEL: Record<StatementRow["status"], string> = {
   UNREADABLE: "Could not open",
 };
 
+const STATUS_BADGE: Record<StatementRow["status"], string> = {
+  PARSED: "badge-good",
+  LOCKED: "badge-warn",
+  UNIDENTIFIED: "badge-ac",
+  UNREADABLE: "badge-crit",
+};
+
 export function StatementShelf({
   accounts,
   onChanged,
@@ -125,21 +132,21 @@ export function StatementShelf({
 
   if (shown.length === 0) {
     return (
-      <div className="card set-card set-card-wide">
-        <div className="set-card-head">
-          <div className="set-card-icon">
-            <Icon name="ic-receipt" />
-          </div>
-          <div>
-            <h4>Statements</h4>
-            <p className="set-card-sub">None for this one yet</p>
-          </div>
+      <div className="card set-card set-card-wide statements-card">
+        <div className="card-head">
+          <h2>Statements</h2>
+          <span className="meta">None for this one yet</span>
         </div>
-        <p className="desc">
-          Statements arrive from the same mailbox as everything else. Scan for
-          them under Connections, and they will be filed here under the card
-          they belong to.
-        </p>
+        <div className="empty-inline">
+          <div className="icon-tile tile-neutral">
+            <Icon name="ic-list" />
+          </div>
+          <p className="desc">
+            Statements arrive from the same mailbox as everything else. Scan for
+            them under Connections, and they will be filed here under the card
+            they belong to.
+          </p>
+        </div>
       </div>
     );
   }
@@ -160,18 +167,13 @@ export function StatementShelf({
     <>
       <StatementResetCard onDone={load} />
 
-      <div className="card set-card set-card-wide">
-        <div className="set-card-head">
-          <div className="set-card-icon">
-            <Icon name="ic-receipt" />
-          </div>
-          <div>
-            <h4>Statements</h4>
-            <p className="set-card-sub">{shelfSummary(shown)}</p>
-          </div>
+      <div className="card set-card set-card-wide statements-card">
+        <div className="card-head">
+          <h2>Statements</h2>
+          <span className="meta">{shelfSummary(shown)}</span>
         </div>
 
-        {error && <p className="desc set-warn">{error}</p>}
+        {error && <p className="callout callout-crit">{error}</p>}
 
         <div className="shelf">
           {shown.map((group) => {
@@ -216,31 +218,35 @@ export function StatementShelf({
                   </span>
                 </button>
 
-                {isOpen &&
-                  group.months.map((month) => (
-                    <div className="shelf-month" key={month.month}>
-                      <h5 className="shelf-month-name">
-                        {monthLabel(month.month)}
-                      </h5>
-
-                      <div className="statement-list">
-                        {month.statements.map((statement) => (
-                          <div
+                {isOpen && (
+                  <div className="table-wrap">
+                  <table className="data-table is-inset statement-table">
+                    <thead>
+                      <tr>
+                        <th>Month</th>
+                        <th>Statement</th>
+                        <th className="num">Bill</th>
+                        <th>Status</th>
+                        <th aria-label="Actions" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                  {group.months.map((month) =>
+                        month.statements.map((statement) => (
+                          <tr
                             className={`statement-row is-${statement.status.toLowerCase()}`}
                             key={statement.id}
                           >
-                            <div className="statement-main">
+                            <td className="statement-month">{monthLabel(month.month)}</td>
+                            <td className="statement-main">
                               <div className="statement-title">
-                                <span
-                                  className={`statement-pill is-${statement.status.toLowerCase()}`}
-                                >
-                                  {STATUS_LABEL[statement.status]}
+                                <span className="statement-name">
+                                  {statement.subject ??
+                                    statement.fileName ??
+                                    "A statement"}
                                 </span>
-                                {statement.subject ??
-                                  statement.fileName ??
-                                  "A statement"}
                                 {statement.kind === "BANK" && (
-                                  <span className="statement-kind">bank</span>
+                                  <span className="badge badge-outline">Bank</span>
                                 )}
                               </div>
 
@@ -255,25 +261,26 @@ export function StatementShelf({
                                     {statement.counts.matched +
                                       statement.counts.uncertain}{" "}
                                     already known
-                                    {statement.totalDueMinor ? (
-                                      <>
-                                        {" "}
-                                        ·{" "}
-                                        {formatMoneyShort(
-                                          statement.totalDueMinor,
-                                        )}{" "}
-                                        due
-                                      </>
-                                    ) : null}
                                   </>
                                 ) : (
                                   (statement.problem ??
                                   "No reason was recorded.")
                                 )}
                               </div>
-                            </div>
+                            </td>
+                            <td className="num">
+                              {statement.status === "PARSED" && statement.totalDueMinor
+                                ? formatMoneyShort(statement.totalDueMinor)
+                                : "—"}
+                            </td>
+                            <td>
+                              <span className={`badge ${STATUS_BADGE[statement.status]}`}>
+                                {statement.status === "LOCKED" && <Icon name="ic-lock" />}
+                                {STATUS_LABEL[statement.status]}
+                              </span>
+                            </td>
 
-                            <div className="statement-actions">
+                            <td className="statement-actions">
                               {statement.status === "PARSED" && (
                                 <button
                                   className="btn btn-sm"
@@ -373,8 +380,13 @@ export function StatementShelf({
                                 added on the way out, or the ledger keeps
                                 rows pointing at something gone. */}
                               <button
-                                className="btn btn-sm btn-ghost btn-danger-text"
+                                className={
+                                  confirming === statement.id
+                                    ? "btn btn-sm btn-danger-text"
+                                    : "icon-btn statement-forget"
+                                }
                                 title="Forget this statement"
+                                aria-label="Forget this statement"
                                 disabled={busy === statement.id}
                                 onClick={() => {
                                   if (confirming === statement.id) {
@@ -390,26 +402,31 @@ export function StatementShelf({
                                 {confirming === statement.id ? (
                                   "Really?"
                                 ) : (
-                                  <Icon name="ic-x" />
+                                  <Icon name="ic-trash" />
                                 )}
                               </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
+                            </td>
+                          </tr>
+                        )),
+                  )}
+                    </tbody>
+                  </table>
+                  </div>
+                )}
               </section>
             );
           })}
         </div>
 
         {anyLocked && (
-          <p className="field-hint" style={{ marginTop: 12 }}>
-            A locked statement needs its password set on the card above. Every
-            card's password is tried against every statement, so one is often
-            enough for all of them.
-          </p>
+          <div className="callout callout-warn statement-locked-note">
+            <Icon name="ic-lock" />
+            <span className="callout-body">
+              A locked statement needs its password set on the card above. Every
+              card's password is tried against every statement, so one is often
+              enough for all of them.
+            </span>
+          </div>
         )}
 
         {explaining && (

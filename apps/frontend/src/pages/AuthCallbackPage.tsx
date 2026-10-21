@@ -31,5 +31,10 @@ export function AuthCallbackPage() {
     });
   }, [navigate]);
 
-  return <p className="empty-state">Signing you in…</p>;
+  return (
+    <div className="auth-callback" role="status">
+      <span className="spinner" aria-hidden="true" />
+      <p>Signing you in…</p>
+    </div>
+  );
 }

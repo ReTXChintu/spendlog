@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { formatMoney } from "../lib/format";
+import { formatMoneyShort } from "../lib/format";
 import { CardPicks, CardStatus, NETWORK_LABELS } from "../types";
 import { Icon } from "./Icon";
 
@@ -57,7 +57,7 @@ function PickTile({ label, card, isBest }: { label: string; card: CardStatus; is
     <div className={`pick-tile${isBest ? " is-best" : ""}`}>
       <div className="pick-network">
         {label}
-        {isBest && <span className="pick-flag">Best overall</span>}
+        {isBest && <span className="badge badge-ac">Best overall</span>}
       </div>
       <div className="pick-name">{card.name}</div>
       <div className="pick-float num">
@@ -65,8 +65,8 @@ function PickTile({ label, card, isBest }: { label: string; card: CardStatus; is
       </div>
       {card.state === "close" && card.availableMinor !== null && (
         <div className="pick-warn">
-          <Icon name="ic-alert" />
-          {formatMoney(card.availableMinor)} of credit left
+          <Icon name="ic-alert-triangle" />
+          {formatMoneyShort(card.availableMinor)} of credit left
         </div>
       )}
     </div>

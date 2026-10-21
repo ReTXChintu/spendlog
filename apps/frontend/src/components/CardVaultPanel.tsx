@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError } from "../lib/api";
 import { OpenedDetails, lockVault, replaceDetails, unlockVault, useVaultSession } from "../lib/vaultSession";
 import { Icon } from "./Icon";
+import { SecretInput } from "./SecretInput";
 
 /**
  * A card's or bank account's full details, behind the one PIN.
@@ -229,9 +230,10 @@ export function VaultPinForm({
           if (pin.length >= 4) submit();
         }}
       >
-        <input
-          className="filter-input"
-          type="password"
+        <SecretInput
+          noun="PIN"
+          wrapClassName="vault-pin-field"
+          className="filter-input vault-pin-input"
           inputMode="numeric"
           autoComplete="off"
           placeholder="PIN"
@@ -241,7 +243,7 @@ export function VaultPinForm({
           value={pin}
           onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
         />
-        <button className="btn btn-sm" type="submit" disabled={busy || pin.length < 4}>
+        <button className="btn btn-primary" type="submit" disabled={busy || pin.length < 4}>
           {busy ? "Checking…" : submitLabel}
         </button>
         {hint && <span className="field-hint">{hint}</span>}
@@ -325,13 +327,22 @@ function VaultHead({
 }) {
   return (
     <div className="vault-head">
-      <span className="vault-title">
-        <Icon name="ic-lock" /> {title}
-      </span>
-      <span className="vault-masked">
-        {isBank ? "•••••••" : "•••• •••• ••••"} {last4 ?? "••••"}
-        {locked && <span className="vault-state">Locked</span>}
-      </span>
+      <div className={`icon-tile ${locked ? "tile-neutral" : "tile-ac"}`}>
+        <Icon name="ic-lock" />
+      </div>
+      <div className="vault-head-main">
+        <span className="vault-title">{title}</span>
+        <span className="vault-masked">
+          {isBank ? "•••••••" : "•••• •••• ••••"} {last4 ?? "••••"}
+        </span>
+      </div>
+      {locked ? (
+        <span className="badge badge-neutral vault-state">
+          <Icon name="ic-lock" /> Locked
+        </span>
+      ) : (
+        <span className="badge badge-ac vault-state">Open</span>
+      )}
     </div>
   );
 }
@@ -371,22 +382,26 @@ function SetPin({ onDone, onCancel }: { onDone: () => void; onCancel: () => void
       }}
     >
       <div className="vault-pin">
-        <input
-          className="filter-input"
-          type="password"
+        <SecretInput
+          noun="PIN"
+          wrapClassName="vault-pin-field"
+          className="filter-input vault-pin-input"
           inputMode="numeric"
           autoComplete="new-password"
           placeholder="New PIN"
+          aria-label="New PIN"
           maxLength={6}
           value={pin}
           onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
         />
-        <input
-          className="filter-input"
-          type="password"
+        <SecretInput
+          noun="PIN"
+          wrapClassName="vault-pin-field"
+          className="filter-input vault-pin-input"
           inputMode="numeric"
           autoComplete="new-password"
           placeholder="Again"
+          aria-label="New PIN again"
           maxLength={6}
           value={again}
           onChange={(event) => setAgain(event.target.value.replace(/\D/g, ""))}
@@ -534,9 +549,9 @@ function EditDetails({
       {!sessionPin && (
         <label className="field">
           <span>Your PIN</span>
-          <input
-            className="filter-input"
-            type="password"
+          <SecretInput
+            noun="PIN"
+            className="filter-input vault-pin-input"
             inputMode="numeric"
             autoComplete="off"
             maxLength={6}

@@ -1,0 +1,219 @@
+/* Analytics (Home's second tab) and the charts it draws.
+ *
+ * design-system.md §7.13: spending bars are ink, "now" is the accent,
+ * days still to come are hollow --sunk stubs, gridlines --ln, the baseline
+ * --ln2, axis text 11 --tx3. Category series use the chart palette c1..c5
+ * then --c-other. Money in is --good. Red only marks a bad delta.
+ */
+
+/* ------------------------------------------------------------- the page */
+.an{display:flex;flex-direction:column;gap:0;min-width:0}
+.an-row{margin-bottom:20px}
+.an-row > .card{align-self:stretch}
+
+/* Filter bar: labelled dropdown chips and the period stepper. */
+.an-filters{display:flex;align-items:center;gap:12px 24px;flex-wrap:wrap}
+.an-filter{display:inline-flex;align-items:center;gap:10px;min-width:0}
+.an-select{appearance:none;-webkit-appearance:none;min-height:36px;max-width:260px;padding:0 34px 0 14px;border-radius:var(--r-full);
+  border:1px solid var(--ln2);background-color:var(--sf);color:var(--tx);font:inherit;font-size:13px;font-weight:500;cursor:pointer;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2367686E' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 12px center;background-size:16px;
+  transition:background-color var(--dur-fast) var(--ease)}
+.an-select:hover{background-color:var(--sf2)}
+.an-select:focus-visible{outline:3px solid var(--ac);outline-offset:3px}
+/* A narrowed filter reads as a selected chip: ink-filled. */
+.an-select.on{background-color:var(--tx);border-color:var(--tx);color:var(--bg);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23F4F2EC' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")}
+.an-select option{background:var(--sf);color:var(--tx)}
+/* The chevrons are data URIs, so dark mode gets its own strokes. */
+:root[data-theme="dark"] .an-select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239A9893' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")}
+:root[data-theme="dark"] .an-select.on{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23111214' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]) .an-select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239A9893' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")}
+  :root:not([data-theme="light"]) .an-select.on{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23111214' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")}
+}
+
+.an-stepper{display:inline-flex;align-items:center;gap:2px;height:40px;padding:0 2px;border:1px solid var(--ln2);border-radius:var(--r-lg);
+  background:var(--sf)}
+.an-stepper span{min-width:128px;padding:0 6px;text-align:center;font-size:14px;font-weight:600;color:var(--tx);white-space:nowrap}
+.an-stepper .icon-btn{width:34px;height:34px}
+
+.an-note{margin:10px 0 20px;font-size:13px;line-height:18px;color:var(--tx2)}
+.an-sub{margin:-8px 0 14px;font-size:13px;line-height:18px;color:var(--tx3)}
+
+/* Compare tiles. */
+.an-tiles{margin-bottom:20px}
+.an-tiles .value{white-space:nowrap}
+.an-pct{font-size:15px;font-weight:600}
+.an-tile-row{display:flex;align-items:center;gap:12px;justify-content:space-between;min-width:0}
+.an-tile-badge{align-self:flex-start}
+.an-spark{flex-shrink:0;overflow:visible}
+.an-spark polyline{fill:none;stroke:var(--ac);stroke-width:1.75;stroke-linejoin:round;stroke-linecap:round}
+
+.an-loading{display:flex;flex-direction:column;gap:16px}
+.an-loading .stat-tile{gap:10px}
+.an-loading-chart{height:300px;border-radius:var(--r-xl)}
+.an-empty{margin-bottom:20px}
+
+/* Top merchants. */
+.an-merchants .data-table td{padding-top:8px;padding-bottom:8px}
+.an-merchant{display:flex;align-items:center;gap:10px;min-width:0}
+.an-merchant-name{font-size:14px;font-weight:500;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:22ch}
+.an-merchants .data-table td.an-times{font-weight:400;color:var(--tx2)}
+
+/* Horizontal bar rows: accounts (ink) and the change per category. */
+.an-bars{display:flex;flex-direction:column;gap:12px}
+.an-bar-row{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(56px,1fr) auto;align-items:center;gap:12px}
+.an-bar-name{font-size:14px;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.an-bar-track{height:10px;border-radius:5px;background:var(--sunk);overflow:hidden}
+.an-bar-fill{height:100%;border-radius:5px;min-width:2px;background:var(--tx)}
+.an-bar-fill.is-up{background:var(--crit-fill)}
+.an-bar-fill.is-down{background:var(--good)}
+.an-bar-val{text-align:right;font-size:14px;font-weight:600;color:var(--tx);white-space:nowrap;min-width:84px}
+.an-bar-val.is-up{color:var(--crit)}
+.an-bar-val.is-down{color:var(--good)}
+.an-bar-sub{display:block;font-size:12px;line-height:16px;font-weight:400;color:var(--tx3)}
+
+/* The AI section. */
+.an-section{display:flex;align-items:center;gap:8px;margin:12px 0 16px;font-size:17px;line-height:24px;font-weight:600;
+  scroll-margin-top:20px}
+.an-section svg{width:20px;height:20px;color:var(--ac)}
+.an-ai-col{display:flex;min-width:0}
+.an-ai-col > .card{flex:1}
+
+/* ---------------------------------------------------------- AI cards */
+.ai-card{display:flex;flex-direction:column;gap:14px;min-height:240px}
+.ai-head{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.ai-head-text{flex:1;min-width:160px}
+.ai-head h2{font-size:17px;line-height:24px;font-weight:600;margin:0}
+.ai-byline{margin:2px 0 0;font-size:12px;line-height:16px;color:var(--tx3)}
+.ai-text{font-size:15px;line-height:22px;color:var(--tx2)}
+.ai-text p{margin:0 0 10px}
+.ai-text p:last-child{margin-bottom:0}
+.ai-text ul,.ai-text ol{margin:0 0 10px;padding-left:20px;display:flex;flex-direction:column;gap:4px}
+.ai-text strong{color:var(--tx);font-weight:600}
+.ai-meta{font-size:12px;line-height:16px;color:var(--tx3);margin:auto 0 0}
+.ai-wait{display:flex;align-items:flex-start;gap:12px;padding:12px 14px;border-radius:var(--r-lg);background:var(--sunk)}
+.ai-wait p{margin:0;font-size:13px;line-height:18px;color:var(--tx2)}
+.ai-empty{display:flex;flex-direction:column;align-items:flex-start;gap:12px}
+.ai-sub{margin:0;font-size:14px;line-height:20px;color:var(--tx2)}
+.ai-error{display:flex;align-items:flex-start;gap:8px;color:var(--crit)}
+.ai-error svg{width:18px;height:18px;flex-shrink:0;margin-top:1px}
+.ai-card .plan-summary{margin:0;font-size:15px;line-height:22px;color:var(--tx2)}
+.ai-card .plan-target{display:flex;flex-direction:column;gap:2px;padding:14px 16px;border-radius:var(--r-lg);background:var(--sf2);
+  border:1px solid var(--ln);margin:0}
+.ai-card .plan-target-label{font-size:12px;line-height:16px;font-weight:600;letter-spacing:.02em;color:var(--tx2)}
+.ai-card .plan-target-figure{font-size:34px;line-height:40px;font-weight:600;letter-spacing:-.02em;color:var(--good)}
+.ai-card .plan-rules{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.ai-card .plan-rules > li{padding:12px 0;border-top:1px solid var(--ln)}
+.ai-card .plan-rules > li:first-child{border-top:none;padding-top:0}
+
+/* --------------------------------------------------------------- charts */
+.chart{position:relative;width:100%;min-width:0}
+.chart-svg{display:block;overflow:visible}
+.chart-svg:focus{outline:none}
+.chart-svg:focus-visible{outline:3px solid var(--ac);outline-offset:4px;border-radius:4px}
+.chart-grid{stroke:var(--ln);stroke-width:1;shape-rendering:crispEdges}
+.chart-base{stroke:var(--ln2);stroke-width:1;shape-rendering:crispEdges}
+.chart-axis{fill:var(--tx3);font-size:11px;font-variant-numeric:tabular-nums lining-nums;font-family:var(--font-sans)}
+.chart-axis.is-today{fill:var(--ac);font-weight:600}
+.chart-value{fill:var(--tx2);font-size:11px;font-weight:600;font-variant-numeric:tabular-nums lining-nums;font-family:var(--font-sans);
+  paint-order:stroke;stroke:var(--sf);stroke-width:3px;stroke-linejoin:round}
+
+/* Day bars: past in ink, today in accent, to come hollow. */
+.chart-bar{fill:var(--tx);transition:opacity var(--dur-fast) var(--ease)}
+.chart-bar.is-today{fill:var(--ac)}
+.chart-svg.is-picking .chart-bar:not(.is-active){opacity:.45}
+.chart-future{fill:var(--sunk);stroke:var(--ln2);stroke-width:1}
+.chart-income{fill:var(--good)}
+
+/* Columns. */
+.chart-col.is-spend{fill:var(--tx)}
+.chart-col.is-income{fill:var(--good)}
+.chart-col.is-current{fill:var(--ac)}
+.chart-group .chart-col{transition:opacity var(--dur-fast) var(--ease)}
+.chart-svg:hover .chart-group:not(.is-active) .chart-col,
+.chart-svg:focus-visible .chart-group:not(.is-active) .chart-col{opacity:.45}
+.chart-empty{fill:var(--sunk);stroke:var(--ln2);stroke-width:1}
+.chart-hit{fill:transparent}
+
+/* Legend row above a chart. */
+.chart-legend{display:flex;gap:6px 20px;flex-wrap:wrap;margin:0 0 12px;font-size:13px;line-height:18px;color:var(--tx2)}
+.chart-legend span{display:inline-flex;align-items:center;gap:8px}
+.chart > .chart-legend:last-child{margin:12px 0 0}
+.chart-key{display:inline-block;width:12px;height:12px;border-radius:3px;flex-shrink:0;background:var(--tx)}
+.chart-key.is-spend{background:var(--tx)}
+.chart-key.is-today{background:var(--ac)}
+.chart-key.is-future{background:var(--sunk);box-shadow:inset 0 0 0 1px var(--ln2)}
+.chart-key.is-income{background:var(--good)}
+
+/* Hover card: floats, so it takes the floating shadow. */
+.chart-tip{position:absolute;top:24px;z-index:2;pointer-events:none;min-width:140px;padding:8px 12px;border-radius:var(--r-md);
+  background:var(--sf);border:1px solid var(--ln);box-shadow:var(--shadow2);font-size:12px;line-height:18px;color:var(--tx2)}
+.chart-tip-title{font-weight:600;color:var(--tx);margin-bottom:2px}
+.chart-tip-row{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.chart-tip-row b{margin-left:auto;padding-left:12px;color:var(--tx);font-weight:600}
+.chart-tip .chart-key{width:10px;height:10px}
+
+/* Donut over its legend table. */
+.donut{display:flex;flex-direction:column;align-items:center;gap:20px}
+.donut-svg{flex-shrink:0;overflow:visible}
+.donut-track{fill:none;stroke:var(--sunk)}
+.donut-arc{transition:opacity var(--dur-fast) var(--ease)}
+.donut-arc.is-dim{opacity:.3}
+.donut-centre-label{fill:var(--tx3);font-size:11px;font-family:var(--font-sans)}
+.donut-centre-value{fill:var(--tx);font-size:17px;font-weight:600;font-family:var(--font-sans);font-variant-numeric:tabular-nums lining-nums}
+.donut-legend{list-style:none;margin:0;padding:0;width:100%;display:flex;flex-direction:column}
+.donut-legend li{display:grid;grid-template-columns:12px minmax(0,1fr) auto 44px;align-items:center;gap:10px;min-height:40px;
+  padding:4px 0;border-bottom:1px solid var(--ln);font-size:14px;cursor:default}
+.donut-legend.has-delta li{grid-template-columns:12px minmax(0,1fr) auto 44px 72px}
+.donut-legend li:last-child{border-bottom:none}
+.donut-legend li.is-active{background:var(--sf2)}
+.donut-legend li:focus-visible{outline:3px solid var(--ac);outline-offset:1px}
+.donut-swatch{width:10px;height:10px;border-radius:3px}
+.donut-name{color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.donut-val{font-weight:600;color:var(--tx);text-align:right}
+.donut-pct{color:var(--tx3);font-size:12px;text-align:right}
+.donut-delta{display:inline-flex;align-items:center;justify-content:flex-end;gap:2px;font-size:12px;font-weight:600;color:var(--tx3);
+  white-space:nowrap}
+.donut-delta svg{width:12px;height:12px;stroke-width:2}
+.donut-delta.is-up{color:var(--crit)}
+.donut-delta.is-down{color:var(--good)}
+
+@media (max-width:599px){
+  .an-filter{width:100%}
+  .an-select{flex:1;max-width:none}
+  .an-stepper{flex:1}
+  .an-stepper span{flex:1;min-width:0}
+  .an-bar-row{grid-template-columns:minmax(70px,30%) minmax(0,1fr) auto}
+}
+
+@media (prefers-reduced-motion: reduce){
+  .chart-bar,.chart-group .chart-col,.donut-arc{transition:none}
+}
+
+/* ------------------------------------------- kept for other screens
+   Older shared classes that used to live in index.css and are still used
+   by the Dashboard, Settings, Transactions and Perks. Restyled to the new
+   tokens; the owners of those screens may replace them. */
+.section-block{margin-bottom:24px}
+.section-block h3{font-size:17px;line-height:24px;font-weight:600;margin:0 0 2px}
+.section-sub{font-size:13px;line-height:18px;color:var(--tx3);margin:0 0 16px}
+
+.budget-setup{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-top:12px}
+.budget-setup .filter-input{width:160px}
+.budget-headline{display:flex;gap:24px;flex-wrap:wrap;margin-top:14px;padding:14px 16px;background:var(--sf2);
+  border:1px solid var(--ln);border-radius:var(--r-lg)}
+.budget-headline.is-watch{background:var(--warn-soft);border-color:transparent}
+.budget-headline.is-over{background:var(--crit-soft);border-color:transparent}
+.budget-headline>div{display:flex;flex-direction:column;gap:2px}
+.budget-figure{font-size:17px;line-height:24px;font-weight:600;color:var(--tx);font-variant-numeric:tabular-nums lining-nums}
+.budget-verdict{display:flex;align-items:flex-start;gap:8px;margin:10px 0 0;font-size:13px;line-height:18px;color:var(--tx2)}
+.budget-verdict svg{width:16px;height:16px;flex-shrink:0;margin-top:1px}
+.budget-bar{height:6px;border-radius:3px;background:var(--sunk);overflow:hidden;margin-top:14px}
+.budget-bar-fill{height:100%;background:var(--tx)}
+.budget-commitments{margin-top:18px}
+.budget-commitment{display:flex;align-items:center;gap:10px;padding:8px 0;font-size:14px;color:var(--tx2);border-bottom:1px solid var(--ln)}
+.budget-commitment:last-of-type{border-bottom:none}
+.budget-commitment>span:first-of-type{flex:1}
+.budget-commitment .is-paid{text-decoration:line-through;color:var(--tx3)}

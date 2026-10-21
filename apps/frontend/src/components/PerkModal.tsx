@@ -121,7 +121,7 @@ export function PerkModal({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="modal modal-wide">
+      <div className="modal modal-wide" role="dialog" aria-modal="true">
         <button className="modal-close" onClick={onClose} aria-label="Close">
           <Icon name="ic-x" />
         </button>
@@ -132,16 +132,16 @@ export function PerkModal({
         </div>
 
         {perk?.needsReview && (
-          <div className="read-banner">
+          <div className="callout callout-info read-banner">
             <Icon name="ic-info" />
-            <div>
+            <div className="callout-body">
               <b>Read from a screenshot.</b> Check the figures against the text below before
               relying on it — "20% up to ₹150" and "₹150 off" are easy to mix up.
             </div>
           </div>
         )}
 
-        <div className="seg" style={{ marginBottom: 16 }}>
+        <div className="seg perk-kind-seg">
           <button className={kind === "COUPON" ? "on" : ""} onClick={() => setKind("COUPON")}>
             Coupon
           </button>
@@ -151,7 +151,7 @@ export function PerkModal({
         </div>
 
         <div className="form-grid">
-          <label className="field field-wide">
+          <label className="field form-row-wide">
             <span>What it is</span>
             <input
               autoFocus
@@ -161,7 +161,7 @@ export function PerkModal({
             />
           </label>
 
-          <label className="field field-wide">
+          <label className="field form-row-wide">
             <span>Where it works</span>
             <input
               value={merchants}
@@ -273,7 +273,7 @@ export function PerkModal({
             <span className="field-hint">Where you got it, so you know which app to open.</span>
           </label>
 
-          <label className="field field-wide">
+          <label className="field form-row-wide">
             <span>Terms &amp; conditions</span>
             <textarea
               className="perk-textarea"
@@ -284,7 +284,7 @@ export function PerkModal({
             />
           </label>
 
-          <label className="field field-wide">
+          <label className="field form-row-wide">
             <span>Notes</span>
             <input
               value={notes}
@@ -303,7 +303,11 @@ export function PerkModal({
           </details>
         )}
 
-        {error && <p className="modal-error">{error}</p>}
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
 
         <div className="modal-actions">
           <button className="btn btn-ghost" onClick={onClose}>

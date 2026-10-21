@@ -1,7 +1,7 @@
 import { ReactNode, RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /**
- * The few pieces every chart on Home shares: its measured width, a clean
+ * The few pieces every chart on Analytics shares: its measured width, a clean
  * axis maximum, compact rupee labels and the hover tooltip.
  *
  * Charts are drawn in real pixels at the measured width rather than
@@ -40,23 +40,30 @@ export function niceMax(value: number): number {
   return 10 * power;
 }
 
-const compact = new Intl.NumberFormat("en-IN", {
-  style: "currency",
-  currency: "INR",
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
-
-/** ₹1.2K, ₹3.5L: axis ticks and tight labels. Paise in, rupees out. */
-export function formatCompact(amountMinor: number): string {
-  return compact.format(amountMinor / 100);
+/** One decimal, dropped when it's a whole number: 34.2, 12. */
+function oneDecimal(value: number): string {
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
 /**
- * A column with a 4px rounded top and a square foot on the baseline. A
+ * ₹886, ₹12k, ₹34.2k, ₹1.2L: axis ticks and tight labels (design-system
+ * §4.3). Paise in, rupees out; a true minus for anything below zero.
+ */
+export function formatCompact(amountMinor: number): string {
+  const rupees = Math.abs(amountMinor / 100);
+  const sign = amountMinor < 0 ? "−" : "";
+  if (rupees < 1000) return `${sign}₹${Math.round(rupees)}`;
+  if (rupees < 100000) return `${sign}₹${oneDecimal(rupees / 1000)}k`;
+  if (rupees < 10000000) return `${sign}₹${oneDecimal(rupees / 100000)}L`;
+  return `${sign}₹${oneDecimal(rupees / 10000000)}Cr`;
+}
+
+/**
+ * A column with a 2px rounded top and a square foot on the baseline. A
  * zero-height value draws nothing rather than a dot.
  */
-export function columnPath(x: number, baseline: number, width: number, height: number, radius = 4): string {
+export function columnPath(x: number, baseline: number, width: number, height: number, radius = 2): string {
   if (height <= 0) return "";
   const r = Math.min(radius, width / 2, height);
   const top = baseline - height;
@@ -85,7 +92,7 @@ export function ChartTip({ x, width, children }: { x: number; width: number; chi
 
   const left = Math.max(0, Math.min(width - tipWidth, x - tipWidth / 2));
   return (
-    <div className="viz-tip" ref={ref} style={{ left }} role="status">
+    <div className="chart-tip" ref={ref} style={{ left }} role="status">
       {children}
     </div>
   );

@@ -10,7 +10,7 @@ import { Icon } from "../Icon";
 import { lookFor } from "./look";
 
 /**
- * A credit card, drawn as the card in your wallet.
+ * A credit card, drawn as the card in your wallet (design-system.md §7.9).
  *
  * The front is what anyone looking over your shoulder could see anyway:
  * the bank, the last four digits, the network. Along the bottom, how much
@@ -90,60 +90,89 @@ export function CardFace({ card }: { card: CardFaceData }) {
 
   const secondsLeft = Math.max(0, Math.ceil((hidesAt - now) / 1000));
   const style = { "--wcard-bg": look.background } as CSSProperties;
+  const bank = card.issuer?.trim() || card.bankName;
+  const title = card.name.trim().toLowerCase() !== bank.toLowerCase() ? `${bank} · ${card.name}` : bank;
+  const caption = captionFor(card);
 
   return (
-    <article
-      ref={cardRef}
-      className={`wcard is-${card.state}${look.light ? " is-light" : ""}${flipped ? " is-flipped" : ""}`}
-      style={style}
-      aria-label={`${card.name} card ending ${card.last4 ?? "unknown"}`}
-    >
-      <div className="wcard-inner">
-        <div className="wcard-face wcard-front" aria-hidden={flipped}>
-          <Front card={card} flipped={flipped} eyeRef={eyeRef} onEye={openEye} />
+    <figure className="wcard-fig">
+      <article
+        ref={cardRef}
+        className={`wcard is-${card.state}${look.light ? " is-light" : ""}${flipped ? " is-flipped" : ""}`}
+        style={style}
+        aria-label={`${card.name} card ending ${card.last4 ?? "unknown"}`}
+      >
+        <div className="wcard-inner">
+          <div className="wcard-face wcard-front" aria-hidden={flipped}>
+            <Front card={card} title={title} flipped={flipped} eyeRef={eyeRef} onEye={openEye} />
+          </div>
+
+          <div className="wcard-face wcard-back" aria-hidden={!flipped}>
+            {details && (
+              <Back
+                details={details}
+                title={title}
+                secondsLeft={secondsLeft}
+                network={card.network}
+                backRef={backRef}
+                onHide={hide}
+              />
+            )}
+          </div>
         </div>
 
-        <div className="wcard-face wcard-back" aria-hidden={!flipped}>
-          {details && (
-            <Back
-              details={details}
-              secondsLeft={secondsLeft}
-              network={card.network}
-              backRef={backRef}
-              onHide={hide}
-            />
+        {/* Over the page rather than inside the card: the card's 3D context
+            would otherwise become the box a fixed overlay is placed in. */}
+        {asking &&
+          createPortal(
+            <PinPrompt
+              card={card}
+              onRevealed={(revealed) => {
+                setAsking(false);
+                show(revealed);
+              }}
+              onClose={() => {
+                setAsking(false);
+                eyeRef.current?.focus();
+              }}
+            />,
+            document.body
           )}
-        </div>
-      </div>
-
-      {/* Over the page rather than inside the card: the card's 3D context
-          would otherwise become the box a fixed overlay is placed in. */}
-      {asking &&
-        createPortal(
-          <PinPrompt
-            card={card}
-            onRevealed={(revealed) => {
-              setAsking(false);
-              show(revealed);
-            }}
-            onClose={() => {
-              setAsking(false);
-              eyeRef.current?.focus();
-            }}
-          />,
-          document.body
-        )}
-    </article>
+      </article>
+      {caption && <figcaption className={`wcard-caption${caption.crit ? " is-crit" : ""}`}>{caption.text}</figcaption>}
+    </figure>
   );
+}
+
+/** The line under a card: what needs saying that the face can't. */
+function captionFor(card: CardFaceData): { text: string; crit: boolean } | null {
+  const limit = card.creditLimitMinor;
+  if (!card.cycleKnown) {
+    return { text: "Not set up · payments still count, but due dates and cycles are unknown.", crit: false };
+  }
+  if (limit && (card.state === "over" || card.state === "close")) {
+    const used = card.usedMinor ?? card.outstandingMinor ?? 0;
+    const pct = Math.round((used / limit) * 100);
+    return {
+      text: `${pct}% used${card.availableMinor !== null ? ` · ${formatMoneyShort(card.availableMinor)} available` : ""}`,
+      crit: card.state === "over",
+    };
+  }
+  if (card.sharesLimitWith.length > 0) {
+    return { text: "Shared limit — the bar shows the whole limit.", crit: false };
+  }
+  return null;
 }
 
 function Front({
   card,
+  title,
   flipped,
   eyeRef,
   onEye,
 }: {
   card: CardFaceData;
+  title: string;
   flipped: boolean;
   eyeRef: MutableRefObject<HTMLButtonElement | null>;
   onEye: () => void;
@@ -156,10 +185,12 @@ function Front({
   const width = fraction === null ? 0 : Math.min(100, Math.max(0, Math.round(fraction * 100)));
 
   const owing = card.lastStatement !== null && card.lastStatement.isPaid === false;
+  const paid = card.lastStatement !== null && card.lastStatement.isPaid === true;
   const dueText = dueLabel(card.daysToDue);
-  const bank = card.issuer?.trim() || card.bankName;
-  const showName = card.name.trim().toLowerCase() !== bank.toLowerCase();
+  const soon = owing && (card.daysToDue ?? 99) <= 3;
+  const owed = card.lastStatement?.owedMinor ?? card.lastStatement?.amountMinor ?? null;
   const tabIndex = flipped ? -1 : undefined;
+  const settings = `/settings?tab=accounts&account=${card.accountId}`;
 
   return (
     <>
@@ -172,10 +203,15 @@ function Front({
       />
 
       <div className="wcard-top">
-        <div className="wcard-bank">
-          <span className="wcard-bank-name">{bank}</span>
-          {showName && <span className="wcard-card-name">{card.name}</span>}
-        </div>
+        <span className="wcard-title">{title}</span>
+        <Wordmark network={card.network} />
+      </div>
+
+      <div className="wcard-mid">
+        <span className="wcard-chip" aria-hidden="true" />
+        <span className="wcard-number">
+          <span aria-hidden="true">•••• •••• ••••</span> {card.last4 ?? "••••"}
+        </span>
         {card.hasCardDetails ? (
           <button
             ref={eyeRef}
@@ -186,76 +222,66 @@ function Front({
             aria-label="Show card details"
             title="Show card details"
           >
-            <EyeIcon />
+            <Icon name="ic-eye" />
           </button>
         ) : (
-          <Link
-            className="wcard-add"
-            to={`/settings?tab=accounts&account=${card.accountId}`}
-            tabIndex={tabIndex}
-          >
-            <Icon name="ic-plus" /> Add card details
+          <Link className="wcard-add" to={settings} tabIndex={tabIndex}>
+            <Icon name="ic-plus" /> Card details
           </Link>
         )}
       </div>
 
-      <div className="wcard-chip-row">
-        <span className="wcard-chip" aria-hidden="true" />
-        <ContactlessIcon />
-        {card.sharesLimitWith.length > 0 && (
-          <span className="wcard-shared" title={`Shares a limit with ${card.sharesLimitWith.join(", ")}`}>
-            Shared limit
-          </span>
+      <div className="wcard-bottom">
+        {card.cycleKnown ? (
+          <>
+            <div
+              className="wcard-bar"
+              role="img"
+              aria-label={fraction === null ? "No limit to measure against" : `${width}% of the credit limit in use`}
+            >
+              <div className="wcard-bar-fill" style={{ width: `${width}%` }} />
+            </div>
+            <div className="wcard-usage">
+              {!limit
+                ? "No credit limit set"
+                : card.sharesLimitWith.length > 0
+                  ? `Shares the ${formatMoneyShort(limit)} limit with ${card.sharesLimitWith.join(", ")}${
+                      card.availableMinor !== null ? ` · ${formatMoneyShort(card.availableMinor)} available` : ""
+                    }`
+                  : `${formatMoneyShort(used)} of ${formatMoneyShort(limit)} used${
+                      card.availableMinor !== null ? ` · ${formatMoneyShort(card.availableMinor)} available` : ""
+                    }`}
+            </div>
+          </>
+        ) : (
+          <div className="wcard-setup">
+            <Icon name="ic-calendar" />
+            <span>We don’t know when this card’s bill closes.</span>
+            <Link className="wcard-setup-btn" to={settings} tabIndex={tabIndex}>
+              Set billing date
+            </Link>
+          </div>
         )}
-      </div>
 
-      <div className="wcard-number">
-        <span aria-hidden="true">•••• •••• ••••</span> {card.last4 ?? "••••"}
-      </div>
-
-      <div className="wcard-foot">
-        <div className="wcard-stat">
-          <span className="wcard-stat-label">This cycle</span>
-          <span className="wcard-stat-value">
-            {card.unbilledMinor === null ? "—" : formatMoneyShort(card.unbilledMinor)}
+        <div className="wcard-bill">
+          <span className={`wcard-bill-due${soon ? " is-soon" : ""}`}>
+            {owing ? (
+              <>
+                Bill{owed !== null ? ` ${formatMoneyShort(owed)}` : ""} due{" "}
+                {card.nextDueOn ? formatShortDate(card.nextDueOn) : ""}
+                {dueText ? ` · ${dueText}` : ""}
+              </>
+            ) : paid ? (
+              <>
+                <Icon name="ic-check" /> Bill paid
+              </>
+            ) : card.nextDueOn ? (
+              <>Next due {formatShortDate(card.nextDueOn)}</>
+            ) : null}
           </span>
-        </div>
-        <div className={`wcard-stat${owing && (card.daysToDue ?? 99) <= 3 ? " is-urgent" : ""}`}>
-          <span className="wcard-stat-label">{owing ? "Bill due" : "Next due"}</span>
-          <span className="wcard-stat-value">
-            {card.nextDueOn ? formatShortDate(card.nextDueOn) : "—"}
-            {owing && dueText && <small> · {dueText}</small>}
+          <span className="wcard-cycle">
+            This cycle {card.unbilledMinor === null ? "—" : formatMoneyShort(card.unbilledMinor)}
           </span>
-        </div>
-        <Wordmark network={card.network} />
-      </div>
-
-      <div className="wcard-limit">
-        <div className="wcard-limit-text">
-          {!card.cycleKnown ? (
-            <span>No billing date set</span>
-          ) : limit ? (
-            <>
-              <span>{formatMoneyShort(used)} used</span>
-              <span>
-                {card.availableMinor !== null ? `${formatMoneyShort(card.availableMinor)} available of ` : "of "}
-                {formatMoneyShort(limit)}
-              </span>
-            </>
-          ) : (
-            <span>No credit limit set</span>
-          )}
-        </div>
-        <div
-          className="wcard-bar"
-          role="img"
-          aria-label={
-            fraction === null
-              ? "No limit to measure against"
-              : `${width}% of the credit limit in use`
-          }
-        >
-          <div className="wcard-bar-fill" style={{ width: `${width}%` }} />
         </div>
       </div>
     </>
@@ -264,12 +290,14 @@ function Front({
 
 function Back({
   details,
+  title,
   secondsLeft,
   network,
   backRef,
   onHide,
 }: {
   details: Revealed;
+  title: string;
   secondsLeft: number;
   network: CardNetwork | null;
   backRef: MutableRefObject<HTMLButtonElement | null>;
@@ -281,31 +309,46 @@ function Back({
     onHide();
   }
 
+  // The countdown ring: the share of the minute still to run.
+  const share = Math.max(0, Math.min(1, secondsLeft / (SHOWN_FOR_MS / 1000)));
+  const circumference = 2 * Math.PI * 7.75;
+
   return (
     <div className="wcard-back-body" onClick={onClick}>
       <div className="wcard-stripe" aria-hidden="true" />
-      <div className="wcard-back-number">
-        <span className="wcard-stat-label">Card number</span>
-        <span className="wcard-back-digits">
-          {spaced(details.number)} <CopyButton text={details.number} />
+      <div className="wcard-back-top">
+        <span className="wcard-title">{title}</span>
+        <span className="wcard-countdown">
+          <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
+            <circle cx="10" cy="10" r="7.75" className="ring-track" />
+            <circle
+              cx="10"
+              cy="10"
+              r="7.75"
+              className="ring-arc"
+              strokeDasharray={`${circumference * share} ${circumference}`}
+              transform="rotate(-90 10 10)"
+            />
+          </svg>
+          Hides in {secondsLeft} s
         </span>
       </div>
+      <div className="wcard-back-digits">
+        {spaced(details.number)} <CopyButton text={details.number} />
+      </div>
       <div className="wcard-back-row">
-        <div className="wcard-stat">
-          <span className="wcard-stat-label">Valid thru</span>
-          <span className="wcard-stat-value">{details.expiry || "—"}</span>
+        <div className="wcard-back-stat">
+          <span className="wcard-back-label">Valid thru</span>
+          <span className="wcard-back-expiry">{details.expiry || "—"}</span>
         </div>
-        <div className="wcard-stat is-name">
-          <span className="wcard-stat-label">Name on card</span>
-          <span className="wcard-stat-value">{details.nameOnCard || "—"}</span>
-        </div>
+        <span className="wcard-back-name">{details.nameOnCard || "—"}</span>
         <Wordmark network={network} />
       </div>
       {details.note && <p className="wcard-back-note">{details.note}</p>}
       <div className="wcard-back-foot">
-        <span>No CVV stored · hides in {secondsLeft}s</span>
+        <span>No CVV stored</span>
         <button ref={backRef} type="button" className="wcard-hide" onClick={onHide}>
-          <Icon name="ic-lock" /> Hide
+          <Icon name="ic-lock" /> Hide now
         </button>
       </div>
     </div>
@@ -359,7 +402,12 @@ function PinPrompt({
         <button className="modal-close" onClick={onClose} aria-label="Close">
           <Icon name="ic-x" />
         </button>
-        <h3 id={`pin-${card.accountId}`}>Show card details</h3>
+        <div className="wcard-prompt-head">
+          <span className="icon-tile tile-ac">
+            <Icon name="ic-lock" />
+          </span>
+          <h3 id={`pin-${card.accountId}`}>Show card details</h3>
+        </div>
         <div className="modal-sub">
           {card.name} ••{card.last4 ?? "••••"} · the same PIN as on the accounts screen
         </div>
@@ -384,28 +432,16 @@ function PinPrompt({
   );
 }
 
-/** The network's name, set the way it appears on the card. */
+/** The network's name, set as type the way the design draws it. */
 export function Wordmark({ network }: { network: CardNetwork | null }) {
   if (!network) return <span className="wcard-mark" />;
   switch (network) {
     case "VISA":
       return <span className="wcard-mark is-visa">VISA</span>;
     case "MASTERCARD":
-      return (
-        <span className="wcard-mark is-mastercard" aria-label="Mastercard">
-          <span className="wcard-mc" aria-hidden="true">
-            <i />
-            <i />
-          </span>
-          mastercard
-        </span>
-      );
+      return <span className="wcard-mark is-mastercard">Mastercard</span>;
     case "RUPAY":
-      return (
-        <span className="wcard-mark is-rupay">
-          RuPay<i aria-hidden="true" />
-        </span>
-      );
+      return <span className="wcard-mark is-rupay">RuPay</span>;
     case "AMEX":
       return <span className="wcard-mark is-amex">AMEX</span>;
     case "DINERS":
@@ -420,23 +456,4 @@ function dueLabel(days: number | null): string | null {
   if (days === 1) return "tomorrow";
   if (days < 0) return `${-days} ${days === -1 ? "day" : "days"} late`;
   return `in ${days} days`;
-}
-
-function EyeIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" />
-      <circle cx="12" cy="12" r="3" />
-    </svg>
-  );
-}
-
-function ContactlessIcon() {
-  return (
-    <svg className="wcard-contactless" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M8.5 8.5a5 5 0 0 1 0 7" />
-      <path d="M12 6a8.5 8.5 0 0 1 0 12" />
-      <path d="M15.5 3.5a12 12 0 0 1 0 17" />
-    </svg>
-  );
 }

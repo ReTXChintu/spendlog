@@ -64,7 +64,7 @@ export function PerkImportBar({
       />
 
       <button
-        className="btn btn-sm"
+        className="btn btn-lg"
         disabled={sending !== null}
         onClick={() => {
           // Asked here, when "tell me when it's done" is the obvious next
@@ -73,8 +73,8 @@ export function PerkImportBar({
           picker.current?.click();
         }}
       >
-        <Icon name="ic-search" />
-        {sending ? `Sending ${sending.done} of ${sending.total}…` : "Read screenshots"}
+        {sending ? <span className="spinner sm" aria-hidden="true" /> : <Icon name="ic-upload" />}
+        {sending ? `Sending ${sending.done} of ${sending.total}…` : "Choose files"}
       </button>
     </>
   );
@@ -94,14 +94,24 @@ export function PerkImportStatus() {
     const current = Math.min(read + 1, total);
 
     return (
-      <div className="perk-reading" role="status" aria-live="polite">
-        <span className="perk-reading-dot" aria-hidden="true" />
-        <span>
-          Reading {current} of {total}…
-        </span>
-        <span className="perk-reading-meter" aria-hidden="true">
-          <span style={{ width: `${total ? Math.round((read / total) * 100) : 0}%` }} />
-        </span>
+      <div className="card import-card" role="status" aria-live="polite" aria-busy="true">
+        <div className="import-head">
+          <span className="spinner" aria-hidden="true" />
+          <div className="import-head-main">
+            <div className="import-title">
+              Reading {total} {total === 1 ? "screenshot" : "screenshots"}…
+            </div>
+            <div className="import-sub">
+              We’ll notify you when your coupons are ready. You can leave this page.
+            </div>
+          </div>
+          <span className="import-count num">
+            {current} of {total}
+          </span>
+        </div>
+        <div className="meter import-meter" aria-hidden="true">
+          <div className="meter-fill" style={{ width: `${total ? Math.round((read / total) * 100) : 0}%` }} />
+        </div>
       </div>
     );
   }
@@ -110,17 +120,16 @@ export function PerkImportStatus() {
 
   const detail = finishedDetail(lastFinished);
   return (
-    <div className="import-bar">
+    <div className="card import-card">
       <div className="import-head">
-        <span>
-          <b>{finishedHeadline(lastFinished)}.</b>
-          {detail && ` ${detail}.`}
+        <span className={`icon-tile ${lastFinished.failures.length > 0 ? "tile-warn" : "tile-good"}`}>
+          <Icon name={lastFinished.failures.length > 0 ? "ic-alert-triangle" : "ic-check"} />
         </span>
-        <button
-          className="btn btn-sm btn-ghost"
-          onClick={() => setLastFinished(null)}
-          aria-label="Dismiss"
-        >
+        <div className="import-head-main">
+          <div className="import-title">{finishedHeadline(lastFinished)}</div>
+          {detail && <div className="import-sub">{detail}.</div>}
+        </div>
+        <button className="icon-btn" onClick={() => setLastFinished(null)} aria-label="Dismiss">
           <Icon name="ic-x" />
         </button>
       </div>
@@ -128,7 +137,8 @@ export function PerkImportStatus() {
         <ul className="import-failures">
           {lastFinished.failures.map((failure, index) => (
             <li key={`${failure.fileName}-${index}`}>
-              <b>{failure.fileName}</b> — {failure.problem ?? "could not be read"}
+              <span className="mono import-file">{failure.fileName}</span>
+              <span className="import-problem">{failure.problem ?? "Couldn’t be read"}</span>
             </li>
           ))}
         </ul>

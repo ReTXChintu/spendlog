@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../../lib/api";
-import { formatMoney } from "../../lib/format";
+import { formatMoney, formatMoneyShort } from "../../lib/format";
 import { Category, MonthlyBudgetStatus, PEOPLE_CATEGORY_NAME, categoriesFor } from "../../types";
 import { Icon } from "../Icon";
 import "../../styles/budget.css";
@@ -152,123 +152,167 @@ export function BudgetEditor({
         <button className="modal-close" onClick={onClose} aria-label="Close">
           <Icon name="ic-x" />
         </button>
-        <h3 id="budget-editor-title">Monthly budget</h3>
-        <div className="modal-sub">
-          Everything counts against it — rent, EMIs, SIPs and the day to day. Whatever is left at the end of the
-          month goes to savings.
-        </div>
 
-        <label className="field budget-editor-total">
-          <span>For the whole month</span>
-          <div className="amount-input">
-            <span className="prefix">₹</span>
-            <input
-              autoFocus
-              className="filter-input"
-              inputMode="decimal"
-              value={total}
-              onChange={(event) => {
-                setTotal(event.target.value);
-                setError(null);
-              }}
-              placeholder="20000"
-            />
-          </div>
-          {status?.suggestedMonthlyMinor && !status.budgetMinor ? (
-            <span className="field-hint">
-              Your old daily budget comes to {formatMoney(status.suggestedMonthlyMinor)} over this month.
-            </span>
-          ) : null}
-        </label>
-
-        <div className="budget-editor-section">
-          <div className="budget-editor-head">
-            <span className="trip-settle-title">Category limits</span>
-            <span className="field-hint">Optional. They share out the total; they never add to it.</span>
+        <div className="budget-editor-top">
+          <div className="budget-editor-intro">
+            <h3 id="budget-editor-title">Monthly budget</h3>
+            <p className="budget-editor-sub">
+              Everything counts against it — rent, EMIs, SIPs and the day to day. Whatever is left at the end of the
+              month goes to savings.
+            </p>
           </div>
 
-          {rows.length > 0 && (
-            <ul className="budget-limit-rows">
-              {rows.map((row) => {
-                const spent = row.categoryId ? spentByCategory.get(row.categoryId) : undefined;
-                return (
-                  <li className="budget-limit-row" key={row.key}>
-                    <select
-                      className="filter-select"
-                      aria-label="Category"
-                      value={row.categoryId}
-                      onChange={(event) => update(row.key, { categoryId: event.target.value })}
-                    >
-                      <option value="" disabled>
-                        Pick a category
-                      </option>
-                      {spendable
-                        .filter((category) => category.id === row.categoryId || !used.has(category.id))
-                        .map((category) => (
-                          <option key={category.id} value={category.id}>
-                            {category.name}
-                          </option>
-                        ))}
-                    </select>
-                    <div className="amount-input">
-                      <span className="prefix">₹</span>
-                      <input
-                        className="filter-input"
-                        inputMode="decimal"
-                        aria-label="Limit"
-                        value={row.amount}
-                        onChange={(event) => update(row.key, { amount: event.target.value })}
-                        placeholder="0"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm budget-limit-remove"
-                      aria-label="Remove this limit"
-                      onClick={() => setRows((current) => current.filter((other) => other.key !== row.key))}
-                    >
-                      <Icon name="ic-x" />
-                    </button>
-                    {spent !== undefined && spent > 0 && (
-                      <span className="budget-limit-spent">{formatMoney(spent)} spent this month</span>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={addRow}
-            disabled={categories !== null && unused.length === 0}
-          >
-            <Icon name="ic-plus" /> Add a category limit
-          </button>
+          <label className="field budget-editor-total">
+            <span>Total budget a month</span>
+            <div className="amount-input">
+              <span className="prefix">₹</span>
+              <input
+                autoFocus
+                className="filter-input num"
+                inputMode="decimal"
+                value={total}
+                aria-invalid={over || undefined}
+                onChange={(event) => {
+                  setTotal(event.target.value);
+                  setError(null);
+                }}
+                placeholder="20000"
+              />
+            </div>
+            {status?.suggestedMonthlyMinor && !status.budgetMinor ? (
+              <span className="field-hint">
+                Your old daily budget comes to {formatMoney(status.suggestedMonthlyMinor)} over this month.
+              </span>
+            ) : null}
+          </label>
         </div>
 
         {/* Kept in view as the limits are typed: how much of the total they take. */}
-        <div className={`budget-meter${over ? " is-over" : ""}`} aria-live="polite">
-          <div className="budget-meter-bar">
-            <div className="budget-meter-fill" style={{ width: `${over ? 100 : assignedShare}%` }} />
-          </div>
+        <div
+          className={`budget-meter${over ? " is-over" : totalMinor ? " is-ok" : ""}`}
+          aria-live="polite"
+          role={over ? "alert" : undefined}
+        >
           <div className="budget-meter-text">
             {totalMinor === null || totalMinor === 0 ? (
               "Set the total first."
             ) : over ? (
               <>
-                <Icon name="ic-alert" />
-                Limits come to {formatMoney(assignedMinor)}, {formatMoney(-unassignedMinor)} more than the{" "}
-                {formatMoney(totalMinor)} budget. Lower a limit or raise the budget.
+                <Icon name="ic-alert-triangle" />
+                <span>
+                  Limits can’t add up to more than the budget — they come to {formatMoneyShort(assignedMinor)},{" "}
+                  {formatMoneyShort(-unassignedMinor)} more than the {formatMoneyShort(totalMinor)} budget. Lower a limit or raise
+                  the budget.
+                </span>
               </>
             ) : (
               <>
-                <b>{formatMoney(assignedMinor)}</b> of {formatMoney(totalMinor)} assigned ·{" "}
-                <b>{formatMoney(unassignedMinor)}</b> unassigned, for everything else
+                <Icon name="ic-check" />
+                <span>
+                  <b className="num">{formatMoneyShort(assignedMinor)}</b> of {formatMoneyShort(totalMinor)} assigned ·{" "}
+                  <b className="num">{formatMoneyShort(unassignedMinor)}</b> unassigned, for everything else
+                </span>
               </>
             )}
           </div>
+          <div className="budget-meter-bar">
+            <div className="budget-meter-fill" style={{ width: `${over ? 100 : assignedShare}%` }} />
+          </div>
+        </div>
+
+        <div className="budget-editor-section">
+          <div className="budget-editor-head">
+            <span className="budget-editor-head-title">Category limits</span>
+            <span className="field-hint">Optional. They share out the total; they never add to it.</span>
+          </div>
+
+          {rows.length > 0 && (
+            <div className="budget-limit-table" role="table" aria-label="Category limits">
+              <div className="budget-limit-row is-head" role="row">
+                <span role="columnheader">Category</span>
+                <span role="columnheader" className="is-right">
+                  Limit
+                </span>
+                <span role="columnheader">Spent so far</span>
+                <span role="columnheader" aria-label="Remove" />
+              </div>
+              {rows.map((row) => {
+                const spent = row.categoryId ? spentByCategory.get(row.categoryId) : undefined;
+                const rowMinor = toMinor(row.amount);
+                const share =
+                  spent !== undefined && rowMinor ? Math.min(100, Math.round((spent / rowMinor) * 100)) : null;
+                return (
+                  <div className="budget-limit-row" role="row" key={row.key}>
+                    <span role="cell">
+                      <select
+                        className="filter-select"
+                        aria-label="Category"
+                        value={row.categoryId}
+                        onChange={(event) => update(row.key, { categoryId: event.target.value })}
+                      >
+                        <option value="" disabled>
+                          Pick a category
+                        </option>
+                        {spendable
+                          .filter((category) => category.id === row.categoryId || !used.has(category.id))
+                          .map((category) => (
+                            <option key={category.id} value={category.id}>
+                              {category.name}
+                            </option>
+                          ))}
+                      </select>
+                    </span>
+                    <span role="cell" className="amount-input budget-limit-amount">
+                      <span className="prefix">₹</span>
+                      <input
+                        className="filter-input num"
+                        inputMode="decimal"
+                        aria-label="Limit"
+                        aria-invalid={over || undefined}
+                        value={row.amount}
+                        onChange={(event) => update(row.key, { amount: event.target.value })}
+                        placeholder="0"
+                      />
+                    </span>
+                    <span role="cell" className="budget-limit-spent">
+                      {spent !== undefined && spent > 0 ? (
+                        <>
+                          <span className={`limit-bar${share !== null && share >= 100 ? " is-over" : ""}`}>
+                            <span
+                              className={`fill${share !== null && share >= 90 ? " is-over" : ""}`}
+                              style={{ width: `${share ?? 0}%` }}
+                            />
+                          </span>
+                          <span className="num">{formatMoneyShort(spent)} spent this month</span>
+                        </>
+                      ) : (
+                        <span className="tx3">Nothing yet this month</span>
+                      )}
+                    </span>
+                    <span role="cell">
+                      <button
+                        type="button"
+                        className="icon-btn budget-limit-remove"
+                        aria-label="Remove this limit"
+                        onClick={() => setRows((current) => current.filter((other) => other.key !== row.key))}
+                      >
+                        <Icon name="ic-trash" />
+                      </button>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <button
+            type="button"
+            className="btn btn-md"
+            onClick={addRow}
+            disabled={categories !== null && unused.length === 0}
+          >
+            <Icon name="ic-plus" /> Add a category limit
+          </button>
         </div>
 
         {error && (
@@ -277,7 +321,7 @@ export function BudgetEditor({
           </p>
         )}
 
-        <div className="modal-actions">
+        <div className="modal-actions budget-editor-actions">
           <span className="field-hint">
             Applies from {status?.month.label ?? "this month"} on. Months already over keep the budget they had.
           </span>

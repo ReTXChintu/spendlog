@@ -68,7 +68,7 @@ export function BalancePanel({ account, onChanged }: { account: AccountOverview;
   return (
     <div className="balance-panel">
       <div className="balance-head">
-        <span className="figure-label">Balance</span>
+        <span className="balance-title">Balance</span>
         {balance && mode === "idle" && (
           <span className="balance-actions">
             <button className="btn btn-sm" onClick={() => setMode("check")}>
@@ -107,13 +107,44 @@ export function BalancePanel({ account, onChanged }: { account: AccountOverview;
       )}
 
       {balance && mode !== "set" && (
-        <div className="balance-figure">
-          <span className="figure-value num">{formatMoney(balance.expectedMinor)}</span>
-          <span className="figure-note">
-            Should hold now · from {formatMoney(balance.openingMinor)} on {formatDateTime(balance.since)}
-            {" · "}+{formatMoney(balance.inMinor)} in · −{formatMoney(balance.outMinor)} out ·{" "}
-            {balance.transactionCount} {balance.transactionCount === 1 ? "transaction" : "transactions"}
-          </span>
+        <div className="balance-tiles">
+          <div className="figure-card balance-figure">
+            <span className="figure-label">SpendLog expects</span>
+            <span className="figure-value num">{formatMoney(balance.expectedMinor)}</span>
+            <span className="figure-note">
+              From {formatMoney(balance.openingMinor)} on {formatDateTime(balance.since)}
+            </span>
+          </div>
+          <div className="figure-card">
+            <span className="figure-label">Since then</span>
+            <dl className="figure-rows">
+              <div>
+                <dt>Money in</dt>
+                <dd className="num money-in">+{formatMoney(balance.inMinor)}</dd>
+              </div>
+              <div>
+                <dt>Money out</dt>
+                <dd className="num">−{formatMoney(balance.outMinor)}</dd>
+              </div>
+              <div>
+                <dt>Transactions</dt>
+                <dd className="num">{balance.transactionCount}</dd>
+              </div>
+            </dl>
+          </div>
+          {mode === "check" && gap !== null && (
+            <div className={`figure-card balance-diff ${gap === 0 ? "is-match" : "is-off"}`}>
+              <span className="figure-label">Difference</span>
+              <span className="figure-value num">{gap === 0 ? "Matches" : `${formatMoney(Math.abs(gap))} off`}</span>
+              <span className="figure-note">
+                {gap === 0
+                  ? "The bank and SpendLog agree"
+                  : gap < 0
+                    ? "Bank has less than SpendLog"
+                    : "Bank has more than SpendLog"}
+              </span>
+            </div>
+          )}
         </div>
       )}
 
@@ -175,7 +206,7 @@ export function BalancePanel({ account, onChanged }: { account: AccountOverview;
             />
           </label>
           {gap !== null && (
-            <p className={`balance-verdict ${gap === 0 ? "is-match" : "is-gap"}`}>
+            <p className={`callout balance-verdict ${gap === 0 ? "callout-good" : "callout-crit"}`}>
               <Icon name={gap === 0 ? "ic-check" : "ic-alert"} />
               {gap === 0
                 ? "Matches — nothing missing."

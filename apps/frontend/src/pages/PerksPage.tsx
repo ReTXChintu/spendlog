@@ -136,16 +136,81 @@ export function PerksPage() {
     load();
   }
 
+  const coupons = perks.filter((perk) => perk.kind === "COUPON" && perk.isLive !== false).length;
+  const endingSoon = perks.filter(
+    (perk) => perk.isLive !== false && !perk.usedAt && typeof perk.daysLeft === "number" && perk.daysLeft >= 0 && perk.daysLeft <= 10
+  ).length;
+
   return (
-    <section className="screen">
+    <section className="screen perks-screen">
       <div className="screen-header">
         <h1 className="screen-title">Perks</h1>
+        {perks.length > 0 && (
+          <span className="badge badge-neutral">
+            {coupons} {coupons === 1 ? "coupon" : "coupons"}
+          </span>
+        )}
+        {endingSoon > 0 && <span className="badge badge-warn">{endingSoon} ending in 10 days</span>}
         <div className="screen-actions">
-          {/* Only where the server has a model to read with. A deployment
-              without one hides this rather than offering a button that
-              fails - reading a picture is an extra way to add a coupon
-              and never the only one. */}
-          {reader?.available && (
+          <button className="btn btn-primary" onClick={() => setEditing({ perk: null })}>
+            <Icon name="ic-plus" /> Add one
+          </button>
+        </div>
+      </div>
+
+      <div className="perks-top">
+        <form className="card ask-bar" onSubmit={ask}>
+          <div className="ask-bar-head">
+            <span className="icon-tile">
+              <Icon name="ic-search" />
+            </span>
+            <div>
+              <h2 className="t-title-card">Do I have anything here?</h2>
+              <p className="ask-bar-sub">Say where you are, and roughly how much, before you pay.</p>
+            </div>
+          </div>
+          <div className="ask-bar-row">
+            <div className="filter-input-icon ask-field">
+              <Icon name="ic-search" />
+              <input
+                autoFocus
+                className="filter-input"
+                placeholder="Where are you? “I'm at Gucci”"
+                aria-label="Where are you?"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+            <div className="amount-input ask-amount">
+              <span className="prefix">₹</span>
+              <input
+                className="filter-input"
+                placeholder="About to spend"
+                aria-label="About to spend"
+                inputMode="decimal"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+              />
+            </div>
+            <button className="btn btn-primary ask-submit" type="submit" disabled={asking || !query.trim()}>
+              {asking ? "Looking…" : "Ask"}
+            </button>
+          </div>
+        </form>
+
+        {/* Only where the server has a model to read with. A deployment
+            without one hides this rather than offering a button that
+            fails - reading a picture is an extra way to add a coupon
+            and never the only one. */}
+        {reader?.available && (
+          <div className="perk-dropzone">
+            <span className="icon-tile">
+              <Icon name="ic-upload" />
+            </span>
+            <div className="perk-dropzone-text">
+              <h2 className="t-title-card">Read coupon screenshots</h2>
+              <p>Reading takes about 30 seconds a picture — we’ll notify you when they’re ready. Up to 40 at a time.</p>
+            </div>
             <PerkImportBar
               onStarted={(job) =>
                 setNotice({
@@ -161,61 +226,36 @@ export function PerksPage() {
               }
               onError={(text) => setNotice({ tone: "warn", text })}
             />
-          )}
-          <button className="btn btn-sm btn-primary" onClick={() => setEditing({ perk: null })}>
-            <Icon name="ic-plus" /> Add one
-          </button>
-        </div>
+          </div>
+        )}
       </div>
 
       {notice && (
         <div
-          className={`perk-notice${notice.tone === "warn" ? " is-warn" : ""}`}
+          className={`callout perk-notice ${notice.tone === "warn" ? "callout-warn" : "callout-good"}`}
           role={notice.tone === "warn" ? "alert" : "status"}
         >
-          <Icon name={notice.tone === "warn" ? "ic-alert" : "ic-check"} />
-          <p>{notice.text}</p>
-          <button className="btn btn-sm btn-ghost" onClick={() => setNotice(null)} aria-label="Dismiss">
+          <Icon name={notice.tone === "warn" ? "ic-alert-triangle" : "ic-check"} />
+          <p className="callout-body">{notice.text}</p>
+          <button className="icon-btn" onClick={() => setNotice(null)} aria-label="Dismiss">
             <Icon name="ic-x" />
           </button>
         </div>
       )}
       <PerkImportStatus />
 
-      <form className="ask-bar" onSubmit={ask}>
-        <div className="ask-field">
-          <Icon name="ic-search" />
-          <input
-            autoFocus
-            className="ask-input"
-            placeholder="Where are you? “I'm at Gucci”"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
-        <input
-          className="filter-input ask-amount"
-          placeholder="₹ about to spend"
-          inputMode="decimal"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-        />
-        <button className="btn btn-primary" type="submit" disabled={asking || !query.trim()}>
-          {asking ? "Looking…" : "Ask"}
-        </button>
-      </form>
-
       {answer && <Answer answer={answer} onUsed={(perk) => markUsed(perk, true)} />}
 
       {unreviewed.length > 0 && (
-        <div className="review-bar">
+        <div className="callout callout-info review-bar">
           <Icon name="ic-info" />
-          <div>
-            <b>
-              {unreviewed.length} {unreviewed.length === 1 ? "perk was" : "perks were"} read off a
-              picture.
-            </b>{" "}
-            Nobody has checked the figures yet — open any that look off, then say you are happy.
+          <div className="callout-body">
+            <div className="callout-title">
+              {unreviewed.length} {unreviewed.length === 1 ? "perk was" : "perks were"} read off a picture.
+            </div>
+            <div className="callout-detail">
+              Nobody has checked the figures yet — open any that look off, then say you are happy.
+            </div>
           </div>
           <button className="btn btn-sm" onClick={confirmAll}>
             All look right
@@ -223,15 +263,15 @@ export function PerksPage() {
         </div>
       )}
 
-      <div className="section-block" style={{ marginTop: 28 }}>
-        <h3>Everything you're holding</h3>
-        <p className="section-sub">
-          A card offer stands until the bank changes it. A coupon is spent once and then gone.
-        </p>
+      <div className="perks-holding">
+        <div className="perks-holding-head">
+          <h2 className="t-title-section">Everything you're holding</h2>
+          <p className="t-caption">A card offer stands until the bank changes it. A coupon is spent once and then gone.</p>
+        </div>
 
         {perks.length === 0 ? (
           <StateBlock
-            icon="ic-percent"
+            icon="ic-tag"
             title="Nothing saved yet"
             body="Add the cashback your cards give at particular shops, and any coupon codes you're sitting on. Then you can ask this page before you pay for anything."
             actions={
@@ -244,7 +284,7 @@ export function PerksPage() {
           <>
             {/* Only worth showing once there is more than one place to pick. */}
             {sources.length + (unsourced > 0 ? 1 : 0) > 1 && (
-              <div className="perk-chips" role="group" aria-label="Filter by where you got it">
+              <div className="chip-row perk-chips" role="group" aria-label="Filter by where you got it">
                 <SourceChip
                   label="All"
                   count={perks.length}
@@ -270,17 +310,17 @@ export function PerksPage() {
                 )}
               </div>
             )}
-          <div className="perk-list">
-            {shown.map((perk) => (
-              <PerkRow
-                key={perk.id}
-                perk={perk}
-                onEdit={() => setEditing({ perk })}
-                onUsed={(used) => markUsed(perk, used)}
-                onRemove={() => remove(perk)}
-              />
-            ))}
-          </div>
+            <div className="perk-list">
+              {shown.map((perk) => (
+                <PerkRow
+                  key={perk.id}
+                  perk={perk}
+                  onEdit={() => setEditing({ perk })}
+                  onUsed={(used) => markUsed(perk, used)}
+                  onRemove={() => remove(perk)}
+                />
+              ))}
+            </div>
           </>
         )}
       </div>
@@ -309,21 +349,27 @@ export function PerksPage() {
  */
 function Answer({ answer, onUsed }: { answer: PerkLookup; onUsed: (perk: PerkMatch) => void }) {
   return (
-    <div className="answer">
-      <div className="answer-verdict">{answer.verdict}</div>
+    <div className="card card-flush answer">
+      <div className="answer-verdict">
+        <Icon name="ic-sparkles" />
+        {answer.verdict}
+      </div>
 
       {answer.matches.map((match) => (
         <div className={`answer-row${match.kind === "COUPON" ? " is-coupon" : ""}`} key={match.id}>
+          <span className={`icon-tile ${match.kind === "COUPON" ? "tile-good" : "tile-ac"}`}>
+            <Icon name={match.kind === "COUPON" ? "ic-tag" : "ic-credit-card"} />
+          </span>
           <div className="answer-main">
             <div className="answer-title">
               {match.title}
               {match.card && <span className="answer-card">on {match.card.name}</span>}
-              {match.reach === "ANYWHERE" && <span className="answer-reach">everywhere</span>}
-              {match.reach === "CATEGORY" && <span className="answer-reach">this category</span>}
+              {match.reach === "ANYWHERE" && <span className="badge badge-neutral">Everywhere</span>}
+              {match.reach === "CATEGORY" && <span className="badge badge-neutral">This category</span>}
             </div>
-            <div className="answer-sub">
+            <div className="answer-sub num">
               {match.valueMinor !== null && match.valueMinor > 0 && (
-                <b>{formatMoney(match.valueMinor)} back. </b>
+                <b className="money-in">{formatMoney(match.valueMinor)} back. </b>
               )}
               {match.minSpendMinor ? `Over ${formatMoneyShort(match.minSpendMinor)}. ` : ""}
               {match.maxDiscountMinor ? `Up to ${formatMoneyShort(match.maxDiscountMinor)}. ` : ""}
@@ -339,7 +385,7 @@ function Answer({ answer, onUsed }: { answer: PerkLookup; onUsed: (perk: PerkMat
             </div>
           </div>
 
-          {match.code && <code className="answer-code">{match.code}</code>}
+          {match.code && <code className="perk-code-text answer-code">{match.code}</code>}
 
           {match.kind === "COUPON" && (
             <button className="btn btn-sm" onClick={() => onUsed(match)}>
@@ -351,9 +397,11 @@ function Answer({ answer, onUsed }: { answer: PerkLookup; onUsed: (perk: PerkMat
 
       {answer.floatAlternative && (
         <div className="answer-float">
-          <Icon name="ic-wallet" />
-          Longest to pay: <b>{answer.floatAlternative.name}</b>, {answer.floatAlternative.floatDays} days
-          {answer.matches.length > 0 ? " — but no offer here." : "."}
+          <Icon name="ic-credit-card" />
+          <span>
+            Longest to pay: <b>{answer.floatAlternative.name}</b>, {answer.floatAlternative.floatDays} days
+            {answer.matches.length > 0 ? " — but no offer here." : "."}
+          </span>
         </div>
       )}
     </div>
@@ -375,10 +423,20 @@ function SourceChip({
   onClick: () => void;
 }) {
   return (
-    <button className={`perk-chip${on ? " is-on" : ""}`} aria-pressed={on} onClick={onClick}>
-      {label} <span className="perk-chip-count">{count}</span>
+    <button className={`chip${on ? " on" : ""}`} aria-pressed={on} onClick={onClick}>
+      {on && <Icon name="ic-check" />}
+      {label} <span className="num">{count}</span>
     </button>
   );
+}
+
+/** Two letters for the card's monogram: the first shop, or the title. */
+function monogramOf(perk: Perk): string {
+  const source = (perk.merchants[0] ?? perk.source ?? perk.title).replace(/[^A-Za-z0-9 ]/g, " ").trim();
+  const parts = source.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "%";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
 function PerkRow({
@@ -393,63 +451,70 @@ function PerkRow({
   onRemove: () => void;
 }) {
   const card = typeof perk.accountId === "object" && perk.accountId ? perk.accountId : null;
-  const worth = perk.percent ? `${perk.percent}%` : perk.flatMinor ? formatMoney(perk.flatMinor) : "";
+  const worth = perk.percent ? `${perk.percent}%` : perk.flatMinor ? formatMoneyShort(perk.flatMinor) : "";
   const terms = perk.terms?.trim();
   const extracted = perk.extractedText?.trim();
+  const daysLeft = perk.daysLeft ?? null;
+  const expired = typeof daysLeft === "number" && daysLeft < 0;
+  const headline = `${worth} ${perk.kind === "COUPON" ? "off" : "back"}${
+    perk.minSpendMinor ? ` on ${formatMoneyShort(perk.minSpendMinor)}+` : ""
+  }${perk.maxDiscountMinor ? ` · up to ${formatMoneyShort(perk.maxDiscountMinor)}` : ""}`;
 
   return (
     <div
-      className={`perk-row perk-row-full${perk.isLive === false ? " is-dead" : ""}${
-        perk.needsReview ? " needs-review" : ""
-      }`}
+      className={`perk-row${perk.isLive === false ? " is-dead" : ""}${perk.needsReview ? " needs-review" : ""}`}
     >
       <div className="perk-row-top">
-        <span className={`perk-kind is-${perk.kind === "COUPON" ? "coupon" : "offer"}`}>
-          {perk.kind === "COUPON" ? "Coupon" : "Card offer"}
-        </span>
-
+        <span className="monogram">{monogramOf(perk)}</span>
         <div className="perk-main">
-          <div className="perk-title">
-            {perk.title} {worth && <span className="perk-worth">{worth}</span>}
-            {perk.source?.trim() && <span className="perk-source">from {perk.source.trim()}</span>}
-            {/* Which of them a machine wrote, so the count in the banner
-                above is findable rather than just a number. */}
-            {perk.needsReview && <span className="perk-unread">read from a picture</span>}
-          </div>
+          <div className="perk-title">{perk.title}</div>
           <div className="perk-sub">
-            {perk.merchants.length > 0 ? perk.merchants.join(", ") : "anywhere"}
+            {perk.source?.trim() ? `From ${perk.source.trim()}` : perk.kind === "COUPON" ? "Coupon" : "Card offer"}
             {card ? ` · ${card.nickname?.trim() || card.bankName}` : ""}
-            {perk.code ? ` · ${perk.code}` : ""}
-            {perk.usedAt
-              ? " · used"
-              : perk.expiresOn
-                ? ` · ${
-                    (perk.daysLeft ?? 0) < 0
-                      ? "expired"
-                      : `${perk.daysLeft} ${perk.daysLeft === 1 ? "day" : "days"} left`
-                  }`
-                : ""}
           </div>
         </div>
-
         <div className="perk-actions">
-          {perk.kind === "COUPON" && (
-            <button className="btn btn-sm btn-ghost" onClick={() => onUsed(!perk.usedAt)}>
-              {perk.usedAt ? "Unuse" : "Used it"}
-            </button>
-          )}
-          <button className="btn btn-sm btn-ghost" onClick={onEdit} aria-label={`Edit ${perk.title}`}>
+          <button className="icon-btn" onClick={onEdit} aria-label={`Edit ${perk.title}`}>
             <Icon name="ic-pencil" />
           </button>
-          <button
-            className="btn btn-sm btn-ghost btn-danger-text"
-            onClick={onRemove}
-            aria-label={`Delete ${perk.title}`}
-          >
-            <Icon name="ic-x" />
+          <button className="icon-btn perk-delete" onClick={onRemove} aria-label={`Delete ${perk.title}`}>
+            <Icon name="ic-trash" />
           </button>
         </div>
       </div>
+
+      {worth && <div className="perk-headline num">{headline}</div>}
+
+      <div className="perk-badges">
+        <span className={`badge ${perk.kind === "COUPON" ? "badge-good" : "badge-ac"}`}>
+          {perk.kind === "COUPON" ? "Coupon" : "Card offer"}
+        </span>
+        {perk.usedAt ? (
+          <span className="badge badge-neutral">Used</span>
+        ) : perk.expiresOn && typeof daysLeft === "number" ? (
+          <span className={`badge ${expired ? "badge-crit" : daysLeft <= 10 ? "badge-warn" : "badge-neutral"}`}>
+            {expired ? "Expired" : `${daysLeft} ${daysLeft === 1 ? "day" : "days"} left`}
+          </span>
+        ) : null}
+        {/* Which of them a machine wrote, so the count in the banner
+            above is findable rather than just a number. */}
+        {perk.needsReview && <span className="badge badge-outline">Read from a picture</span>}
+      </div>
+
+      <p className="perk-where">{perk.merchants.length > 0 ? perk.merchants.join(", ") : "Anywhere"}</p>
+
+      {perk.code && (
+        <div className="perk-code">
+          <span className="perk-code-text">{perk.code}</span>
+          <CopyButton text={perk.code} label="Copy" />
+        </div>
+      )}
+
+      {perk.kind === "COUPON" && (
+        <button className="btn btn-sm perk-used" onClick={() => onUsed(!perk.usedAt)}>
+          {perk.usedAt ? "Unuse" : "Used it"}
+        </button>
+      )}
 
       {/* Native <details>: keyboard and screen-reader friendly for free,
           and closed by default so the list stays scannable. */}
@@ -474,7 +539,7 @@ function PerkRow({
   );
 }
 
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ text, label = "Copy text" }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
 
   async function copy() {
@@ -488,8 +553,8 @@ function CopyButton({ text }: { text: string }) {
   }
 
   return (
-    <button className="btn btn-sm btn-ghost perk-copy" onClick={copy}>
-      {copied ? "Copied" : "Copy text"}
+    <button className="btn btn-sm perk-copy" onClick={copy}>
+      {copied ? "Copied" : label}
     </button>
   );
 }

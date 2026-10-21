@@ -27,26 +27,24 @@ export function StateBlock({
 }
 
 /** Placeholder rows matching the ledger's shape, shown while loading. */
-export function LedgerSkeleton() {
+export function LedgerSkeleton({ caption = "Loading your payments…" }: { caption?: string }) {
   const widths = [
-    ["70%", "45%"],
-    ["55%", "35%"],
-    ["60%", "40%"],
+    ["40%", "24%"],
+    ["32%", "20%"],
+    ["36%", "22%"],
+    ["28%", "18%"],
   ];
   return (
-    <div>
-      <div className="day-header" style={{ borderBottomColor: "var(--line)" }}>
-        <span className="skel skel-line" style={{ width: 70 }} />
-        <span className="skel skel-line" style={{ width: 60 }} />
-      </div>
+    <div className="ledger-skeleton" aria-busy="true" aria-live="polite">
+      <p className="skel-caption">{caption}</p>
       {widths.map(([top, bottom], i) => (
         <div className="skel-row" key={i}>
           <span className="skel skel-circle" />
           <div>
-            <span className="skel skel-line" style={{ width: top, display: "block", marginBottom: 7 }} />
-            <span className="skel skel-line" style={{ width: bottom, display: "block" }} />
+            <span className="skel skel-line" style={{ width: top, marginBottom: 8 }} />
+            <span className="skel skel-line sm" style={{ width: bottom }} />
           </div>
-          <span className="skel skel-line" style={{ width: "100%" }} />
+          <span className="skel skel-line" style={{ width: 72, justifySelf: "end" }} />
         </div>
       ))}
     </div>

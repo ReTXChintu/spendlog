@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ThemeChoice, resolvedTheme, setStoredTheme, storedTheme } from "../lib/theme";
+import { ThemeChoice, onThemeChange, resolvedTheme, setStoredTheme, storedTheme } from "../lib/theme";
 import { Icon } from "./Icon";
 
 /**
@@ -17,6 +17,9 @@ const LABEL: Record<ThemeChoice, string> = {
 
 export function ThemeToggle() {
   const [choice, setChoice] = useState<ThemeChoice>(storedTheme);
+
+  // Follow Settings → Appearance when the theme is picked there.
+  useEffect(() => onThemeChange(setChoice), []);
 
   // Keep up with the OS while the choice is "system".
   useEffect(() => {
@@ -42,7 +45,8 @@ export function ThemeToggle() {
       title={`Theme: ${LABEL[choice]}${choice === "system" ? ` (${showing})` : ""}. Click to change.`}
     >
       <Icon name={showing === "dark" ? "ic-moon" : "ic-sun"} />
-      <span>{LABEL[choice]}</span>
+      <span>Theme</span>
+      <span className="theme-toggle-value">{LABEL[choice]}</span>
     </button>
   );
 }

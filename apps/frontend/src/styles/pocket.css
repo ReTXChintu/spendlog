@@ -1,25 +1,28 @@
 /* ------------------------------------------------------------ pocket money */
-/* Same quiet box as the balance panel above it. Tokens only, so both themes follow. */
-.pocket-panel{margin-top:14px;padding:14px 15px;background:var(--paper);border:1px solid var(--line);
-  border-radius:var(--radius-md);display:flex;flex-direction:column;gap:10px}
-.pocket-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
-.pocket-actions{display:flex;gap:6px;flex-wrap:wrap}
-.pocket-empty{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
-.pocket-desc{margin:0;flex:1;min-width:220px}
+/* A quiet inner panel in the account view (§7.5 inner tile). Bundled before
+   index.css, so shared classes are scoped. Tokens only, so both themes follow. */
+.pocket-panel { margin-top: 14px; padding: 14px 16px; background: var(--sf2); border: 1px solid var(--ln); border-radius: 14px;
+  display: flex; flex-direction: column; gap: 10px; }
+.pocket-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.pocket-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.pocket-empty { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.pocket-desc { margin: 0; flex: 1; min-width: 220px; }
 
-.pocket-status{display:flex;flex-direction:column;gap:4px}
-.pocket-status .figure-value{font-size:22px}
-.pocket-status.is-close .meter-fill{background:var(--warn)}
-.pocket-status.is-over .meter-fill{background:var(--debit)}
+.pocket-status { display: flex; flex-direction: column; gap: 4px; }
+.pocket-status .figure-value { font-size: 22px; line-height: 28px; font-weight: 600; }
+.pocket-status .meter .meter-fill { background: var(--tx); }
+.pocket-status.is-close .meter .meter-fill { background: var(--warn-fill); }
+.pocket-status.is-over .meter .meter-fill { background: var(--crit-fill); }
+.pocket-status.is-over .figure-note { color: var(--crit); font-weight: 600; }
 
 /* Renewal day: the one job this account has, so it stands out. */
-.pocket-topup{display:flex;align-items:center;gap:8px;margin:8px 0 0;padding:9px 11px;font-size:13px;
-  font-weight:600;border-radius:var(--radius-sm);background:var(--warn-bg);color:var(--warn)}
-.pocket-topup.is-done{background:var(--credit-50);color:var(--credit)}
-.pocket-topup svg{width:15px;height:15px;flex-shrink:0}
+.pocket-topup { display: flex; align-items: center; gap: 10px; margin: 8px 0 0; padding: 10px 14px; font-size: 14px; font-weight: 500;
+  border-radius: 12px; background: var(--warn-soft); color: var(--warn); }
+.pocket-topup.is-done { background: var(--good-soft); color: var(--good); }
+.pocket-topup svg { width: 18px; height: 18px; flex-shrink: 0; }
 
-.pocket-form{display:flex;flex-direction:column;gap:10px}
-.pocket-form-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
-.pocket-form .filter-input{width:100%}
+.pocket-form { display: flex; flex-direction: column; gap: 12px; }
+.pocket-form-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
 
-.badge-pocket{background:var(--warn-bg);color:var(--warn)}
+/* The pocket-money badge on a transaction row. */
+.badge.badge-pocket { background: var(--warn-soft); color: var(--warn); }

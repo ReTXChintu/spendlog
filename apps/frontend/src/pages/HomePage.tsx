@@ -7,7 +7,7 @@ import "../styles/home.css";
 
 const TABS = [
   { id: "dashboard", label: "Dashboard", icon: "ic-home" },
-  { id: "analytics", label: "Analytics", icon: "ic-trend" },
+  { id: "analytics", label: "Analytics", icon: "ic-bar-chart" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -43,18 +43,8 @@ export function HomePage() {
   return (
     <section className="screen home">
       <div className="screen-header home-header">
-        <h1 className="screen-title">Home</h1>
-        <div className="screen-actions">
-          <button className="btn btn-sm" onClick={() => navigate("/ask")}>
-            <Icon name="ic-question" /> Ask about my money
-          </button>
-          <button className="btn btn-sm" onClick={() => navigate("/perks")}>
-            <Icon name="ic-percent" /> What do I have here?
-          </button>
-        </div>
-      </div>
-
-      <div className="tabs" role="tablist" aria-label="Home">
+        <h1 className="screen-title">{tab === "analytics" ? "Analytics" : "Home"}</h1>
+        <div className="tabs home-tabs" role="tablist" aria-label="Home">
         {TABS.map((candidate, index) => (
           <button
             key={candidate.id}
@@ -74,6 +64,15 @@ export function HomePage() {
             {candidate.label}
           </button>
         ))}
+        </div>
+        <div className="screen-actions">
+          <button className="btn" onClick={() => navigate("/ask")}>
+            <Icon name="ic-sparkles" /> Ask about my money
+          </button>
+          <button className="btn btn-primary" onClick={() => navigate("/perks")}>
+            <Icon name="ic-tag" /> What do I have here?
+          </button>
+        </div>
       </div>
 
       <div id="home-panel" role="tabpanel" aria-labelledby={`home-tab-${tab}`}>

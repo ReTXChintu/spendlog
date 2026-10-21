@@ -18,9 +18,21 @@ export function storedTheme(): ThemeChoice {
   return value === "light" || value === "dark" || value === "system" ? value : "system";
 }
 
+const CHANGE_EVENT = "spendlog-theme-change";
+
 export function setStoredTheme(choice: ThemeChoice): void {
   localStorage.setItem(STORAGE_KEY, choice);
   applyTheme(choice);
+  // The sidebar toggle and Settings → Appearance each show the choice;
+  // tell whichever one didn't make it.
+  window.dispatchEvent(new CustomEvent<ThemeChoice>(CHANGE_EVENT, { detail: choice }));
+}
+
+/** Calls back whenever the stored choice changes; returns the unsubscribe. */
+export function onThemeChange(listener: (choice: ThemeChoice) => void): () => void {
+  const handler = (event: Event) => listener((event as CustomEvent<ThemeChoice>).detail);
+  window.addEventListener(CHANGE_EVENT, handler);
+  return () => window.removeEventListener(CHANGE_EVENT, handler);
 }
 
 /** What the user is actually looking at right now. */

@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { formatMoney } from "../../lib/format";
+import { formatMoney, formatMoneyShort } from "../../lib/format";
 import { PlanRule } from "../../types";
 import { Icon } from "../Icon";
 
@@ -16,14 +16,16 @@ export function PlanWarnings({ warnings }: { warnings: PlanRule[] }) {
   const over = warnings.filter((warning) => warning.state === "over").length;
 
   return (
-    <section className={`plan-warn${over > 0 ? " is-over" : ""}`} aria-labelledby="plan-warn-title">
+    <section className={`card plan-warn${over > 0 ? " is-over" : ""}`} aria-labelledby="plan-warn-title">
       <div className="plan-warn-head">
-        <Icon name="ic-alert" />
+        <span className={`icon-tile ${over > 0 ? "tile-crit" : "tile-warn"}`} aria-hidden="true">
+          <Icon name="ic-alert-triangle" />
+        </span>
         <h2 id="plan-warn-title">
           {warnings.length === 1 ? "One savings rule needs you" : `${warnings.length} savings rules need you`}
         </h2>
-        <Link className="plan-warn-link" to="/?tab=analytics#ai">
-          See the plan <Icon name="ic-arrow-right" />
+        <Link className="btn-link plan-warn-link" to="/?tab=analytics#ai">
+          See the plan <Icon name="ic-chevron-right" />
         </Link>
       </div>
       <ul className="plan-warn-list">
@@ -48,27 +50,29 @@ export function RuleLine({ rule }: { rule: PlanRule }) {
     <div className={`rule is-${rule.state}`}>
       <div className="rule-top">
         <span className="rule-text">{rule.text}</span>
-        <span className={`rule-pill is-${rule.state}`}>
-          <Icon name={rule.state === "ok" ? "ic-check" : "ic-alert"} />
+        <span
+          className={`badge ${rule.state === "ok" ? "badge-good" : rule.state === "over" ? "badge-crit" : "badge-warn"}`}
+        >
+          <Icon name={rule.state === "ok" ? "ic-check" : "ic-alert-triangle"} />
           {rule.state === "ok" ? "On track" : rule.state === "over" ? "Over" : "Ahead of pace"}
         </span>
       </div>
       {cap != null && (
         <>
           <div
-            className="rule-bar"
+            className="limit-bar rule-bar"
             role="img"
             aria-label={`${formatMoney(spent)} spent of a ${formatMoney(cap)} cap`}
           >
-            <div className="rule-bar-fill" style={{ width: `${pct}%` }} />
+            <span className={`fill${rule.state === "ok" ? "" : rule.state === "over" ? " is-over" : " is-warn"}`} style={{ width: `${pct}%` }} />
             {/* Where spending should be by today, if it were spread evenly. */}
-            {pace !== null && <div className="rule-bar-pace" style={{ left: `${pace}%` }} />}
+            {pace !== null && <span className="pace-tick" style={{ left: `${pace}%` }} />}
           </div>
           <div className="rule-sub num">
-            {formatMoney(spent)} of {formatMoney(cap)}
+            {formatMoneyShort(spent)} of {formatMoneyShort(cap)}
             {rule.category && <> · {rule.category}</>}
             {rule.expectedSoFarMinor != null && rule.state !== "over" && (
-              <> · about {formatMoney(rule.expectedSoFarMinor)} by now</>
+              <> · about {formatMoneyShort(rule.expectedSoFarMinor)} by now</>
             )}
           </div>
         </>

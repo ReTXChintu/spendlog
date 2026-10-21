@@ -1,15 +1,27 @@
+/**
+ * A negative amount reads with a true minus (U+2212), not the hyphen Intl
+ * puts there: "−₹486" (design-system.md §4.3).
+ */
+function trueMinus(formatted: string): string {
+  return formatted.replace(/^-/, "−");
+}
+
 /** Amounts are stored in paise; always shown as ₹ with Indian grouping. */
 export function formatMoney(amountMinor: number, currency = "INR"): string {
-  return new Intl.NumberFormat("en-IN", { style: "currency", currency }).format(amountMinor / 100);
+  return trueMinus(
+    new Intl.NumberFormat("en-IN", { style: "currency", currency }).format(amountMinor / 100)
+  );
 }
 
 /** Compact form for tiles and rollups: ₹42,318 with no paise. */
 export function formatMoneyShort(amountMinor: number, currency = "INR"): string {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 0,
-  }).format(amountMinor / 100);
+  return trueMinus(
+    new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 0,
+    }).format(amountMinor / 100)
+  );
 }
 
 /**
