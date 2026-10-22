@@ -232,7 +232,7 @@ describe("trip.linked", () => {
     const { status, body } = await sendEvent("trip.linked", tripPayload({ owner: asha, members: [asha, ravi] }));
     assert.equal(status, 200);
     assert.ok(body.remoteId);
-    assert.equal(body.url, `https://spend-log.example:50002/trips?trip=${body.remoteId}`);
+    assert.equal(body.url, `https://spend-log.example:50002/groups?group=${body.remoteId}`);
 
     const trip = await tripOf(body.remoteId);
     assert.equal(trip.name, "Goa");

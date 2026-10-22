@@ -60,6 +60,27 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- A group's web page opens here (App Links: verified against
+                 https://spend-log.duckdns.org/.well-known/assetlinks.json).
+                 /trips?trip= is the older form Trippin may still hold. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="spend-log.duckdns.org" android:pathPrefix="/groups" />
+                <data android:scheme="https" android:host="spend-log.duckdns.org" android:pathPrefix="/trips" />
+            </intent-filter>
+            <!-- spendlog://app/groups/<id>: what Trippin opens, which works whether
+                 or not the App Link above is verified. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="spendlog" android:host="app" />
+            </intent-filter>
+            <!-- Links are read by lib/services/deep_links.dart (app_links), not
+                 pushed to the navigator by Flutter. -->
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="false" />
         </activity>
         <!-- Delivers incoming SMS to the background handler in
              lib/services/sms_service.dart, so transactions are captured
@@ -103,6 +124,11 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- "Planned in Trippin": opening the trip in Trippin. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="trippin" />
         </intent>
     </queries>
 </manifest>

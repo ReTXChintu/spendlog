@@ -2,6 +2,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import '../services/api_client.dart';
 import '../services/push_service.dart';
+import '../services/deep_links.dart';
 import '../services/sms_service.dart';
 import '../widgets/ds/ds.dart';
 import 'ask_screen.dart';
@@ -45,6 +46,8 @@ class _HomeShellState extends State<HomeShell> {
     // launch and right after signing in, and never for a kid.
     PushService.instance.registerIfOwner();
     _checkIpos();
+    // A group link that arrived before sign-in opens now.
+    DeepLinks.instance.flush();
   }
 
   /// One call, and the server answers it from its cache. Any failure leaves

@@ -73,7 +73,8 @@ const NAME_MAX = 80;
 
 /** The SpendLog web page for a trip, which Trippin links to. */
 export function tripWebUrl(tripId: Types.ObjectId | string): string {
-  return `${env.frontendUrl.replace(/\/+$/, "")}/trips?trip=${tripId.toString()}`;
+  // The group's page; the phone app opens the same address (an App Link).
+  return `${env.frontendUrl.replace(/\/+$/, "")}/groups?group=${tripId.toString()}`;
 }
 
 /**

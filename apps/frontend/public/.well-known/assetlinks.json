@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "io.github.retxchintu.spendlog",
+      "sha256_cert_fingerprints": ["E9:49:5B:0E:23:43:65:EB:D3:CD:9F:0E:ED:53:93:E6:9C:0B:70:EE:A7:CE:84:E4:78:66:CB:AB:6B:DF:30:FF"]
+    }
+  }
+]

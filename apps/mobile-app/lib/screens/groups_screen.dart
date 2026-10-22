@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../models/models.dart';
+import '../services/deep_links.dart';
 import '../services/api_client.dart';
 import '../widgets/ds/ds.dart';
 import '../utils/format.dart';
@@ -342,10 +342,11 @@ class GroupSourceRow extends StatelessWidget {
 
   const GroupSourceRow({super.key, required this.source, this.tinted = false});
 
+  /// The trip in Trippin when it's installed, else its web page.
   Future<void> _open() async {
     final url = source.url;
     if (url == null || url.isEmpty) return;
-    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    await openSuiteUrl(url);
   }
 
   @override

@@ -49,6 +49,7 @@ dependencies:
   # granted anything. Held at 12: 13 brings permission_handler_android 14,
   # which compiles against SDK 37, and this AGP cannot find that platform.
   permission_handler: ^12.0.1
+  app_links: ^7.2.2
 
 dev_dependencies:
   flutter_test:

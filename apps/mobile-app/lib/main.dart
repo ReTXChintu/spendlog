@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'screens/start_screen.dart';
 import 'services/credential_store.dart';
+import 'services/deep_links.dart';
 import 'services/perk_import_watcher.dart';
 import 'services/reminder_service.dart';
 import 'services/theme_service.dart';
@@ -25,6 +26,8 @@ void main() {
   // Loaded before the first frame so a dark-mode user never sees a light flash.
   ThemeService.instance.load();
   _ownerStartup();
+  // Group links (from Trippin, the web, notifications): opened once signed in.
+  DeepLinks.instance.start();
   runApp(const SpendLogApp());
 }
 
