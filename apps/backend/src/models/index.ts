@@ -112,6 +112,11 @@ export interface UserDoc {
   /// Null on an account that predates the field, which reads as the month
   /// that account was created.
   ledgerFrom?: string | null;
+  /// A fresh start partway through a month: nothing dated before this
+  /// instant is imported, even inside the ledgerFrom month. Set when the
+  /// account's history was cleared from a given day, so the messages still
+  /// on the phone and in Gmail don't bring it all back.
+  ledgerFromAt?: Date | null;
   /// The PIN that unlocks stored card details, as a scrypt hash and its
   /// salt. One PIN covers every card: it guards a screen, not a card, and
   /// nobody wants four of them.
@@ -256,6 +261,7 @@ const userSchema = new Schema<UserDoc>(
     dailyBudgetHistory: { type: [dailyBudgetChangeSchema], default: [] },
     monthlyBudgetHistory: { type: [monthlyBudgetChangeSchema], default: [] },
     ledgerFrom: { type: String, default: null },
+    ledgerFromAt: { type: Date, default: null },
     vaultPin: { type: vaultPinSchema, default: null },
     geminiApiKeyEnc: { type: String, default: null },
     geminiApiKeyHint: { type: String, default: null },

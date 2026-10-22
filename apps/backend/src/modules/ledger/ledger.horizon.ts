@@ -34,10 +34,12 @@ export function defaultHorizon(createdAt: Date): string {
  * should do less, not more.
  */
 export async function horizonFor(userId: Types.ObjectId): Promise<Date | null> {
-  const user = await User.findById(userId).select("ledgerFrom createdAt");
+  const user = await User.findById(userId).select("ledgerFrom ledgerFromAt createdAt");
   if (!user) return null;
 
-  return istMonthStart(user.ledgerFrom ?? defaultHorizon(user.createdAt));
+  const monthStart = istMonthStart(user.ledgerFrom ?? defaultHorizon(user.createdAt));
+  // A fresh start from a given day sits inside its month: the later wins.
+  return user.ledgerFromAt && user.ledgerFromAt > monthStart ? user.ledgerFromAt : monthStart;
 }
 
 /** The same, as the month key a client shows and edits. */

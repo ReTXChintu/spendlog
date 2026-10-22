@@ -110,6 +110,20 @@ describe("where the ledger starts", () => {
     assert.equal((await ingest(alert("28-08-26"), "2026-08-28")).status, "created");
   });
 
+  it("starts from the day of a fresh start, inside its month", async () => {
+    // History cleared from 15 September: the 2nd and the 14th are still on
+    // the phone and must not come back; the 15th itself does.
+    await models.User.findByIdAndUpdate(userId, { $set: { ledgerFromAt: istDayStart("2026-09-15") } });
+    assert.equal((await ingest(alert("02-09-26"), "2026-09-02")).status, "ignored");
+    assert.equal((await ingest(alert("14-09-26"), "2026-09-14")).status, "ignored");
+    assert.equal((await ingest(alert("15-09-26"), "2026-09-15")).status, "created");
+  });
+
+  it("leaves the month start in charge when the fresh start is earlier", async () => {
+    await models.User.findByIdAndUpdate(userId, { $set: { ledgerFromAt: istDayStart("2026-07-15") } });
+    assert.equal((await ingest(alert("28-08-26"), "2026-08-28")).status, "ignored");
+  });
+
   it("imports nothing at all for an account that is gone", async () => {
     // Not everything: a sync for a deleted account should do less rather
     // than more, and "no horizon" must not read as "no limit".
