@@ -80,6 +80,12 @@ class Account {
   final String? sharesLimitWith;
   final int? creditLimitMinor;
 
+  /// For a credit card: what its bank app showed as available, and when -
+  /// carried forward on the server from there. On a card that shares its
+  /// limit it is kept on the holder, so null here.
+  final int? availableLimitMinor;
+  final DateTime? availableLimitAt;
+
   /// The day the card's bill is drawn and the day it falls due. Every card
   /// figure is measured from the first - each card on its own cycle.
   final int? statementDay;
@@ -125,6 +131,8 @@ class Account {
     this.linkedAccountId,
     this.sharesLimitWith,
     this.creditLimitMinor,
+    this.availableLimitMinor,
+    this.availableLimitAt,
     this.statementDay,
     this.dueDay,
     this.isActive = true,
@@ -159,6 +167,8 @@ class Account {
         linkedAccountId: json['linkedAccountId'] as String?,
         sharesLimitWith: json['sharesLimitWith'] as String?,
         creditLimitMinor: json['creditLimitMinor'] as int?,
+        availableLimitMinor: json['availableLimitMinor'] as int?,
+        availableLimitAt: DateTime.tryParse(json['availableLimitAt'] as String? ?? ''),
         statementDay: json['statementDay'] as int?,
         dueDay: json['dueDay'] as int?,
         isActive: json['isActive'] as bool? ?? true,
@@ -771,8 +781,15 @@ class CardStatus {
   final bool outstandingIsEstimate;
 
   /// The credit limit, less the outstanding. For a card on a shared limit,
-  /// the group's figure.
+  /// the group's figure. When a figure was stated - typed in, or the bank's
+  /// "Avl Lmt" - that figure carried forward instead.
   final int? availableMinor;
+
+  /// "computed" | "you" | "sms": where [availableMinor] comes from.
+  final String availableSource;
+
+  /// When the stated figure was true; null when computed.
+  final DateTime? availableAsOf;
 
   /// The other cards this one shares a limit with, named.
   final List<String> sharesLimitWith;
@@ -799,6 +816,8 @@ class CardStatus {
     this.outstandingMinor,
     this.outstandingIsEstimate = false,
     this.availableMinor,
+    this.availableSource = 'computed',
+    this.availableAsOf,
     this.sharesLimitWith = const [],
     this.groupUsedMinor,
     required this.state,
@@ -820,10 +839,55 @@ class CardStatus {
         outstandingMinor: json['outstandingMinor'] as int?,
         outstandingIsEstimate: json['outstandingIsEstimate'] as bool? ?? false,
         availableMinor: json['availableMinor'] as int?,
+        availableSource: json['availableSource'] as String? ?? 'computed',
+        availableAsOf: DateTime.tryParse(json['availableAsOf'] as String? ?? ''),
         sharesLimitWith:
             (json['sharesLimitWith'] as List<dynamic>? ?? []).map((name) => name as String).toList(),
         groupUsedMinor: json['groupUsedMinor'] as int?,
         state: json['state'] as String? ?? 'unset',
+      );
+}
+
+/// What a credit card has left of its limit, as the accounts page shows
+/// it: the figure, and - when one was stated, by the user or by the bank's
+/// own message - how it got from that figure to now.
+class CardAvailability {
+  final int? availableMinor;
+
+  /// "computed" | "you" | "sms".
+  final String source;
+  final DateTime? asOf;
+
+  /// The stated figure, and what was charged (net of refunds) and paid on
+  /// the limit since. Null when computed.
+  final int? anchorMinor;
+  final int? chargedSinceMinor;
+  final int? paidSinceMinor;
+  final int? creditLimitMinor;
+
+  const CardAvailability({
+    this.availableMinor,
+    this.source = 'computed',
+    this.asOf,
+    this.anchorMinor,
+    this.chargedSinceMinor,
+    this.paidSinceMinor,
+    this.creditLimitMinor,
+  });
+
+  /// Whether a figure was stated, rather than added up from the card's rows.
+  bool get isStated => source != 'computed' && availableMinor != null;
+
+  /// From the card's `cycle` block on the accounts overview. An older
+  /// server sends none of the new fields: the figure is then computed.
+  factory CardAvailability.fromJson(Map<String, dynamic> json) => CardAvailability(
+        availableMinor: json['availableMinor'] as int?,
+        source: json['availableSource'] as String? ?? 'computed',
+        asOf: DateTime.tryParse(json['availableAsOf'] as String? ?? ''),
+        anchorMinor: json['availableLimitAnchorMinor'] as int?,
+        chargedSinceMinor: json['chargedSinceAnchorMinor'] as int?,
+        paidSinceMinor: json['paidSinceAnchorMinor'] as int?,
+        creditLimitMinor: json['creditLimitMinor'] as int?,
       );
 }
 

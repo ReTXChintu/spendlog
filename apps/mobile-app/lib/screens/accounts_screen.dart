@@ -4,6 +4,7 @@ import '../services/api_client.dart';
 import '../widgets/ds/ds.dart';
 import '../utils/format.dart';
 import '../widgets/account_balance_panel.dart';
+import '../widgets/card_available_panel.dart';
 import '../widgets/card_vault_panel.dart';
 import '../widgets/edit_account_sheet.dart';
 import '../widgets/pocket_money.dart';
@@ -52,6 +53,10 @@ class _Cycle {
   final int? usedMinor;
   final int? availableMinor;
 
+  /// computed | you | sms - whether [availableMinor] was added up from the
+  /// card's rows or carried forward from a stated figure.
+  final String availableSource;
+
   /// ok | close | over | unset - credit used against the limit.
   final String state;
 
@@ -65,6 +70,7 @@ class _Cycle {
     this.creditLimitMinor,
     this.usedMinor,
     this.availableMinor,
+    this.availableSource = 'computed',
     this.state = 'unset',
   });
 
@@ -78,6 +84,7 @@ class _Cycle {
         creditLimitMinor: json['creditLimitMinor'] as int?,
         usedMinor: json['usedMinor'] as int?,
         availableMinor: json['availableMinor'] as int?,
+        availableSource: json['availableSource'] as String? ?? 'computed',
         state: json['state'] as String? ?? 'unset',
       );
 }
@@ -101,6 +108,10 @@ class _Bill {
 class _Overview {
   final Account account;
   final _Cycle? cycle;
+
+  /// For a credit card: what it has left of its limit and where that
+  /// figure comes from. Null for anything else.
+  final CardAvailability? availability;
   final _Bill? bill;
   final bool hasCardDetails;
 
@@ -122,6 +133,7 @@ class _Overview {
   _Overview({
     required this.account,
     this.cycle,
+    this.availability,
     this.bill,
     required this.hasCardDetails,
     this.tracksBalance = false,
@@ -134,6 +146,9 @@ class _Overview {
   factory _Overview.fromJson(Map<String, dynamic> json) => _Overview(
         account: Account.fromJson(json),
         cycle: json['cycle'] == null ? null : _Cycle.fromJson(json['cycle'] as Map<String, dynamic>),
+        availability: json['accountType'] == 'CARD' && json['cycle'] is Map<String, dynamic>
+            ? CardAvailability.fromJson(json['cycle'] as Map<String, dynamic>)
+            : null,
         bill: json['bill'] == null ? null : _Bill.fromJson(json['bill'] as Map<String, dynamic>),
         hasCardDetails: json['hasCardDetails'] as bool? ?? false,
         tracksBalance: json['tracksBalance'] as bool? ?? false,
@@ -737,6 +752,18 @@ class _AccountsScreenState extends State<AccountsScreen> {
             const SizedBox(height: 4),
           ],
 
+          // A credit card's counterpart to the balance above: what the
+          // bank's app says is left, carried forward from there - with or
+          // without a statement day.
+          if (isCard && row.availability != null)
+            CardAvailablePanel(
+              key: ValueKey('available-${account.id}'),
+              accountId: account.id,
+              availability: row.availability!,
+              sharedWith: _limitSharedWith(account),
+              onChanged: _load,
+            ),
+
           // A credit card bills you rather than holding money someone can
           // be handed, so pocket money is for everything else.
           if (!isCard) ...[
@@ -975,6 +1002,20 @@ class _AccountsScreenState extends State<AccountsScreen> {
     );
   }
 
+  /// The other cards drawing on the same limit as [card], by name: those
+  /// pointing at it, the one it points at, and any pointing there too.
+  List<String> _limitSharedWith(Account card) {
+    final holder = card.sharesLimitWith ?? card.id;
+    return (_accounts ?? const <_Overview>[])
+        .map((row) => row.account)
+        .where((other) =>
+            other.id != card.id &&
+            other.accountType == 'CARD' &&
+            (other.id == holder || other.sharesLimitWith == holder))
+        .map((other) => other.label)
+        .toList();
+  }
+
   /// What this account is, for anything with no cycle to show instead.
   String _standingNote(_Overview row, {required bool isCard, required bool isDebit}) {
     if (isDebit) {
@@ -1055,7 +1096,11 @@ class _AccountsScreenState extends State<AccountsScreen> {
     final billed = cycle.billedUnpaidMinor ?? 0;
     return [
       if (cycle.availableMinor != null)
-        '${formatMoney(cycle.availableMinor!)} available'
+        '${formatMoney(cycle.availableMinor!)} available${switch (cycle.availableSource) {
+          'you' => ' from your figure',
+          'sms' => " from your bank's SMS",
+          _ => '',
+        }}'
       else
         'Set a credit limit to see what is left',
       if (billed > 0) '${cycle.outstandingIsEstimate ? 'about ' : ''}${formatMoney(billed)} of the last bill unpaid',

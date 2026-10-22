@@ -278,14 +278,18 @@ class _CardPagerState extends State<CardPager> {
 /// The first line under a face: credit used against the limit, and what is
 /// left of it. With no credit limit only what is used; with no billing
 /// date, nothing that depends on one - the caption offers to set whichever
-/// is missing after it.
+/// is missing after it. A figure the user or the bank's message stated
+/// needs neither: it is what is left, said as such.
 String cardLimitLine(CardFace card) {
   final limit = card.creditLimitMinor;
-  if (!card.cycleKnown) {
+  final stated = card.availableSource != 'computed' && card.availableMinor != null;
+  if (!card.cycleKnown && !stated) {
     return limit != null && limit > 0 ? '${formatMoneyShort(limit)} credit limit' : 'Cycle unknown';
   }
   final used = creditUsedMinor(card);
-  if (limit == null || limit <= 0) return '${formatMoneyShort(used)} used';
+  if (limit == null || limit <= 0) {
+    return stated ? '${formatMoneyShort(card.availableMinor!)} available' : '${formatMoneyShort(used)} used';
+  }
   final available = card.availableMinor ?? math.max(0, limit - used);
   return '${formatMoneyShort(used)} of ${formatMoneyShort(limit)} used · '
       '${formatMoneyShort(available)} available';

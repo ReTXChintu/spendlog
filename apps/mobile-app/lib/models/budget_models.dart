@@ -418,6 +418,11 @@ class CardFace {
   /// figure when the limit is shared.
   final int usedMinor;
   final int? availableMinor;
+
+  /// computed | you | sms: whether [availableMinor] was added up from the
+  /// card's rows, or carried forward from a figure the user or the bank's
+  /// own message stated - which holds with no billing date too.
+  final String availableSource;
   final List<String> sharesLimitWith;
   final String? cycleStart;
   final String? cycleEnd;
@@ -456,6 +461,7 @@ class CardFace {
     this.outstandingIsEstimate = false,
     this.usedMinor = 0,
     this.availableMinor,
+    this.availableSource = 'computed',
     this.sharesLimitWith = const [],
     this.cycleStart,
     this.cycleEnd,
@@ -492,6 +498,7 @@ class CardFace {
       outstandingIsEstimate: _bool(json['outstandingIsEstimate']),
       usedMinor: _int(json['usedMinor']),
       availableMinor: _intOrNull(json['availableMinor']),
+      availableSource: _str(json['availableSource']) ?? 'computed',
       sharesLimitWith: (json['sharesLimitWith'] as List<dynamic>? ?? []).whereType<String>().toList(),
       cycleStart: _str(json['cycleStart']),
       cycleEnd: _str(json['cycleEnd']),
