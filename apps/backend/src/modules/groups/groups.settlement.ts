@@ -15,12 +15,28 @@ export interface TripExpense {
   sharerIds: string[];
 }
 
+/**
+ * What one person owed another before any payment here: a group's opening
+ * balance, already turned the right way round - `fromId` owes `toId`.
+ */
+export interface TripOpening {
+  fromId: string;
+  toId: string;
+  amountMinor: number;
+}
+
 export interface TripBalance {
   userId: string;
   /** What this person put in. */
   paidMinor: number;
   /** What was spent on their behalf. */
   shareMinor: number;
+  /**
+   * Where they stood before any payment, from opening balances: positive
+   * owed to them, negative owed by them. Apart from paid and share, which
+   * stay what was spent, so a starting debt never reads as spending.
+   */
+  openingMinor: number;
   /** Positive means they are owed; negative means they owe. */
   netMinor: number;
 }
@@ -54,10 +70,14 @@ export function shareOut(amountMinor: number, sharerIds: string[]): Map<string, 
   return shares;
 }
 
-/** What each person put in against what was spent on them. */
-export function computeBalances(expenses: TripExpense[]): TripBalance[] {
+/**
+ * What each person put in against what was spent on them, starting from
+ * whatever they already owed each other.
+ */
+export function computeBalances(expenses: TripExpense[], openings: TripOpening[] = []): TripBalance[] {
   const paid = new Map<string, number>();
   const owed = new Map<string, number>();
+  const opening = new Map<string, number>();
 
   const bump = (map: Map<string, number>, id: string, amount: number) =>
     map.set(id, (map.get(id) ?? 0) + amount);
@@ -70,13 +90,20 @@ export function computeBalances(expenses: TripExpense[]): TripBalance[] {
     }
   }
 
-  const everyone = new Set([...paid.keys(), ...owed.keys()]);
+  for (const entry of openings) {
+    if (entry.amountMinor <= 0 || entry.fromId === entry.toId) continue;
+    bump(opening, entry.toId, entry.amountMinor);
+    bump(opening, entry.fromId, -entry.amountMinor);
+  }
+
+  const everyone = new Set([...paid.keys(), ...owed.keys(), ...opening.keys()]);
 
   return [...everyone]
     .map((userId) => {
       const paidMinor = paid.get(userId) ?? 0;
       const shareMinor = owed.get(userId) ?? 0;
-      return { userId, paidMinor, shareMinor, netMinor: paidMinor - shareMinor };
+      const openingMinor = opening.get(userId) ?? 0;
+      return { userId, paidMinor, shareMinor, openingMinor, netMinor: paidMinor - shareMinor + openingMinor };
     })
     .sort((a, b) => b.netMinor - a.netMinor);
 }

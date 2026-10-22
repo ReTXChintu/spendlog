@@ -16,6 +16,7 @@ import { runCardBillLegBackfill } from "./modules/cards/cards.billLeg";
 import { runCardCreditBackfill, runPaymentTwinBackfill, runSelfPaymentRepair } from "./modules/cards/cards.billRepair";
 import { runDailyFundRefresh } from "./modules/funds/funds.cache";
 import { runSipStepsBackfill } from "./modules/funds/funds.backfill";
+import { runGroupSharesBackfill } from "./modules/groups/groups.backfill";
 import { runTransferLegBackfill } from "./modules/transactions/transactions.transfer";
 import { runLoanSplitBackfill } from "./modules/loans/loans.backfill";
 import { syncAllConnectedEmails } from "./modules/ingestion/gmail.service";
@@ -135,6 +136,9 @@ async function start() {
   // Every SIP stored as one amount given a one-step history, the shape a
   // SIP's changes of amount and skipped months are kept in.
   runSipStepsBackfill().catch((err) => console.error("SIP steps backfill failed:", err));
+  // Group payments the user made counted at their own share only, the
+  // other members' shares owed back rather than spent.
+  runGroupSharesBackfill().catch((err) => console.error("Group shares backfill failed:", err));
 
   setInterval(() => {
     syncAllConnectedEmails().catch((err) => console.error("Background Gmail sync failed:", err));

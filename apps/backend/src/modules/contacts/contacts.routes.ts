@@ -3,8 +3,8 @@ import { Types } from "mongoose";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
-import { Contact, ContactClearance, Transaction } from "../../models";
-import { removeContactFromGroups } from "../groups/groups.service";
+import { Contact, ContactClearance, Group, Transaction } from "../../models";
+import { removeContactFromGroups, signedOpening } from "../groups/groups.service";
 import { Balance, NO_BALANCE, balances, normalisePhone, personSign } from "./contacts.people";
 
 export const contactsRouter = Router();
@@ -87,7 +87,7 @@ contactsRouter.get("/:id", validObjectIdParam("id"), async (req, res) => {
   const contact = await Contact.findOne({ _id: req.params.id, userId });
   if (!contact) return res.status(404).json({ error: "Not found" });
 
-  const [owed, transactions, clearances] = await Promise.all([
+  const [owed, transactions, clearances, groups] = await Promise.all([
     balances(userId, [contact._id]),
     Transaction.find({ userId, "people.contactId": contact._id })
       .sort({ occurredAt: -1 })
@@ -96,7 +96,30 @@ contactsRouter.get("/:id", validObjectIdParam("id"), async (req, res) => {
       .populate("account")
       .populate("group"),
     ContactClearance.find({ userId, contactId: contact._id }).sort({ on: -1, createdAt: -1 }).limit(200),
+    Group.find({ openingBalances: { $elemMatch: { setBy: userId, memberKind: "contact", contactId: contact._id } } })
+      .select("name openingBalances")
+      .lean(),
   ]);
+
+  // What each group says was owed with them when it began here, one row
+  // per group: "Opening balance in Flatmates · Rahul owes you 1,200".
+  const groupOpenings = groups
+    .flatMap((group) =>
+      group.openingBalances
+        .filter((entry) => entry.memberKind === "contact" && entry.setBy.equals(userId) && entry.contactId?.equals(contact._id))
+        .map((entry) => ({
+          id: entry._id.toString(),
+          groupId: group._id.toString(),
+          groupName: group.name,
+          direction: entry.direction,
+          amountMinor: entry.amountMinor,
+          // Signed like history: positive added to what they owe.
+          effectMinor: signedOpening(entry),
+          note: entry.note ?? null,
+          setAt: entry.setAt,
+        }))
+    )
+    .sort((a, b) => new Date(b.setAt).getTime() - new Date(a.setAt).getTime());
 
   res.json({
     ...withBalance(contact, owed.get(contact._id.toString())),
@@ -117,6 +140,8 @@ contactsRouter.get("/:id", validObjectIdParam("id"), async (req, res) => {
       ...clearance.toJSON(),
       effectMinor: clearance.direction === "OWED_TO_ME" ? -clearance.amountMinor : clearance.amountMinor,
     })),
+    // Apart from the history too, for the same reason; edited from the group.
+    groupOpenings,
   });
 });
 

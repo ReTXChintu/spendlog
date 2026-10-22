@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
+import {
+  GroupOpeningsEditor,
+  OpeningRow,
+  openingSentence,
+  openingsBody,
+  rupeesOf,
+} from "../components/GroupOpeningsEditor";
 import { Icon } from "../components/Icon";
 import { PeoplePicker } from "../components/PeoplePicker";
 import { StateBlock } from "../components/States";
@@ -15,6 +22,7 @@ import {
   GroupDetail,
   GroupSettlement,
   GroupSummary,
+  OpeningInput,
   Transaction,
 } from "../types";
 import "../styles/edit-transaction.css";
@@ -178,6 +186,7 @@ export function GroupsPage() {
   const myId = me?.userId ?? user?.id ?? null;
   const isOwner = !!openGroup && !!myId && openGroup.ownerId === myId;
   const myContactMembers = openDetail?.contacts.filter((contact) => contact.isMine) ?? [];
+  const hasOpenings = (settlement?.balances ?? []).some((balance) => (balance.openingMinor ?? 0) !== 0);
 
   async function run<T>(action: () => Promise<T>, after?: (result: T) => void) {
     setBusy(true);
@@ -487,6 +496,7 @@ export function GroupsPage() {
                     <thead>
                       <tr>
                         <th>Person</th>
+                        {hasOpenings && <th className="num">Start</th>}
                         <th className="num">Paid</th>
                         <th className="num">Share</th>
                         <th className="num">Net</th>
@@ -503,6 +513,12 @@ export function GroupsPage() {
                               {balance.isMe ? "You" : balance.name}
                             </span>
                           </td>
+                          {hasOpenings && (
+                            <td className="num">
+                              {(balance.openingMinor ?? 0) > 0 ? "+" : (balance.openingMinor ?? 0) < 0 ? "−" : ""}
+                              {formatMoneyShort(Math.abs(balance.openingMinor ?? 0))}
+                            </td>
+                          )}
                           <td className="num">{formatMoneyShort(balance.paidMinor)}</td>
                           <td className="num">{formatMoneyShort(balance.shareMinor)}</td>
                           <td className={`num ${balance.netMinor > 0 ? "money-in" : balance.netMinor < 0 ? "money-out" : ""}`}>
@@ -514,10 +530,24 @@ export function GroupsPage() {
                     </tbody>
                   </table>
                   <p className="t-caption">
+                    {hasOpenings && "It starts from the starting balances below. "}
                     What your contacts owe you, or you owe them, is also on the People page — one balance per person,
                     across groups and lending, settled there as usual.
                   </p>
                 </div>
+              )}
+
+              {openDetail && (
+                <OpeningsCard
+                  detail={openDetail}
+                  busy={busy}
+                  onSave={(openingBalances) =>
+                    run(
+                      () => api.put<GroupDetail>(`/groups/${openDetail.id}/openings`, { openingBalances }),
+                      () => setNotice("Starting balances saved. Who owes whom starts from them.")
+                    )
+                  }
+                />
               )}
 
               <div className="card card-flush group-payments">
@@ -739,23 +769,39 @@ function NewGroupForm({
   contacts: Contact[] | null;
   busy: boolean;
   onCancel: () => void;
-  onCreate: (body: { name: string; startedAt: string | null; endedAt: string | null; contactIds: string[] }) => void;
+  onCreate: (body: {
+    name: string;
+    startedAt: string | null;
+    endedAt: string | null;
+    contactIds: string[];
+    openingBalances?: OpeningInput[];
+  }) => void;
 }) {
   const [name, setName] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [picked, setPicked] = useState<Contact[]>([]);
+  // What was already owed with each of them, kept by id so taking someone
+  // off and back on keeps what was typed.
+  const [owed, setOwed] = useState<Record<string, OpeningRow>>({});
   const [problem, setProblem] = useState<string | null>(null);
+
+  const owedRows: OpeningRow[] = picked.map(
+    (contact) =>
+      owed[contact.id] ?? { memberId: contact.id, name: contact.name, memberKind: "contact", rupees: "", direction: "owes_me" }
+  );
 
   function submit() {
     if (!name.trim()) return setProblem("Give the group a name first.");
     if (from && to && to < from) return setProblem("It can't end before it starts.");
     setProblem(null);
+    const openingBalances = openingsBody(owedRows);
     onCreate({
       name: name.trim(),
       startedAt: dayToIso(from),
       endedAt: dayToIso(to, true),
       contactIds: picked.map((contact) => contact.id),
+      ...(openingBalances.length > 0 ? { openingBalances } : {}),
     });
   }
 
@@ -815,6 +861,20 @@ function NewGroupForm({
           SpendLog users join with the group's code. Anyone else comes from your contacts — you can add more later.
         </span>
       </div>
+      {picked.length > 0 && (
+        <div className="field">
+          <span>Anything already owed? (optional)</span>
+          <span className="field-hint">
+            If it was running before SpendLog, say what was owed when it began here. Leave anyone at nothing. It isn't
+            spending: only who owes whom moves.
+          </span>
+          <GroupOpeningsEditor
+            rows={owedRows}
+            disabled={busy}
+            onChange={(rows) => setOwed(Object.fromEntries(rows.map((row) => [row.memberId, row])))}
+          />
+        </div>
+      )}
       {problem && (
         <p className="form-error" role="alert">
           {problem}
@@ -832,6 +892,111 @@ function NewGroupForm({
         It stays active until you archive it. Nothing goes in on its own: you pick the group for each payment.
       </p>
     </form>
+  );
+}
+
+/**
+ * What was already owed when the group began here, from the caller's
+ * side, and the caller's own to change: with each of their contacts, and
+ * with each other SpendLog user who hasn't already set it from their side.
+ */
+function OpeningsCard({
+  detail,
+  busy,
+  onSave,
+}: {
+  detail: GroupDetail;
+  busy: boolean;
+  onSave: (openings: OpeningInput[]) => void;
+}) {
+  const openings = detail.openingBalances ?? [];
+  const [editing, setEditing] = useState(false);
+  const [rows, setRows] = useState<OpeningRow[]>([]);
+
+  const members = [
+    ...detail.members.filter((member) => !member.isMe).map((member) => ({ ...member, memberKind: "user" as const })),
+    ...detail.contacts.filter((contact) => contact.isMine).map((contact) => ({ ...contact, memberKind: "contact" as const })),
+  ];
+
+  function startEditing() {
+    setRows(
+      members.map((member) => {
+        const mine = openings.find((o) => o.isMine && o.memberId === member.id);
+        const theirs =
+          member.memberKind === "user"
+            ? openings.find((o) => !o.isMine && o.memberKind === "user" && o.setBy === member.id && o.viewerDirection)
+            : undefined;
+        return {
+          memberId: member.id,
+          name: member.name,
+          memberKind: member.memberKind,
+          rupees: mine ? rupeesOf(mine.amountMinor) : "",
+          direction: mine?.direction ?? "owes_me",
+          setByThem: theirs ? openingSentence(theirs) : null,
+        };
+      })
+    );
+    setEditing(true);
+  }
+
+  return (
+    <div className="card group-openings-card">
+      <div className="card-head">
+        <h2>Starting balances</h2>
+        {!editing && members.length > 0 && (
+          <button className="btn btn-sm" disabled={busy} onClick={startEditing}>
+            <Icon name="ic-pencil" /> {openings.some((o) => o.isMine) ? "Edit" : "Set"}
+          </button>
+        )}
+      </div>
+      {editing ? (
+        <>
+          <p className="t-caption">
+            Anything already owed when the group began here. It starts who owes whom, and with a contact it moves their
+            balance on People too. Not spending: nothing counts in your budget and no account moves.
+          </p>
+          <GroupOpeningsEditor rows={rows} onChange={setRows} disabled={busy} />
+          <div className="group-form-actions">
+            <button type="button" className="btn" disabled={busy} onClick={() => setEditing(false)}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy}
+              onClick={() => {
+                onSave(openingsBody(rows));
+                setEditing(false);
+              }}
+            >
+              Save starting balances
+            </button>
+          </div>
+        </>
+      ) : openings.length === 0 ? (
+        <p className="t-caption">
+          {members.length > 0
+            ? "Was it running before SpendLog? Say what was already owed — it starts who owes whom."
+            : "Nothing was owed when it began here."}
+        </p>
+      ) : (
+        <div className="trip-people">
+          {openings.map((opening) => (
+            <div className="trip-person" key={opening.id}>
+              <span className="group-person-text">
+                {openingSentence(opening)}
+                <span className="group-person-sub">
+                  {opening.isMine ? "Set by you" : `Set by ${opening.setByName}`}
+                  {opening.isMine && opening.memberKind === "contact" && " · on People too"}
+                  {opening.note && ` · ${opening.note}`}
+                </span>
+              </span>
+              <span className="badge badge-outline">Before SpendLog</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

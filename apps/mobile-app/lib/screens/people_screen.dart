@@ -327,6 +327,7 @@ class _PersonScreenState extends State<PersonScreen> {
   late Contact _contact = widget.contact;
   List<ContactHistoryEntry>? _history;
   List<ContactClearance> _clearances = const [];
+  List<ContactGroupOpening> _groupOpenings = const [];
   bool _failed = false;
 
   @override
@@ -344,6 +345,7 @@ class _PersonScreenState extends State<PersonScreen> {
         _contact = detail.contact;
         _history = detail.history;
         _clearances = detail.clearances;
+        _groupOpenings = detail.groupOpenings;
         _failed = false;
       });
     } catch (_) {
@@ -460,14 +462,16 @@ class _PersonScreenState extends State<PersonScreen> {
     }
   }
 
-  /// Transactions and clearances as one history, newest first: a
-  /// clearance happened on a day like anything else did.
+  /// Transactions, clearances and groups' opening balances as one
+  /// history, newest first: each happened on a day like anything else did.
   List<Widget> _rows() {
     final rows = <(DateTime, Widget)>[
       for (final entry in _history ?? const <ContactHistoryEntry>[])
         (entry.transaction.occurredAt, _HistoryRow(entry: entry)),
       for (final clearance in _clearances)
         (clearance.on, _ClearanceRow(clearance: clearance, onUndo: () => _undoClearance(clearance))),
+      for (final opening in _groupOpenings)
+        (opening.setAt, _GroupOpeningRow(opening: opening, name: _contact.name)),
     ]..sort((a, b) => b.$1.compareTo(a.$1));
     return [for (final (_, row) in rows) row];
   }
@@ -558,7 +562,7 @@ class _PersonScreenState extends State<PersonScreen> {
               )
             else if (_history == null)
               const DsCard(child: DsSkeletonRows(count: 3))
-            else if (_history!.isEmpty && _clearances.isEmpty && opening == 0)
+            else if (_history!.isEmpty && _clearances.isEmpty && _groupOpenings.isEmpty && opening == 0)
               DsCard(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -590,7 +594,7 @@ class _PersonScreenState extends State<PersonScreen> {
                     ],
                     // Newest first, so what came before SpendLog goes last.
                     if (opening != 0) ...[
-                      if (_history!.isNotEmpty || _clearances.isNotEmpty) const Divider(),
+                      if (_history!.isNotEmpty || _clearances.isNotEmpty || _groupOpenings.isNotEmpty) const Divider(),
                       _StartingRow(amountMinor: opening),
                     ],
                   ],
@@ -793,6 +797,34 @@ class _HistoryLine extends StatelessWidget {
           if (trailing != null) trailing!,
         ],
       ),
+    );
+  }
+}
+
+/// What a group said was owed with them when it began in SpendLog, as a
+/// line of the history: "Opening balance in Flatmates · Rahul owes you
+/// ₹1,200". Changed from the group's Starting balances, not here.
+class _GroupOpeningRow extends StatelessWidget {
+  const _GroupOpeningRow({required this.opening, required this.name});
+
+  final ContactGroupOpening opening;
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final money = _plainMoney(opening.amountMinor);
+    return _HistoryLine(
+      leading: const DsIconTile(DsIcons.users),
+      title: 'Opening balance in ${opening.groupName}',
+      titleMaxLines: 2,
+      meta: [
+        opening.theyOwe ? '$name owes you $money' : 'You owe $name $money',
+        formatShortDate(opening.setAt),
+      ].join(' · '),
+      amount: '${opening.theyOwe ? '+' : '−'}${formatMoney(opening.amountMinor)}',
+      amountColour: c.tx,
+      caption: opening.theyOwe ? 'they owed' : 'you owed',
     );
   }
 }

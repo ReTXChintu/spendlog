@@ -8,6 +8,7 @@ import '../utils/format.dart';
 import '../widgets/person_picker_sheet.dart';
 import '../widgets/state_block.dart';
 import 'group_detail_screen.dart';
+import 'group_openings_screen.dart';
 import 'join_group_screen.dart';
 
 /// Groups: spending shared with people - a holiday, the flat, an office
@@ -405,8 +406,9 @@ class GroupSourceRow extends StatelessWidget {
   }
 }
 
-/// A new group: a name, optional dates, and optionally the contacts in it.
-/// Pops with the group once made.
+/// A new group: a name, optional dates, and optionally the contacts in it -
+/// then, with anyone in it, an optional "Anything already owed?" for a
+/// group that was running before SpendLog. Pops with the group once made.
 class NewGroupSheet extends StatefulWidget {
   const NewGroupSheet({super.key});
 
@@ -422,11 +424,46 @@ class _NewGroupSheetState extends State<NewGroupSheet> {
   bool _saving = false;
   String? _error;
 
+  /// On the second step: what was already owed with each of them.
+  bool _askingOwed = false;
+  final Map<String, OpeningDraft> _drafts = {};
+
   @override
   void dispose() {
     _name.dispose();
+    for (final draft in _drafts.values) {
+      draft.dispose();
+    }
     super.dispose();
   }
+
+  /// The checks the first step can make, as a sentence, or null.
+  String? _firstStepError() {
+    if (_name.text.trim().isEmpty) return 'Give it a name.';
+    if (_startsOn != null && _endsOn != null && _endsOn!.isBefore(_startsOn!)) {
+      return "It can't end before it starts.";
+    }
+    return null;
+  }
+
+  /// On to "Anything already owed?", one row per contact, keeping whatever
+  /// was typed for someone before going back.
+  void _next() {
+    final problem = _firstStepError();
+    if (problem != null) return setState(() => _error = problem);
+    setState(() {
+      for (final contact in _contacts) {
+        _drafts.putIfAbsent(contact.id, () => OpeningDraft(memberId: contact.id, name: contact.name, isContact: true));
+      }
+      _error = null;
+      _askingOwed = true;
+    });
+  }
+
+  List<OpeningDraft> get _shownDrafts => [
+        for (final contact in _contacts)
+          if (_drafts[contact.id] != null) _drafts[contact.id]!,
+      ];
 
   Future<void> _pickDate({required bool start}) async {
     final current = start ? _startsOn : _endsOn;
@@ -464,12 +501,11 @@ class _NewGroupSheetState extends State<NewGroupSheet> {
   String _dayEnd(DateTime day) =>
       fromIstWallClock(DateTime(day.year, day.month, day.day, 23, 59, 59)).toIso8601String();
 
-  Future<void> _save() async {
+  Future<void> _save({bool withOpenings = true}) async {
     final name = _name.text.trim();
-    if (name.isEmpty) return setState(() => _error = 'Give it a name.');
-    if (_startsOn != null && _endsOn != null && _endsOn!.isBefore(_startsOn!)) {
-      return setState(() => _error = "It can't end before it starts.");
-    }
+    final problem = _firstStepError();
+    if (problem != null) return setState(() => _error = problem);
+    final openings = withOpenings && _askingOwed ? openingsBodyOf(_shownDrafts) : const <Map<String, dynamic>>[];
     setState(() {
       _saving = true;
       _error = null;
@@ -481,6 +517,7 @@ class _NewGroupSheetState extends State<NewGroupSheet> {
         'startedAt': _startsOn == null ? null : _dayStart(_startsOn!),
         'endedAt': _endsOn == null ? null : _dayEnd(_endsOn!),
         if (_contacts.isNotEmpty) 'contactIds': [for (final c in _contacts) c.id],
+        if (openings.isNotEmpty) 'openingBalances': openings,
       }) as Map<String, dynamic>;
       navigator.pop(Group.fromJson(json));
     } catch (e) {
@@ -544,10 +581,60 @@ class _NewGroupSheetState extends State<NewGroupSheet> {
             const DsDragHandle(),
             DsSheetHeader(
               icon: DsIcons.users,
-              title: 'New group',
+              title: _askingOwed ? 'Anything already owed?' : 'New group',
               onClose: _saving ? null : () => Navigator.of(context).pop(),
             ),
             const SizedBox(height: 16),
+            if (_askingOwed) ..._owedStep(c) else ..._detailsStep(c),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// "Anything already owed?": optional, for a group that was running
+  /// before it came into SpendLog.
+  List<Widget> _owedStep(DsColors c) => [
+        Text(
+          'If ${_name.text.trim()} was already running, say what was owed when it began here - '
+          '"Rahul owes me ₹1,200". Leave anyone at nothing. It isn\'t spending: only who owes whom moves.',
+          style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2),
+        ),
+        const SizedBox(height: 16),
+        GroupOpeningsEditor(
+          drafts: _shownDrafts,
+          enabled: !_saving,
+          onChanged: () => setState(() => _error = null),
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 12),
+          DsCallout(tone: DsTone.crit, title: _error!),
+        ],
+        const SizedBox(height: 16),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: Text(_saving ? 'Making it…' : 'Make the group'),
+        ),
+        const SizedBox(height: 8),
+        // Wraps rather than overflowing on a narrow phone with large text.
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          spacing: 8,
+          children: [
+            TextButton(
+              onPressed: _saving ? null : () => setState(() => _askingOwed = false),
+              child: const Text('Back'),
+            ),
+            TextButton(
+              onPressed: _saving ? null : () => _save(withOpenings: false),
+              child: const Text('Skip - nothing owed'),
+            ),
+          ],
+        ),
+      ];
+
+  /// The name, dates and contacts.
+  List<Widget> _detailsStep(DsColors c) => [
             DsField(
               label: 'Name',
               child: TextField(
@@ -608,13 +695,16 @@ class _NewGroupSheetState extends State<NewGroupSheet> {
               DsCallout(tone: DsTone.crit, title: _error!),
             ],
             const SizedBox(height: 16),
-            FilledButton(
-              onPressed: _saving ? null : _save,
-              child: Text(_saving ? 'Making it…' : 'Make the group'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+            // With people in it, on to what was already owed with them.
+            if (_contacts.isNotEmpty)
+              FilledButton(
+                onPressed: _saving ? null : _next,
+                child: const Text('Next'),
+              )
+            else
+              FilledButton(
+                onPressed: _saving ? null : _save,
+                child: Text(_saving ? 'Making it…' : 'Make the group'),
+              ),
+          ];
 }

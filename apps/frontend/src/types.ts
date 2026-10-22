@@ -384,9 +384,55 @@ export interface GroupContactMember {
   isMine: boolean;
 }
 
+/** Which way a group's opening balance runs, from whoever set it. */
+export type OpeningDirection = "owes_me" | "i_owe";
+
+/**
+ * What one member owed another when a group began in SpendLog - "Rahul
+ * owes me ₹1,200" on a Flatmates that was already running. Always between
+ * whoever set it and one member, and only theirs to change. Not spending:
+ * it only moves who owes whom (the settlement, and with a contact the
+ * setter's People balance).
+ */
+export interface GroupOpening {
+  id: string;
+  memberKind: GroupMemberKind;
+  /** The member it is with: the contact's id or the user's. */
+  memberId: string;
+  memberName: string;
+  contactId: string | null;
+  userId: string | null;
+  /** From the setter's side. */
+  direction: OpeningDirection;
+  amountMinor: number;
+  note: string | null;
+  setBy: string;
+  setByName: string;
+  setAt: string;
+  /** Set by the caller, and so theirs to edit. */
+  isMine: boolean;
+  /** `fromId` owes `toId`. */
+  fromId: string;
+  fromName: string;
+  toId: string;
+  toName: string;
+  /** Which way it runs for the caller when they are one of the two, or null. */
+  viewerDirection: OpeningDirection | null;
+}
+
+/** One opening balance as PUT /groups/:id/openings (or a new group) takes it. */
+export interface OpeningInput {
+  memberKind: GroupMemberKind;
+  contactId?: string;
+  userId?: string;
+  direction: OpeningDirection;
+  amountMinor: number;
+}
+
 export interface GroupDetail extends Omit<Group, "members"> {
   members: GroupUserMember[];
   contacts: GroupContactMember[];
+  openingBalances?: GroupOpening[];
 }
 
 export type GroupMemberKind = "user" | "contact";
@@ -401,6 +447,7 @@ export interface GroupSummary {
   perDayMinor: number;
   byMember: { userId: string; kind?: GroupMemberKind; name: string | null; spentMinor: number; count: number }[];
   byCategory: { categoryId: string | null; name: string; amountMinor: number }[];
+  openingBalances?: GroupOpening[];
 }
 
 export interface GroupSettlement {
@@ -410,6 +457,8 @@ export interface GroupSettlement {
     name: string;
     paidMinor: number;
     shareMinor: number;
+    /** Where they stood before any payment, from starting balances. Part of netMinor. */
+    openingMinor?: number;
     netMinor: number;
     isMe?: boolean;
   }[];
@@ -781,8 +830,24 @@ export interface Contact {
   /** Settled without money moving. Same sign as balanceMinor: positive
       cleared what they owed, negative what you owed them. */
   clearedMinor?: number;
+  /** What groups say was owed with them when each began here. Same sign,
+      and part of balanceMinor - apart from openingBalanceMinor. */
+  groupOpeningMinor?: number;
   transactionCount: number;
   lastAt: string | null;
+}
+
+/** "Opening balance in Flatmates · Rahul owes you ₹1,200" on the People page. */
+export interface ContactGroupOpening {
+  id: string;
+  groupId: string;
+  groupName: string;
+  direction: OpeningDirection;
+  amountMinor: number;
+  /** Signed like a history row: positive when they owe you. */
+  effectMinor: number;
+  note: string | null;
+  setAt: string;
 }
 
 /**
@@ -813,6 +878,8 @@ export interface ContactDetail extends Contact {
   history: { transaction: Transaction; amountMinor: number }[];
   /** Newest first. Kept apart from history, which is transactions only. */
   clearances?: ContactClearance[];
+  /** Newest first. What groups said was owed with them; changed from the group. */
+  groupOpenings?: ContactGroupOpening[];
 }
 
 /** The running balance with everyone the user splits bills with. */

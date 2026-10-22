@@ -596,8 +596,10 @@ export interface TransactionDoc {
   dedupeKey?: string | null;
   /// The group this was spent in, if any (was `tripId`, still readable and
   /// writable under that name). A label in itself: a meal on holiday is
-  /// still a meal. Only a contact member's share moves the counted amount,
-  /// through the split the group writes (groupSplit).
+  /// still a meal. On a payment the user made, only their own share of it
+  /// counts, through the split the group writes (groupSplit): everyone
+  /// else's is owed back - a contact's through People, a SpendLog user's
+  /// through the group's settlement - and never the user's spending.
   groupId?: Types.ObjectId | null;
   /// Who a group expense was for, as member ids - SpendLog users' and
   /// contacts' alike, since both are ObjectIds and never collide. null
@@ -1324,14 +1326,49 @@ export interface GroupContactMember {
   joinedAt: Date;
 }
 
+export const OPENING_DIRECTIONS = ["owes_me", "i_owe"] as const;
+export type OpeningDirection = (typeof OPENING_DIRECTIONS)[number];
+
+/**
+ * What stood between one member and another before the group was in
+ * SpendLog: a "Flatmates" that has been running for a year comes in with
+ * "Rahul owes me 1,200" and "I owe Priya 450" already true.
+ *
+ * Always between whoever set it (`setBy`, the "me" of `direction`) and one
+ * member - a contact of theirs, or another SpendLog user in the group -
+ * and only ever edited by them. Not a transaction, on purpose, the way a
+ * clearance is not: no money moved, so nothing counts as spending or
+ * income and no account moves. It is money owed, like a contact's own
+ * opening balance:
+ *
+ * - inside the group, it is where the settlement starts from, for both of
+ *   them (the other user sees the mirror of it);
+ * - with a contact, it also moves the setter's People balance with them,
+ *   as their shares of the group's payments do.
+ */
+export interface GroupOpeningBalance {
+  _id: Types.ObjectId;
+  memberKind: "contact" | "user";
+  /// The member it is with: one of these, by memberKind.
+  contactId?: Types.ObjectId | null;
+  userId?: Types.ObjectId | null;
+  /// From the setter's side: "owes_me" the member owes them, "i_owe" they owe the member.
+  direction: OpeningDirection;
+  /// Always positive. Which way it goes is `direction`.
+  amountMinor: number;
+  setBy: Types.ObjectId;
+  setAt: Date;
+  note?: string | null;
+}
+
 /**
  * People who share spending: "Goa trip", "Flatmates", "Office lunch".
  *
  * Grew out of trips (the collection was `trips` until the groups
  * migration copied it here, keeping every id). A group is a label on
- * payments plus the arithmetic of who owes whom; it never changes what a
- * payment counts for, except where a contact's share has to come out of
- * the payer's own spending to be owed back by them.
+ * payments plus the arithmetic of who owes whom. What it changes about a
+ * payment is what counts as the payer's spending: their own share only,
+ * since everyone else's comes back to them.
  *
  * Nothing is put in a group automatically any more - a payment goes in
  * when someone picks the group for it - with one exception: a group
@@ -1352,6 +1389,8 @@ export interface GroupDoc {
   members: GroupMember[];
   /// People without an account, from members' contacts.
   contactMembers: GroupContactMember[];
+  /// What members owed each other when the group began here. See GroupOpeningBalance.
+  openingBalances: GroupOpeningBalance[];
   /// Shared out of band — read out, or scanned as a QR code — so that
   /// joining needs no email address and no link handling.
   joinCode: string;
@@ -1416,6 +1455,18 @@ const groupContactMemberSchema = new Schema<GroupContactMember>(
   { _id: false }
 );
 
+// With an id of its own, so the People page can name the row it shows.
+const groupOpeningBalanceSchema = new Schema<GroupOpeningBalance>({
+  memberKind: { type: String, enum: ["contact", "user"], required: true },
+  contactId: { type: Schema.Types.ObjectId, ref: "Contact", default: null },
+  userId: { type: Schema.Types.ObjectId, ref: "User", default: null },
+  direction: { type: String, enum: OPENING_DIRECTIONS, required: true },
+  amountMinor: { type: Number, required: true, min: 1 },
+  setBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
+  setAt: { type: Date, default: () => new Date() },
+  note: { type: String, default: null, maxlength: 200 },
+});
+
 const groupSchema = new Schema<GroupDoc>(
   {
     ownerId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
@@ -1425,6 +1476,7 @@ const groupSchema = new Schema<GroupDoc>(
     archivedAt: { type: Date, default: null },
     members: { type: [groupMemberSchema], default: [] },
     contactMembers: { type: [groupContactMemberSchema], default: [] },
+    openingBalances: { type: [groupOpeningBalanceSchema], default: [] },
     joinCode: { type: String, required: true },
     source: { type: groupSourceSchema, default: null },
   },
@@ -1441,6 +1493,8 @@ groupSchema.index(
 groupSchema.index({ "members.userId": 1 });
 // A contact's groups, for taking them out when the contact goes.
 groupSchema.index({ "contactMembers.contactId": 1 });
+// A user's openings with their contacts, for the People page's balances.
+groupSchema.index({ "openingBalances.setBy": 1 });
 // Deliberately no "one running at a time" index, which trips had: groups
 // are not a mode, and "Flatmates" and "Goa" are both open at once.
 

@@ -7,6 +7,7 @@ import '../widgets/edit_transaction_sheet.dart';
 import '../widgets/state_block.dart';
 import 'group_add_payments_screen.dart';
 import 'group_members_screen.dart';
+import 'group_openings_screen.dart';
 import 'group_other_payment_screen.dart';
 import 'group_payments_screen.dart';
 import 'groups_screen.dart';
@@ -212,6 +213,11 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                         ],
                         _WhoOwes(settlement: _settlement),
                         const SizedBox(height: kCardGap),
+                        _OpeningsCard(
+                          detail: detail,
+                          onEdit: () => _push(GroupOpeningsScreen(detail: detail)),
+                        ),
+                        const SizedBox(height: kCardGap),
                         _PeopleCard(
                           detail: detail,
                           settlement: _settlement,
@@ -394,10 +400,83 @@ class _WhoOwes extends StatelessWidget {
               ),
           const SizedBox(height: 6),
           Text(
-            "What your contacts owe you, or you owe them, is also on the People page - one balance per person, "
-            'across every group.',
+            "It starts from the starting balances below. What your contacts owe you, or you owe them, is also "
+            'on the People page - one balance per person, across every group.',
             style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// What was already owed when the group began here - from the signed-in
+/// user's side - and the way to change their own.
+class _OpeningsCard extends StatelessWidget {
+  final GroupDetail detail;
+  final VoidCallback onEdit;
+
+  const _OpeningsCard({required this.detail, required this.onEdit});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final openings = detail.openings;
+    final canSet = detail.openingMembers.isNotEmpty;
+
+    return DsCard(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          DsSectionHeader(
+            'Starting balances',
+            trailing: canSet
+                ? TextButton(onPressed: onEdit, child: Text(detail.myOpenings.isEmpty ? 'Set' : 'Edit'))
+                : null,
+          ),
+          const SizedBox(height: 4),
+          if (openings.isEmpty)
+            Text(
+              canSet
+                  ? 'Was it running before SpendLog? Say what was already owed - it starts who owes whom.'
+                  : 'Nothing was owed when it began here.',
+              style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx2),
+            )
+          else
+            for (final opening in openings)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(
+                  children: [
+                    DsIconTile(DsIcons.calendar, size: 32, tone: opening.viewerDirection == null ? DsTone.neutral : DsTone.ac),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            openingSentence(opening),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx),
+                          ),
+                          Text(
+                            [
+                              opening.isMine ? 'Set by you' : 'Set by ${opening.setByName}',
+                              if (opening.isContact && opening.isMine) 'on People too',
+                              if (opening.note != null && opening.note!.trim().isNotEmpty) opening.note!,
+                            ].join(' · '),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
         ],
       ),
     );

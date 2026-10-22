@@ -3,7 +3,15 @@ import { Icon } from "../components/Icon";
 import { StateBlock } from "../components/States";
 import { api } from "../lib/api";
 import { formatDayLabel, formatMoney, formatMoneyShort, istToday } from "../lib/format";
-import { Contact, ContactClearance, ContactDetail, ContactList, Transaction, groupOf } from "../types";
+import {
+  Contact,
+  ContactClearance,
+  ContactDetail,
+  ContactGroupOpening,
+  ContactList,
+  Transaction,
+  groupOf,
+} from "../types";
 
 /** Two initials for an avatar. */
 function initialsOf(name: string): string {
@@ -376,15 +384,17 @@ function PersonDetail({
     }
   }
 
-  // Transactions and clearances in one list, newest first: a clearance
-  // happened on a day like anything else did.
+  // Transactions, clearances and groups' opening balances in one list,
+  // newest first: each happened on a day like anything else did.
   const rows: (
     | { kind: "transaction"; at: string; transaction: Transaction; amountMinor: number }
     | { kind: "clearance"; at: string; clearance: ContactClearance }
+    | { kind: "groupOpening"; at: string; opening: ContactGroupOpening }
   )[] = detail
     ? [
         ...detail.history.map((row) => ({ kind: "transaction" as const, at: row.transaction.occurredAt, ...row })),
         ...(detail.clearances ?? []).map((clearance) => ({ kind: "clearance" as const, at: clearance.on, clearance })),
+        ...(detail.groupOpenings ?? []).map((opening) => ({ kind: "groupOpening" as const, at: opening.setAt, opening })),
       ].sort((a, b) => b.at.localeCompare(a.at))
     : [];
   const cleared = contact.clearedMinor ?? 0;
@@ -537,7 +547,30 @@ function PersonDetail({
               </thead>
               <tbody>
                 {rows.map((row) =>
-                  row.kind === "transaction" ? (
+                  row.kind === "groupOpening" ? (
+                    // What a group said was owed when it began here; changed
+                    // from the group's Starting balances.
+                    <tr key={row.opening.id}>
+                      <td className="people-date">{formatDayLabel(row.opening.setAt.slice(0, 10))}</td>
+                      <td>
+                        <div className="people-history-name">Opening balance in {row.opening.groupName}</div>
+                        <div className="people-history-sub">
+                          {row.opening.effectMinor > 0
+                            ? `${contact.name} owes you ${formatRupees(row.opening.amountMinor)}`
+                            : `You owe ${contact.name} ${formatRupees(row.opening.amountMinor)}`}
+                          {row.opening.note && ` · ${row.opening.note}`}
+                        </div>
+                      </td>
+                      <td>
+                        <span className="badge badge-outline">Starting balance · no money moved</span>
+                      </td>
+                      <td className="num money-neutral">
+                        {row.opening.effectMinor > 0 ? "+" : "−"}
+                        {formatMoney(row.opening.amountMinor)}
+                      </td>
+                      <td />
+                    </tr>
+                  ) : row.kind === "transaction" ? (
                     <tr key={row.transaction.id}>
                       <td className="people-date">{formatDayLabel(row.transaction.occurredAt.slice(0, 10))}</td>
                       <td>

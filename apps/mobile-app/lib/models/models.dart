@@ -1081,13 +1081,119 @@ class GroupMember {
       );
 }
 
+/// Which way a group's opening balance runs, from whoever set it: the
+/// member owes them, or they owe the member.
+enum OpeningDirection {
+  owesMe('owes_me'),
+  iOwe('i_owe');
+
+  const OpeningDirection(this.json);
+
+  /// How the server spells it.
+  final String json;
+
+  static OpeningDirection? parse(Object? value) => switch (value) {
+        'owes_me' => OpeningDirection.owesMe,
+        'i_owe' => OpeningDirection.iOwe,
+        _ => null,
+      };
+}
+
+/// What one member owed another when a group began in SpendLog - "Rahul
+/// owes me ₹1,200" on a Flatmates that had been running for a year.
+///
+/// Always between whoever set it and one member, and only theirs to
+/// change. Not spending: it only moves who owes whom - the group's
+/// settlement and, with a contact, the setter's People balance.
+class GroupOpening {
+  final String id;
+  final bool isContact;
+
+  /// The member it is with: a contact's id or a user's.
+  final String memberId;
+  final String memberName;
+
+  /// From the setter's side.
+  final OpeningDirection direction;
+  final int amountMinor;
+  final String? note;
+  final String setById;
+  final String setByName;
+
+  /// Set by the signed-in user, and so theirs to edit.
+  final bool isMine;
+
+  /// Who owes whom, by name: [fromName] owes [toName].
+  final String fromName;
+  final String toName;
+
+  /// Which way it runs for the signed-in user when they are one of the
+  /// two - the mirror of [direction] when somebody else set it - or null.
+  final OpeningDirection? viewerDirection;
+
+  GroupOpening({
+    required this.id,
+    required this.isContact,
+    required this.memberId,
+    required this.memberName,
+    required this.direction,
+    required this.amountMinor,
+    this.note,
+    required this.setById,
+    required this.setByName,
+    this.isMine = false,
+    required this.fromName,
+    required this.toName,
+    this.viewerDirection,
+  });
+
+  factory GroupOpening.fromJson(Map<String, dynamic> json) => GroupOpening(
+        id: json['id'] as String? ?? '',
+        isContact: json['memberKind'] == 'contact',
+        memberId: (json['memberId'] ?? json['contactId'] ?? json['userId']) as String? ?? '',
+        memberName: json['memberName'] as String? ?? 'Someone',
+        direction: OpeningDirection.parse(json['direction']) ?? OpeningDirection.owesMe,
+        amountMinor: json['amountMinor'] as int? ?? 0,
+        note: json['note'] as String?,
+        setById: json['setBy'] as String? ?? '',
+        setByName: json['setByName'] as String? ?? 'Someone',
+        isMine: json['isMine'] == true,
+        fromName: json['fromName'] as String? ?? 'Someone',
+        toName: json['toName'] as String? ?? 'Someone',
+        viewerDirection: OpeningDirection.parse(json['viewerDirection']),
+      );
+}
+
+/// One opening balance as the editor sends it: PUT /groups/:id/openings,
+/// or `openingBalances` on a new group.
+Map<String, dynamic> openingBody({
+  required bool isContact,
+  required String memberId,
+  required OpeningDirection direction,
+  required int amountMinor,
+}) =>
+    {
+      'memberKind': isContact ? 'contact' : 'user',
+      if (isContact) 'contactId': memberId else 'userId': memberId,
+      'direction': direction.json,
+      'amountMinor': amountMinor,
+    };
+
+List<GroupOpening> _openingsFrom(Object? json) => (json as List<dynamic>? ?? [])
+    .map((o) => GroupOpening.fromJson(o as Map<String, dynamic>))
+    .toList();
+
 /// GET /groups/:id - the group, and everyone in it.
 class GroupDetail {
   final Group group;
   final List<GroupMember> users;
   final List<GroupMember> contacts;
 
-  GroupDetail({required this.group, required this.users, required this.contacts});
+  /// What members owed each other when it began here, from the signed-in
+  /// user's side.
+  final List<GroupOpening> openings;
+
+  GroupDetail({required this.group, required this.users, required this.contacts, this.openings = const []});
 
   factory GroupDetail.fromJson(Map<String, dynamic> json) => GroupDetail(
         group: Group.fromJson(json),
@@ -1097,7 +1203,21 @@ class GroupDetail {
         contacts: (json['contacts'] as List<dynamic>? ?? [])
             .map((m) => GroupMember.contact(m as Map<String, dynamic>))
             .toList(),
+        openings: _openingsFrom(json['openingBalances']),
       );
+
+  /// Who the signed-in user can set a starting balance with: the other
+  /// SpendLog users, and their own contacts.
+  List<GroupMember> get openingMembers => [...users.where((m) => !m.isMe), ...myContacts];
+
+  /// The ones the signed-in user set.
+  List<GroupOpening> get myOpenings => openings.where((o) => o.isMine).toList();
+
+  /// What a SpendLog user has already set between the two of you, if
+  /// anything: theirs stands, and a second from this side would count it
+  /// twice.
+  GroupOpening? openingSetWithMeBy(String userId) =>
+      openings.where((o) => !o.isMine && !o.isContact && o.setById == userId && o.viewerDirection != null).firstOrNull;
 
   List<GroupMember> get everyone => [...users, ...contacts];
 
@@ -1118,6 +1238,7 @@ class GroupSummary {
   final int perDayMinor;
   final List<CategorySpend> byCategory;
   final List<GroupMemberSpend> byMember;
+  final List<GroupOpening> openings;
 
   GroupSummary({
     required this.group,
@@ -1127,6 +1248,7 @@ class GroupSummary {
     required this.perDayMinor,
     required this.byCategory,
     required this.byMember,
+    this.openings = const [],
   });
 
   factory GroupSummary.fromJson(Map<String, dynamic> json) => GroupSummary(
@@ -1141,6 +1263,7 @@ class GroupSummary {
         byMember: (json['byMember'] as List<dynamic>? ?? [])
             .map((m) => GroupMemberSpend.fromJson(m as Map<String, dynamic>))
             .toList(),
+        openings: _openingsFrom(json['openingBalances']),
       );
 }
 
@@ -1186,6 +1309,10 @@ class GroupBalance {
   final int paidMinor;
   final int shareMinor;
 
+  /// Where they stood before any payment, from starting balances: positive
+  /// owed to them, negative owed by them. Part of [netMinor].
+  final int openingMinor;
+
   /// Positive: they get money back. Negative: they owe.
   final int netMinor;
   final bool isContact;
@@ -1196,6 +1323,7 @@ class GroupBalance {
     required this.name,
     required this.paidMinor,
     this.shareMinor = 0,
+    this.openingMinor = 0,
     required this.netMinor,
     this.isContact = false,
     this.isMe = false,
@@ -1206,6 +1334,7 @@ class GroupBalance {
         name: json['name'] as String? ?? 'Someone',
         paidMinor: json['paidMinor'] as int? ?? 0,
         shareMinor: json['shareMinor'] as int? ?? 0,
+        openingMinor: json['openingMinor'] as int? ?? 0,
         netMinor: json['netMinor'] as int? ?? 0,
         isContact: json['kind'] == 'contact',
         isMe: json['isMe'] == true,
@@ -2165,6 +2294,10 @@ class Contact {
   /// Settled without money moving - see [ContactClearance]. Same signs as
   /// the balance: positive cleared what they owed, negative what you owed.
   final int clearedMinor;
+
+  /// What groups say was owed with them when each began in SpendLog. Same
+  /// signs as the balance, and part of it - apart from [openingBalanceMinor].
+  final int groupOpeningMinor;
   final int transactionCount;
   final DateTime? lastAt;
 
@@ -2177,6 +2310,7 @@ class Contact {
     this.givenMinor = 0,
     this.returnedMinor = 0,
     this.clearedMinor = 0,
+    this.groupOpeningMinor = 0,
     this.transactionCount = 0,
     this.lastAt,
   });
@@ -2193,6 +2327,7 @@ class Contact {
         givenMinor: json['givenMinor'] as int? ?? 0,
         returnedMinor: json['returnedMinor'] as int? ?? 0,
         clearedMinor: json['clearedMinor'] as int? ?? 0,
+        groupOpeningMinor: json['groupOpeningMinor'] as int? ?? 0,
         transactionCount: json['transactionCount'] as int? ?? 0,
         lastAt: json['lastAt'] != null ? DateTime.tryParse(json['lastAt'] as String) : null,
       );
@@ -2267,6 +2402,46 @@ class ContactClearance {
   }
 }
 
+/// What a group said was owed with this person when it began in SpendLog:
+/// "Opening balance in Flatmates · Rahul owes you ₹1,200". Changed from
+/// the group, not here.
+class ContactGroupOpening {
+  final String id;
+  final String groupId;
+  final String groupName;
+  final int amountMinor;
+  final String? note;
+  final DateTime setAt;
+
+  /// Signed like a history entry: positive when they owe you.
+  final int effectMinor;
+
+  ContactGroupOpening({
+    required this.id,
+    required this.groupId,
+    required this.groupName,
+    required this.amountMinor,
+    this.note,
+    required this.setAt,
+    required this.effectMinor,
+  });
+
+  bool get theyOwe => effectMinor > 0;
+
+  factory ContactGroupOpening.fromJson(Map<String, dynamic> json) {
+    final amount = json['amountMinor'] as int? ?? 0;
+    return ContactGroupOpening(
+      id: json['id'] as String? ?? '',
+      groupId: json['groupId'] as String? ?? '',
+      groupName: json['groupName'] as String? ?? 'a group',
+      amountMinor: amount,
+      note: json['note'] as String?,
+      setAt: DateTime.tryParse(json['setAt'] as String? ?? '') ?? DateTime.now(),
+      effectMinor: json['effectMinor'] as int? ?? (json['direction'] == 'i_owe' ? -amount : amount),
+    );
+  }
+}
+
 class ContactDetail {
   final Contact contact;
   final List<ContactHistoryEntry> history;
@@ -2274,7 +2449,15 @@ class ContactDetail {
   /// Newest first. Kept apart from [history], which is transactions only.
   final List<ContactClearance> clearances;
 
-  ContactDetail({required this.contact, this.history = const [], this.clearances = const []});
+  /// What groups said was owed with them when each began. Apart too.
+  final List<ContactGroupOpening> groupOpenings;
+
+  ContactDetail({
+    required this.contact,
+    this.history = const [],
+    this.clearances = const [],
+    this.groupOpenings = const [],
+  });
 
   factory ContactDetail.fromJson(Map<String, dynamic> json) => ContactDetail(
         contact: Contact.fromJson(json),
@@ -2283,6 +2466,9 @@ class ContactDetail {
             .toList(),
         clearances: (json['clearances'] as List<dynamic>? ?? [])
             .map((c) => ContactClearance.fromJson(c as Map<String, dynamic>))
+            .toList(),
+        groupOpenings: (json['groupOpenings'] as List<dynamic>? ?? [])
+            .map((o) => ContactGroupOpening.fromJson(o as Map<String, dynamic>))
             .toList(),
       );
 }

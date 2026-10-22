@@ -244,7 +244,7 @@ describe("sharing a payment", () => {
     const friend = await makeUser();
     await call("/groups/join", friend.token, { body: { code: group.joinCode } });
     assert.equal(await balanceOf(me.token, rahul.id), 750_00, "four people now");
-    assert.equal((await row(hotel.id)).countedAmountMinor, 1500_00, "my share and my friend's stay mine to settle in the group");
+    assert.equal((await row(hotel.id)).countedAmountMinor, 750_00, "only my share: my friend's settles in the group, not as my spending");
 
     await call(`/transactions/${hotel.id}`, me.token, { method: "PATCH", body: { groupId: null } });
     const stored = await row(hotel.id);

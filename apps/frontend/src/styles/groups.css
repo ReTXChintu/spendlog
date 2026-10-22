@@ -126,3 +126,10 @@ a.trip-source-chip:hover{color:var(--tx)}
 /* The editor's group section. */
 .tx-group{display:flex;flex-direction:column;gap:10px}
 .tx-group-paid{font-size:13px;line-height:18px;color:var(--tx2)}
+
+/* Starting balances: what was owed when a group began here. Full width, in columns as it widens. */
+.group-openings{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr));gap:12px}
+.group-opening-row{display:flex;flex-direction:column;gap:10px;padding:12px 14px;border:1px solid var(--ln);border-radius:var(--r-lg);background:var(--sf2)}
+.group-opening-row .owed-input .amount-input{flex:1 1 120px;width:auto}
+.group-openings-card{display:flex;flex-direction:column;gap:12px}
+.group-openings-card .card-head{margin-bottom:0}

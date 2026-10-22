@@ -8,17 +8,21 @@ import { accountLabel } from "../accounts/accounts.label";
 import { normalisePhone } from "../contacts/contacts.people";
 import {
   GROUP_AMOUNT,
+  GroupOpeningError,
   GroupPaymentError,
   assertGroupMember,
   autoAdds,
   claimTransactions,
   createPaidByContact,
+  dropContactOpenings,
   generateJoinCode,
+  groupOpeningsJson,
   groupSettlement,
   groupSpendSummary,
   isGroupRunning,
   resyncGroup,
   runningAt,
+  setOpenings,
   syncGroupSplit,
 } from "./groups.service";
 import { isLikelyTravel } from "./groups.travel";
@@ -41,6 +45,9 @@ export function buildGroupsRouter(options: { legacy: boolean }): Router {
   /** A group as the clients get it. */
   function groupJson(group: HydratedDocument<GroupDoc>, extra: Record<string, unknown> = {}) {
     const json = group.toJSON() as Record<string, unknown>;
+    // Named and turned to the viewer's side where they are shown (detail,
+    // summary), never as stored.
+    delete json.openingBalances;
     return {
       ...json,
       // An app from before groups reads a start date on every trip.
@@ -69,11 +76,12 @@ export function buildGroupsRouter(options: { legacy: boolean }): Router {
   /** The group with who is in it, named, from the caller's side. */
   async function detailJson(group: HydratedDocument<GroupDoc>, userId: Types.ObjectId) {
     const contactIds = group.contactMembers.map((m) => m.contactId);
-    const [users, contacts] = await Promise.all([
+    const [users, contacts, openingBalances] = await Promise.all([
       User.find({ _id: { $in: [...group.members.map((m) => m.userId), ...group.contactMembers.map((m) => m.addedBy)] } })
         .select("name email")
         .lean(),
       Contact.find({ _id: { $in: contactIds } }).select("name phone").lean(),
+      groupOpeningsJson(group, userId),
     ]);
     const nameOfUser = (id: Types.ObjectId) => {
       const user = users.find((u) => u._id.equals(id));
@@ -104,6 +112,7 @@ export function buildGroupsRouter(options: { legacy: boolean }): Router {
           isMine: member.addedBy.equals(userId),
         };
       }),
+      openingBalances,
     });
   }
 
@@ -131,12 +140,36 @@ export function buildGroupsRouter(options: { legacy: boolean }): Router {
 
   const OBJECT_ID = /^[0-9a-fA-F]{24}$/;
 
+  /**
+   * One opening balance, from the setter's side. A contact is named by
+   * contactId and a SpendLog user by userId; `memberId` names either, for a
+   * client that keeps one list of everyone.
+   */
+  const openingSchema = z
+    .object({
+      memberKind: z.enum(["contact", "user"]),
+      contactId: z.string().regex(OBJECT_ID).nullable().optional(),
+      userId: z.string().regex(OBJECT_ID).nullable().optional(),
+      memberId: z.string().regex(OBJECT_ID).optional(),
+      direction: z.enum(["owes_me", "i_owe"]),
+      amountMinor: z.number().int().min(0).max(1_000_000_000_00),
+      note: z.string().trim().max(200).nullable().optional(),
+    })
+    .transform(({ memberId, ...entry }) => ({
+      ...entry,
+      contactId: entry.memberKind === "contact" ? (entry.contactId ?? memberId ?? null) : null,
+      userId: entry.memberKind === "user" ? (entry.userId ?? memberId ?? null) : null,
+    }));
+  const openingsSchema = z.array(openingSchema).max(100);
+
   const createGroupSchema = z.object({
     name: z.string().trim().min(1).max(80),
     startedAt: z.coerce.date().nullable().optional(),
     endedAt: z.coerce.date().nullable().optional(),
     /** Contacts of the caller's to put in it from the start. */
     contactIds: z.array(z.string().regex(OBJECT_ID)).max(50).optional(),
+    /** What was already owed with each of them when the group began here. */
+    openingBalances: openingsSchema.optional(),
   });
 
   // POST / — a new group, with whoever of the caller's contacts is in it.
@@ -172,7 +205,7 @@ export function buildGroupsRouter(options: { legacy: boolean }): Router {
     }
 
     const now = new Date();
-    const group = await Group.create({
+    const group = new Group({
       ownerId: userId,
       name: parsed.data.name,
       startedAt,
@@ -182,6 +215,15 @@ export function buildGroupsRouter(options: { legacy: boolean }): Router {
       contactMembers: contactIds.map((contactId) => ({ contactId, addedBy: userId, joinedAt: now })),
       joinCode: generateJoinCode(),
     });
+    if (parsed.data.openingBalances?.length) {
+      try {
+        setOpenings(group, userId, parsed.data.openingBalances);
+      } catch (error) {
+        if (error instanceof GroupOpeningError) return res.status(400).json({ error: error.message });
+        throw error;
+      }
+    }
+    await group.save();
 
     res.status(201).json(groupJson(group, { claimedCount: 0, totalMinor: 0, transactionCount: 0 }));
   });
@@ -273,7 +315,35 @@ export function buildGroupsRouter(options: { legacy: boolean }): Router {
     if (!group) return res.status(404).json({ error: "Not found" });
 
     const json = groupJson(group);
-    res.json({ group: json, trip: json, ...(await groupSpendSummary(group)) });
+    const [spend, openingBalances] = await Promise.all([groupSpendSummary(group), groupOpeningsJson(group, userId)]);
+    res.json({ group: json, trip: json, ...spend, openingBalances });
+  });
+
+  const putOpeningsSchema = z.object({ openingBalances: openingsSchema });
+
+  // PUT /:id/openings — everything the caller says was owed between them
+  // and the others when the group began here: "Rahul owes me 1,200", "I owe
+  // Priya 450". Replaces all of the caller's own (an empty list takes them
+  // all away); nobody else's are touched. Not spending or income: only
+  // who owes whom moves - the group's settlement and, with a contact, the
+  // caller's People balance.
+  router.put("/:id/openings", validObjectIdParam("id"), async (req, res) => {
+    const parsed = putOpeningsSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+    const userId = currentUserId(req);
+    const group = await assertGroupMember(req.params.id, userId);
+    if (!group) return res.status(404).json({ error: "Not found" });
+
+    try {
+      setOpenings(group, userId, parsed.data.openingBalances);
+    } catch (error) {
+      if (error instanceof GroupOpeningError) return res.status(400).json({ error: error.message });
+      throw error;
+    }
+    await group.save();
+
+    res.json(await detailJson(group, userId));
   });
 
   // GET /:id/transactions — everyone's spending in the group.
@@ -526,6 +596,9 @@ export function buildGroupsRouter(options: { legacy: boolean }): Router {
       }
 
       group.contactMembers = group.contactMembers.filter((m) => !m.contactId.equals(member.contactId));
+      // What was owed with them when the group began goes with them, as
+      // their shares of its payments do.
+      dropContactOpenings(group, member.contactId);
       await group.save();
       await resyncGroup(group._id);
 

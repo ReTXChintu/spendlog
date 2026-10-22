@@ -8,9 +8,11 @@ import 'package:spendlog/models/models.dart';
 import 'package:spendlog/screens/group_add_payments_screen.dart';
 import 'package:spendlog/screens/group_detail_screen.dart';
 import 'package:spendlog/screens/group_members_screen.dart';
+import 'package:spendlog/screens/group_openings_screen.dart';
 import 'package:spendlog/screens/group_other_payment_screen.dart';
 import 'package:spendlog/screens/group_payments_screen.dart';
 import 'package:spendlog/screens/groups_screen.dart';
+import 'package:spendlog/screens/people_screen.dart';
 import 'package:spendlog/theme.dart';
 import 'package:spendlog/widgets/ds/ds_icon.dart';
 import 'package:spendlog/widgets/edit_transaction_sheet.dart';
@@ -56,8 +58,11 @@ Map<String, dynamic> _groupJson(
 
 /// GET /groups/:id: the user, a friend on SpendLog, a contact of the user's
 /// and a contact of the friend's.
-Map<String, dynamic> _detailJson(String id, String name, {bool iOwn = true}) => {
+Map<String, dynamic> _detailJson(String id, String name,
+        {bool iOwn = true, List<Map<String, dynamic>> openings = const []}) =>
+    {
       ..._groupJson(id, name),
+      'openingBalances': openings,
       'members': [
         {'id': 'me', 'kind': 'user', 'userId': 'me', 'name': 'Biswajit', 'isOwner': iOwn, 'isMe': true},
         {'id': 'asha', 'kind': 'user', 'userId': 'asha', 'name': 'Asha', 'isOwner': !iOwn, 'isMe': false},
@@ -162,11 +167,15 @@ class _Calls {
 }
 
 /// Answers every group endpoint the screens and the editor ask for.
-MockClient _groupServer(_Calls calls, {List<Map<String, dynamic>>? groups, bool iOwn = true}) =>
+MockClient _groupServer(_Calls calls,
+        {List<Map<String, dynamic>>? groups, bool iOwn = true, List<Map<String, dynamic>> openings = const []}) =>
     MockClient((request) async {
       calls.requests.add(request);
       final path = request.url.path;
       if (request.method == 'PATCH') return http.Response('{}', 200);
+      if (request.method == 'PUT' && path.endsWith('/openings')) {
+        return _json(_detailJson('goa1', 'Goa', iOwn: iOwn, openings: openings));
+      }
       if (request.method == 'POST' && path.endsWith('/contacts') && path.contains('/groups/')) {
         return http.Response(jsonEncode(_detailJson('goa1', 'Goa')), 201);
       }
@@ -197,7 +206,7 @@ MockClient _groupServer(_Calls calls, {List<Map<String, dynamic>>? groups, bool 
       if (path.endsWith('/settlement')) return _json(_settlementJson());
       if (path.endsWith('/groups/goa1/transactions')) return _json(_paymentsJson());
       if (RegExp(r'/groups/[a-z0-9]+$').hasMatch(path)) {
-        return _json(_detailJson(path.split('/').last, 'Goa', iOwn: iOwn));
+        return _json(_detailJson(path.split('/').last, 'Goa', iOwn: iOwn, openings: openings));
       }
       if (path.endsWith('/contacts')) {
         return _json({
@@ -481,6 +490,9 @@ void main() {
         await tester.tap(find.widgetWithText(FilledButton, 'Add'));
         await tester.pumpAndSettle();
         expect(find.text('Priya'), findsOneWidget);
+        await tester.tap(find.text('Next'));
+        await tester.pumpAndSettle();
+        // Nothing owed: the optional step left as it is.
         await tester.tap(find.text('Make the group'));
         await tester.pumpAndSettle();
       }, () => _groupServer(calls));
@@ -490,6 +502,7 @@ void main() {
       expect(post['contactIds'], ['priya']);
       expect(post['startedAt'], isNull);
       expect(post['endedAt'], isNull);
+      expect(post.containsKey('openingBalances'), isFalse);
       // Opened straight away.
       expect(calls.to('GET', '/groups/new1'), isNotEmpty);
     });
@@ -794,6 +807,242 @@ void main() {
       expect(addedToGroupMessage(3, 'Goa'), 'Added 3 payments to Goa');
       expect(addedToGroupMessage(1, 'Goa'), 'Added 1 payment to Goa');
     });
+  });
+
+  group('starting balances', () {
+    /// Through "New group" to "Anything already owed?", with Rahul and Priya in it.
+    Future<void> toOwedStep(WidgetTester tester, {Brightness brightness = Brightness.light, double height = 1400}) async {
+      _phone(tester, height: height);
+      await tester.pumpWidget(MaterialApp(theme: buildTheme(brightness), home: const GroupsScreen()));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('New group'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).first, 'Flatmates');
+      await tester.tap(find.text('Add from contacts'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Rahul'));
+      await tester.tap(find.text('Priya'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Add 2'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('"New group" asks what was already owed, and posts it with the group', (tester) async {
+      final calls = _Calls();
+      await http.runWithClient(() async {
+        await toOwedStep(tester);
+        expect(find.text('Anything already owed?'), findsOneWidget);
+        expect(find.text('Owes me'), findsNWidgets(2));
+
+        await tester.enterText(find.byKey(const ValueKey('opening-amount-rahul')), '1200');
+        await tester.enterText(find.byKey(const ValueKey('opening-amount-priya')), '450.50');
+        await tester.tap(find.descendant(
+          of: find.byKey(const ValueKey('opening-direction-priya')),
+          matching: find.text('I owe'),
+        ));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Make the group'));
+        await tester.pumpAndSettle();
+      }, () => _groupServer(calls));
+
+      final post = jsonDecode(calls.to('POST', '/groups').single.body) as Map<String, dynamic>;
+      expect(post['contactIds'], unorderedEquals(['rahul', 'priya']));
+      expect(post['openingBalances'], unorderedEquals([
+        {'memberKind': 'contact', 'contactId': 'rahul', 'direction': 'owes_me', 'amountMinor': 120000},
+        {'memberKind': 'contact', 'contactId': 'priya', 'direction': 'i_owe', 'amountMinor': 45050},
+      ]));
+    });
+
+    testWidgets('"Skip" makes the group with nothing owed, whatever was typed', (tester) async {
+      final calls = _Calls();
+      await http.runWithClient(() async {
+        await toOwedStep(tester);
+        await tester.enterText(find.byKey(const ValueKey('opening-amount-rahul')), '1200');
+        await tester.tap(find.text('Skip - nothing owed'));
+        await tester.pumpAndSettle();
+      }, () => _groupServer(calls));
+
+      final post = jsonDecode(calls.to('POST', '/groups').single.body) as Map<String, dynamic>;
+      expect(post.containsKey('openingBalances'), isFalse);
+      expect(post['contactIds'], hasLength(2));
+    });
+
+    final openings = [
+      {
+        'id': 'o1',
+        'memberKind': 'contact',
+        'memberId': 'rahul',
+        'memberName': 'Rahul',
+        'contactId': 'rahul',
+        'direction': 'owes_me',
+        'amountMinor': 120000,
+        'setBy': 'me',
+        'setByName': 'Biswajit',
+        'isMine': true,
+        'fromId': 'rahul',
+        'fromName': 'Rahul',
+        'toId': 'me',
+        'toName': 'Biswajit',
+        'viewerDirection': 'owes_me',
+      },
+      {
+        'id': 'o2',
+        'memberKind': 'user',
+        'memberId': 'me',
+        'memberName': 'Biswajit',
+        'userId': 'me',
+        'direction': 'owes_me',
+        'amountMinor': 30000,
+        'setBy': 'asha',
+        'setByName': 'Asha',
+        'isMine': false,
+        'fromId': 'me',
+        'fromName': 'Biswajit',
+        'toId': 'asha',
+        'toName': 'Asha',
+        'viewerDirection': 'i_owe',
+      },
+    ];
+
+    testWidgets('the group shows them from my side, and its editor saves mine', (tester) async {
+      final calls = _Calls();
+      await http.runWithClient(() async {
+        _phone(tester, height: 2600);
+        await tester.pumpWidget(MaterialApp(theme: buildTheme(Brightness.light), home: GroupDetailScreen(group: _goa)));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Starting balances'), findsOneWidget);
+        expect(find.text('Rahul owes you ₹1,200'), findsOneWidget);
+        expect(find.text('You owe Asha ₹300'), findsOneWidget, reason: 'the mirror of the one Asha set');
+        expect(find.textContaining('Set by Asha'), findsOneWidget);
+
+        await tester.ensureVisible(find.widgetWithText(TextButton, 'Edit'));
+        await tester.tap(find.widgetWithText(TextButton, 'Edit'));
+        await tester.pumpAndSettle();
+        expect(find.byType(GroupOpeningsScreen), findsOneWidget);
+        // Asha set what is between us; it is hers to change.
+        expect(find.byKey(const ValueKey('opening-amount-asha')), findsNothing);
+        expect(find.textContaining('Asha already set this'), findsOneWidget);
+        expect(find.text('1200'), findsOneWidget, reason: 'Rahul, as it stands');
+
+        await tester.tap(find.descendant(
+          of: find.byKey(const ValueKey('opening-direction-rahul')),
+          matching: find.text('I owe'),
+        ));
+        await tester.enterText(find.byKey(const ValueKey('opening-amount-rahul')), '1500');
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Save starting balances'));
+        await tester.pumpAndSettle();
+      }, () => _groupServer(calls, openings: openings));
+
+      final put = jsonDecode(calls.to('PUT', '/groups/goa1/openings').single.body) as Map<String, dynamic>;
+      expect(put['openingBalances'], [
+        {'memberKind': 'contact', 'contactId': 'rahul', 'direction': 'i_owe', 'amountMinor': 150000},
+      ]);
+      // Back on the group, loaded again.
+      expect(find.byType(GroupDetailScreen), findsOneWidget);
+    });
+
+    testWidgets('clearing an amount takes that one away', (tester) async {
+      final calls = _Calls();
+      await http.runWithClient(() async {
+        _phone(tester, height: 1400);
+        await tester.pumpWidget(MaterialApp(
+          theme: buildTheme(Brightness.light),
+          home: GroupOpeningsScreen(detail: GroupDetail.fromJson(_detailJson('goa1', 'Goa', openings: openings))),
+        ));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byKey(const ValueKey('opening-amount-rahul')), '');
+        await tester.tap(find.text('Save starting balances'));
+        await tester.pumpAndSettle();
+      }, () => _groupServer(calls, openings: openings));
+
+      final put = jsonDecode(calls.to('PUT', '/groups/goa1/openings').single.body) as Map<String, dynamic>;
+      expect(put['openingBalances'], isEmpty);
+    });
+
+    testWidgets('the People page shows a group opening as its own row', (tester) async {
+      _phone(tester, height: 1400);
+      await http.runWithClient(() async {
+        await tester.pumpWidget(MaterialApp(
+          theme: buildTheme(Brightness.light),
+          home: PersonScreen(contact: Contact(id: 'rahul', name: 'Rahul', balanceMinor: 120000)),
+        ));
+        await tester.pumpAndSettle();
+      }, () => MockClient((request) async => _json({
+            'id': 'rahul',
+            'name': 'Rahul',
+            'balanceMinor': 120000,
+            'openingBalanceMinor': 0,
+            'groupOpeningMinor': 120000,
+            'history': [],
+            'clearances': [],
+            'groupOpenings': [
+              {
+                'id': 'o1',
+                'groupId': 'flat1',
+                'groupName': 'Flatmates',
+                'direction': 'owes_me',
+                'amountMinor': 120000,
+                'effectMinor': 120000,
+                'setAt': '2026-10-01T10:00:00.000Z',
+              },
+            ],
+          })));
+
+      expect(find.text('Opening balance in Flatmates'), findsOneWidget);
+      expect(find.textContaining('Rahul owes you ₹1,200'), findsOneWidget);
+      expect(find.text('+₹1,200.00'), findsOneWidget);
+      expect(find.text('Starting balance'), findsNothing, reason: 'not the contact own opening balance');
+    });
+
+    for (final brightness in Brightness.values) {
+      testWidgets('"Anything already owed?" fits at 360 (${brightness.name})', (tester) async {
+        await http.runWithClient(() async {
+          await toOwedStep(tester, brightness: brightness, height: 800);
+          await tester.enterText(find.byKey(const ValueKey('opening-amount-rahul')), '123456789');
+          await tester.pumpAndSettle();
+        }, () => _groupServer(_Calls()));
+        expect(tester.takeException(), isNull);
+        expect(find.text('Anything already owed?'), findsOneWidget);
+      });
+
+      testWidgets('the starting balances editor fits at 360 (${brightness.name})', (tester) async {
+        _phone(tester);
+        final detail = _detailJson('goa1', 'Spiti Valley, Chandratal and the long way back', openings: openings);
+        (detail['contacts'] as List).add({
+          'id': 'long',
+          'kind': 'contact',
+          'contactId': 'long',
+          'name': 'Venkatanarasimharajuvaripeta Subrahmanyam',
+          'addedBy': 'me',
+          'isMine': true,
+        });
+        await http.runWithClient(() async {
+          await tester.pumpWidget(MaterialApp(
+            theme: buildTheme(brightness),
+            home: GroupOpeningsScreen(detail: GroupDetail.fromJson(detail)),
+          ));
+          await tester.pumpAndSettle();
+          await tester.enterText(find.byKey(const ValueKey('opening-amount-long')), '99999999');
+          await tester.pumpAndSettle();
+        }, () => _groupServer(_Calls()));
+        expect(tester.takeException(), isNull);
+        expect(find.text('Save starting balances'), findsOneWidget);
+      });
+
+      testWidgets('the group detail with starting balances fits at 360 (${brightness.name})', (tester) async {
+        _phone(tester, height: 3200);
+        await http.runWithClient(() async {
+          await tester.pumpWidget(MaterialApp(theme: buildTheme(brightness), home: GroupDetailScreen(group: _goa)));
+          await tester.pumpAndSettle();
+        }, () => _groupServer(_Calls(), openings: openings));
+        expect(tester.takeException(), isNull);
+        expect(find.text('Starting balances'), findsOneWidget);
+      });
+    }
   });
 
   group('at 360 px', () {

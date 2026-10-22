@@ -1,5 +1,5 @@
 import { Types } from "mongoose";
-import { Contact, ContactClearance, Transaction, TransactionDoc } from "../../models";
+import { Contact, ContactClearance, Group, Transaction, TransactionDoc } from "../../models";
 
 /**
  * Who owes what, and the rules for saying so on a transaction.
@@ -71,6 +71,13 @@ export interface Balance {
    * what the user owed them.
    */
   clearedMinor: number;
+  /**
+   * What groups say was owed with them when each began here - "Opening
+   * balance in Flatmates · Rahul owes you 1,200". Signed like the balance,
+   * and part of it. Apart from the contact's own opening balance, so each
+   * shows as the row it is.
+   */
+  groupOpeningMinor: number;
   transactionCount: number;
   lastAt: Date | null;
 }
@@ -82,6 +89,30 @@ export interface Balance {
 const SIGNED_CLEARANCE = {
   $cond: [{ $eq: ["$direction", "OWED_TO_ME"] }, "$amountMinor", { $multiply: ["$amountMinor", -1] }],
 };
+
+/**
+ * A group opening balance as it moves the setter's balance with a contact
+ * (see GroupOpeningBalance): "owes_me" adds to what they owe, "i_owe"
+ * takes from it - the same way round as a payment the user made for them
+ * and one they made for the user. The aggregation form of signedOpening.
+ */
+const SIGNED_GROUP_OPENING = {
+  $cond: [
+    { $eq: ["$openingBalances.direction", "owes_me"] },
+    "$openingBalances.amountMinor",
+    { $multiply: ["$openingBalances.amountMinor", -1] },
+  ],
+};
+
+/** Every group opening the user set with one of their contacts, unwound. */
+function groupOpeningsPipeline(userId: Types.ObjectId, contactIds?: Types.ObjectId[]) {
+  const match = {
+    "openingBalances.setBy": userId,
+    "openingBalances.memberKind": "contact",
+    ...(contactIds ? { "openingBalances.contactId": { $in: contactIds } } : {}),
+  };
+  return [{ $match: match }, { $unwind: "$openingBalances" }, { $match: match }];
+}
 
 /**
  * Whether a person's part of a row is something they owe the user (a
@@ -100,12 +131,13 @@ export function personSign(transaction: Pick<TransactionDoc, "type" | "offLedger
 }
 
 /**
- * Every person's running balance, from the transactions that name them
- * and whatever was cleared with them since. The opening balance is the
- * contact's own, added by whoever has the contact to hand.
+ * Every person's running balance, from the transactions that name them,
+ * what groups say was owed with them when each began here, and whatever
+ * was cleared with them since. The opening balance is the contact's own,
+ * added by whoever has the contact to hand.
  */
 export async function balances(userId: Types.ObjectId, contactIds?: Types.ObjectId[]) {
-  const [rows, cleared] = await Promise.all([
+  const [rows, cleared, openings] = await Promise.all([
     Transaction.aggregate<{
       _id: Types.ObjectId;
       givenMinor: number;
@@ -130,6 +162,16 @@ export async function balances(userId: Types.ObjectId, contactIds?: Types.Object
       { $match: { userId, ...(contactIds ? { contactId: { $in: contactIds } } : {}) } },
       { $group: { _id: "$contactId", clearedMinor: { $sum: SIGNED_CLEARANCE }, lastAt: { $max: "$on" } } },
     ]),
+    Group.aggregate<{ _id: Types.ObjectId; openingMinor: number; lastAt: Date }>([
+      ...groupOpeningsPipeline(userId, contactIds),
+      {
+        $group: {
+          _id: "$openingBalances.contactId",
+          openingMinor: { $sum: SIGNED_GROUP_OPENING },
+          lastAt: { $max: "$openingBalances.setAt" },
+        },
+      },
+    ]),
   ]);
 
   const result = new Map<string, Balance>(
@@ -140,6 +182,7 @@ export async function balances(userId: Types.ObjectId, contactIds?: Types.Object
         givenMinor: row.givenMinor,
         returnedMinor: row.returnedMinor,
         clearedMinor: 0,
+        groupOpeningMinor: 0,
         transactionCount: row.transactionCount,
         lastAt: row.lastAt,
       },
@@ -155,17 +198,29 @@ export async function balances(userId: Types.ObjectId, contactIds?: Types.Object
       lastAt: balance.lastAt && balance.lastAt > row.lastAt ? balance.lastAt : row.lastAt,
     });
   }
+  for (const row of openings) {
+    const key = row._id.toString();
+    const balance = result.get(key) ?? { ...NO_BALANCE };
+    result.set(key, {
+      ...balance,
+      balanceMinor: balance.balanceMinor + row.openingMinor,
+      groupOpeningMinor: row.openingMinor,
+      lastAt: balance.lastAt && balance.lastAt > row.lastAt ? balance.lastAt : row.lastAt,
+    });
+  }
   return result;
 }
 
 /**
  * What people owe the user, net, beyond what their transactions say:
- * every opening balance, less everything cleared. The pooled figures (the
- * dashboard's, and analytics') start from split bills, which know nothing
- * of either, and add this so that they agree with the People screen.
+ * every opening balance - each contact's own, and each one a group says
+ * was owed with a contact when it began here - less everything cleared.
+ * The pooled figures (the dashboard's, and analytics') start from split
+ * bills, which know nothing of any of these, and add this so that they
+ * agree with the People screen.
  */
 export async function outsideTransactionsMinor(userId: Types.ObjectId): Promise<number> {
-  const [opening, cleared] = await Promise.all([
+  const [opening, cleared, groupOpenings] = await Promise.all([
     Contact.aggregate<{ total: number }>([
       { $match: { userId } },
       { $group: { _id: null, total: { $sum: { $ifNull: ["$openingBalanceMinor", 0] } } } },
@@ -174,8 +229,12 @@ export async function outsideTransactionsMinor(userId: Types.ObjectId): Promise<
       { $match: { userId } },
       { $group: { _id: null, total: { $sum: SIGNED_CLEARANCE } } },
     ]),
+    Group.aggregate<{ total: number }>([
+      ...groupOpeningsPipeline(userId),
+      { $group: { _id: null, total: { $sum: SIGNED_GROUP_OPENING } } },
+    ]),
   ]);
-  return (opening[0]?.total ?? 0) - (cleared[0]?.total ?? 0);
+  return (opening[0]?.total ?? 0) + (groupOpenings[0]?.total ?? 0) - (cleared[0]?.total ?? 0);
 }
 
 /**
@@ -183,12 +242,23 @@ export async function outsideTransactionsMinor(userId: Types.ObjectId): Promise<
  * the user's own. On a group payment somebody else made it goes the other
  * way - none of it was the user's money, and their share is owed to
  * whoever paid - so the same figure the People page shows comes out here.
+ *
+ * On a payment the user made in a group, only the part their own contacts
+ * owe (its people): the rest of what was not theirs is owed by SpendLog
+ * users in the group, and comes back through the group's settlement, not
+ * through anyone on the People page.
  */
 export const LENT_PART = {
   $cond: [
     { $eq: ["$offLedger", true] },
     { $multiply: [-1, { $ifNull: ["$split.myShareMinor", "$amountMinor"] }] },
-    { $subtract: ["$amountMinor", "$split.myShareMinor"] },
+    {
+      $cond: [
+        { $eq: ["$groupSplit", true] },
+        { $sum: { $ifNull: ["$people.amountMinor", []] } },
+        { $subtract: ["$amountMinor", "$split.myShareMinor"] },
+      ],
+    },
   ],
 };
 
@@ -197,6 +267,7 @@ export const NO_BALANCE: Balance = {
   givenMinor: 0,
   returnedMinor: 0,
   clearedMinor: 0,
+  groupOpeningMinor: 0,
   transactionCount: 0,
   lastAt: null,
 };
