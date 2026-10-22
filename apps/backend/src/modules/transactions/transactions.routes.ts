@@ -23,6 +23,7 @@ import {
   groupMemberIds,
   syncGroupSplit,
 } from "../groups/groups.service";
+import { MIRROR_DELETE_MESSAGE, MIRROR_EDIT_MESSAGE, mirrorEdit, removeMirrorsOf } from "../groups/groups.mirrors";
 import {
   ensureTransferLegs,
   handOverLegs,
@@ -597,6 +598,23 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   const existing = await Transaction.findOne({ _id: req.params.id, userId });
   if (!existing) return res.status(404).json({ error: "Not found" });
 
+  // My share of somebody else's payment: everything about it follows
+  // their row, bar what kind of spending it is to me.
+  if (existing.mirrorOf) {
+    const edit = mirrorEdit(existing, parsed.data);
+    if (!edit.ok) return res.status(400).json({ error: MIRROR_EDIT_MESSAGE });
+    const mirror = await Transaction.findOneAndUpdate(
+      { _id: existing._id, userId },
+      edit.categoryId !== undefined ? { $set: { categoryId: edit.categoryId, editedAt: new Date() } } : {},
+      { new: true }
+    )
+      .populate("category")
+      .populate("account")
+      .populate("group")
+      .populate("paidByContact", "name");
+    return res.json({ ...mirror!.toJSON(), transferLeg: null });
+  }
+
   // The group fields arrive under either name; tripId is what an app from
   // before groups sends. Handled apart from the plain fields below.
   const {
@@ -838,8 +856,16 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
 
 transactionsRouter.delete("/:id", validObjectIdParam("id"), async (req, res) => {
   const userId = currentUserId(req);
+  // A share of somebody else's payment is theirs to take away, by taking
+  // the user off it or the payment out of the group.
+  if (await Transaction.exists({ _id: req.params.id, userId, mirrorOf: { $ne: null } })) {
+    return res.status(400).json({ error: MIRROR_DELETE_MESSAGE });
+  }
   const deleted = await Transaction.findOneAndDelete({ _id: req.params.id, userId });
   if (!deleted) return res.status(404).json({ error: "Not found" });
+
+  // The other members' shares of it, written into their ledgers, go with it.
+  await removeMirrorsOf([deleted._id]);
 
   // The other leg of a transfer: gone with it if SpendLog wrote it in,
   // otherwise unpaired. See releaseLegs.
@@ -1105,6 +1131,9 @@ transactionsRouter.post("/:id/merge", validObjectIdParam("id"), async (req, res)
   }
 
   await mergeTransactions(target, sources);
+  // A row merged away is nobody's share any more; the one it went into
+  // keeps its own mirrors.
+  await removeMirrorsOf(sources.map((source) => source._id));
   // A repayment merged away no longer pays anything; one restored by an
   // unmerge pays again (see below).
   for (const source of sources) {

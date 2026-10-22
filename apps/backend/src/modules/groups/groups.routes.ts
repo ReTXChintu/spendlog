@@ -64,7 +64,7 @@ export function buildGroupsRouter(options: { legacy: boolean }): Router {
   /** Totals per group, so a list means something without opening each one. */
   async function withTotals(groups: HydratedDocument<GroupDoc>[]) {
     const totals = await Transaction.aggregate<{ _id: Types.ObjectId; total: number; count: number }>([
-      { $match: { groupId: { $in: groups.map((g) => g._id) }, type: "DEBIT" } },
+      { $match: { groupId: { $in: groups.map((g) => g._id) }, type: "DEBIT", mirrorOf: null } },
       { $group: { _id: "$groupId", total: { $sum: GROUP_AMOUNT }, count: { $sum: 1 } } },
     ]);
     return groups.map((group) => {
@@ -285,6 +285,9 @@ export function buildGroupsRouter(options: { legacy: boolean }): Router {
     const group = await Group.findOne({ _id: req.params.id, ownerId: currentUserId(req) });
     if (!group) return res.status(404).json({ error: "Not found" });
 
+    // The shares of its payments written into other members' ledgers go
+    // with it: they were only ever the group's arithmetic.
+    await Transaction.deleteMany({ groupId: group._id, mirrorOf: { $ne: null } });
     const split = await Transaction.find({ groupId: group._id, groupSplit: true, offLedger: { $ne: true } });
     for (const row of split) {
       row.groupId = null;
@@ -352,7 +355,9 @@ export function buildGroupsRouter(options: { legacy: boolean }): Router {
     const group = await assertGroupMember(req.params.id, userId);
     if (!group) return res.status(404).json({ error: "Not found" });
 
-    const transactions = await Transaction.find({ groupId: group._id })
+    // Without the mirrors: each is one member's share of a payment that is
+    // already in the list, from its payer's side.
+    const transactions = await Transaction.find({ groupId: group._id, mirrorOf: null })
       .sort({ occurredAt: -1 })
       .limit(500)
       .populate("category")

@@ -11,6 +11,7 @@ import {
   User,
 } from "../../models";
 import { istDayKey } from "../../time";
+import { syncMirrors } from "./groups.mirrors";
 import { TripOpening, computeBalances, settle, shareOut } from "./groups.settlement";
 
 /**
@@ -239,6 +240,7 @@ type SplitRow = Pick<
   | "cardPaymentFor"
   | "emiRole"
   | "loanId"
+  | "mirrorOf"
 >;
 
 /** What the group writes on a row: its split and people, or nothing (null). */
@@ -275,6 +277,8 @@ export function groupSplitFor(
   const paidByContact = row.paidBy?.contactId ?? null;
   const clear = () => (row.groupSplit ? null : "keep");
 
+  // A mirror's split is its source's share of it, kept by syncMirrors.
+  if (row.mirrorOf) return "keep";
   if (!group) return paidByContact ? "keep" : clear();
   if (!paidByContact && !groupCanSplit(row)) return clear();
 
@@ -317,13 +321,16 @@ export async function syncGroupSplit(
 ): Promise<boolean> {
   const group = row.groupId ? (known && known._id.equals(row.groupId) ? known : await Group.findById(row.groupId)) : null;
   const next = groupSplitFor(row, group);
-  if (next === "keep") return false;
-
-  row.split = next ? next.split : null;
-  row.people = next ? next.people : [];
-  row.groupSplit = Boolean(next);
-  await row.save();
-  return true;
+  if (next !== "keep") {
+    row.split = next ? next.split : null;
+    row.people = next ? next.people : [];
+    row.groupSplit = Boolean(next);
+    await row.save();
+  }
+  // The other SpendLog users' shares of it, in their own ledgers - written,
+  // brought up to date or taken away for what the row is now.
+  await syncMirrors(row, group);
+  return next !== "keep";
 }
 
 /**
@@ -335,7 +342,7 @@ export async function resyncGroup(groupId: Types.ObjectId): Promise<number> {
   if (!group) return 0;
 
   let changed = 0;
-  const rows = await Transaction.find({ groupId, type: "DEBIT" });
+  const rows = await Transaction.find({ groupId, type: "DEBIT", mirrorOf: null });
   for (const row of rows) {
     if (await syncGroupSplit(row, group)) changed += 1;
   }
@@ -383,7 +390,8 @@ export async function groupDirectory(group: Pick<GroupDoc, "contactMembers">, id
 
 /** What a group cost, and where it went. */
 export async function groupSpendSummary(group: Pick<GroupDoc, "_id" | "contactMembers">) {
-  const rows = await Transaction.find({ groupId: group._id, type: "DEBIT" })
+  // Never a mirror: it is one member's share of a row already here.
+  const rows = await Transaction.find({ groupId: group._id, type: "DEBIT", mirrorOf: null })
     .select("userId paidBy amountMinor countedAmountMinor groupSplit categoryId occurredAt")
     .lean();
   const categoryIds = [...new Set(rows.map((row) => row.categoryId?.toString()).filter(Boolean))];
@@ -457,6 +465,7 @@ export async function groupSettlement(
   const transactions = await Transaction.find({
     groupId: group._id,
     type: "DEBIT",
+    mirrorOf: null,
     $or: [{ countedAmountMinor: { $gt: 0 } }, { groupSplit: true }],
   }).select("userId paidBy amountMinor countedAmountMinor groupShareWith groupSplit");
 

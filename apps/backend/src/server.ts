@@ -17,6 +17,7 @@ import { runCardCreditBackfill, runPaymentTwinBackfill, runSelfPaymentRepair } f
 import { runDailyFundRefresh } from "./modules/funds/funds.cache";
 import { runSipStepsBackfill } from "./modules/funds/funds.backfill";
 import { runGroupSharesBackfill } from "./modules/groups/groups.backfill";
+import { runGroupMirrorsBackfill } from "./modules/groups/groups.mirrors";
 import { runTransferLegBackfill } from "./modules/transactions/transactions.transfer";
 import { runLoanSplitBackfill } from "./modules/loans/loans.backfill";
 import { syncAllConnectedEmails } from "./modules/ingestion/gmail.service";
@@ -138,7 +139,13 @@ async function start() {
   runSipStepsBackfill().catch((err) => console.error("SIP steps backfill failed:", err));
   // Group payments the user made counted at their own share only, the
   // other members' shares owed back rather than spent.
-  runGroupSharesBackfill().catch((err) => console.error("Group shares backfill failed:", err));
+  // Then each member's share of the group payments the others made,
+  // written into their own ledgers - after the shares pass, which is what
+  // marks a payment as shared.
+  runGroupSharesBackfill()
+    .catch((err) => console.error("Group shares backfill failed:", err))
+    .then(() => runGroupMirrorsBackfill())
+    .catch((err) => console.error("Group mirrors backfill failed:", err));
 
   setInterval(() => {
     syncAllConnectedEmails().catch((err) => console.error("Background Gmail sync failed:", err));

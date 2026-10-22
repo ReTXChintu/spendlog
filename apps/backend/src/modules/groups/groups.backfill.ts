@@ -31,7 +31,7 @@ export const GROUP_SHARES_BACKFILL_VERSION = 1;
  * same rule the hooks use.
  */
 export async function backfillGroupShares(userId: Types.ObjectId): Promise<number> {
-  const rows = await Transaction.find({ userId, groupId: { $ne: null }, type: "DEBIT" }).lean();
+  const rows = await Transaction.find({ userId, groupId: { $ne: null }, type: "DEBIT", mirrorOf: null }).lean();
   if (rows.length === 0) return 0;
 
   const groupIds = [...new Set(rows.map((row) => row.groupId!.toString()))];

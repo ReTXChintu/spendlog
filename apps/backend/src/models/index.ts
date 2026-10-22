@@ -627,6 +627,17 @@ export interface TransactionDoc {
   /// them right as members, amounts and shares change; an edit that types
   /// a different split takes them over.
   groupSplit?: boolean;
+  /// Set on a row that stands for the user's share of a group payment
+  /// another SpendLog user made: the id of that payment, in the payer's
+  /// ledger. Written and kept in step by the group (groups.mirrors.ts),
+  /// never by hand - the amount, date and group follow the payer's row,
+  /// and only the category is the user's to change. Off the ledger like a
+  /// payment a contact made, and counted the same way: the share.
+  mirrorOf?: Types.ObjectId | null;
+  /// Who paid, by name, on a mirror: the payer as they were named when the
+  /// row was last kept in step - or their contact, when one of the payer's
+  /// contacts paid. Goes out as paidByName.
+  mirrorPayerName?: string | null;
   /// The plan this belongs to, once a purchase has been converted to an
   /// EMI: the purchase itself as PARENT, each monthly payment as
   /// INSTALMENT. Only the parent is kept out of the totals.
@@ -867,6 +878,8 @@ const transactionSchema = new Schema<TransactionDoc>(
     paidBy: { type: paidBySchema, default: null },
     offLedger: { type: Boolean, default: false },
     groupSplit: { type: Boolean, default: false },
+    mirrorOf: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
+    mirrorPayerName: { type: String, default: null },
     refundOf: { type: [refundAllocationSchema], default: [] },
     refundedMinor: { type: Number, default: 0, min: 0 },
     people: { type: [personShareSchema], default: [] },
@@ -1018,6 +1031,13 @@ transactionSchema.index({ userId: 1, "people.contactId": 1 });
 transactionSchema.index({ groupId: 1, occurredAt: -1 });
 // Every payment towards a loan, for working out where it stands.
 transactionSchema.index({ "loanSplits.loanId": 1 });
+// One mirror per person per payment, however many times the group is
+// brought up to date at once; and the mirrors of a payment, to keep in
+// step or take away with it.
+transactionSchema.index(
+  { mirrorOf: 1, userId: 1 },
+  { unique: true, partialFilterExpression: { mirrorOf: { $type: "objectId" } } }
+);
 
 // Exposed as `category`/`account` (alongside the raw `categoryId`/`accountId`)
 // so populated responses keep the shape the clients already expect.
@@ -1069,6 +1089,9 @@ transactionSchema.set("toJSON", {
     const json = ret as Record<string, unknown>;
     delete json._id;
     if (json.group !== undefined) json.trip = json.group;
+    // A mirror says who paid itself; the clients read paidByName the way
+    // the group's own list gives it.
+    if (json.mirrorPayerName && json.paidByName === undefined) json.paidByName = json.mirrorPayerName;
     return json;
   },
 });
