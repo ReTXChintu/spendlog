@@ -290,8 +290,8 @@ export interface MonthlyBudgetStatus {
   suggestedMonthlyMinor: number | null;
 }
 
-/** Spending in a month by category, and how much of it was fixed costs. */
-async function spendingIn(userId: Types.ObjectId, month: Pick<UserMonth, "start" | "end">) {
+/** Spending in a month by category ("none" for uncategorised), and how much of it was fixed costs. */
+export async function spendingIn(userId: Types.ObjectId, month: Pick<UserMonth, "start" | "end">) {
   // One pass. A payment towards a commitment, a subscription's renewal or
   // a card EMI's instalment is a fixed cost; a loan repayment is one for
   // the part put down to its loans, and anything it was not split to yet

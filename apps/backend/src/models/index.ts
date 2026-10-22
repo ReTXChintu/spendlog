@@ -1829,6 +1829,38 @@ subscriptionSchema.index({ userId: 1, status: 1, nextRenewalOn: 1 });
 export const Subscription = model<SubscriptionDoc>("Subscription", subscriptionSchema);
 
 /**
+ * The month's summary pushed to the phone the morning after pay day
+ * (budget.digest.ts), recorded so each month's is sent once.
+ */
+export interface MonthlyDigestDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  /// The month summarised, by its key.
+  monthKey: string;
+  sentAt?: Date | null;
+  /// Nothing to say: a month with no spending in it was passed over.
+  skipped?: boolean;
+  title?: string | null;
+  body?: string | null;
+  createdAt: Date;
+}
+
+const monthlyDigestSchema = new Schema<MonthlyDigestDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    monthKey: { type: String, required: true },
+    sentAt: { type: Date, default: null },
+    skipped: { type: Boolean, default: false },
+    title: { type: String, default: null },
+    body: { type: String, default: null },
+  },
+  { timestamps: { createdAt: true, updatedAt: false }, ...serialization }
+);
+monthlyDigestSchema.index({ userId: 1, monthKey: 1 }, { unique: true });
+
+export const MonthlyDigest = model<MonthlyDigestDoc>("MonthlyDigest", monthlyDigestSchema);
+
+/**
  * One row of a credit card statement, with what reconciling made of it.
  *
  * Kept after the fact rather than thrown away once processed: it is the

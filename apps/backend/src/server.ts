@@ -18,6 +18,7 @@ import { runDailyFundRefresh } from "./modules/funds/funds.cache";
 import { runSipStepsBackfill } from "./modules/funds/funds.backfill";
 import { runGroupSharesBackfill } from "./modules/groups/groups.backfill";
 import { runGroupMirrorsBackfill } from "./modules/groups/groups.mirrors";
+import { runMonthlyDigests } from "./modules/budget/budget.digest";
 import { runSubscriptionNotices } from "./modules/subscriptions/subscriptions.notify";
 import { runTransferLegBackfill } from "./modules/transactions/transactions.transfer";
 import { runLoanSplitBackfill } from "./modules/loans/loans.backfill";
@@ -176,6 +177,11 @@ async function start() {
     runSubscriptionNotices().catch((err) => console.error("Subscription notices failed:", err));
   subscriptionNotices();
   setInterval(subscriptionNotices, DAILY_JOB_CHECK_MS);
+
+  // The month that just closed, the morning after each person's pay day.
+  const monthlyDigests = () => runMonthlyDigests().catch((err) => console.error("Monthly digests failed:", err));
+  monthlyDigests();
+  setInterval(monthlyDigests, DAILY_JOB_CHECK_MS);
 }
 
 start().catch((err) => {
