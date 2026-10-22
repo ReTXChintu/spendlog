@@ -4,12 +4,14 @@ import 'dart:ui' show DartPluginRegistrant;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import '../screens/groups_screen.dart';
 import '../screens/passbook_screen.dart';
 import '../screens/subscription_detail_screen.dart';
 import '../screens/subscriptions_screen.dart';
 import '../screens/transactions_screen.dart';
 import 'api_client.dart';
 import 'credential_store.dart';
+import 'deep_links.dart' show GroupLinkScreen;
 import 'perk_import_watcher.dart' show appNavigatorKey;
 import 'sms_service.dart';
 
@@ -34,6 +36,10 @@ const String _subscriptionType = 'SUBSCRIPTION';
 /// A visible push the morning after pay day: the month that just closed.
 /// Tapping it opens the ledger on that month.
 const String _digestType = 'MONTHLY_DIGEST';
+
+/// A group: someone joined it, Trippin put me in it, or a payment there
+/// includes my share. Opens the group (or the list, for several).
+const String _groupType = 'GROUP';
 
 /// Whether this phone is signed in as the owner. A kid's phone must never
 /// register for pushes or read SMS, and a signed-out one has no one to
@@ -142,6 +148,9 @@ class PushService {
       case _subscriptionType:
         final id = data['subscriptionId'];
         return id is String && id.isNotEmpty ? SubscriptionDetailScreen(id: id) : const SubscriptionsScreen();
+      case _groupType:
+        final groupId = data['groupId'];
+        return groupId is String && groupId.isNotEmpty ? GroupLinkScreen(groupId: groupId) : const GroupsScreen();
       case _digestType:
         final monthKey = data['monthKey'];
         if (monthKey is! String || monthKey.isEmpty) return null;

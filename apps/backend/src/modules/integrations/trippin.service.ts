@@ -11,6 +11,7 @@ import {
   tripSettlement,
   tripSpendSummary,
 } from "../groups/groups.service";
+import { noteAddedFromTrippin } from "../groups/groups.notify";
 
 /**
  * Trippin, the suite's trip planner, tracking a trip's spending here.
@@ -197,10 +198,12 @@ async function syncMembers(trip: HydratedDocument<TripDoc>, trippin: TrippinTrip
   const resolved = await Promise.all([...people.values()].map(resolveSuitePerson));
   const skipped = resolved.filter((r): r is Extract<Resolved, { skipped: string }> => "skipped" in r);
 
+  const added: Types.ObjectId[] = [];
   for (const person of resolved) {
     if (!("userId" in person)) continue;
     if (!trip.members.some((member) => member.userId.equals(person.userId))) {
       trip.members.push({ userId: person.userId, joinedAt });
+      added.push(person.userId);
     }
   }
 
@@ -215,7 +218,14 @@ async function syncMembers(trip: HydratedDocument<TripDoc>, trippin: TrippinTrip
   }
 
   if (trip.source) trip.source.memberSubs = [...listed];
-  return skipped.map(({ sub, reason }) => ({ sub, reason }));
+  return { skipped: skipped.map(({ sub, reason }) => ({ sub, reason })), added };
+}
+
+/** Tells whoever Trippin just put in the group (never its owner). */
+function announce(trip: HydratedDocument<TripDoc>, added: Types.ObjectId[]) {
+  for (const userId of added) {
+    if (!userId.equals(trip.ownerId)) noteAddedFromTrippin(userId, trip);
+  }
 }
 
 /**
@@ -324,8 +334,9 @@ async function linkTrip(trippin: TrippinTrip, attachTo?: string) {
   }
   trip.source!.url = trippin.url ?? null;
 
-  const skippedMembers = await syncMembers(trip, trippin, foundingJoin);
+  const { skipped: skippedMembers, added } = await syncMembers(trip, trippin, foundingJoin);
   await trip.save();
+  announce(trip, added);
 
   await releaseOutsideWindow(trip);
   // Anything already recorded inside the window belongs to it, exactly as
@@ -350,8 +361,9 @@ async function updateTrip(trippin: TrippinTrip, moveDates: boolean) {
     trip.source.url = trippin.url ?? trip.source.url ?? null;
   }
 
-  const skippedMembers = await syncMembers(trip, trippin, new Date());
+  const { skipped: skippedMembers, added } = await syncMembers(trip, trippin, new Date());
   await trip.save();
+  announce(trip, added);
 
   if (moveDates) await releaseOutsideWindow(trip);
   await claimTransactions(trip, undefined, true);

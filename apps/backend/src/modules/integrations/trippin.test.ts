@@ -737,3 +737,32 @@ describe("linking an existing group", () => {
     assert.equal(await models.SuiteEvent.countDocuments({}), 0, "a refusal isn't remembered");
   });
 });
+
+describe("telling people they're in", () => {
+  it("whoever Trippin puts in the group hears about it; the owner doesn't", async () => {
+    const notify = await import("../groups/groups.notify");
+    const sent: { userId: string; title: string; data: Record<string, string> }[] = [];
+    notify.setGroupNotifierForTests(async (userId, note) => {
+      sent.push({ userId: userId.toString(), title: note.title, data: note.data });
+    });
+    try {
+      const asha = person("Asha");
+      const ravi = person("Ravi");
+      const meera = person("Meera");
+      await existingUser(asha);
+      const friend = await existingUser(ravi);
+      const { body } = await sendEvent("trip.linked", tripPayload({ owner: asha, members: [asha, ravi] }));
+      assert.deepEqual(sent, [
+        { userId: friend.id.toString(), title: "You're in Goa", data: { type: "GROUP", groupId: body.remoteId, link: `spendlog://app/groups/${body.remoteId}` } },
+      ]);
+
+      // Someone added later hears too; nobody already in it does.
+      sent.length = 0;
+      const third = await existingUser(meera);
+      await sendEvent("trip.members_changed", tripPayload({ owner: asha, members: [asha, ravi, meera] }));
+      assert.deepEqual(sent.map((s) => s.userId), [third.id.toString()]);
+    } finally {
+      notify.setGroupNotifierForTests(null);
+    }
+  });
+});

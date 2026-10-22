@@ -316,3 +316,73 @@ describe("a group payment somebody else made", () => {
     assert.equal((await mirrors.runGroupMirrorsBackfill()).users, 0);
   });
 });
+
+describe("what the group tells people's phones", () => {
+  let notify: typeof import("./groups.notify");
+  const sent: { userId: string; title: string; body: string; data: Record<string, string> }[] = [];
+
+  before(async () => {
+    notify = await import("./groups.notify");
+    notify.setGroupNotifierForTests(async (userId, note) => {
+      sent.push({ userId: userId.toString(), ...note });
+    });
+  });
+  after(() => notify.setGroupNotifierForTests(null));
+  beforeEach(() => {
+    notify.flushShares();
+    sent.length = 0;
+  });
+
+  it("the owner hears when someone joins with the code", async () => {
+    const { me, group } = await threeOnSpendLog();
+    const joined = sent.filter((s) => s.userId === me.id.toString());
+    assert.deepEqual(
+      joined.map((s) => s.title),
+      ["Asha joined Goa", "Ben joined Goa"]
+    );
+    assert.deepEqual(joined[0].data, { type: "GROUP", groupId: group.id, link: `spendlog://app/groups/${group.id}` });
+  });
+
+  it("a payment with my share notifies me once a minute's shares are gathered, as one", async () => {
+    const { me, asha, ben, group } = await threeOnSpendLog();
+    sent.length = 0;
+    await spend(me.token, { amountMinor: 3000_00, groupId: group.id, merchant: "Fisherman's Wharf" });
+    assert.equal(sent.length, 0, "gathered first");
+    notify.flushShares();
+    const forAsha = sent.filter((s) => s.userId === asha.id.toString());
+    assert.equal(forAsha.length, 1);
+    assert.equal(forAsha[0].title, "Biswajit paid for Fisherman's Wharf");
+    assert.equal(forAsha[0].body, "Your share: ₹1,000 · Goa");
+    assert.equal(forAsha[0].data.link, `spendlog://app/groups/${group.id}`);
+    assert.equal(sent.filter((s) => s.userId === me.id.toString()).length, 0, "the payer isn't told");
+
+    sent.length = 0;
+    await spend(me.token, { amountMinor: 300_00, groupId: group.id, merchant: "Chai" });
+    await spend(me.token, { amountMinor: 600_00, groupId: group.id, note: "Taxi" });
+    notify.flushShares();
+    const forBen = sent.filter((s) => s.userId === ben.id.toString());
+    assert.deepEqual(
+      forBen.map((s) => [s.title, s.body]),
+      [["2 payments include your share", "₹300 in all · Goa"]]
+    );
+  });
+
+  it("an old payment (a backfill, a tidy-up) never notifies", async () => {
+    const { me, group } = await threeOnSpendLog();
+    sent.length = 0;
+    await spend(me.token, { amountMinor: 900_00, groupId: group.id, occurredAt: new Date(Date.now() - 30 * 86_400_000).toISOString() });
+    notify.flushShares();
+    assert.equal(sent.length, 0);
+  });
+
+  it("the text for shares across groups", () => {
+    const note = notify.shareNote([
+      { groupId: "a", groupName: "Goa", payerName: "Asha", what: null, shareMinor: 150 },
+      { groupId: "b", groupName: "Flat", payerName: "Ben", what: "Rent", shareMinor: 1000_00 },
+    ]);
+    assert.equal(note.title, "2 payments include your share");
+    assert.equal(note.body, "₹1,001.50 in all · 2 groups");
+    assert.deepEqual(note.data, { type: "GROUP" });
+    assert.equal(notify.shareNote([{ groupId: "a", groupName: "Goa", payerName: "Asha", what: null, shareMinor: 250_00 }]).title, "Asha paid");
+  });
+});

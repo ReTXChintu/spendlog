@@ -3,6 +3,7 @@ import { runOncePerUser } from "../../backfill";
 import { Contact, Group, GroupDoc, Transaction, TransactionDoc, User } from "../../models";
 import { shareOut } from "./groups.settlement";
 import { groupMemberIds, sharersOf } from "./groups.service";
+import { noteShare } from "./groups.notify";
 
 /**
  * My share of a group payment somebody else on SpendLog made.
@@ -177,6 +178,14 @@ export async function syncMirrors(row: Source, known?: GroupShape | null): Promi
         ...fields(share),
       });
       changed += 1;
+      noteShare(new Types.ObjectId(userId), {
+        groupId: group!._id.toString(),
+        groupName: group!.name,
+        payerName: name,
+        what: row.merchant ?? row.note ?? null,
+        shareMinor: share,
+        occurredAt: row.occurredAt,
+      });
     } catch (error) {
       // Two syncs of the same row at once: the other one wrote it.
       if ((error as { code?: number }).code !== 11000) throw error;

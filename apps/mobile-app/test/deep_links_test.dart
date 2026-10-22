@@ -1,6 +1,8 @@
 // Links into SpendLog (a group from Trippin, the web or a notification) and out to Trippin.
 import 'package:flutter_test/flutter_test.dart';
+import 'package:spendlog/screens/groups_screen.dart';
 import 'package:spendlog/services/deep_links.dart';
+import 'package:spendlog/services/push_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 void main() {
@@ -56,5 +58,12 @@ void main() {
 
     expect(await openSuiteUrl('https://trip-pin.duckdns.org/trips/t1', launcher: installed), isTrue);
     expect(tried.length, 1);
+  });
+
+  test('a group notification opens the group, or the list when it is about several', () {
+    final one = PushService.screenFor({'type': 'GROUP', 'groupId': 'g1', 'link': 'spendlog://app/groups/g1'});
+    expect(one, isA<GroupLinkScreen>());
+    expect((one as GroupLinkScreen).groupId, 'g1');
+    expect(PushService.screenFor({'type': 'GROUP'}), isA<GroupsScreen>());
   });
 }

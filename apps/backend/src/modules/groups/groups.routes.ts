@@ -26,6 +26,7 @@ import {
   syncGroupSplit,
 } from "./groups.service";
 import { isLikelyTravel } from "./groups.travel";
+import { noteJoined } from "./groups.notify";
 
 /**
  * Groups: people who share spending - "Goa trip", "Flatmates", "Office
@@ -646,6 +647,10 @@ export function buildGroupsRouter(options: { legacy: boolean }): Router {
     await group.save();
     // One more person to share everything with.
     await resyncGroup(group._id);
+    if (!group.ownerId.equals(userId)) {
+      const joiner = await User.findById(userId).select("name email").lean();
+      noteJoined(group.ownerId, joiner?.name ?? joiner?.email ?? "Someone", group);
+    }
 
     res.json(groupJson(group, { alreadyJoined: false }));
   });
