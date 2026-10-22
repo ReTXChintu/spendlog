@@ -3,7 +3,7 @@ import { Icon } from "../components/Icon";
 import { StateBlock } from "../components/States";
 import { api } from "../lib/api";
 import { formatDayLabel, formatMoney, formatMoneyShort, istToday } from "../lib/format";
-import { Contact, ContactClearance, ContactDetail, ContactList, Transaction } from "../types";
+import { Contact, ContactClearance, ContactDetail, ContactList, Transaction, groupOf } from "../types";
 
 /** Two initials for an avatar. */
 function initialsOf(name: string): string {
@@ -330,6 +330,7 @@ function AddPerson({ onDone }: { onDone: (created: Contact | null) => void }) {
 
 /** What kind of row a history transaction is, as a badge. */
 function kindBadge(transaction: Transaction, amountMinor: number) {
+  if (transaction.offLedger) return <span className="badge badge-neutral">They paid</span>;
   if (transaction.isSettlement) return <span className="badge badge-good">Paid back</span>;
   if (transaction.split) return <span className="badge badge-neutral">Split</span>;
   return <span className="badge badge-neutral">{amountMinor > 0 ? "Lent" : "Paid back"}</span>;
@@ -546,7 +547,15 @@ function PersonDetail({
                             (row.amountMinor > 0 ? "Lent" : "Paid back")}
                         </div>
                         <div className="people-history-sub">
-                          {row.transaction.isSettlement ? "Settling up" : row.transaction.split ? "Split" : "Lent"}
+                          {row.transaction.offLedger
+                            ? `They paid${groupOf(row.transaction) ? ` · ${groupOf(row.transaction)!.name}` : ""}`
+                            : groupOf(row.transaction)
+                              ? `Split in ${groupOf(row.transaction)!.name}`
+                              : row.transaction.isSettlement
+                                ? "Settling up"
+                                : row.transaction.split
+                                  ? "Split"
+                                  : "Lent"}
                         </div>
                       </td>
                       <td>{kindBadge(row.transaction, row.amountMinor)}</td>

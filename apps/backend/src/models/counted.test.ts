@@ -132,3 +132,39 @@ describe("a credit card bill payment", () => {
     assert.equal(result.countedReason, "FULL");
   });
 });
+
+describe("a group payment somebody else made", () => {
+  it("counts the user's own share, and nothing of anyone else's", () => {
+    // Rahul paid 2,000 for dinner for two: 1,000 of it was the user's
+    // spending, owed to Rahul.
+    const result = resolveCountedAmount({ amountMinor: 200000, offLedger: true, split: { myShareMinor: 100000 } });
+    assert.deepEqual(result, { countedAmountMinor: 100000, countedReason: "SPLIT" });
+  });
+
+  it("counts all of it when it was all the user's, and none when none was", () => {
+    assert.deepEqual(resolveCountedAmount({ amountMinor: 60000, offLedger: true }), {
+      countedAmountMinor: 60000,
+      countedReason: "FULL",
+    });
+    assert.deepEqual(resolveCountedAmount({ amountMinor: 60000, offLedger: true, split: { myShareMinor: 0 } }), {
+      countedAmountMinor: 0,
+      countedReason: "SPLIT",
+    });
+  });
+
+  it("is spending whatever else it is marked, since none of it touched an account", () => {
+    for (const marking of [{ isTransfer: true }, { isSettlement: true }, { cardPaymentFor: "card" }, { excludeFromTotals: true }]) {
+      const result = resolveCountedAmount({ amountMinor: 200000, offLedger: true, split: { myShareMinor: 50000 }, ...marking });
+      assert.equal(result.countedAmountMinor, 50000, JSON.stringify(marking));
+    }
+  });
+
+  it("takes a refund off the user's share", () => {
+    const result = resolveCountedAmount({ amountMinor: 200000, offLedger: true, split: { myShareMinor: 100000 }, refundedMinor: 30000 });
+    assert.deepEqual(result, { countedAmountMinor: 70000, countedReason: "REFUNDED" });
+  });
+
+  it("and paying the payer back later counts as nothing, so it is never counted twice", () => {
+    assert.equal(resolveCountedAmount({ amountMinor: 100000, isSettlement: true }).countedAmountMinor, 0);
+  });
+});

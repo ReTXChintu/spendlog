@@ -3,7 +3,7 @@ import http from "node:http";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import mongoose, { Types } from "mongoose";
-import { isLikelyTravel } from "./trips.travel";
+import { isLikelyTravel } from "./groups.travel";
 
 // env.ts demands these at import time, and the app is imported dynamically
 // below so they are in place first. The database url is never dialled.

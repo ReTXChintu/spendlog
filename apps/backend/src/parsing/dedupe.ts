@@ -32,6 +32,9 @@ export async function findDuplicate(params: {
     userId: params.userId,
     amountMinor: params.amountMinor,
     type: params.type,
+    // A group payment somebody else made is never the same event as a
+    // message about the user's own account, however alike the amounts.
+    offLedger: { $ne: true },
     occurredAt: {
       $gte: new Date(params.occurredAt.getTime() - windowMs),
       $lte: new Date(params.occurredAt.getTime() + windowMs),

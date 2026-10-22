@@ -6,46 +6,47 @@ import '../widgets/ds/ds.dart';
 import '../utils/format.dart';
 import '../widgets/state_block.dart';
 
-/// How far before a trip's start the list reaches, one step per "go back
-/// further". Tickets are booked weeks out, sometimes months.
-const tripLookbackSteps = [60, 180, 365];
+/// How far back the list reaches - from the group's start, or from today
+/// for a group with no dates - one step per "go back further". Tickets are
+/// booked weeks out, sometimes months.
+const groupLookbackSteps = [60, 180, 365];
 
 /// "Added 3 payments to Goa".
-String addedToTripMessage(int added, String tripName) =>
-    'Added $added ${added == 1 ? 'payment' : 'payments'} to $tripName';
+String addedToGroupMessage(int added, String groupName) =>
+    'Added $added ${added == 1 ? 'payment' : 'payments'} to $groupName';
 
-/// Picks payments from before a trip started - tickets, a hotel's advance -
-/// and puts them on it. Its dates never would: the trip only takes in what
-/// was spent while it ran.
+/// Picks payments made before - tickets, a hotel's advance, last week's
+/// groceries - and puts them in a group. Nothing goes into a group by
+/// itself, so this is how the earlier ones get there.
 ///
 /// Pops with how many were added, or null when nothing was.
-class TripAddPaymentsScreen extends StatefulWidget {
-  final Trip trip;
+class GroupAddPaymentsScreen extends StatefulWidget {
+  final Group group;
 
-  const TripAddPaymentsScreen({super.key, required this.trip});
+  const GroupAddPaymentsScreen({super.key, required this.group});
 
   @override
-  State<TripAddPaymentsScreen> createState() => _TripAddPaymentsScreenState();
+  State<GroupAddPaymentsScreen> createState() => _GroupAddPaymentsScreenState();
 }
 
-class _TripAddPaymentsScreenState extends State<TripAddPaymentsScreen> {
+class _GroupAddPaymentsScreenState extends State<GroupAddPaymentsScreen> {
   final _search = TextEditingController();
   Timer? _debounce;
 
   int _step = 0;
-  List<TripCandidate>? _rows;
+  List<GroupCandidate>? _rows;
   bool _error = false;
   bool _saving = false;
 
   /// Picked rows, kept by id across searches and a longer look back, so
   /// the total on the button never forgets one that scrolled out of view.
-  final Map<String, TripCandidate> _picked = {};
+  final Map<String, GroupCandidate> _picked = {};
 
   /// Which load is the latest, so a slow answer to an older search cannot
   /// replace a newer one.
   int _loadToken = 0;
 
-  int get _days => tripLookbackSteps[_step];
+  int get _days => groupLookbackSteps[_step];
 
   @override
   void initState() {
@@ -69,11 +70,11 @@ class _TripAddPaymentsScreenState extends State<TripAddPaymentsScreen> {
     final q = _search.text.trim();
     try {
       final result = await ApiClient.instance.get(
-        '/trips/${widget.trip.id}/candidates?days=$_days'
+        '/groups/${widget.group.id}/candidates?days=$_days'
         '${q.isEmpty ? '' : '&q=${Uri.encodeQueryComponent(q)}'}',
       ) as List<dynamic>;
       if (!mounted || token != _loadToken) return;
-      setState(() => _rows = result.map((r) => TripCandidate.fromJson(r as Map<String, dynamic>)).toList());
+      setState(() => _rows = result.map((r) => GroupCandidate.fromJson(r as Map<String, dynamic>)).toList());
     } catch (_) {
       if (mounted && token == _loadToken) setState(() => _error = true);
     }
@@ -85,12 +86,12 @@ class _TripAddPaymentsScreenState extends State<TripAddPaymentsScreen> {
   }
 
   void _goBackFurther() {
-    if (_step >= tripLookbackSteps.length - 1) return;
+    if (_step >= groupLookbackSteps.length - 1) return;
     setState(() => _step += 1);
     _load();
   }
 
-  void _toggle(TripCandidate row) {
+  void _toggle(GroupCandidate row) {
     setState(() {
       if (_picked.remove(row.id) == null) _picked[row.id] = row;
     });
@@ -103,7 +104,7 @@ class _TripAddPaymentsScreenState extends State<TripAddPaymentsScreen> {
     final messenger = ScaffoldMessenger.of(context);
     try {
       final result = await ApiClient.instance.post(
-        '/trips/${widget.trip.id}/add',
+        '/groups/${widget.group.id}/add',
         {'transactionIds': _picked.keys.toList()},
       ) as Map<String, dynamic>;
       navigator.pop(result['added'] as int? ?? _picked.length);
@@ -120,9 +121,9 @@ class _TripAddPaymentsScreenState extends State<TripAddPaymentsScreen> {
   Widget build(BuildContext context) {
     final c = context.c;
     final rows = _rows;
-    final travel = rows?.where((r) => r.likelyTravel).toList() ?? const <TripCandidate>[];
-    final rest = rows?.where((r) => !r.likelyTravel).toList() ?? const <TripCandidate>[];
-    final from = widget.trip.startedAt.subtract(Duration(days: _days));
+    final travel = rows?.where((r) => r.likelyTravel).toList() ?? const <GroupCandidate>[];
+    final rest = rows?.where((r) => !r.likelyTravel).toList() ?? const <GroupCandidate>[];
+    final from = (widget.group.startedAt ?? DateTime.now()).subtract(Duration(days: _days));
     final count = _picked.length;
     final totalMinor = _picked.values.fold<int>(0, (sum, row) => sum + row.amountMinor);
 
@@ -134,7 +135,7 @@ class _TripAddPaymentsScreenState extends State<TripAddPaymentsScreen> {
           children: [
             const Text('Add earlier payments'),
             Text(
-              widget.trip.name,
+              widget.group.name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 13, height: 18 / 13, fontWeight: FontWeight.w400, color: c.tx3),
@@ -169,12 +170,12 @@ class _TripAddPaymentsScreenState extends State<TripAddPaymentsScreen> {
               children: [
                 Expanded(
                   child: Text(
-                    'Your payments since ${formatShortDate(from)}, on no trip yet',
+                    'Your payments since ${formatShortDate(from)}, in no group yet',
                     maxLines: 2,
                     style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
                   ),
                 ),
-                if (_step < tripLookbackSteps.length - 1)
+                if (_step < groupLookbackSteps.length - 1)
                   TextButton.icon(
                     onPressed: _goBackFurther,
                     icon: const DsIcon(DsIcons.calendar, size: 16),
@@ -204,25 +205,25 @@ class _TripAddPaymentsScreenState extends State<TripAddPaymentsScreen> {
                             title: 'Nothing to add',
                             body: _search.text.trim().isNotEmpty
                                 ? 'No payment matches that search.'
-                                : 'Every payment since ${formatShortDate(from)} is already on a trip, '
+                                : 'Every payment since ${formatShortDate(from)} is already in a group, '
                                     'or there were none.',
-                            actionLabel: _step < tripLookbackSteps.length - 1 ? 'Go back further' : null,
-                            onAction: _step < tripLookbackSteps.length - 1 ? _goBackFurther : null,
+                            actionLabel: _step < groupLookbackSteps.length - 1 ? 'Go back further' : null,
+                            onAction: _step < groupLookbackSteps.length - 1 ? _goBackFurther : null,
                           )
                         : ListView(
                             padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
                             children: [
                               if (travel.isNotEmpty) ...[
-                                const _GroupLabel('Looks like travel'),
-                                _Group(
+                                const _SectionLabel('Looks like travel'),
+                                _RowCard(
                                   rows: travel,
                                   picked: _picked,
                                   onToggle: _toggle,
                                 ),
                               ],
                               if (rest.isNotEmpty) ...[
-                                _GroupLabel(travel.isEmpty ? 'Your payments' : 'Everything else'),
-                                _Group(
+                                _SectionLabel(travel.isEmpty ? 'Your payments' : 'Everything else'),
+                                _RowCard(
                                   rows: rest,
                                   picked: _picked,
                                   onToggle: _toggle,
@@ -264,22 +265,22 @@ class _TripAddPaymentsScreenState extends State<TripAddPaymentsScreen> {
   }
 }
 
-class _GroupLabel extends StatelessWidget {
+class _SectionLabel extends StatelessWidget {
   final String text;
-  const _GroupLabel(this.text);
+  const _SectionLabel(this.text);
 
   @override
   Widget build(BuildContext context) =>
       DsLabel(text, padding: const EdgeInsets.fromLTRB(2, 16, 2, 8));
 }
 
-/// One group's rows in a single flat card, divided by hairlines.
-class _Group extends StatelessWidget {
-  final List<TripCandidate> rows;
-  final Map<String, TripCandidate> picked;
-  final ValueChanged<TripCandidate> onToggle;
+/// One section's rows in a single flat card, divided by hairlines.
+class _RowCard extends StatelessWidget {
+  final List<GroupCandidate> rows;
+  final Map<String, GroupCandidate> picked;
+  final ValueChanged<GroupCandidate> onToggle;
 
-  const _Group({required this.rows, required this.picked, required this.onToggle});
+  const _RowCard({required this.rows, required this.picked, required this.onToggle});
 
   @override
   Widget build(BuildContext context) {
@@ -302,7 +303,7 @@ class _Group extends StatelessWidget {
 }
 
 class _CandidateRow extends StatelessWidget {
-  final TripCandidate row;
+  final GroupCandidate row;
   final bool picked;
   final bool last;
   final VoidCallback onTap;

@@ -445,7 +445,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--ac);width:18px;hei
 .badge-good,.badge-refund,.badge-refunded,.badge-settlement{background:var(--good-soft);color:var(--good)}
 .badge-warn,.badge-pending{background:var(--warn-soft);color:var(--warn)}
 .badge-crit{background:var(--crit-soft);color:var(--crit)}
-.badge-ac,.badge-new,.badge-split,.badge-emi,.badge-trip{background:var(--ac-soft);color:var(--ac)}
+.badge-ac,.badge-new,.badge-split,.badge-emi,.badge-trip,.badge-group{background:var(--ac-soft);color:var(--ac)}
 .badge-neutral,.badge-transfer{background:var(--sunk);color:var(--tx2)}
 .badge-outline,.badge-edited,.badge-merged{background:transparent;color:var(--tx2);box-shadow:inset 0 0 0 1px var(--ln2)}
 .badge-on-tint{background:var(--sf)}

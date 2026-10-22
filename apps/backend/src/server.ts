@@ -6,6 +6,7 @@ import { app } from "./app";
 import { connectDatabase } from "./db";
 import { env } from "./env";
 import { runLendingBackfill } from "./modules/contacts/contacts.backfill";
+import { runGroupsMigration } from "./modules/groups/groups.migration";
 import { runSpendLimitBackfill } from "./modules/accounts/accounts.backfill";
 import { runNightlyDriftCheck } from "./modules/accounts/accounts.drift";
 import { runAccountUnknownBackfill, runStatedBalanceBackfill } from "./modules/accounts/accounts.statedBackfill";
@@ -67,6 +68,12 @@ async function start() {
   // Connect before listening so the first request can't race the database.
   await connectDatabase();
   console.log("Connected to MongoDB");
+
+  // Trips became groups. Before listening, unlike the repairs below: until
+  // it has run, a group a transaction points at may not be in `groups`
+  // yet, and every screen that shows one would come up empty. It is one
+  // pass, and every later start finds nothing left to do.
+  await runGroupsMigration().catch((err) => console.error("Groups migration failed:", err));
 
   const { server, scheme } = createServer();
   server.listen(env.port, env.host, () => {

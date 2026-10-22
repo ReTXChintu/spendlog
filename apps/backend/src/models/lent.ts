@@ -31,6 +31,7 @@ export interface LendingInput {
   refundOf?: unknown[] | null;
   isEarmarked?: boolean | null;
   isSalary?: boolean | null;
+  offLedger?: boolean | null;
   people?: { contactId: unknown; amountMinor: number }[] | null;
 }
 
@@ -48,6 +49,8 @@ export function isPlain(transaction: LendingInput): boolean {
   if (transaction.loanId || transaction.emiRole || transaction.emiPlanId) return false;
   if ((transaction.refundOf ?? []).length > 0) return false;
   if (transaction.isEarmarked || transaction.isSalary) return false;
+  // Paid by somebody else in a group: who owes whom is the group's to say.
+  if (transaction.offLedger) return false;
   return true;
 }
 

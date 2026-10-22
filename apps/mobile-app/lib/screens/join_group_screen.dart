@@ -3,19 +3,19 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../services/api_client.dart';
 import '../widgets/ds/ds.dart';
 
-/// Joins a trip by scanning the owner's code, or typing it.
+/// Joins a group by scanning the owner's code, or typing it.
 ///
 /// The camera is the quick path and the text field is the one that always
 /// works — a code read out over the phone, or a camera someone would
 /// rather not turn on.
-class JoinTripScreen extends StatefulWidget {
-  const JoinTripScreen({super.key});
+class JoinGroupScreen extends StatefulWidget {
+  const JoinGroupScreen({super.key});
 
   @override
-  State<JoinTripScreen> createState() => _JoinTripScreenState();
+  State<JoinGroupScreen> createState() => _JoinGroupScreenState();
 }
 
-class _JoinTripScreenState extends State<JoinTripScreen> {
+class _JoinGroupScreenState extends State<JoinGroupScreen> {
   final _controller = TextEditingController();
   final _scanner = MobileScannerController(detectionSpeed: DetectionSpeed.noDuplicates);
 
@@ -40,12 +40,12 @@ class _JoinTripScreenState extends State<JoinTripScreen> {
 
     final navigator = Navigator.of(context);
     try {
-      final result = await ApiClient.instance.post('/trips/join', {'code': trimmed})
+      final result = await ApiClient.instance.post('/groups/join', {'code': trimmed})
           as Map<String, dynamic>;
-      navigator.pop(result['name'] as String? ?? 'the trip');
+      navigator.pop(result['name'] as String? ?? 'the group');
     } catch (e) {
       setState(() {
-        _error = e is ApiException ? e.message : "Couldn't join that trip.";
+        _error = e is ApiException ? e.message : "Couldn't join that group.";
         _joining = false;
       });
     }
@@ -57,7 +57,7 @@ class _JoinTripScreenState extends State<JoinTripScreen> {
 
     return Scaffold(
       backgroundColor: c.bg,
-      appBar: AppBar(title: const Text('Join a trip')),
+      appBar: AppBar(title: const Text('Join a group')),
       body: ListView(
         padding: kPagePad,
         children: [
@@ -147,8 +147,8 @@ class _JoinTripScreenState extends State<JoinTripScreen> {
           ],
           const SizedBox(height: 16),
           Text(
-            'Joining shares this trip from now on. What you spent before it stays yours — you can '
-            'add those payments afterwards if you want them counted.',
+            'Joining lets you see and add to this group. Nothing of yours goes in by itself - you '
+            'choose which payments to put in it.',
             style: TextStyle(fontSize: 12, height: 17 / 12, color: c.tx3),
           ),
         ],

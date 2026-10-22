@@ -275,7 +275,7 @@ describe("joining with a code", () => {
     const [owner, friend] = await Promise.all([makeUser(), makeUser()]);
     const trip = await makeTrip(owner.id);
 
-    await Transaction.create({
+    const earlier = await Transaction.create({
       userId: friend.id,
       amountMinor: 50000,
       currency: "INR",
@@ -288,7 +288,16 @@ describe("joining with a code", () => {
       method: "POST",
       body: JSON.stringify({ code: "GOA123" }),
     });
-    await call(`/trips/${trip.id}/rescan`, friend.token, { method: "POST" });
+    // A re-scan of an ordinary group sweeps nothing in by date any more;
+    // picking the payment is how it goes in.
+    const rescan = await json<{ claimedCount: number }>(
+      await call(`/trips/${trip.id}/rescan`, friend.token, { method: "POST" })
+    );
+    assert.equal(rescan.claimedCount, 0);
+    await call(`/trips/${trip.id}/add`, friend.token, {
+      method: "POST",
+      body: JSON.stringify({ transactionIds: [earlier.id] }),
+    });
 
     const summary = await json<{ totalMinor: number }>(
       await call(`/trips/${trip.id}/summary`, owner.token)

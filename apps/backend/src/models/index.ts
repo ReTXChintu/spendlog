@@ -1,4 +1,4 @@
-import { Schema, Types, model } from "mongoose";
+import { Model, Schema, Types, model } from "mongoose";
 import {
   ACCOUNT_TYPES,
   BALANCE_CHECKPOINT_SOURCES,
@@ -588,13 +588,37 @@ export interface TransactionDoc {
   source: TransactionSource;
   sourceRef?: string | null; // provider message id, for dedup + audit trail
   dedupeKey?: string | null;
-  /// The trip this was spent on, if any. Purely a label: it never touches
-  /// countedAmountMinor, because a meal on holiday is still a meal.
+  /// The group this was spent in, if any (was `tripId`, still readable and
+  /// writable under that name). A label in itself: a meal on holiday is
+  /// still a meal. Only a contact member's share moves the counted amount,
+  /// through the split the group writes (groupSplit).
+  groupId?: Types.ObjectId | null;
+  /// Who a group expense was for, as member ids - SpendLog users' and
+  /// contacts' alike, since both are ObjectIds and never collide. null
+  /// means everyone in the group, equally, which is the usual answer; a
+  /// list narrows it, and a list of just the payer is how a souvenir stays
+  /// out of everyone else's arithmetic. (Was `tripShareWith`.)
+  groupShareWith?: Types.ObjectId[] | null;
+  /// The old names of the two above, as Mongoose aliases of them: the same
+  /// values, readable and writable either way.
   tripId?: Types.ObjectId | null;
-  /// Who a trip expense was for. null means everyone on the trip, which is
-  /// the usual answer; a list narrows it, and a list of just the payer is
-  /// how a souvenir stays out of everyone else's arithmetic.
   tripShareWith?: Types.ObjectId[] | null;
+  /// Who paid, when it was not the row's owner: a contact of theirs
+  /// ("Rahul paid 2,000 for dinner"). Null on every ordinary row. `userId`
+  /// is there for the shape's sake and only ever names the owner.
+  paidBy?: { contactId?: Types.ObjectId | null; userId?: Types.ObjectId | null } | null;
+  /// Money that never went through any of the user's accounts: a group
+  /// payment somebody else made. Moves no balance, no passbook, no cash -
+  /// accountId stays null and, unlike a payment of unknown account, nobody
+  /// is waiting to say which account it was. Only the user's own share
+  /// counts as spending (split.myShareMinor), and that share is owed to
+  /// whoever paid (people).
+  offLedger?: boolean;
+  /// The split and people on this row were written by its group - the
+  /// contact members' shares of it - rather than typed in. The group keeps
+  /// them right as members, amounts and shares change; an edit that types
+  /// a different split takes them over.
+  groupSplit?: boolean;
   /// The plan this belongs to, once a purchase has been converted to an
   /// EMI: the purchase itself as PARENT, each monthly payment as
   /// INSTALMENT. Only the parent is kept out of the totals.
@@ -783,6 +807,14 @@ const personShareSchema = new Schema<PersonShare>(
   { _id: false }
 );
 
+const paidBySchema = new Schema(
+  {
+    contactId: { type: Schema.Types.ObjectId, ref: "Contact", default: null },
+    userId: { type: Schema.Types.ObjectId, ref: "User", default: null },
+  },
+  { _id: false }
+);
+
 const transactionSplitSchema = new Schema<TransactionSplit>(
   {
     myShareMinor: { type: Number, required: true, min: 0 },
@@ -820,8 +852,13 @@ const transactionSchema = new Schema<TransactionDoc>(
     source: { type: String, enum: TRANSACTION_SOURCES, required: true },
     sourceRef: { type: String, default: null },
     dedupeKey: { type: String, default: null },
-    tripId: { type: Schema.Types.ObjectId, ref: "Trip", default: null },
-    tripShareWith: { type: [Schema.Types.ObjectId], default: null },
+    // Aliased to the old names, so old clients' `tripId`, old tests and
+    // rows written by them keep meaning the same thing.
+    groupId: { type: Schema.Types.ObjectId, ref: "Group", default: null, alias: "tripId" },
+    groupShareWith: { type: [Schema.Types.ObjectId], default: null, alias: "tripShareWith" },
+    paidBy: { type: paidBySchema, default: null },
+    offLedger: { type: Boolean, default: false },
+    groupSplit: { type: Boolean, default: false },
     refundOf: { type: [refundAllocationSchema], default: [] },
     refundedMinor: { type: Number, default: 0, min: 0 },
     people: { type: [personShareSchema], default: [] },
@@ -968,9 +1005,9 @@ transactionSchema.index({ sourceRef: 1 });
 transactionSchema.index({ "refundOf.transactionId": 1 });
 // A person's history, and everyone's balance, both start from here.
 transactionSchema.index({ userId: 1, "people.contactId": 1 });
-// A trip's totals read every member's transactions, so this is not scoped
+// A group's totals read every member's transactions, so this is not scoped
 // by user the way the other indexes are.
-transactionSchema.index({ tripId: 1, occurredAt: -1 });
+transactionSchema.index({ groupId: 1, occurredAt: -1 });
 // Every payment towards a loan, for working out where it stands.
 transactionSchema.index({ "loanSplits.loanId": 1 });
 
@@ -999,13 +1036,33 @@ transactionSchema.virtual("account", {
   justOne: true,
 });
 
-// So a row can say which holiday it belongs to without the client having
-// to hold a separate list of trips.
-transactionSchema.virtual("trip", {
-  ref: "Trip",
-  localField: "tripId",
+// So a row can say which group it belongs to without the client having
+// to hold a separate list of them.
+transactionSchema.virtual("group", {
+  ref: "Group",
+  localField: "groupId",
   foreignField: "_id",
   justOne: true,
+});
+
+// Who paid, by name, on a payment somebody else made.
+transactionSchema.virtual("paidByContact", {
+  ref: "Contact",
+  localField: "paidBy.contactId",
+  foreignField: "_id",
+  justOne: true,
+});
+
+// The populated group goes out as `trip` too, for an app from before
+// groups that reads the trip's name off it.
+transactionSchema.set("toJSON", {
+  ...serialization.toJSON,
+  transform: (_doc: unknown, ret: unknown) => {
+    const json = ret as Record<string, unknown>;
+    delete json._id;
+    if (json.group !== undefined) json.trip = json.group;
+    return json;
+  },
 });
 
 export const Transaction = model<TransactionDoc>("Transaction", transactionSchema);
@@ -1238,27 +1295,63 @@ loanInstalmentSchema.index({ userId: 1, status: 1, dueDate: 1 });
 
 export const LoanInstalment = model<LoanInstalmentDoc>("LoanInstalment", loanInstalmentSchema);
 
-export interface TripMember {
+/** A SpendLog user in a group: someone who can open it and add to it. */
+export interface GroupMember {
   userId: Types.ObjectId;
   joinedAt: Date;
 }
 
-export interface TripDoc {
+/**
+ * Someone in a group who has no SpendLog account: one of a member's own
+ * contacts (the People page's), picked off the phone or typed in.
+ *
+ * Belongs to whoever added them - a Contact is per user - so their share
+ * of what *that* member paid is owed to that member and moves that
+ * member's People balance, the one balance per person across groups and
+ * lending. Everyone else in the group sees them by name, and their shares
+ * of other people's payments settle inside the group.
+ */
+export interface GroupContactMember {
+  contactId: Types.ObjectId;
+  /// The member whose contact this is.
+  addedBy: Types.ObjectId;
+  joinedAt: Date;
+}
+
+/**
+ * People who share spending: "Goa trip", "Flatmates", "Office lunch".
+ *
+ * Grew out of trips (the collection was `trips` until the groups
+ * migration copied it here, keeping every id). A group is a label on
+ * payments plus the arithmetic of who owes whom; it never changes what a
+ * payment counts for, except where a contact's share has to come out of
+ * the payer's own spending to be owed back by them.
+ *
+ * Nothing is put in a group automatically any more - a payment goes in
+ * when someone picks the group for it - with one exception: a group
+ * linked from Trippin still takes in everything inside its dates.
+ */
+export interface GroupDoc {
   _id: Types.ObjectId;
   ownerId: Types.ObjectId;
   name: string;
-  /// Everything spent between these belongs to the trip. endedAt is null
-  /// while it is still running.
-  startedAt: Date;
+  /// Optional dates. A trip has them; "Flatmates" does not. Only a group
+  /// linked from Trippin acts on them, claiming the payments inside.
+  startedAt?: Date | null;
   endedAt?: Date | null;
-  /// Everyone who can see it and add to it. The owner is always the first.
-  members: TripMember[];
+  /// Set once the owner archives it. A group is active until then,
+  /// whatever its dates say: it is where the editor offers to file things.
+  archivedAt?: Date | null;
+  /// Every SpendLog user who can see it and add to it. The owner is always the first.
+  members: GroupMember[];
+  /// People without an account, from members' contacts.
+  contactMembers: GroupContactMember[];
   /// Shared out of band — read out, or scanned as a QR code — so that
   /// joining needs no email address and no link handling.
   joinCode: string;
-  /// Where the trip was planned, when somewhere else made it. Null for a
-  /// trip started in SpendLog.
-  source?: TripSource | null;
+  /// Where the group was planned, when somewhere else made it. Null for
+  /// one made in SpendLog.
+  source?: GroupSource | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -1268,10 +1361,10 @@ export interface TripDoc {
  *
  * Trippin owns the name, the dates and the members while `linked` is
  * true, and overwrites them on its next change. Switching tracking off
- * there unlinks rather than deletes: the trip and everything on it stay
- * here as an ordinary trip, with `linked` false to say where it came from.
+ * there unlinks rather than deletes: the group and everything on it stay
+ * here as an ordinary group, with `linked` false to say where it came from.
  */
-export interface TripSource {
+export interface GroupSource {
   app: "trippin";
   /// Trippin's own id for the trip.
   externalId: string;
@@ -1287,7 +1380,7 @@ export interface TripSource {
   memberSubs?: string[];
 }
 
-const tripSourceSchema = new Schema<TripSource>(
+const groupSourceSchema = new Schema<GroupSource>(
   {
     app: { type: String, enum: ["trippin"], required: true },
     externalId: { type: String, required: true },
@@ -1300,7 +1393,7 @@ const tripSourceSchema = new Schema<TripSource>(
   { _id: false }
 );
 
-const tripMemberSchema = new Schema<TripMember>(
+const groupMemberSchema = new Schema<GroupMember>(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     joinedAt: { type: Date, default: () => new Date() },
@@ -1308,37 +1401,55 @@ const tripMemberSchema = new Schema<TripMember>(
   { _id: false }
 );
 
-const tripSchema = new Schema<TripDoc>(
+const groupContactMemberSchema = new Schema<GroupContactMember>(
+  {
+    contactId: { type: Schema.Types.ObjectId, ref: "Contact", required: true },
+    addedBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    joinedAt: { type: Date, default: () => new Date() },
+  },
+  { _id: false }
+);
+
+const groupSchema = new Schema<GroupDoc>(
   {
     ownerId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     name: { type: String, required: true },
-    startedAt: { type: Date, required: true },
+    startedAt: { type: Date, default: null },
     endedAt: { type: Date, default: null },
-    members: { type: [tripMemberSchema], default: [] },
+    archivedAt: { type: Date, default: null },
+    members: { type: [groupMemberSchema], default: [] },
+    contactMembers: { type: [groupContactMemberSchema], default: [] },
     joinCode: { type: String, required: true },
-    source: { type: tripSourceSchema, default: null },
+    source: { type: groupSourceSchema, default: null },
   },
-  { timestamps: true, ...serialization }
+  { timestamps: true, collection: "groups", ...serialization }
 );
 
-tripSchema.index({ joinCode: 1 }, { unique: true });
-// One SpendLog trip per Trippin trip, however often it is linked again.
-tripSchema.index(
+groupSchema.index({ joinCode: 1 }, { unique: true });
+// One SpendLog group per Trippin trip, however often it is linked again.
+groupSchema.index(
   { "source.app": 1, "source.externalId": 1 },
   { unique: true, partialFilterExpression: { "source.externalId": { $type: "string" } } }
 );
-// Membership is what authorises reading a trip, so it is looked up by it.
-tripSchema.index({ "members.userId": 1 });
+// Membership is what authorises reading a group, so it is looked up by it.
+groupSchema.index({ "members.userId": 1 });
+// A contact's groups, for taking them out when the contact goes.
+groupSchema.index({ "contactMembers.contactId": 1 });
+// Deliberately no "one running at a time" index, which trips had: groups
+// are not a mode, and "Flatmates" and "Goa" are both open at once.
 
-// One running trip at a time: "trip mode" is a switch, and two of them on
-// at once would leave every payment ambiguous. A partial index rather than
-// sparse, because endedAt is present-and-null rather than absent.
-tripSchema.index(
-  { ownerId: 1, endedAt: 1 },
-  { unique: true, partialFilterExpression: { endedAt: null } }
-);
+export const Group = model<GroupDoc>("Group", groupSchema);
 
-export const Trip = model<TripDoc>("Trip", tripSchema);
+/**
+ * The names trips went by, kept so code and tests written against them -
+ * the Trippin integration's among them - read the same collection. A trip
+ * always has a start, which is what its type still says: everything Trippin
+ * links is dated, and so is every trip made before groups.
+ */
+export type TripDoc = Omit<GroupDoc, "startedAt"> & { startedAt: Date };
+export const Trip = Group as unknown as Model<TripDoc>;
+export type TripMember = GroupMember;
+export type TripSource = GroupSource;
 
 /**
  * An event another app in the suite has already sent and had processed.

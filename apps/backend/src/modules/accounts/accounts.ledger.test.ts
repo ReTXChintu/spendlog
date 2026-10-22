@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Types } from "mongoose";
-import { LedgerCheckpoint, LedgerRow, buildLedger, driftOf, ledgerContext, movementsOf } from "./accounts.balance";
+import { LedgerCheckpoint, LedgerRow, buildLedger, driftOf, ledgerContext, ledgerFilter, movementsOf } from "./accounts.balance";
 import {
   SuspectRow,
   duplicateSuspects,
@@ -66,6 +66,20 @@ describe("which balances a row moves", () => {
       ]
     );
     assert.equal(movementsOf({ ...transfer, transferPairId: new Types.ObjectId() }, context).length, 1);
+  });
+
+  it("moves nothing at all for a group payment somebody else made", () => {
+    // No account, and not cash: the money was never the user's.
+    const theirs = row({ accountId: null, amountMinor: 2000_00, type: "DEBIT", occurredAt: "2026-10-02T10:00:00Z", offLedger: true });
+    assert.deepEqual(movementsOf(theirs, context), []);
+    // Not even if something were to give it an account or call it a transfer.
+    assert.deepEqual(movementsOf({ ...theirs, accountId: bank, isTransfer: true, transferAccountId: cash }, context), []);
+  });
+
+  it("leaves it out of the rows a cash passbook reads", () => {
+    const filter = ledgerFilter(new Types.ObjectId(), context, [cash.toString()]);
+    assert.deepEqual(filter.$or[0], { accountId: { $in: [cash] } });
+    assert.deepEqual(filter.$or[1], { accountId: null, offLedger: { $ne: true } });
   });
 
   it("moves nothing before the starting balance was read", () => {

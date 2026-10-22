@@ -8,7 +8,7 @@ import { PeoplePage } from "./pages/PeoplePage";
 import { PerksPage } from "./pages/PerksPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SettingsPage } from "./pages/SettingsPage";
-import { TripsPage } from "./pages/TripsPage";
+import { GroupsPage, LegacyTripsRedirect } from "./pages/GroupsPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
 
 export default function App() {
@@ -29,7 +29,9 @@ export default function App() {
         <Route path="/" element={<HomePage />} />
         <Route path="/transactions" element={<TransactionsPage />} />
         <Route path="/perks" element={<PerksPage />} />
-        <Route path="/trips" element={<TripsPage />} />
+        <Route path="/groups" element={<GroupsPage />} />
+        {/* Trippin links to /trips?trip=<id>; old links land on the same group. */}
+        <Route path="/trips" element={<LegacyTripsRedirect />} />
         {/* Old links and bookmarks still land on the analytics. */}
         <Route path="/analytics" element={<Navigate to="/?tab=analytics" replace />} />
         <Route path="/settings" element={<SettingsPage />} />

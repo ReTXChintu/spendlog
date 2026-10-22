@@ -3,7 +3,7 @@ import { FilterQuery, Types } from "mongoose";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
-import { Account, Transaction, TransactionDoc, TransactionSourceEntry } from "../../models";
+import { Account, Group, Transaction, TransactionDoc, TransactionSourceEntry } from "../../models";
 import { ingestRawMessage } from "../../parsing/ingest";
 import { checkPeople, shareablePart } from "../contacts/contacts.people";
 import { splitsOf } from "../loans/loans.allocation";
@@ -14,7 +14,15 @@ import {
   setLoanSplits,
   splitsForNewAmount,
 } from "../loans/loans.splits";
-import { assertTripMember, tripForOccurredAt } from "../trips/trips.service";
+import {
+  GroupPaymentError,
+  assertGroupMember,
+  checkShareWith,
+  createPaidByContact,
+  groupForOccurredAt,
+  groupMemberIds,
+  syncGroupSplit,
+} from "../groups/groups.service";
 import {
   ensureTransferLegs,
   handOverLegs,
@@ -109,7 +117,7 @@ transactionsRouter.get("/", async (req, res) => {
   const [items, total] = await Promise.all([
     Transaction.find(filter)
       .populate("category")
-      .populate("account").populate("trip")
+      .populate("account").populate("group").populate("paidByContact", "name")
       .sort({ occurredAt: -1 })
       .skip((parsed.data.page - 1) * parsed.data.pageSize)
       .limit(parsed.data.pageSize),
@@ -165,7 +173,7 @@ transactionsRouter.get("/by-day", async (req, res) => {
   const oldest = page[page.length - 1].earliest;
   const transactions = await Transaction.find({ ...filter, occurredAt: { ...(filter.occurredAt as object), $gte: oldest } })
     .populate("category")
-    .populate("account").populate("trip")
+    .populate("account").populate("group").populate("paidByContact", "name")
     .sort({ occurredAt: -1 });
 
   const grouped = new Map<string, typeof transactions>();
@@ -224,7 +232,7 @@ transactionsRouter.get("/review", async (req, res) => {
 transactionsRouter.get("/:id", validObjectIdParam("id"), async (req, res) => {
   const tx = await Transaction.findOne({ _id: req.params.id, userId: currentUserId(req) })
     .populate("category")
-    .populate("account").populate("trip");
+    .populate("account").populate("group").populate("paidByContact", "name");
   if (!tx) return res.status(404).json({ error: "Not found" });
 
   res.json(tx);
@@ -280,7 +288,39 @@ const createTransactionSchema = z.object({
   commitmentId: z.string().regex(OBJECT_ID).nullable().optional(),
   loanId: z.string().regex(OBJECT_ID).nullable().optional(),
   loanSplits: z.array(loanSplitBody).max(20).optional(),
+  // The group it goes in, picked in the editor - nothing is put in one by
+  // itself any more, bar a Trippin trip's dates. tripId is the old name.
+  groupId: z.string().regex(OBJECT_ID).nullable().optional(),
+  tripId: z.string().regex(OBJECT_ID).nullable().optional(),
+  // null: everyone in the group, equally. A list narrows it.
+  groupShareWith: z.array(z.string().regex(OBJECT_ID)).max(100).nullable().optional(),
+  tripShareWith: z.array(z.string().regex(OBJECT_ID)).max(100).nullable().optional(),
+  // Paid by one of the user's contacts in the group, not by the user: no
+  // account moved. The same as POST /groups/:id/payments.
+  paidBy: z
+    .object({
+      contactId: z.string().regex(OBJECT_ID).nullable().optional(),
+      userId: z.string().regex(OBJECT_ID).nullable().optional(),
+    })
+    .nullable()
+    .optional(),
 });
+
+/**
+ * Who paid, as sent: a contact of the user's, or nobody but the user. A
+ * SpendLog user records their own payments from their own ledger, so
+ * naming anyone else here would count the same money twice.
+ */
+function paidByContactOf(
+  paidBy: { contactId?: string | null; userId?: string | null } | null | undefined,
+  userId: Types.ObjectId
+): { contactId: string | null } | { error: string } {
+  if (!paidBy) return { contactId: null };
+  if (paidBy.userId && !userId.equals(paidBy.userId)) {
+    return { error: "Someone with SpendLog records what they paid themselves." };
+  }
+  return { contactId: paidBy.contactId ?? null };
+}
 
 // POST /transactions — manual entry (cash spends, or anything the auto
 // ingestion missed).
@@ -288,10 +328,58 @@ transactionsRouter.post("/", async (req, res) => {
   const parsed = createTransactionSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
+  const userId = currentUserId(req);
+
+  // A group picked for it, which has to be one the user is in.
+  const groupIdAsked = parsed.data.groupId !== undefined ? parsed.data.groupId : (parsed.data.tripId ?? null);
+  const group = groupIdAsked ? await assertGroupMember(groupIdAsked, userId) : null;
+  if (groupIdAsked && !group) return res.status(400).json({ error: "Unknown group" });
+  const shareAsked = parsed.data.groupShareWith !== undefined ? parsed.data.groupShareWith : parsed.data.tripShareWith;
+
+  // Paid by somebody else: a different kind of row altogether, made the
+  // way the group's own "add a payment" makes it.
+  const payer = paidByContactOf(parsed.data.paidBy, userId);
+  if ("error" in payer) return res.status(400).json({ error: payer.error });
+  if (payer.contactId) {
+    if (!group) return res.status(400).json({ error: "A payment someone else made goes in a group." });
+    if (parsed.data.type !== "DEBIT") return res.status(400).json({ error: "Only a payment can be made by someone else." });
+    try {
+      const created = await createPaidByContact(userId, group, {
+        contactId: payer.contactId,
+        amountMinor: parsed.data.amountMinor,
+        occurredAt: parsed.data.occurredAt,
+        merchant: parsed.data.merchant ?? null,
+        note: parsed.data.note ?? null,
+        categoryId: parsed.data.categoryId ?? null,
+        currency: parsed.data.currency,
+        shareWith: shareAsked,
+      });
+      const tx = await Transaction.findById(created._id)
+        .populate("category")
+        .populate("account")
+        .populate("group")
+        .populate("paidByContact", "name");
+      return res.status(201).json({ ...tx!.toJSON(), transferLeg: null });
+    } catch (error) {
+      if (error instanceof GroupPaymentError) return res.status(400).json({ error: error.message });
+      throw error;
+    }
+  }
+
+  let groupShareWith: Types.ObjectId[] | null = null;
+  if (group) {
+    try {
+      groupShareWith = await checkShareWith(group, shareAsked);
+    } catch (error) {
+      if (error instanceof GroupPaymentError) return res.status(400).json({ error: error.message });
+      throw error;
+    }
+  }
+
   // Reject an id that isn't one of this user's own accounts, rather than
   // storing a dangling reference.
   if (parsed.data.accountId) {
-    const owned = await Account.exists({ _id: parsed.data.accountId, userId: currentUserId(req) });
+    const owned = await Account.exists({ _id: parsed.data.accountId, userId });
     if (!owned) return res.status(400).json({ error: "Unknown account" });
   }
 
@@ -342,7 +430,10 @@ transactionsRouter.post("/", async (req, res) => {
     categoryId: parsed.data.categoryId ?? null,
     accountId: parsed.data.accountId ?? null,
     occurredAt: parsed.data.occurredAt,
-    tripId: await tripForOccurredAt(currentUserId(req), parsed.data.occurredAt),
+    // The group picked; with none, only a Trippin trip whose dates it falls
+    // in takes it in by itself.
+    groupId: group ? group._id : await groupForOccurredAt(userId, parsed.data.occurredAt),
+    groupShareWith,
     isTransfer: parsed.data.isTransfer ?? false,
     split: parsed.data.split ?? null,
     isSettlement: parsed.data.isSettlement ?? false,
@@ -360,12 +451,15 @@ transactionsRouter.post("/", async (req, res) => {
   // same step an edit uses rather than being written as a plain field.
   if (loanSplits.length > 0) await setLoanSplits(created, loanSplits);
 
+  // Its contacts' shares, when it went into a group that has contacts.
+  if (created.groupId) await syncGroupSplit(created, group);
+
   // The other account's side, found or written in, so a transfer typed in
   // by hand shows on both accounts - and a card bill on the card. Said in
   // the response, so the app can tell the user what else just appeared.
   const transferLeg = (await ensureCardBillLeg(created)) ?? (await ensureTransferLegs(created));
 
-  const tx = await Transaction.findById(created._id).populate("category").populate("account").populate("trip");
+  const tx = await Transaction.findById(created._id).populate("category").populate("account").populate("group").populate("paidByContact", "name");
   res.status(201).json({ ...tx!.toJSON(), transferLeg });
 });
 
@@ -411,10 +505,13 @@ const updateTransactionSchema = z.object({
     .nullable()
     .optional(),
   isSettlement: z.boolean().optional(),
-  // null takes it off whatever trip it was on.
+  // null takes it out of whatever group it was in. tripId is the old name,
+  // still sent by apps from before groups.
+  groupId: z.string().regex(OBJECT_ID).nullable().optional(),
   tripId: z.string().regex(OBJECT_ID).nullable().optional(),
-  // null means everyone on the trip; a list narrows it.
-  tripShareWith: z.array(z.string().regex(OBJECT_ID)).max(20).nullable().optional(),
+  // null means everyone in the group, equally; a list narrows it.
+  groupShareWith: z.array(z.string().regex(OBJECT_ID)).max(100).nullable().optional(),
+  tripShareWith: z.array(z.string().regex(OBJECT_ID)).max(100).nullable().optional(),
   pending: z.boolean().optional(),
   // Who it was for or from. An empty list takes everyone off it.
   people: z.array(personShareBody).max(20).optional(),
@@ -480,32 +577,102 @@ async function nextLoanSplits(
   return splitsForNewAmount(existing, amountMinor);
 }
 
+/** Whether two people lists say the same, in the same order. */
+function samePeople(
+  a: { contactId: unknown; amountMinor: number }[],
+  b: { contactId: unknown; amountMinor: number }[]
+): boolean {
+  return (
+    a.length === b.length &&
+    a.every((entry, i) => String(entry.contactId) === String(b[i].contactId) && entry.amountMinor === b[i].amountMinor)
+  );
+}
+
 transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   const parsed = updateTransactionSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
   const userId = currentUserId(req);
 
+  const existing = await Transaction.findOne({ _id: req.params.id, userId });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+
+  // The group fields arrive under either name; tripId is what an app from
+  // before groups sends. Handled apart from the plain fields below.
+  const {
+    groupId: groupIdField,
+    tripId: tripIdField,
+    groupShareWith: shareField,
+    tripShareWith: tripShareField,
+    ...data
+  } = parsed.data;
+  const groupAsked = groupIdField !== undefined ? groupIdField : tripIdField;
+  const shareAsked = shareField !== undefined ? shareField : tripShareField;
+
+  // A payment somebody else made touched none of the user's accounts and
+  // lives in the group it was made in. Its split and who it is owed to are
+  // the group's to keep, so a form re-sending them changes nothing.
+  if (existing.offLedger) {
+    if (data.accountId) {
+      return res.status(400).json({ error: "Someone else paid for this, so it isn't on any of your accounts." });
+    }
+    if (
+      data.isTransfer ||
+      data.isSettlement ||
+      data.isEarmarked ||
+      data.cardPaymentFor ||
+      data.loanId ||
+      (data.loanSplits?.length ?? 0) > 0 ||
+      (data.type !== undefined && data.type !== "DEBIT")
+    ) {
+      return res.status(400).json({ error: "Someone else paid for this - it can only be a payment in its group." });
+    }
+    if (groupAsked === null) {
+      return res.status(400).json({ error: "A payment someone else made stays in its group. Delete it instead." });
+    }
+    delete data.split;
+    delete data.people;
+    delete data.accountUnknown;
+  }
+
+  // On a row whose split the group keeps, an app that knows nothing of
+  // groups re-sends the split it loaded; the same values, or none at all,
+  // leave the group in charge. A different split, typed in, takes over.
+  let groupSplitTakenOver = false;
+  if (existing.groupSplit && !existing.offLedger) {
+    const noSplit = data.split === undefined || data.split === null;
+    const noPeople = data.people === undefined || data.people.length === 0;
+    const asStored =
+      data.split?.myShareMinor === existing.split?.myShareMinor &&
+      (data.people === undefined || samePeople(data.people, existing.people));
+    if ((noSplit && noPeople) || asStored) {
+      delete data.split;
+      delete data.people;
+    } else {
+      groupSplitTakenOver = true;
+    }
+  }
+
   // Reject an id that isn't one of this user's own accounts, rather than
   // storing a dangling reference.
-  if (parsed.data.accountId) {
-    const owned = await Account.exists({ _id: parsed.data.accountId, userId });
+  if (data.accountId) {
+    const owned = await Account.exists({ _id: data.accountId, userId });
     if (!owned) return res.status(400).json({ error: "Unknown account" });
   }
 
   // People are checked against what the transaction will be once this
   // edit lands, since the same edit often turns the split on and names
   // who it was with. An edit that takes the split away takes the people
-  // with it; one that only shrinks the room for them has to say who.
-  const existing = await Transaction.findOne({ _id: req.params.id, userId });
-  if (!existing) return res.status(404).json({ error: "Not found" });
+  // with it; one that only shrinks the room for them has to say who. The
+  // group's own shares are its business, and checked by it.
+  const groupKept = (existing.groupSplit && !groupSplitTakenOver) || existing.offLedger;
   const next = {
-    amountMinor: parsed.data.amountMinor ?? existing.amountMinor,
-    isSettlement: parsed.data.isSettlement ?? existing.isSettlement,
-    split: parsed.data.split !== undefined ? parsed.data.split : existing.split,
+    amountMinor: data.amountMinor ?? existing.amountMinor,
+    isSettlement: data.isSettlement ?? existing.isSettlement,
+    split: data.split !== undefined ? data.split : existing.split,
   };
-  let people: { contactId: string; amountMinor: number }[] | undefined = parsed.data.people;
-  if (people === undefined && existing.people.length > 0) {
+  let people: { contactId: string; amountMinor: number }[] | undefined = data.people;
+  if (!groupKept && people === undefined && existing.people.length > 0) {
     if (shareablePart(next) === 0) people = [];
     else {
       const kept = existing.people.map((person) => ({
@@ -521,22 +688,50 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
     if (problem) return res.status(400).json({ error: problem });
   }
 
-  const willBeTransfer = parsed.data.isTransfer ?? existing.isTransfer;
+  const willBeTransfer = data.isTransfer ?? existing.isTransfer;
   const transferProblem = await checkTransferAccount(
     userId,
-    willBeTransfer ? parsed.data.transferAccountId : null,
-    parsed.data.accountId !== undefined ? parsed.data.accountId : existing.accountId?.toString()
+    willBeTransfer ? data.transferAccountId : null,
+    data.accountId !== undefined ? data.accountId : existing.accountId?.toString()
   );
   if (transferProblem) return res.status(400).json({ error: transferProblem });
-  // Put on a trip by hand, which may be one whose dates it falls outside -
-  // the train booked a month before. Only a trip the user is on; taking it
-  // off one needs no check, and nor does a form re-sending the trip it is
-  // already on.
-  const tripChanged =
-    parsed.data.tripId !== undefined && (parsed.data.tripId ?? null) !== (existing.tripId?.toString() ?? null);
-  if (tripChanged && parsed.data.tripId && !(await assertTripMember(parsed.data.tripId, userId))) {
-    return res.status(400).json({ error: "Unknown trip" });
+
+  // Put in a group by hand - the editor offers every active one, and the
+  // payment can be from any date. Only a group the user is in; taking it
+  // out needs no check, and nor does a form re-sending the group it is
+  // already in.
+  const groupChanged =
+    groupAsked !== undefined && (groupAsked ?? null) !== (existing.groupId?.toString() ?? null);
+  const groupFields: Record<string, unknown> = {};
+  if (groupChanged) {
+    if (groupAsked && !(await assertGroupMember(groupAsked, userId))) {
+      return res.status(400).json({ error: "Unknown group" });
+    }
+    groupFields.groupId = groupAsked ? new Types.ObjectId(groupAsked) : null;
+    // "Just me" was said about the group it is leaving, and may name
+    // people who are not in the next one.
+    if (shareAsked === undefined) groupFields.groupShareWith = null;
   }
+  if (shareAsked !== undefined) {
+    const groupId = groupChanged ? (groupAsked ?? null) : (existing.groupId?.toString() ?? null);
+    const group = groupId ? await Group.findById(groupId) : null;
+    if (!group || !shareAsked || shareAsked.length === 0) {
+      groupFields.groupShareWith = null;
+    } else {
+      // Whoever it was already shared with stays allowed - someone who has
+      // since left the group is still in that row's arithmetic.
+      const allowed = new Set([
+        ...groupMemberIds(group),
+        ...(!groupChanged ? (existing.groupShareWith ?? []).map(String) : []),
+      ]);
+      if (shareAsked.some((id) => !allowed.has(id))) {
+        return res.status(400).json({ error: "Everyone it's shared with has to be in the group." });
+      }
+      groupFields.groupShareWith = [...new Set(shareAsked)].map((id) => new Types.ObjectId(id));
+    }
+  }
+  if (groupSplitTakenOver) groupFields.groupSplit = false;
+
   // Marking a payment as the bill of the card it is on, or moving a bill
   // payment onto its card: refused, since a card cannot pay its own bill.
   // Only when this edit says so - a form sends every field, and a row left
@@ -545,35 +740,32 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   const differs = (sent: string | null | undefined, stored: unknown) =>
     sent !== undefined && (sent ?? null) !== (stored ? String(stored) : null);
   if (
-    differs(parsed.data.cardPaymentFor, existing.cardPaymentFor) ||
-    differs(parsed.data.accountId, existing.accountId) ||
-    differs(parsed.data.type, existing.type)
+    differs(data.cardPaymentFor, existing.cardPaymentFor) ||
+    differs(data.accountId, existing.accountId) ||
+    differs(data.type, existing.type)
   ) {
     const billProblem = await cardPaymentProblem(userId, {
-      type: parsed.data.type ?? existing.type,
-      accountId: parsed.data.accountId !== undefined ? parsed.data.accountId : existing.accountId,
-      cardPaymentFor: parsed.data.cardPaymentFor !== undefined ? parsed.data.cardPaymentFor : existing.cardPaymentFor,
+      type: data.type ?? existing.type,
+      accountId: data.accountId !== undefined ? data.accountId : existing.accountId,
+      cardPaymentFor: data.cardPaymentFor !== undefined ? data.cardPaymentFor : existing.cardPaymentFor,
     });
     if (billProblem) return res.status(400).json({ error: billProblem });
   }
   // No longer a transfer: there is no other account to speak of.
   const transferFields: Record<string, unknown> = willBeTransfer ? {} : { transferAccountId: null };
   // Only money in can be set aside; on a payment it would zero real spending.
-  if ((parsed.data.type ?? existing.type) === "DEBIT") transferFields.isEarmarked = false;
+  if ((data.type ?? existing.type) === "DEBIT") transferFields.isEarmarked = false;
   // An account named is an account known.
-  if (parsed.data.accountId) transferFields.accountUnknown = false;
+  if (data.accountId) transferFields.accountUnknown = false;
   // A leg SpendLog wrote in for a transfer is the user's own row once they
   // have touched it: kept in step with the transfer no longer, and never
   // deleted along with it.
   if (existing.autoLeg) transferFields.autoLeg = false;
-  // "Just me" was said about the trip it is leaving, and may name people
-  // who are not on the next one.
-  if (tripChanged && parsed.data.tripShareWith === undefined) transferFields.tripShareWith = null;
   // An unexplained difference is explained once it is filed somewhere or
   // called something.
   if (
     existing.needsExplanation &&
-    (parsed.data.categoryId || (parsed.data.merchant && parsed.data.merchant !== existing.merchant))
+    (data.categoryId || (data.merchant && data.merchant !== existing.merchant))
   ) {
     transferFields.needsExplanation = false;
   }
@@ -584,31 +776,32 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   // $set below, because of that side effect.
   let loanSplits: Awaited<ReturnType<typeof nextLoanSplits>>;
   try {
-    loanSplits = await nextLoanSplits(existing, userId, parsed.data);
+    loanSplits = await nextLoanSplits(existing, userId, data);
   } catch (error) {
     if (error instanceof LoanSplitError) return res.status(400).json({ error: error.message });
     throw error;
   }
   if (loanSplits) await setLoanSplits(existing, loanSplits);
-  const { loanId: _handledAbove, loanSplits: _alsoAbove, people: _checkedAbove, ...fields } = parsed.data;
+  const { loanId: _handledAbove, loanSplits: _alsoAbove, people: _checkedAbove, ...fields } = data;
 
   // Whether this edit changes what kind of transaction it is, as opposed
   // to filing it. Compared against the row rather than read off the body,
   // because a form sends every field whether it was touched or not - and
   // only a real change should stop the card bill recogniser from deciding.
   const kindChanged =
-    (parsed.data.type !== undefined && parsed.data.type !== existing.type) ||
-    (parsed.data.isTransfer !== undefined && parsed.data.isTransfer !== existing.isTransfer) ||
-    (parsed.data.isSettlement !== undefined && parsed.data.isSettlement !== existing.isSettlement) ||
-    (parsed.data.cardPaymentFor !== undefined &&
-      (parsed.data.cardPaymentFor ?? null) !== (existing.cardPaymentFor?.toString() ?? null));
+    (data.type !== undefined && data.type !== existing.type) ||
+    (data.isTransfer !== undefined && data.isTransfer !== existing.isTransfer) ||
+    (data.isSettlement !== undefined && data.isSettlement !== existing.isSettlement) ||
+    (data.cardPaymentFor !== undefined &&
+      (data.cardPaymentFor ?? null) !== (existing.cardPaymentFor?.toString() ?? null));
 
-  const updated = await Transaction.findOneAndUpdate(
+  let updated = await Transaction.findOneAndUpdate(
     { _id: req.params.id, userId },
     {
       $set: {
         ...fields,
         ...transferFields,
+        ...groupFields,
         ...(people !== undefined ? { people } : {}),
         editedAt: new Date(),
         ...(kindChanged ? { kindEditedAt: new Date() } : {}),
@@ -617,7 +810,7 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
     { new: true }
   )
     .populate("category")
-    .populate("account").populate("trip");
+    .populate("account").populate("group").populate("paidByContact", "name");
   if (!updated) return res.status(404).json({ error: "Not found" });
 
   // The other leg of the transfer, moved, taken away or given, to match
@@ -626,6 +819,19 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   // own rules (cards.billLeg).
   const cardSide = await syncCardBillLeg(updated, existing);
   const transferLeg = cardSide.handled ? cardSide.leg : await syncTransferLegs(updated, existing);
+
+  // The group's contact shares, worked out again for what the row is now:
+  // a new amount, a new group, a narrower list, or out of any group.
+  if (updated.groupId || existing.groupSplit) {
+    const row = await Transaction.findById(updated._id);
+    if (row && (await syncGroupSplit(row))) {
+      updated = (await Transaction.findById(updated._id)
+        .populate("category")
+        .populate("account")
+        .populate("group")
+        .populate("paidByContact", "name"))!;
+    }
+  }
 
   res.json({ ...updated.toJSON(), transferLeg });
 });
@@ -789,7 +995,7 @@ transactionsRouter.get("/:id/refund-candidates", validObjectIdParam("id"), async
     .sort({ occurredAt: -1 })
     .limit(400)
     .populate("category")
-    .populate("account").populate("trip");
+    .populate("account").populate("group").populate("paidByContact", "name");
 
   // An exact-amount match on the same card is almost always the one.
   const ranked = [...candidates].sort((a, b) => score(b) - score(a));
@@ -891,6 +1097,11 @@ transactionsRouter.post("/:id/merge", validObjectIdParam("id"), async (req, res)
   const sources = await Transaction.find({ _id: { $in: parsed.data.sourceIds }, userId });
   if (sources.length !== parsed.data.sourceIds.length) {
     return res.status(404).json({ error: "Not found" });
+  }
+  // A payment somebody else made is never the same money as one of the
+  // user's own: merging would put it on an account it never touched.
+  if (target.offLedger || sources.some((source) => source.offLedger)) {
+    return res.status(400).json({ error: "A payment someone else made can't be merged with one of yours." });
   }
 
   await mergeTransactions(target, sources);

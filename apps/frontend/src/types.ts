@@ -300,67 +300,139 @@ export interface EmiUpcoming {
   instalments: (EmiInstalment & { planId: EmiPlan })[];
 }
 
-export interface TripMember {
+/** A SpendLog user on a group, as the list endpoints give it. */
+export interface GroupMemberRef {
   userId: string;
   joinedAt: string;
-  /** Present on the trip detail, where members are resolved to people. */
-  name?: string;
-  isOwner?: boolean;
+}
+
+/** A Contact (someone without a SpendLog account) on a group. */
+export interface GroupContactRef {
+  contactId: string;
+  /** The user whose Contact this is - only their People balance tracks it. */
+  addedBy: string;
+  joinedAt: string;
 }
 
 /**
- * Where a trip was planned, when Trippin made it. While `linked`, Trippin
+ * Where a group was planned, when Trippin made it. While `linked`, Trippin
  * owns the name, dates and members and overwrites them on its next
- * change; once unlinked it is an ordinary trip that remembers its origin.
+ * change; once unlinked it is an ordinary group that remembers its origin.
  */
-export interface TripSource {
+export interface GroupSource {
   app: "trippin";
   externalId: string;
   url: string | null;
   linked: boolean;
-  linkedAt: string | null;
-  unlinkedAt: string | null;
+  linkedAt?: string | null;
+  unlinkedAt?: string | null;
 }
 
-export interface Trip {
+/**
+ * A group: a trip, a flat, an office lunch - payments put in it are split
+ * between its members. Active until someone archives it; the dates are
+ * optional and only a linked Trippin group adds payments by them.
+ */
+export interface Group {
   id: string;
   name: string;
   ownerId: string;
-  startedAt: string;
+  startedAt: string | null;
   endedAt: string | null;
-  members: TripMember[];
-  joinCode: string;
+  archivedAt: string | null;
+  /** Not archived. */
   isActive: boolean;
+  isArchived: boolean;
+  /** Dates under way - informational only. */
+  isRunning?: boolean;
+  /** A linked Trippin group: payments inside its dates are added on their own. */
+  autoAdds: boolean;
+  joinCode: string;
+  source?: GroupSource | null;
+  members: GroupMemberRef[];
+  contactMembers: GroupContactRef[];
+  memberCount: number;
+  /** List endpoints only. */
   totalMinor: number;
   transactionCount: number;
-  source?: TripSource | null;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
-export interface TripSummary {
-  trip: Trip;
+/** A SpendLog user on the group detail. */
+export interface GroupUserMember {
+  id: string;
+  kind: "user";
+  userId: string;
+  joinedAt: string;
+  name: string;
+  isOwner: boolean;
+  isMe: boolean;
+}
+
+/** A Contact on the group detail. */
+export interface GroupContactMember {
+  id: string;
+  kind: "contact";
+  contactId: string;
+  joinedAt: string;
+  name: string;
+  phone: string | null;
+  addedBy: string;
+  addedByName: string | null;
+  /** The caller's own Contact: their People balance moves with it. */
+  isMine: boolean;
+}
+
+export interface GroupDetail extends Omit<Group, "members"> {
+  members: GroupUserMember[];
+  contacts: GroupContactMember[];
+}
+
+export type GroupMemberKind = "user" | "contact";
+
+export interface GroupSummary {
+  group?: Group;
+  /** The same object, under its old name. */
+  trip?: Group;
   totalMinor: number;
   transactionCount: number;
   dayCount: number;
   perDayMinor: number;
-  byMember: { userId: string; name: string | null; spentMinor: number; count: number }[];
+  byMember: { userId: string; kind?: GroupMemberKind; name: string | null; spentMinor: number; count: number }[];
   byCategory: { categoryId: string | null; name: string; amountMinor: number }[];
 }
 
-export interface TripSettlement {
+export interface GroupSettlement {
   balances: {
     userId: string;
+    kind?: GroupMemberKind;
     name: string;
     paidMinor: number;
     shareMinor: number;
     netMinor: number;
+    isMe?: boolean;
   }[];
   transfers: {
     fromUserId: string;
     toUserId: string;
+    fromKind?: GroupMemberKind;
+    toKind?: GroupMemberKind;
     fromName: string;
     toName: string;
     amountMinor: number;
   }[];
+}
+
+/** One of the user's own payments, on no group yet, that could be added to one by hand. */
+export interface GroupCandidate {
+  id: string;
+  occurredAt: string;
+  merchant: string | null;
+  amountMinor: number;
+  accountLabel: string | null;
+  categoryName: string | null;
+  likelyTravel: boolean;
 }
 
 /** A shortcut for entering a payment by hand: a name and its usual category. */
@@ -598,7 +670,7 @@ export type BudgetPace =
 
 export interface Transaction {
   id: string;
-  /** Who this belongs to — the payer, on a shared trip. */
+  /** Who this belongs to — the payer, on a shared group. */
   userId: string;
   amountMinor: number;
   currency: string;
@@ -611,11 +683,22 @@ export interface Transaction {
   refundOf: { transactionId: string; amountMinor: number }[];
   /** On a purchase: how much of it has since come back. */
   refundedMinor: number;
-  /** The trip this was spent on, if any. */
-  tripId: string | null;
-  trip: { id: string; name: string } | null;
-  /** Who a trip expense was for. null means everyone on the trip. */
-  tripShareWith: string[] | null;
+  /** The group this was put in, if any. */
+  groupId?: string | null;
+  group?: { id: string; name: string } | null;
+  /** Who a group expense was for. null means everyone in the group, equally. */
+  groupShareWith?: string[] | null;
+  /** The same three under their old names, still sent for older apps. */
+  tripId?: string | null;
+  trip?: { id: string; name: string } | null;
+  tripShareWith?: string[] | null;
+  /** Who paid, when it wasn't the row's owner. null: the owner paid. */
+  paidBy?: { contactId: string | null; userId: string | null } | null;
+  paidByContact?: { id: string; name: string } | null;
+  /** A payment someone else made: it touches no account, passbook or cash. */
+  offLedger?: boolean;
+  /** Its split and people are kept by its group (contact members' shares). */
+  groupSplit?: boolean;
   emiPlanId: string | null;
   emiRole: EmiRole | null;
   isTransfer: boolean;
@@ -1114,4 +1197,19 @@ export interface AccountCycles {
   /** False for a credit card with no billing date: no cycles at all, never pay months in their place. */
   cycleKnown?: boolean;
   cycles: { from: string; to: string; current: boolean; spentMinor: number; count: number }[];
+}
+
+/** The group a transaction is in, read off the new fields or, from an older server, the old ones. */
+export function groupOf(transaction: Transaction): { id: string; name: string } | null {
+  return transaction.group ?? transaction.trip ?? null;
+}
+
+export function groupIdOf(transaction: Transaction | null | undefined): string | null {
+  if (!transaction) return null;
+  return transaction.groupId ?? transaction.tripId ?? groupOf(transaction)?.id ?? null;
+}
+
+export function groupShareOf(transaction: Transaction | null | undefined): string[] | null {
+  if (!transaction) return null;
+  return transaction.groupShareWith ?? transaction.tripShareWith ?? null;
 }

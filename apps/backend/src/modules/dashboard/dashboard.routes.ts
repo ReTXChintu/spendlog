@@ -16,7 +16,7 @@ import { expectedBalances, tracksBalance } from "../accounts/accounts.balance";
 import { balanceTodos } from "../accounts/accounts.drift";
 import { settleMissingCredits } from "../accounts/accounts.missingCredits";
 import { PocketStatus, pocketStatuses } from "../accounts/accounts.pocket";
-import { outsideTransactionsMinor } from "../contacts/contacts.people";
+import { LENT_PART, outsideTransactionsMinor } from "../contacts/contacts.people";
 
 export const dashboardRouter = Router();
 dashboardRouter.use(requireAuth);
@@ -403,13 +403,11 @@ async function owedBalance(userId: Types.ObjectId) {
         // on the schema, so every lent rupee summed as nothing and the
         // dashboard reported money owed *by* the user whenever anyone paid
         // them back.
+        // On a group payment somebody else made, the other way: the
+        // user's share is owed to them (LENT_PART).
         lent: {
           $sum: {
-            $cond: [
-              { $ne: [{ $ifNull: ["$split.myShareMinor", null] }, null] },
-              { $subtract: ["$amountMinor", "$split.myShareMinor"] },
-              0,
-            ],
+            $cond: [{ $ne: [{ $ifNull: ["$split.myShareMinor", null] }, null] }, LENT_PART, 0],
           },
         },
         settledIn: {

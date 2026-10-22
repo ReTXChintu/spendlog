@@ -97,23 +97,18 @@ void main() {
     });
   });
 
-  group('taking a payment off a trip', () {
-    Transaction onTrip() => Transaction.fromJson({
+  group('taking a payment out of a group', () {
+    Transaction inGroup() => Transaction.fromJson({
           'id': 't2',
+          'userId': 'me',
           'amountMinor': 120000,
           'type': 'DEBIT',
           'merchant': 'Pharmacy',
           'source': 'SMS',
           'occurredAt': '2026-10-08T10:00:00.000Z',
-          'tripId': 'trip1',
-          'trip': {'name': 'Goa'},
+          'groupId': 'group1',
+          'group': {'name': 'Goa'},
         });
-
-    Future<void> openMore(WidgetTester tester) async {
-      await tester.ensureVisible(find.text('More'));
-      await tester.tap(find.text('More'));
-      await tester.pumpAndSettle();
-    }
 
     Future<void> save(WidgetTester tester) async {
       await tester.ensureVisible(find.text('Save'));
@@ -121,37 +116,53 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('switching the trip off sends it off the trip', (tester) async {
+    testWidgets('switching the group off sends it out of the group', (tester) async {
       final patches = <Map<String, dynamic>>[];
       await http.runWithClient(() async {
-        await _open(tester, onTrip());
-        await openMore(tester);
+        await _open(tester, inGroup());
 
         expect(find.text('On Goa'), findsOneWidget);
-        expect(find.text('Just mine on Goa'), findsOneWidget);
+        expect(find.text('Just mine'), findsOneWidget);
+        await tester.ensureVisible(find.text('On Goa'));
         await tester.tap(find.text('On Goa'));
         await tester.pumpAndSettle();
-        // Nothing to narrow once it is off the trip.
-        expect(find.text('Just mine on Goa'), findsNothing);
-        expect(find.textContaining('stays off'), findsOneWidget);
+        // Nothing to narrow once it is out of the group.
+        expect(find.text('Just mine'), findsNothing);
+        expect(find.text('Add to a group'), findsOneWidget);
 
         await save(tester);
       }, () => _server(patches));
 
-      expect(patches.single.containsKey('tripId'), isTrue);
-      expect(patches.single['tripId'], isNull);
-      expect(patches.single.containsKey('tripShareWith'), isFalse);
+      expect(patches.single.containsKey('groupId'), isTrue);
+      expect(patches.single['groupId'], isNull);
+      expect(patches.single.containsKey('groupShareWith'), isFalse);
     });
 
-    testWidgets('left on, the trip is not touched', (tester) async {
+    testWidgets('left on, the group is not touched', (tester) async {
       final patches = <Map<String, dynamic>>[];
       await http.runWithClient(() async {
-        await _open(tester, onTrip());
+        await _open(tester, inGroup());
         await save(tester);
       }, () => _server(patches));
 
-      expect(patches.single.containsKey('tripId'), isFalse);
-      expect(patches.single['tripShareWith'], isNull);
+      expect(patches.single.containsKey('groupId'), isFalse);
+      expect(patches.single['groupShareWith'], isNull);
+    });
+
+    testWidgets("an older server's trip fields still read as the group", (tester) async {
+      final row = Transaction.fromJson({
+        'id': 't3',
+        'amountMinor': 100,
+        'type': 'DEBIT',
+        'source': 'SMS',
+        'occurredAt': '2026-10-08T10:00:00.000Z',
+        'tripId': 'trip1',
+        'tripShareWith': ['me'],
+        'trip': {'name': 'Goa'},
+      });
+      expect(row.groupId, 'trip1');
+      expect(row.groupName, 'Goa');
+      expect(row.groupShareWith, ['me']);
     });
   });
 }

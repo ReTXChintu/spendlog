@@ -70,6 +70,10 @@ export function initialKind(transaction: Transaction | null): Kind {
   if (!transaction) return "normal";
   const t = transaction;
   if (t.type === "DEBIT") {
+    // A payment someone else made, and a payment whose split its group
+    // keeps, are ordinary payments to the form: the group says who owes
+    // what, not a split typed in here.
+    if (t.offLedger || t.groupSplit) return "normal";
     if (t.cardPaymentFor) return "cardBill";
     if (t.isTransfer) return "transfer";
     if (t.isSettlement) return "settle";

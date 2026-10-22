@@ -54,7 +54,7 @@ const NAV: { group: string | null; items: NavEntry[] }[] = [
     group: "Shared",
     items: [
       { to: "/people", label: "People", icon: "ic-users", match: (p) => p === "/people" },
-      { to: "/trips", label: "Trips", icon: "ic-briefcase", match: (p) => p === "/trips" },
+      { to: "/groups", label: "Groups", icon: "ic-briefcase", match: (p) => p === "/groups" || p === "/trips" },
       { to: "/settings?tab=family", label: "Family", icon: "ic-shield", match: (p, t) => p === "/settings" && t === "family" },
     ],
   },

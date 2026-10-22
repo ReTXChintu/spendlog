@@ -198,7 +198,7 @@ export async function dailyBudget(
   const special = {
     $or: [
       { $eq: ["$isSpecial", true] },
-      { $gt: ["$tripId", null] },
+      { $gt: ["$groupId", null] },
       { $gt: ["$commitmentId", null] },
       { $in: ["$accountId", pocketAccounts] },
     ],
@@ -375,11 +375,11 @@ async function refundsForBucket(userId: Types.ObjectId, periodStart: Date, now: 
 
   const purchaseIds = credits.flatMap((credit) => credit.refundOf.map((allocation) => allocation.transactionId));
   const purchases = await Transaction.find({ _id: { $in: purchaseIds }, userId, type: "DEBIT" }).select(
-    "occurredAt isSpecial tripId commitmentId"
+    "occurredAt isSpecial groupId commitmentId"
   );
   const scored = new Map(
     purchases
-      .filter((purchase) => !purchase.isSpecial && !purchase.tripId && !purchase.commitmentId)
+      .filter((purchase) => !purchase.isSpecial && !purchase.groupId && !purchase.commitmentId)
       .map((purchase) => [purchase._id.toString(), purchase])
   );
 

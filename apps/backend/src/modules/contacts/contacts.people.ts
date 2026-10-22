@@ -84,6 +84,22 @@ const SIGNED_CLEARANCE = {
 };
 
 /**
+ * Whether a person's part of a row is something they owe the user (a
+ * payment the user made, split or lent) rather than something that
+ * squares or reverses it (money in from them).
+ *
+ * A group payment somebody else made is a debit, but runs the other way:
+ * the person on it is whoever paid, and their part is the user's share,
+ * now owed to them - just as if they had lent it.
+ */
+const OWED_TO_ME = { $and: [{ $eq: ["$type", "DEBIT"] }, { $ne: ["$offLedger", true] }] };
+
+/** The same rule, for a row in hand: +1 adds to what they owe, -1 takes from it. */
+export function personSign(transaction: Pick<TransactionDoc, "type" | "offLedger">): 1 | -1 {
+  return transaction.type === "DEBIT" && !transaction.offLedger ? 1 : -1;
+}
+
+/**
  * Every person's running balance, from the transactions that name them
  * and whatever was cleared with them since. The opening balance is the
  * contact's own, added by whoever has the contact to hand.
@@ -103,8 +119,8 @@ export async function balances(userId: Types.ObjectId, contactIds?: Types.Object
       {
         $group: {
           _id: "$people.contactId",
-          givenMinor: { $sum: { $cond: [{ $eq: ["$type", "DEBIT"] }, "$people.amountMinor", 0] } },
-          returnedMinor: { $sum: { $cond: [{ $eq: ["$type", "CREDIT"] }, "$people.amountMinor", 0] } },
+          givenMinor: { $sum: { $cond: [OWED_TO_ME, "$people.amountMinor", 0] } },
+          returnedMinor: { $sum: { $cond: [OWED_TO_ME, 0, "$people.amountMinor"] } },
           transactionCount: { $sum: 1 },
           lastAt: { $max: "$occurredAt" },
         },
@@ -161,6 +177,20 @@ export async function outsideTransactionsMinor(userId: Types.ObjectId): Promise<
   ]);
   return (opening[0]?.total ?? 0) - (cleared[0]?.total ?? 0);
 }
+
+/**
+ * What one split row puts on the pool: the part of the bill that was not
+ * the user's own. On a group payment somebody else made it goes the other
+ * way - none of it was the user's money, and their share is owed to
+ * whoever paid - so the same figure the People page shows comes out here.
+ */
+export const LENT_PART = {
+  $cond: [
+    { $eq: ["$offLedger", true] },
+    { $multiply: [-1, { $ifNull: ["$split.myShareMinor", "$amountMinor"] }] },
+    { $subtract: ["$amountMinor", "$split.myShareMinor"] },
+  ],
+};
 
 export const NO_BALANCE: Balance = {
   balanceMinor: 0,

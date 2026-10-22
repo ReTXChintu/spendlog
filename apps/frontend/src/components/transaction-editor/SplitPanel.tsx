@@ -170,7 +170,7 @@ export function SplitPanel({
         <input
           id="e-group"
           className="filter-input"
-          placeholder={isDebit ? "Goa trip, flat rent…" : "Roommate reimbursement"}
+          placeholder={isDebit ? "Dinner out, flat rent…" : "Roommate reimbursement"}
           value={draft.groupLabel}
           onChange={(e) => onChange({ ...draft, groupLabel: e.target.value })}
         />

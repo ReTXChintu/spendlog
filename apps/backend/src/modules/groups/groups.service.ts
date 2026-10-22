@@ -1,0 +1,516 @@
+import { FilterQuery, HydratedDocument, Types } from "mongoose";
+import { Category, Contact, Group, GroupDoc, Transaction, TransactionDoc, User } from "../../models";
+import { istDayKey } from "../../time";
+import { computeBalances, settle, shareOut } from "./groups.settlement";
+
+/**
+ * The one place in the app where a query is scoped by something other than
+ * the signed-in user.
+ *
+ * Everything else ends in `userId: currentUserId(req)`, which is what keeps
+ * one person's ledger out of another's. A group is shared on purpose, so
+ * its reads are authorised by membership instead — and that exception
+ * lives here, in one function, rather than being spelled out at each
+ * endpoint where it could be forgotten.
+ */
+export async function assertGroupMember(groupId: string, userId: Types.ObjectId) {
+  return Group.findOne({ _id: groupId, "members.userId": userId });
+}
+
+/** A group linked from Trippin, which still takes in what was spent inside its dates. */
+export function autoAdds(group: Pick<GroupDoc, "source">): boolean {
+  return group.source?.app === "trippin" && Boolean(group.source.linked);
+}
+
+/**
+ * Which group, if any, a payment made at this moment goes into by itself.
+ *
+ * Only a group linked from Trippin: every other group is picked by hand,
+ * in the editor, since "Flatmates" and "Office lunch" have no dates for a
+ * payment to fall inside, and a trip's dates guessed wrong more often than
+ * people liked.
+ *
+ * Matched on when the money was spent rather than when the message turned
+ * up, so an SMS that syncs three days after the holiday still lands on the
+ * holiday - and a finished trip still claims payments inside its window.
+ */
+export async function groupForOccurredAt(
+  userId: Types.ObjectId,
+  occurredAt: Date
+): Promise<Types.ObjectId | null> {
+  const group = await Group.findOne({
+    "source.app": "trippin",
+    "source.linked": true,
+    archivedAt: null,
+    // Only from the point this person joined. Someone who joins on day
+    // three is sharing the trip from then on, not handing over the
+    // spending they did before it — that stays theirs to add on purpose.
+    members: { $elemMatch: { userId, joinedAt: { $lte: occurredAt } } },
+    startedAt: { $ne: null, $lte: occurredAt },
+    $or: [{ endedAt: null }, { endedAt: { $gte: occurredAt } }],
+  })
+    // The most recently started wins, on the grounds that two overlapping
+    // windows almost certainly means the newer one is the intended answer.
+    .sort({ startedAt: -1 });
+
+  return group?._id ?? null;
+}
+
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+/**
+ * A short code to read out or show as a QR.
+ *
+ * The alphabet leaves out the characters people misread to each other —
+ * O and 0, I and 1 — because this gets spoken across a dinner table as
+ * often as it gets scanned.
+ */
+export function generateJoinCode(length = 6): string {
+  let code = "";
+  for (let i = 0; i < length; i += 1) {
+    code += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+  }
+  return code;
+}
+
+/**
+ * Whether a group is "running" in the sense trips had: dated, not
+ * archived, and under way. No longer what makes a group active - that is
+ * simply not being archived - but still what the Trippin overlap rule and
+ * the old /trips routes mean by it.
+ *
+ * Dated with no end runs until it is given one; with both dates, between
+ * them, the way a Trippin trip from the 3rd to the 7th is on while it is
+ * the 5th.
+ */
+export function isGroupRunning(
+  group: Pick<GroupDoc, "startedAt" | "endedAt" | "archivedAt">,
+  now = new Date()
+): boolean {
+  if (group.archivedAt || !group.startedAt) return false;
+  if (!group.endedAt) return true;
+  return group.startedAt <= now && group.endedAt >= now;
+}
+
+/** The query form of isGroupRunning, to merge into a group filter. */
+export function runningAt(now = new Date()): FilterQuery<GroupDoc> {
+  return {
+    archivedAt: null,
+    startedAt: { $ne: null },
+    $or: [{ endedAt: null }, { startedAt: { $lte: now }, endedAt: { $gte: now } }],
+  };
+}
+
+/**
+ * Files everything inside a dated group's window that is in no group yet.
+ * Only ever called for a group that takes payments in by itself (see
+ * autoAdds) - a Trippin trip.
+ *
+ * Leaves anything hand-edited alone, which is how a transaction taken out
+ * on purpose stays out - the same rule that stops automatic passes
+ * overwriting corrections elsewhere.
+ *
+ * With `respectJoins`, each member's share of the window starts when they
+ * joined rather than when the group did: someone added on day three shares
+ * the trip from then on, not the days before it.
+ */
+export async function claimTransactions(
+  group: Pick<GroupDoc, "_id" | "members" | "startedAt" | "endedAt">,
+  onlyUserId?: Types.ObjectId,
+  respectJoins = false
+): Promise<number> {
+  if (!group.startedAt) return 0;
+  const startedAt = group.startedAt;
+  const until = group.endedAt ? { $lte: group.endedAt } : {};
+  // Never a payment somebody else made: it was put in its group on purpose.
+  const base = { groupId: null, editedAt: null, offLedger: { $ne: true } };
+
+  let claimed = 0;
+  if (!respectJoins) {
+    const memberIds = onlyUserId ? [onlyUserId] : group.members.map((member) => member.userId);
+    const result = await Transaction.updateMany(
+      { ...base, userId: { $in: memberIds }, occurredAt: { $gte: startedAt, ...until } },
+      { $set: { groupId: group._id } }
+    );
+    claimed = result.modifiedCount;
+  } else {
+    for (const member of group.members) {
+      if (onlyUserId && !member.userId.equals(onlyUserId)) continue;
+      const from = member.joinedAt > startedAt ? member.joinedAt : startedAt;
+      if (group.endedAt && from > group.endedAt) continue;
+
+      const result = await Transaction.updateMany(
+        { ...base, userId: member.userId, occurredAt: { $gte: from, ...until } },
+        { $set: { groupId: group._id } }
+      );
+      claimed += result.modifiedCount;
+    }
+  }
+
+  // A contact in the group has a share of what was just taken in.
+  if (claimed > 0) await resyncGroup(group._id);
+  return claimed;
+}
+
+/** Everyone in a group by id: its SpendLog users and its contacts, as strings. */
+export function groupMemberIds(group: Pick<GroupDoc, "members" | "contactMembers">): string[] {
+  return [
+    ...group.members.map((member) => member.userId.toString()),
+    ...(group.contactMembers ?? []).map((member) => member.contactId.toString()),
+  ];
+}
+
+type GroupRow = Pick<
+  TransactionDoc,
+  "userId" | "amountMinor" | "countedAmountMinor" | "groupShareWith" | "groupSplit" | "paidBy"
+>;
+
+/** Who paid for a group row: the contact who did, or the row's owner. */
+export function payerOf(row: Pick<TransactionDoc, "userId" | "paidBy">): string {
+  return (row.paidBy?.contactId ?? row.userId).toString();
+}
+
+/**
+ * What a row puts into the group's arithmetic.
+ *
+ * Its counted amount, so a refunded hotel and a bill split with somebody
+ * outside the group both behave without this knowing anything about
+ * refunds or splits - except where the group itself wrote the split. Then
+ * the counted amount is already the payer's share after the group's
+ * contacts, and the whole bill is what the group shares.
+ */
+export function groupAmountOf(row: GroupRow): number {
+  return row.groupSplit ? row.amountMinor : row.countedAmountMinor;
+}
+
+/** Who a row was for: the ones named, or everyone in the group. */
+export function sharersOf(row: Pick<TransactionDoc, "groupShareWith">, memberIds: string[]): string[] {
+  return row.groupShareWith?.length ? row.groupShareWith.map((id) => id.toString()) : memberIds;
+}
+
+/** The aggregation form of groupAmountOf. */
+export const GROUP_AMOUNT = { $cond: [{ $eq: ["$groupSplit", true] }, "$amountMinor", "$countedAmountMinor"] };
+
+/**
+ * Whether a row is the kind a group can split: a plain payment, or one
+ * the group split already. Anything marked otherwise - a transfer,
+ * settling up, a card bill, a loan, an EMI, a split typed in by hand - was
+ * marked by someone who knew better, and the group leaves it be.
+ */
+function groupCanSplit(row: HydratedDocument<TransactionDoc>): boolean {
+  if (row.type !== "DEBIT") return false;
+  if (row.isTransfer || row.isSettlement || row.cardPaymentFor || row.emiRole || row.loanId) return false;
+  if (row.groupSplit) return true;
+  return !row.split && row.people.length === 0;
+}
+
+const sameShares = (a: { contactId: unknown; amountMinor: number }[], b: { contactId: unknown; amountMinor: number }[]) =>
+  a.length === b.length &&
+  a.every((entry, i) => String(entry.contactId) === String(b[i].contactId) && entry.amountMinor === b[i].amountMinor);
+
+/**
+ * Writes a group row's contact shares onto it, as the split and people the
+ * rest of the app already understands. Saves when anything changed, so the
+ * counted amount follows; returns whether it did.
+ *
+ * On a payment the row's owner made, each of *their* contacts in the group
+ * owes them their share: those shares come out of the owner's spending and
+ * onto the People page. A SpendLog user's share, and a contact of somebody
+ * else's, stay in the owner's spending and settle inside the group, as on
+ * a trip.
+ *
+ * On a payment one of their contacts made (offLedger), the owner's own
+ * share is what they spent, and what they now owe that contact.
+ *
+ * A row that has left its group gives back what the group wrote - except
+ * a payment somebody else made, which only ever made sense with its
+ * shares, and keeps them.
+ */
+export async function syncGroupSplit(
+  row: HydratedDocument<TransactionDoc>,
+  known?: HydratedDocument<GroupDoc> | null
+): Promise<boolean> {
+  const paidByContact = row.paidBy?.contactId ?? null;
+  const group = row.groupId ? (known && known._id.equals(row.groupId) ? known : await Group.findById(row.groupId)) : null;
+
+  const clear = async () => {
+    if (!row.groupSplit) return false;
+    row.split = null;
+    row.people = [];
+    row.groupSplit = false;
+    await row.save();
+    return true;
+  };
+
+  if (!group) return paidByContact ? false : clear();
+  if (!paidByContact && !groupCanSplit(row)) return clear();
+
+  const shares = shareOut(row.amountMinor, sharersOf(row, groupMemberIds(group)));
+  const owner = row.userId.toString();
+
+  let myShareMinor: number;
+  let people: { contactId: Types.ObjectId; amountMinor: number }[];
+  if (paidByContact) {
+    myShareMinor = shares.get(owner) ?? 0;
+    people = myShareMinor > 0 ? [{ contactId: paidByContact, amountMinor: myShareMinor }] : [];
+  } else {
+    const mine = group.contactMembers.filter((member) => member.addedBy.equals(row.userId));
+    people = mine
+      .map((member) => ({ contactId: member.contactId, amountMinor: shares.get(member.contactId.toString()) ?? 0 }))
+      .filter((person) => person.amountMinor > 0);
+    if (people.length === 0) return clear();
+    myShareMinor = row.amountMinor - people.reduce((sum, person) => sum + person.amountMinor, 0);
+  }
+
+  const groupLabel = group.name.slice(0, 60);
+  const unchanged =
+    row.groupSplit &&
+    row.split?.myShareMinor === myShareMinor &&
+    row.split?.groupLabel === groupLabel &&
+    sameShares(row.people, people);
+  if (unchanged) return false;
+
+  row.split = { myShareMinor, groupLabel };
+  row.people = people;
+  row.groupSplit = true;
+  await row.save();
+  return true;
+}
+
+/**
+ * Every row in a group, its contact shares brought up to date: after
+ * someone joins or leaves, or a contact is added or taken off. A group
+ * with no contacts, and no shares written before, has nothing to do.
+ */
+export async function resyncGroup(groupId: Types.ObjectId): Promise<number> {
+  const group = await Group.findById(groupId);
+  if (!group) return 0;
+  if (group.contactMembers.length === 0 && !(await Transaction.exists({ groupId, groupSplit: true }))) return 0;
+
+  let changed = 0;
+  const rows = await Transaction.find({ groupId, type: "DEBIT" });
+  for (const row of rows) {
+    if (await syncGroupSplit(row, group)) changed += 1;
+  }
+  return changed;
+}
+
+/**
+ * A contact deleted from the People page leaves every group they were in.
+ * Their part of each payment has already been taken off the rows; the
+ * shares are worked out again among whoever is left.
+ */
+export async function removeContactFromGroups(contactId: Types.ObjectId): Promise<void> {
+  const groups = await Group.find({ "contactMembers.contactId": contactId });
+  for (const group of groups) {
+    group.contactMembers = group.contactMembers.filter((member) => !member.contactId.equals(contactId));
+    await group.save();
+    await resyncGroup(group._id);
+  }
+}
+
+/** A name for every id in a group - users' and contacts' - and which each is. */
+export async function groupDirectory(group: Pick<GroupDoc, "contactMembers">, ids: string[]) {
+  const unique = [...new Set(ids)].filter((id) => Types.ObjectId.isValid(id));
+  const [users, contacts] = await Promise.all([
+    User.find({ _id: { $in: unique } }).select("name email").lean(),
+    Contact.find({ _id: { $in: unique } }).select("name phone userId").lean(),
+  ]);
+
+  const directory = new Map<string, { name: string; kind: "user" | "contact" }>();
+  for (const user of users) directory.set(user._id.toString(), { name: user.name ?? user.email ?? "Someone", kind: "user" });
+  for (const contact of contacts) directory.set(contact._id.toString(), { name: contact.name, kind: "contact" });
+  // A contact deleted since is still a contact, if nameless.
+  for (const member of group.contactMembers ?? []) {
+    const id = member.contactId.toString();
+    if (!directory.has(id)) directory.set(id, { name: "Someone", kind: "contact" });
+  }
+  return {
+    nameOf: (id: string) => directory.get(id)?.name ?? "Someone",
+    kindOf: (id: string): "user" | "contact" => directory.get(id)?.kind ?? "user",
+  };
+}
+
+/** What a group cost, and where it went. */
+export async function groupSpendSummary(group: Pick<GroupDoc, "_id" | "contactMembers">) {
+  const rows = await Transaction.find({ groupId: group._id, type: "DEBIT" })
+    .select("userId paidBy amountMinor countedAmountMinor groupSplit categoryId occurredAt")
+    .lean();
+  const categoryIds = [...new Set(rows.map((row) => row.categoryId?.toString()).filter(Boolean))];
+  const categories = await Category.find({ _id: { $in: categoryIds } }).select("name").lean();
+  const categoryName = new Map(categories.map((category) => [category._id.toString(), category.name]));
+
+  const byPayer = new Map<string, { spentMinor: number; count: number }>();
+  const byCategory = new Map<string, { categoryId: Types.ObjectId | null; amountMinor: number; name: string }>();
+  const days = new Set<string>();
+  let totalMinor = 0;
+
+  for (const row of rows) {
+    const amount = groupAmountOf(row);
+    totalMinor += amount;
+    // Days actually spent money on, not days elapsed: a trip with a quiet
+    // Sunday should not look cheaper per day because of it.
+    days.add(istDayKey(row.occurredAt));
+
+    const payer = payerOf(row);
+    const entry = byPayer.get(payer) ?? { spentMinor: 0, count: 0 };
+    entry.spentMinor += amount;
+    entry.count += 1;
+    byPayer.set(payer, entry);
+
+    if (amount > 0) {
+      const key = row.categoryId?.toString() ?? "none";
+      const name = categoryName.get(key) ?? "Uncategorized";
+      const category = byCategory.get(key) ?? { categoryId: row.categoryId ?? null, amountMinor: 0, name };
+      category.amountMinor += amount;
+      byCategory.set(key, category);
+    }
+  }
+
+  const directory = await groupDirectory(group, [...byPayer.keys()]);
+  const dayCount = days.size;
+
+  return {
+    totalMinor,
+    transactionCount: rows.length,
+    dayCount,
+    perDayMinor: dayCount === 0 ? 0 : Math.round(totalMinor / dayCount),
+    byMember: [...byPayer.entries()]
+      .map(([id, entry]) => ({ userId: id, kind: directory.kindOf(id), name: directory.nameOf(id), ...entry }))
+      .sort((a, b) => b.spentMinor - a.spentMinor),
+    byCategory: [...byCategory.values()].sort((a, b) => b.amountMinor - a.amountMinor),
+  };
+}
+
+/**
+ * Who owes whom in a group, and the payments that square it off.
+ *
+ * Every expense is shared by everyone in the group unless it says
+ * otherwise, which is the common case and saves marking each one up.
+ * Contacts are people here like anyone else: what one paid for the group
+ * is on their side, and their share of everything else on the other.
+ *
+ * The People page keeps its own, direct balance per contact - what they
+ * owe *you* across every group and loan. This is the group's view, with
+ * the fewest payments that settle everyone.
+ */
+export async function groupSettlement(
+  group: Pick<GroupDoc, "_id" | "members" | "contactMembers">,
+  viewerId?: Types.ObjectId | string | null
+) {
+  const memberIds = groupMemberIds(group);
+
+  const transactions = await Transaction.find({
+    groupId: group._id,
+    type: "DEBIT",
+    $or: [{ countedAmountMinor: { $gt: 0 } }, { groupSplit: true }],
+  }).select("userId paidBy amountMinor countedAmountMinor groupShareWith groupSplit");
+
+  const expenses = transactions
+    .map((transaction) => ({
+      payerId: payerOf(transaction),
+      amountMinor: groupAmountOf(transaction),
+      sharerIds: sharersOf(transaction, memberIds),
+    }))
+    .filter((expense) => expense.amountMinor > 0);
+
+  const balances = computeBalances(expenses);
+  const transfers = settle(balances);
+
+  // Anyone who has left still appears in the arithmetic, so their name has
+  // to be resolvable too.
+  const directory = await groupDirectory(group, [...balances.map((b) => b.userId), ...memberIds]);
+  const viewer = viewerId ? viewerId.toString() : null;
+
+  return {
+    balances: balances.map((balance) => ({
+      ...balance,
+      kind: directory.kindOf(balance.userId),
+      name: directory.nameOf(balance.userId),
+      isMe: balance.userId === viewer,
+    })),
+    transfers: transfers.map((transfer) => ({
+      ...transfer,
+      fromKind: directory.kindOf(transfer.fromUserId),
+      toKind: directory.kindOf(transfer.toUserId),
+      fromName: directory.nameOf(transfer.fromUserId),
+      toName: directory.nameOf(transfer.toUserId),
+    })),
+  };
+}
+
+export class GroupPaymentError extends Error {}
+
+/**
+ * Records a group payment somebody else made: "Rahul paid 2,000 for
+ * dinner". The payer is one of the user's own contacts in the group; no
+ * account of the user's moved, so the row is off the ledger, and the
+ * user's share - all of it, some of it, or none, by shareWith - is what
+ * they spent and what they owe Rahul.
+ */
+export async function createPaidByContact(
+  userId: Types.ObjectId,
+  group: HydratedDocument<GroupDoc>,
+  body: {
+    contactId: string;
+    amountMinor: number;
+    occurredAt: Date;
+    merchant?: string | null;
+    note?: string | null;
+    categoryId?: string | null;
+    currency?: string;
+    shareWith?: string[] | null;
+  }
+) {
+  const contact = group.contactMembers.find(
+    (member) => member.contactId.toString() === body.contactId && member.addedBy.equals(userId)
+  );
+  if (!contact) throw new GroupPaymentError("Add them to the group from your contacts first.");
+
+  const shareWith = await checkShareWith(group, body.shareWith);
+
+  const created = await Transaction.create({
+    userId,
+    amountMinor: body.amountMinor,
+    currency: body.currency ?? "INR",
+    type: "DEBIT",
+    merchant: body.merchant ?? null,
+    note: body.note ?? null,
+    categoryId: body.categoryId ?? null,
+    accountId: null,
+    accountUnknown: false,
+    offLedger: true,
+    paidBy: { contactId: contact.contactId, userId: null },
+    groupId: group._id,
+    groupShareWith: shareWith,
+    occurredAt: body.occurredAt,
+    source: "MANUAL",
+    editedAt: new Date(),
+  });
+  await syncGroupSplit(created, group);
+  return created;
+}
+
+/**
+ * A share-with list checked against the group: everyone named is in it.
+ * null, or an empty list, means everyone.
+ */
+export async function checkShareWith(
+  group: Pick<GroupDoc, "members" | "contactMembers">,
+  shareWith: string[] | null | undefined
+): Promise<Types.ObjectId[] | null> {
+  if (!shareWith || shareWith.length === 0) return null;
+  const members = new Set(groupMemberIds(group));
+  const unique = [...new Set(shareWith)];
+  if (unique.some((id) => !members.has(id))) {
+    throw new GroupPaymentError("Everyone it's shared with has to be in the group.");
+  }
+  return unique.map((id) => new Types.ObjectId(id));
+}
+
+// The names these went by while groups were trips.
+export const assertTripMember = assertGroupMember;
+export const tripForOccurredAt = groupForOccurredAt;
+export const tripSpendSummary = groupSpendSummary;
+export const tripSettlement = groupSettlement;
+export const isTripActive = isGroupRunning;

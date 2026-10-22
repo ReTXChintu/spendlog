@@ -281,13 +281,25 @@ class Transaction {
   /// user never typed can be checked.
   final String? rawText;
   final String source; // SMS | EMAIL | MANUAL
-  /// Who this belongs to — the payer, on a shared trip.
+  /// Who this belongs to — the payer, on a shared group.
   final String? userId;
-  /// The trip this was spent on, if any.
-  final String? tripId;
-  final String? tripName;
-  /// Who a trip expense was for. null means everyone on the trip.
-  final List<String>? tripShareWith;
+  /// The group this was spent in, if any.
+  final String? groupId;
+  final String? groupName;
+  /// Who a group expense was for. null means everyone in the group,
+  /// equally; just the owner's own id is "just mine".
+  final List<String>? groupShareWith;
+
+  /// On a payment someone else made: which of the user's contacts paid.
+  final String? paidByContactId;
+  final String? paidByName;
+
+  /// A payment someone else made: it touches no account, passbook or cash.
+  final bool offLedger;
+
+  /// The split and people on this row are kept by its group (the contacts'
+  /// shares), so the editor offers the group's split rather than its own.
+  final bool groupSplit;
   /// On a credit: how much of it belongs to which earlier purchases. One
   /// credit often settles several cancelled orders at once.
   final List<RefundAllocation> refundOf;
@@ -386,9 +398,13 @@ class Transaction {
     this.rawText,
     required this.source,
     this.userId,
-    this.tripId,
-    this.tripName,
-    this.tripShareWith,
+    this.groupId,
+    this.groupName,
+    this.groupShareWith,
+    this.paidByContactId,
+    this.paidByName,
+    this.offLedger = false,
+    this.groupSplit = false,
     this.refundOf = const [],
     this.refundedMinor = 0,
     this.emiPlanId,
@@ -449,9 +465,15 @@ class Transaction {
         rawText: json['rawText'] as String?,
         source: json['source'] as String,
         userId: json['userId'] is String ? json['userId'] as String : null,
-        tripId: json['tripId'] as String?,
-        tripShareWith: (json['tripShareWith'] as List<dynamic>?)?.cast<String>(),
-        tripName: (json['trip'] as Map<String, dynamic>?)?['name'] as String?,
+        // The trip names are what an older server sent; the same values.
+        groupId: (json['groupId'] ?? json['tripId']) as String?,
+        groupShareWith: ((json['groupShareWith'] ?? json['tripShareWith']) as List<dynamic>?)?.cast<String>(),
+        groupName: ((json['group'] ?? json['trip']) as Map<String, dynamic>?)?['name'] as String?,
+        paidByContactId: (json['paidBy'] as Map<String, dynamic>?)?['contactId'] as String?,
+        paidByName: (json['paidByContact'] as Map<String, dynamic>?)?['name'] as String? ??
+            json['paidByName'] as String?,
+        offLedger: json['offLedger'] == true,
+        groupSplit: json['groupSplit'] == true,
         refundOf: (json['refundOf'] as List<dynamic>? ?? [])
             .map((a) => RefundAllocation.fromJson(a as Map<String, dynamic>))
             .toList(),
@@ -922,18 +944,18 @@ class FixedCosts {
   }
 }
 
-/// Where a trip was planned, when Trippin made it. While [linked], Trippin
+/// Where a group was planned, when Trippin made it. While [linked], Trippin
 /// owns the name, dates and people, and overwrites them on its next
-/// change; once unlinked it is an ordinary trip that remembers its origin.
-class TripSource {
+/// change; once unlinked it is an ordinary group that remembers its origin.
+class GroupSource {
   final String app;
   final String externalId;
   final String? url;
   final bool linked;
 
-  TripSource({required this.app, required this.externalId, this.url, required this.linked});
+  GroupSource({required this.app, required this.externalId, this.url, required this.linked});
 
-  factory TripSource.fromJson(Map<String, dynamic> json) => TripSource(
+  factory GroupSource.fromJson(Map<String, dynamic> json) => GroupSource(
         app: json['app'] as String? ?? 'trippin',
         externalId: json['externalId'] as String? ?? '',
         url: json['url'] as String?,
@@ -941,55 +963,164 @@ class TripSource {
       );
 }
 
-class Trip {
+DateTime? _dateOrNull(Object? value) => value is String ? DateTime.parse(value) : null;
+
+/// People sharing spending: a holiday, flatmates, an office lunch. Active
+/// until somebody archives it; its dates, when it has any, are only labels
+/// - except on a group linked from Trippin, which takes in the payments
+/// made between them by itself ([autoAdds]).
+class Group {
   final String id;
   final String name;
-  final DateTime startedAt;
+  final String? ownerId;
+  final DateTime? startedAt;
   final DateTime? endedAt;
+  final DateTime? archivedAt;
   final String joinCode;
+
+  /// Not archived. Only active groups are offered in the editor.
   final bool isActive;
+
+  /// Payments inside its dates go on by themselves: a linked Trippin group.
+  final bool autoAdds;
   final int totalMinor;
   final int transactionCount;
-  final TripSource? source;
 
-  Trip({
+  /// SpendLog users and contacts together.
+  final int memberCount;
+  final GroupSource? source;
+
+  Group({
     required this.id,
     required this.name,
-    required this.startedAt,
+    this.ownerId,
+    this.startedAt,
     this.endedAt,
+    this.archivedAt,
     required this.joinCode,
     required this.isActive,
+    this.autoAdds = false,
     this.totalMinor = 0,
     this.transactionCount = 0,
+    this.memberCount = 1,
     this.source,
   });
 
-  factory Trip.fromJson(Map<String, dynamic> json) => Trip(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        startedAt: DateTime.parse(json['startedAt'] as String),
-        endedAt: json['endedAt'] != null ? DateTime.parse(json['endedAt'] as String) : null,
-        joinCode: json['joinCode'] as String? ?? '',
-        isActive: json['isActive'] as bool? ?? (json['endedAt'] == null),
-        totalMinor: json['totalMinor'] as int? ?? 0,
-        transactionCount: json['transactionCount'] as int? ?? 0,
-        source: json['source'] is Map<String, dynamic>
-            ? TripSource.fromJson(json['source'] as Map<String, dynamic>)
-            : null,
+  bool get isArchived => !isActive;
+
+  factory Group.fromJson(Map<String, dynamic> json) {
+    final archivedAt = _dateOrNull(json['archivedAt']);
+    final members = (json['members'] as List<dynamic>?)?.length;
+    final contacts = (json['contactMembers'] as List<dynamic>?)?.length ?? 0;
+    return Group(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      ownerId: json['ownerId'] is String ? json['ownerId'] as String : null,
+      startedAt: _dateOrNull(json['startedAt']),
+      endedAt: _dateOrNull(json['endedAt']),
+      archivedAt: archivedAt,
+      joinCode: json['joinCode'] as String? ?? '',
+      isActive: json['isArchived'] is bool ? !(json['isArchived'] as bool) : (json['isActive'] as bool? ?? archivedAt == null),
+      autoAdds: json['autoAdds'] == true,
+      totalMinor: json['totalMinor'] as int? ?? 0,
+      transactionCount: json['transactionCount'] as int? ?? 0,
+      memberCount: json['memberCount'] as int? ?? ((members ?? 1) + contacts),
+      source: json['source'] is Map<String, dynamic>
+          ? GroupSource.fromJson(json['source'] as Map<String, dynamic>)
+          : null,
+    );
+  }
+}
+
+/// Someone in a group: a SpendLog user, or one of somebody's contacts who
+/// has no account.
+class GroupMember {
+  /// The user's id or the contact's id - the id a share names.
+  final String id;
+  final bool isContact;
+  final String name;
+  final String? phone;
+  final bool isOwner;
+
+  /// The signed-in user.
+  final bool isMe;
+
+  /// A contact of the signed-in user's own: their People balance moves
+  /// with it.
+  final bool isMine;
+
+  /// Who added a contact, for "Asha's contact".
+  final String? addedByName;
+
+  GroupMember({
+    required this.id,
+    required this.isContact,
+    required this.name,
+    this.phone,
+    this.isOwner = false,
+    this.isMe = false,
+    this.isMine = false,
+    this.addedByName,
+  });
+
+  factory GroupMember.user(Map<String, dynamic> json) => GroupMember(
+        id: (json['userId'] ?? json['id']) as String,
+        isContact: false,
+        name: json['name'] as String? ?? 'Someone',
+        isOwner: json['isOwner'] == true,
+        isMe: json['isMe'] == true,
+      );
+
+  factory GroupMember.contact(Map<String, dynamic> json) => GroupMember(
+        id: (json['contactId'] ?? json['id']) as String,
+        isContact: true,
+        name: json['name'] as String? ?? 'Someone',
+        phone: json['phone'] as String?,
+        isMine: json['isMine'] == true,
+        addedByName: json['addedByName'] as String?,
       );
 }
 
-class TripSummary {
-  final Trip trip;
+/// GET /groups/:id - the group, and everyone in it.
+class GroupDetail {
+  final Group group;
+  final List<GroupMember> users;
+  final List<GroupMember> contacts;
+
+  GroupDetail({required this.group, required this.users, required this.contacts});
+
+  factory GroupDetail.fromJson(Map<String, dynamic> json) => GroupDetail(
+        group: Group.fromJson(json),
+        users: (json['members'] as List<dynamic>? ?? [])
+            .map((m) => GroupMember.user(m as Map<String, dynamic>))
+            .toList(),
+        contacts: (json['contacts'] as List<dynamic>? ?? [])
+            .map((m) => GroupMember.contact(m as Map<String, dynamic>))
+            .toList(),
+      );
+
+  List<GroupMember> get everyone => [...users, ...contacts];
+
+  GroupMember? get me => users.where((m) => m.isMe).firstOrNull;
+
+  /// Whether the signed-in user started it, and so can archive or delete it.
+  bool get iOwn => me?.isOwner ?? false;
+
+  /// The contacts the signed-in user can say paid for something.
+  List<GroupMember> get myContacts => contacts.where((m) => m.isMine).toList();
+}
+
+class GroupSummary {
+  final Group group;
   final int totalMinor;
   final int transactionCount;
   final int dayCount;
   final int perDayMinor;
   final List<CategorySpend> byCategory;
-  final List<TripMemberSpend> byMember;
+  final List<GroupMemberSpend> byMember;
 
-  TripSummary({
-    required this.trip,
+  GroupSummary({
+    required this.group,
     required this.totalMinor,
     required this.transactionCount,
     required this.dayCount,
@@ -998,8 +1129,8 @@ class TripSummary {
     required this.byMember,
   });
 
-  factory TripSummary.fromJson(Map<String, dynamic> json) => TripSummary(
-        trip: Trip.fromJson(json['trip'] as Map<String, dynamic>),
+  factory GroupSummary.fromJson(Map<String, dynamic> json) => GroupSummary(
+        group: Group.fromJson((json['group'] ?? json['trip']) as Map<String, dynamic>),
         totalMinor: json['totalMinor'] as int? ?? 0,
         transactionCount: json['transactionCount'] as int? ?? 0,
         dayCount: json['dayCount'] as int? ?? 0,
@@ -1008,81 +1139,96 @@ class TripSummary {
             .map((c) => CategorySpend.fromJson(c as Map<String, dynamic>))
             .toList(),
         byMember: (json['byMember'] as List<dynamic>? ?? [])
-            .map((m) => TripMemberSpend.fromJson(m as Map<String, dynamic>))
+            .map((m) => GroupMemberSpend.fromJson(m as Map<String, dynamic>))
             .toList(),
       );
 }
 
-/// What one person on a trip paid for.
-class TripMemberSpend {
+/// What one person in a group paid for.
+class GroupMemberSpend {
   final String userId;
   final String name;
   final int spentMinor;
+  final bool isContact;
 
-  TripMemberSpend({required this.userId, required this.name, required this.spentMinor});
+  GroupMemberSpend({required this.userId, required this.name, required this.spentMinor, this.isContact = false});
 
-  factory TripMemberSpend.fromJson(Map<String, dynamic> json) => TripMemberSpend(
+  factory GroupMemberSpend.fromJson(Map<String, dynamic> json) => GroupMemberSpend(
         userId: json['userId'] as String,
         name: json['name'] as String? ?? 'Someone',
         spentMinor: json['spentMinor'] as int? ?? 0,
+        isContact: json['kind'] == 'contact',
       );
 }
 
-/// Who owes whom at the end of a trip, and the payments that square it.
-class TripSettlement {
-  final List<TripBalance> balances;
-  final List<TripTransfer> transfers;
+/// Who owes whom in a group, and the payments that square it.
+class GroupSettlement {
+  final List<GroupBalance> balances;
+  final List<GroupTransfer> transfers;
 
-  TripSettlement({required this.balances, required this.transfers});
+  GroupSettlement({required this.balances, required this.transfers});
 
-  factory TripSettlement.fromJson(Map<String, dynamic> json) => TripSettlement(
+  factory GroupSettlement.fromJson(Map<String, dynamic> json) => GroupSettlement(
         balances: (json['balances'] as List<dynamic>? ?? [])
-            .map((b) => TripBalance.fromJson(b as Map<String, dynamic>))
+            .map((b) => GroupBalance.fromJson(b as Map<String, dynamic>))
             .toList(),
         transfers: (json['transfers'] as List<dynamic>? ?? [])
-            .map((t) => TripTransfer.fromJson(t as Map<String, dynamic>))
+            .map((t) => GroupTransfer.fromJson(t as Map<String, dynamic>))
             .toList(),
       );
+
+  GroupBalance? get mine => balances.where((b) => b.isMe).firstOrNull;
 }
 
-class TripBalance {
+class GroupBalance {
   final String userId;
   final String name;
   final int paidMinor;
-  final int netMinor;
+  final int shareMinor;
 
-  TripBalance({
+  /// Positive: they get money back. Negative: they owe.
+  final int netMinor;
+  final bool isContact;
+  final bool isMe;
+
+  GroupBalance({
     required this.userId,
     required this.name,
     required this.paidMinor,
+    this.shareMinor = 0,
     required this.netMinor,
+    this.isContact = false,
+    this.isMe = false,
   });
 
-  factory TripBalance.fromJson(Map<String, dynamic> json) => TripBalance(
+  factory GroupBalance.fromJson(Map<String, dynamic> json) => GroupBalance(
         userId: json['userId'] as String,
         name: json['name'] as String? ?? 'Someone',
         paidMinor: json['paidMinor'] as int? ?? 0,
+        shareMinor: json['shareMinor'] as int? ?? 0,
         netMinor: json['netMinor'] as int? ?? 0,
+        isContact: json['kind'] == 'contact',
+        isMe: json['isMe'] == true,
       );
 }
 
-class TripTransfer {
+class GroupTransfer {
   final String fromName;
   final String toName;
   final int amountMinor;
 
-  TripTransfer({required this.fromName, required this.toName, required this.amountMinor});
+  GroupTransfer({required this.fromName, required this.toName, required this.amountMinor});
 
-  factory TripTransfer.fromJson(Map<String, dynamic> json) => TripTransfer(
+  factory GroupTransfer.fromJson(Map<String, dynamic> json) => GroupTransfer(
         fromName: json['fromName'] as String? ?? 'Someone',
         toName: json['toName'] as String? ?? 'Someone',
         amountMinor: json['amountMinor'] as int? ?? 0,
       );
 }
 
-/// A payment of the user's own, on no trip yet, that could be added to
+/// A payment of the user's own, in no group yet, that could be added to
 /// one by hand - the tickets booked and the hotel paid before it started.
-class TripCandidate {
+class GroupCandidate {
   final String id;
   final DateTime occurredAt;
   final String? merchant;
@@ -1093,7 +1239,7 @@ class TripCandidate {
   /// Reads like a ticket, a stay or a ride. Only a hint, to put those first.
   final bool likelyTravel;
 
-  TripCandidate({
+  GroupCandidate({
     required this.id,
     required this.occurredAt,
     this.merchant,
@@ -1103,7 +1249,7 @@ class TripCandidate {
     this.likelyTravel = false,
   });
 
-  factory TripCandidate.fromJson(Map<String, dynamic> json) => TripCandidate(
+  factory GroupCandidate.fromJson(Map<String, dynamic> json) => GroupCandidate(
         id: json['id'] as String,
         occurredAt: DateTime.parse(json['occurredAt'] as String),
         merchant: json['merchant'] as String?,

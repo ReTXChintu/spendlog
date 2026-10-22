@@ -4,7 +4,8 @@ import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
 import { Contact, ContactClearance, Transaction } from "../../models";
-import { Balance, NO_BALANCE, balances, normalisePhone } from "./contacts.people";
+import { removeContactFromGroups } from "../groups/groups.service";
+import { Balance, NO_BALANCE, balances, normalisePhone, personSign } from "./contacts.people";
 
 export const contactsRouter = Router();
 contactsRouter.use(requireAuth);
@@ -92,7 +93,8 @@ contactsRouter.get("/:id", validObjectIdParam("id"), async (req, res) => {
       .sort({ occurredAt: -1 })
       .limit(200)
       .populate("category")
-      .populate("account"),
+      .populate("account")
+      .populate("group"),
     ContactClearance.find({ userId, contactId: contact._id }).sort({ on: -1, createdAt: -1 }).limit(200),
   ]);
 
@@ -102,9 +104,11 @@ contactsRouter.get("/:id", validObjectIdParam("id"), async (req, res) => {
       transaction,
       // Their part: positive when it added to what they owe, negative when
       // it paid some of it back.
+      // A group payment they made for the user counts the way money in
+      // from them does: it is what the user now owes them.
       amountMinor:
         (transaction.people.find((person) => person.contactId.equals(contact._id))?.amountMinor ?? 0) *
-        (transaction.type === "DEBIT" ? 1 : -1),
+        personSign(transaction),
     })),
     // Apart from the history rather than in it, so an app from before
     // clearances still finds a transaction on every history row. Signed
@@ -221,6 +225,7 @@ contactsRouter.delete("/:id", validObjectIdParam("id"), async (req, res) => {
     { $pull: { people: { contactId: new Types.ObjectId(contact._id) } } }
   );
   await ContactClearance.deleteMany({ userId, contactId: contact._id });
+  await removeContactFromGroups(contact._id);
   await contact.deleteOne();
   res.status(204).end();
 });

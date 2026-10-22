@@ -1,6 +1,6 @@
 import { CSSProperties, MouseEvent, useState } from "react";
 import { formatMoney, formatTime } from "../lib/format";
-import { Category, Transaction, accountLabel } from "../types";
+import { Category, Transaction, accountLabel, groupOf } from "../types";
 import { CategoryPopover } from "./CategoryPopover";
 import { Icon } from "./Icon";
 import { RememberBanner } from "./RememberBanner";
@@ -88,7 +88,10 @@ export function TransactionRow({
     source === "EMAIL" ? "ic-mail" : source === "MANUAL" ? "ic-pencil" : source === "STATEMENT" ? "ic-list" : "ic-message"
   );
 
-  const accountText = account ? accountLabel(account) : "Cash";
+  // A payment someone else made touched none of the user's accounts.
+  const paidByName = transaction.offLedger ? (transaction.paidByContact?.name ?? "someone else") : null;
+  const accountText = paidByName ? `Paid by ${paidByName}` : account ? accountLabel(account) : "Cash";
+  const group = groupOf(transaction);
   const categoryText = transaction.isTransfer
     ? isDebit
       ? "To my own account"
@@ -104,7 +107,7 @@ export function TransactionRow({
   if (transaction.pending) badges.push({ text: "Pending", tone: "badge-warn" });
   if (account?.pocketMoney) badges.push({ text: `Pocket money · ${account.pocketMoney.holder}`, tone: "badge-pocket" });
   if (transaction.byKidName) badges.push({ text: `by ${transaction.byKidName}`, tone: "badge-kid" });
-  if (transaction.trip) badges.push({ text: transaction.trip.name, tone: "badge-trip" });
+  if (group) badges.push({ text: group.name, tone: "badge-group" });
   if (transaction.refundOf.length > 0) badges.push({ text: "Refund · not income", tone: "badge-refund" });
   if (transaction.refundedMinor > 0)
     badges.push({
@@ -116,7 +119,12 @@ export function TransactionRow({
     });
   if (transaction.emiRole === "PARENT") badges.push({ text: "On EMI · not counted here", tone: "badge-emi" });
   if (transaction.emiRole === "INSTALMENT") badges.push({ text: "EMI payment", tone: "badge-emi" });
-  if (transaction.split)
+  if (transaction.split && transaction.groupSplit)
+    badges.push({
+      text: `My share ${formatAmount(transaction.split.myShareMinor, transaction.currency)}`,
+      tone: "badge-split",
+    });
+  else if (transaction.split)
     badges.push({
       text: `Split · my share ${formatAmount(transaction.split.myShareMinor, transaction.currency)}${
         transaction.split.groupLabel ? ` · ${transaction.split.groupLabel}` : ""

@@ -3,7 +3,7 @@ import { Account, BalanceCheckpoint, CardStatement, CardStatementDoc, Transactio
 import { istDayEnd, istDayKey } from "../../time";
 import { StatementLineResolution } from "../../types";
 import { categorizeTransaction } from "../../parsing/categorizer";
-import { tripForOccurredAt } from "../trips/trips.service";
+import { groupForOccurredAt } from "../groups/groups.service";
 import { countsAsStatementSpend, isLedgerWorthy, looksLikeCardBill } from "./statements.classify";
 import { markCardBillPayment, paysOwnCard } from "../cards/cards.billPayment.service";
 
@@ -326,7 +326,7 @@ async function addFromLine(
     rawText: line.description,
   });
 
-  const tripId = await tripForOccurredAt(statement.userId, line.date);
+  const groupId = await groupForOccurredAt(statement.userId, line.date);
 
   // A bank statement lists the card bill going out, while the card's own
   // statement lists every purchase behind it. Adding both as spending books
@@ -345,7 +345,7 @@ async function addFromLine(
     userId: statement.userId,
     accountId: statement.accountId,
     categoryId,
-    tripId,
+    groupId,
     amountMinor: line.amountMinor,
     currency: "INR",
     type: line.type,

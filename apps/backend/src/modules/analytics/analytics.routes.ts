@@ -5,7 +5,7 @@ import { currentUserId, requireAuth } from "../../middleware/auth";
 import { Account, Transaction } from "../../models";
 import { IST_OFFSET, istDayKey } from "../../time";
 import { UserMonth, monthLabel, monthSoFar, userMonth, userMonths } from "../budget/budget.months";
-import { outsideTransactionsMinor } from "../contacts/contacts.people";
+import { LENT_PART, outsideTransactionsMinor } from "../contacts/contacts.people";
 
 export const analyticsRouter = Router();
 analyticsRouter.use(requireAuth);
@@ -37,6 +37,8 @@ async function filters(
   if (query.account === "cash") {
     const cash = await Account.findOne({ userId, accountType: "CASH" }).select("_id");
     match.accountId = { $in: [null, ...(cash ? [cash._id] : [])] };
+    // Paid by somebody else has no account either, but was never cash.
+    match.offLedger = { $ne: true };
   } else if (query.account) {
     match.accountId = new Types.ObjectId(query.account);
   }
@@ -196,7 +198,7 @@ analyticsRouter.get("/owed", async (req, res) => {
       {
         $group: {
           _id: null,
-          amountMinor: { $sum: { $subtract: ["$amountMinor", "$split.myShareMinor"] } },
+          amountMinor: { $sum: LENT_PART },
           count: { $sum: 1 },
         },
       },
@@ -507,8 +509,11 @@ analyticsRouter.get("/weekday", async (req, res) => {
 /**
  * GET /analytics/accounts?month=&category= — where the spending was paid
  * from: each card and account, and cash (which includes payments with no
- * account at all).
+ * account at all) - apart from group payments somebody else made, which
+ * get a line of their own.
  */
+const OTHERS = "others";
+
 analyticsRouter.get("/accounts", async (req, res) => {
   const parsed = summarySchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
@@ -516,7 +521,7 @@ analyticsRouter.get("/accounts", async (req, res) => {
   const userId = currentUserId(req);
   const month = await userMonth(userId, parsed.data.month);
   const [rows, accounts] = await Promise.all([
-    Transaction.aggregate<{ _id: Types.ObjectId | null; amountMinor: number; count: number }>([
+    Transaction.aggregate<{ _id: Types.ObjectId | typeof OTHERS | null; amountMinor: number; count: number }>([
       {
         $match: {
           userId,
@@ -526,7 +531,15 @@ analyticsRouter.get("/accounts", async (req, res) => {
           ...(await filters(userId, { category: parsed.data.category })),
         },
       },
-      { $group: { _id: "$accountId", amountMinor: { $sum: "$countedAmountMinor" }, count: { $sum: 1 } } },
+      {
+        $group: {
+          // A payment somebody else made goes on a line of its own rather
+          // than under cash, which it never was.
+          _id: { $cond: [{ $eq: ["$offLedger", true] }, OTHERS, "$accountId"] },
+          amountMinor: { $sum: "$countedAmountMinor" },
+          count: { $sum: 1 },
+        },
+      },
     ]),
     Account.find({ userId }),
   ]);
@@ -537,6 +550,16 @@ analyticsRouter.get("/accounts", async (req, res) => {
     { accountId: string; name: string; accountType: string; amountMinor: number; count: number }
   >();
   for (const row of rows) {
+    if (row._id === OTHERS) {
+      merged.set(OTHERS, {
+        accountId: OTHERS,
+        name: "Paid by others",
+        accountType: "OTHER",
+        amountMinor: row.amountMinor,
+        count: row.count,
+      });
+      continue;
+    }
     const account = row._id ? accounts.find((candidate) => candidate._id.equals(row._id!)) : cash;
     const key = account ? account._id.toString() : "cash";
     const entry = merged.get(key) ?? {

@@ -141,6 +141,8 @@ export type LedgerRow = {
   source?: TransactionSource;
   statedBalanceMinor?: number | null;
   accountUnknown?: boolean;
+  /// Paid by somebody else (a group payment): no account of the user's moved.
+  offLedger?: boolean;
   isAdjustment?: boolean;
   needsExplanation?: boolean;
   autoLeg?: boolean;
@@ -216,11 +218,15 @@ export interface LedgerMove {
  *     transfers are given both legs (transactions.transfer.ts), the one-row
  *     case is what is left: a leg deleted by hand, or no account to put
  *     one on;
+ *   - a payment somebody else made (offLedger) moves nothing at all: it
+ *     has no account, and "no account" does not mean cash for it - the
+ *     money was never the user's to begin with;
  *   - nothing moves before the moment the opening balance was read. A
  *     payment in the same minute was already in the figure typed in.
  */
 export function movementsOf(row: LedgerRow, context: LedgerContext): LedgerMove[] {
   const moves: LedgerMove[] = [];
+  if (row.offLedger) return moves;
   const here = row.accountId
     ? (context.ownerOf.get(row.accountId.toString()) ?? null)
     : row.accountUnknown
@@ -267,7 +273,8 @@ export function ledgerFilter(userId: Types.ObjectId, context: LedgerContext, own
     occurredAt: { $gt: earliest },
     $or: [
       { accountId: { $in: ids } },
-      ...(context.cashId && wanted.has(context.cashId) ? [{ accountId: null }] : []),
+      // No account means cash - except on a payment somebody else made.
+      ...(context.cashId && wanted.has(context.cashId) ? [{ accountId: null, offLedger: { $ne: true } }] : []),
       // A transfer recorded as one row: the other account moves too.
       { isTransfer: true, transferAccountId: { $in: ids }, transferPairId: null },
     ],
@@ -534,7 +541,7 @@ export function buildLedger(params: {
 
 const ROW_FIELDS =
   "accountId type amountMinor occurredAt isTransfer transferAccountId transferPairId merchant countedReason source " +
-  "statedBalanceMinor accountUnknown isAdjustment needsExplanation autoLeg";
+  "statedBalanceMinor accountUnknown offLedger isAdjustment needsExplanation autoLeg";
 
 /**
  * The passbook of every tracked account among these - or of the ones

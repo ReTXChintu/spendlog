@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { formatMoney } from "../lib/format";
 import {
   Account,
@@ -8,6 +9,8 @@ import {
   Contact,
   ContactList,
   FixedCommitment,
+  Group,
+  GroupDetail,
   Loan,
   MerchantPreset,
   PEOPLE_CATEGORY_NAME,
@@ -16,6 +19,9 @@ import {
   TransactionType,
   accountLabel,
   categoriesFor,
+  groupIdOf,
+  groupOf,
+  groupShareOf,
 } from "../types";
 import { Icon } from "./Icon";
 import { creditWarning } from "./CardStrip";
@@ -24,6 +30,7 @@ import { AccountSelect, fromPickerValue, pickerValueName, toPickerValue } from "
 import { Kind, initialKind, kindAfterTypeChange, kindsFor, looksRaw } from "./transaction-editor/kinds";
 import { MerchantField } from "./transaction-editor/MerchantField";
 import { SettlePanel } from "./transaction-editor/SettlePanel";
+import { ShareChooser, ShareMode, shareModeOf, shareWithFor } from "./transaction-editor/ShareChooser";
 import { SplitPanel } from "./transaction-editor/SplitPanel";
 import { SplitDraft, computeSplit, initialSplitDraft } from "./transaction-editor/split";
 import "../styles/edit-transaction.css";
@@ -135,9 +142,21 @@ export function EditTransactionModal({
   const [settlePeople, setSettlePeople] = useState<PersonShare[]>(
     transaction?.isSettlement ? transaction.people ?? [] : []
   );
-  // On a trip, an expense is everyone's unless it says otherwise. The only
-  // narrowing worth a control is "this one was just mine".
-  const [tripJustMine, setTripJustMine] = useState((transaction?.tripShareWith?.length ?? 0) > 0);
+  // A payment goes into a group only when it is put there - here, or from
+  // the group itself. In one, it is everyone's equally unless it says
+  // otherwise: just mine, or a chosen few.
+  const { user } = useAuth();
+  const myUserId = transaction?.userId ?? user?.id ?? null;
+  const originalGroupId = groupIdOf(transaction);
+  const [groupId, setGroupId] = useState(originalGroupId ?? "");
+  const [shareMode, setShareMode] = useState<ShareMode>(() => shareModeOf(groupShareOf(transaction), myUserId));
+  const [shareChosen, setShareChosen] = useState<string[]>(() => groupShareOf(transaction) ?? []);
+  const [activeGroups, setActiveGroups] = useState<Group[] | null>(null);
+  const [groupDetail, setGroupDetail] = useState<GroupDetail | null>(null);
+  // A payment someone else made: no account of the user's moved, and it
+  // lives in its group.
+  const offLedger = !!transaction?.offLedger;
+  const paidByName = transaction?.paidByContact?.name ?? "someone else";
 
   const [commitments, setCommitments] = useState<FixedCommitment[]>([]);
   const [loans, setLoans] = useState<Loan[]>([]);
@@ -208,7 +227,25 @@ export function EditTransactionModal({
       .get<ContactList>("/contacts")
       .then((list) => setContacts(list.contacts))
       .catch(() => setContacts([]));
+    api
+      .get<Group[]>("/groups/active")
+      .then(setActiveGroups)
+      .catch(() => setActiveGroups([]));
   }, []);
+
+  // Who is in the picked group, for "Choose who".
+  useEffect(() => {
+    setGroupDetail(null);
+    if (!groupId) return;
+    let live = true;
+    api
+      .get<GroupDetail>(`/groups/${groupId}`)
+      .then((detail) => live && setGroupDetail(detail))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [groupId]);
 
   /* ---------- merchant ---------- */
 
@@ -420,7 +457,8 @@ export function EditTransactionModal({
     setFixedOn(false);
     setCardPaymentFor("");
     setLoanId("");
-    setTripJustMine(false);
+    // Only a payment goes into a group; money in comes out of one.
+    if (next === "CREDIT") setGroupId("");
   }
 
   /** Keeps a one-person settling-up covering the whole amount as it is corrected. */
@@ -444,6 +482,42 @@ export function EditTransactionModal({
     if (!merchant.trim() && picked.merchant) setMerchant(picked.merchant);
     const category = typeof picked.categoryId === "object" ? picked.categoryId?.id : picked.categoryId;
     if (!categoryId && category) setCategoryId(category);
+  }
+
+  /* ---------- group ---------- */
+
+  // The active groups to pick from, plus whichever this row is already in
+  // - an archived group should not vanish from its own picker.
+  const currentGroup = transaction ? groupOf(transaction) : null;
+  const groupOptions: { id: string; name: string }[] = [
+    ...(activeGroups ?? []).map((group) => ({ id: group.id, name: group.name })),
+    ...(currentGroup && !(activeGroups ?? []).some((group) => group.id === currentGroup.id)
+      ? [{ id: currentGroup.id, name: `${currentGroup.name} (archived)` }]
+      : []),
+  ];
+  const selectedGroupName =
+    groupOptions.find((option) => option.id === groupId)?.name ?? (groupId ? currentGroup?.name : null) ?? null;
+  const groupPeople =
+    groupDetail && groupDetail.id === groupId
+      ? [
+          ...groupDetail.members.map((member) => ({ id: member.userId, name: member.isMe ? "You" : member.name })),
+          ...groupDetail.contacts.map((contact) => ({ id: contact.contactId, name: contact.name })),
+        ]
+      : null;
+
+  function pickGroup(id: string) {
+    setGroupId(id);
+    // Who it was for was said about the group it is leaving.
+    if (id !== originalGroupId) {
+      setShareMode("everyone");
+      setShareChosen([]);
+    }
+  }
+
+  function chooseShareMode(mode: ShareMode) {
+    setShareMode(mode);
+    // "Choose who" starts from everyone, to untick from.
+    if (mode === "custom" && shareChosen.length === 0 && groupPeople) setShareChosen(groupPeople.map((p) => p.id));
   }
 
   /* ---------- what it will count as ---------- */
@@ -478,6 +552,19 @@ export function EditTransactionModal({
         case "settle":
           return { text: "Not spending — paying back what you owed", tone: "neutral" };
         default:
+          if (offLedger)
+            return {
+              text: `Paid by ${paidByName} — your share is your spending, and ${paidByName} is owed it`,
+              tone: "debit",
+            };
+          if (groupId)
+            return {
+              text:
+                shareMode === "mine"
+                  ? `${total} of spending · just yours in ${selectedGroupName ?? "the group"}`
+                  : `Split in ${selectedGroupName ?? "the group"} — your contacts' shares are owed back to you`,
+              tone: "debit",
+            };
           return {
             text: `${total} of spending${isSpecial ? " · a one-off, still in the monthly budget" : ""}`,
             tone: "debit",
@@ -522,6 +609,8 @@ export function EditTransactionModal({
     }
     if (kind === "cardBill" && !cardPaymentFor) return "Pick which card's bill this paid.";
     if (kind === "loan" && !loanId) return "Pick which loan this repays.";
+    if (type === "DEBIT" && groupId && shareMode === "custom" && shareChosen.length === 0)
+      return "Tick at least one person in the group it was for.";
     return null;
   }
 
@@ -537,13 +626,23 @@ export function EditTransactionModal({
     setError(null);
     const isDebit = type === "DEBIT";
     const transferOther = kind === "transfer" ? fromPickerValue(otherAccount, cashAccount) : null;
+    // In a group, an ordinary payment's split is the group's to work out:
+    // the form says which group and who it was for, never a split of its own.
+    const inGroup = isDebit && !!groupId;
+    const groupKeepsSplit = inGroup && kind === "normal";
+    const groupFields: Record<string, unknown> = inGroup
+      ? { groupId, groupShareWith: shareWithFor(shareMode, myUserId, shareChosen) }
+      : originalGroupId
+        ? { groupId: null }
+        : {};
     const body = {
       amountMinor: totalMinor,
       type,
       merchant: merchant.trim() || null,
       note: note.trim() || null,
       categoryId: categoryId || null,
-      accountId: fromPickerValue(account, cashAccount),
+      // Someone else's payment never touched an account of the user's.
+      accountId: offLedger ? null : fromPickerValue(account, cashAccount),
       occurredAt: fromIstParts(date, time),
       // A card bill found as both legs of a transfer keeps that mark.
       isTransfer: kind === "transfer" || (kind === "cardBill" && !!transaction?.isTransfer),
@@ -555,17 +654,20 @@ export function EditTransactionModal({
       commitmentId: fixedApplies && fixedOn ? commitmentId || null : null,
       loanId: isDebit && kind === "loan" ? loanId || null : null,
       isSettlement: kind === "settle",
-      // Narrowed to the payer alone, or widened back to everyone on the trip.
-      ...(transaction?.tripId ? { tripShareWith: isDebit && tripJustMine ? [transaction.userId] : null } : {}),
-      split: isSplitKind
-        ? { myShareMinor: splitResult.myShareMinor, groupLabel: splitDraft.groupLabel.trim() || null }
-        : null,
-      // Only a split or a settling-up has anyone else in it.
-      people: isSplitKind
-        ? splitResult.people.filter((person) => person.amountMinor > 0)
-        : kind === "settle"
-          ? settlePeople.filter((person) => person.amountMinor > 0)
-          : [],
+      ...groupFields,
+      ...(groupKeepsSplit
+        ? {}
+        : {
+            split: isSplitKind
+              ? { myShareMinor: splitResult.myShareMinor, groupLabel: splitDraft.groupLabel.trim() || null }
+              : null,
+            // Only a split or a settling-up has anyone else in it.
+            people: isSplitKind
+              ? splitResult.people.filter((person) => person.amountMinor > 0)
+              : kind === "settle"
+                ? settlePeople.filter((person) => person.amountMinor > 0)
+                : [],
+          }),
     };
 
     try {
@@ -821,9 +923,9 @@ export function EditTransactionModal({
     }
   })();
 
-  const showTrip = type === "DEBIT" && !!transaction?.trip;
+  const showGroup = type === "DEBIT" && (groupOptions.length > 0 || !!groupId);
   const showFixed = fixedApplies && (commitments.length > 0 || fixedOn);
-  const hasAlso = specialApplies || showFixed || showTrip;
+  const hasAlso = specialApplies || showFixed;
   const canConvertToEmi = !isNew && !!onConvertToEmi && type === "DEBIT" && !transaction.emiPlanId;
   const hasMore = !isNew;
 
@@ -923,6 +1025,7 @@ export function EditTransactionModal({
               </p>
             </section>
 
+            {!offLedger && (
             <section className="field" aria-labelledby="tx-kind-title">
               <span id="tx-kind-title">Kind</span>
               <div className="tx-kinds" role="radiogroup" aria-labelledby="tx-kind-title">
@@ -942,11 +1045,21 @@ export function EditTransactionModal({
                 ))}
               </div>
             </section>
+            )}
 
             {panel && <div className="tx-panel">{panel}</div>}
 
             <div className="tx-pair">
-              {accountRow}
+              {offLedger ? (
+                <div className="form-row">
+                  <span className="field-label">Paid by</span>
+                  <p className="tx-group-paid">
+                    {paidByName} — not from any of your accounts, so no balance moves.
+                  </p>
+                </div>
+              ) : (
+                accountRow
+              )}
               {kind !== "transfer" && categoryField}
             </div>
 
@@ -1005,6 +1118,47 @@ export function EditTransactionModal({
 
             {noteField}
 
+            {showGroup && (
+              <section className="field tx-group" aria-labelledby="tx-group-title">
+                <label id="tx-group-title" htmlFor="e-group">
+                  Group
+                </label>
+                <select
+                  id="e-group"
+                  className="filter-select"
+                  value={groupId}
+                  onChange={(e) => pickGroup(e.target.value)}
+                  // Someone else's payment lives in its group; deleting it is how it goes.
+                  disabled={offLedger}
+                >
+                  <option value="">Not in a group</option>
+                  {groupOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.name}
+                    </option>
+                  ))}
+                </select>
+                {groupId && (
+                  <ShareChooser
+                    mode={shareMode}
+                    onMode={chooseShareMode}
+                    people={groupPeople}
+                    chosen={shareChosen}
+                    onChosen={setShareChosen}
+                  />
+                )}
+                <span className="field-hint">
+                  {offLedger
+                    ? `${paidByName} paid this for the group. Delete it to take it out.`
+                    : groupId
+                      ? kind === "normal"
+                        ? "Split equally unless you say otherwise. Your contacts' shares show on the People page."
+                        : "This kind keeps its own split; the group only uses it for who owes whom."
+                      : "Put it in a group to split it with the people in it. Nothing goes in on its own."}
+                </span>
+              </section>
+            )}
+
             {hasAlso && (
               <div className="tx-also">
                 <span className="tx-also-label">Also</span>
@@ -1042,12 +1196,6 @@ export function EditTransactionModal({
                         }}
                       />
                       <span>Fixed monthly cost</span>
-                    </label>
-                  )}
-                  {showTrip && (
-                    <label className="tx-toggle" title="Leave it out of who owes whom on the trip">
-                      <input type="checkbox" checked={tripJustMine} onChange={(e) => setTripJustMine(e.target.checked)} />
-                      <span>Just mine on {transaction!.trip!.name}</span>
                     </label>
                   )}
                 </div>

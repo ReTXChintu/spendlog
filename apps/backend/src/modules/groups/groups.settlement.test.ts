@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { computeBalances, settle, shareOut, TripExpense } from "./trips.settlement";
+import { computeBalances, settle, shareOut, TripExpense } from "./groups.settlement";
 
 const [ANA, BEN, CAL, DEV] = ["ana", "ben", "cal", "dev"];
 

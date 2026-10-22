@@ -1,5 +1,5 @@
 /**
- * Who owes whom at the end of a trip.
+ * Who owes whom in a group (it began with trips).
  *
  * Kept free of the database so the arithmetic can be checked directly: the
  * failure mode here is a balance that looks plausible and is wrong by a

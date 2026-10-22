@@ -10,7 +10,7 @@ import 'home_screen.dart';
 import 'ipos_screen.dart';
 import 'settings_screen.dart';
 import 'transactions_screen.dart';
-import 'trips_screen.dart';
+import 'groups_screen.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -23,7 +23,7 @@ class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
   // Analytics is a tab inside Home now, beside the Dashboard.
-  static const _titles = ['Home', 'Transactions', 'Trips', 'Settings'];
+  static const _titles = ['Home', 'Transactions', 'Groups', 'Settings'];
   static const _settingsIndex = 3;
 
   // The dashboard reloads when you come back to it, since half of what
@@ -105,7 +105,7 @@ class _HomeShellState extends State<HomeShell> {
         onOpenAiSettings: _openAssistantSettings,
       ),
       TransactionsScreen(onOpenSettings: () => setState(() => _index = _settingsIndex)),
-      const TripsScreen(),
+      const GroupsScreen(),
       SettingsScreen(key: _settings),
     ];
 
@@ -160,7 +160,7 @@ class _HomeShellState extends State<HomeShell> {
           destinations: const [
             NavigationDestination(icon: DsIcon(DsIcons.home), label: 'Home'),
             NavigationDestination(icon: DsIcon(DsIcons.list), label: 'Transactions'),
-            NavigationDestination(icon: DsIcon(DsIcons.briefcase), label: 'Trips'),
+            NavigationDestination(icon: DsIcon(DsIcons.users), label: 'Groups'),
             NavigationDestination(icon: DsIcon(DsIcons.sliders), label: 'Settings'),
           ],
         ),

@@ -11,7 +11,7 @@ import 'emi_sheet.dart';
 import 'person_picker_sheet.dart';
 import 'raw_message_sheet.dart';
 import 'refund_sheet.dart';
-import 'trip_picker_sheet.dart';
+import 'group_picker_sheet.dart';
 
 /// Whether a merchant reads like a bank's raw payee rather than a name a
 /// person chose: a UPI handle ("9876@ybl") or a shouted reference
@@ -181,19 +181,21 @@ class _EditSheetState extends State<_EditSheet> {
   /// one by hand stops the others being redone under it.
   bool _autoSettle = true;
 
-  /// On a trip, an expense is everyone's unless it says otherwise. The only
-  /// narrowing worth a control is "this one was just mine".
-  late bool _tripJustMine;
+  /// The group this payment is in, or will be once saved. Nothing goes into
+  /// a group by itself: it is picked here, from every active group.
+  String? _groupId;
+  String? _groupName;
 
-  /// Whether it stays on the trip it was filed under. Everything inside a
-  /// trip's dates goes on it; switched off, this one comes off for good -
-  /// the trip's re-scan leaves anything edited by hand alone.
-  late bool _onTrip;
+  /// Who it is shared between in the group: everyone equally unless the
+  /// user says it was just theirs, or picks who.
+  GroupShare _groupShare = GroupShare.everyone;
 
-  /// A trip picked in this sheet for a payment on none - the tickets booked
-  /// before it started, which its dates will never take in. Goes on when
-  /// saved; switching it off again just forgets the pick.
-  Trip? _pickedTrip;
+  /// On [GroupShare.chosen]: the member ids it is shared between.
+  final Set<String> _groupChosen = {};
+
+  /// The group's people, for "Choose who" and for knowing which one is the
+  /// user. Null until loaded.
+  GroupDetail? _groupDetail;
 
   /// Who else it was for or from - shared by split and settling up, so
   /// switching between the two keeps the people already picked.
@@ -238,6 +240,30 @@ class _EditSheetState extends State<_EditSheet> {
   bool get _isDebit => _type == 'DEBIT';
   int get _totalMinor => parseRupees(_amount.text) ?? 0;
 
+  /// A payment someone else made: on no account of the user's, and living
+  /// in its group for good.
+  bool get _offLedger => widget.transaction?.offLedger ?? false;
+
+  /// The row's split is kept by its group - the contacts' shares - for as
+  /// long as it stays in one, so the sheet offers the group's split instead.
+  bool get _groupKeepsSplit =>
+      (widget.transaction?.groupSplit ?? false) && _groupId != null && _isDebit && _kind == _Kind.normal;
+
+  /// Whether the row's split is its group's, whatever kind is picked: the
+  /// split chips give way to the group's "Who was it for?".
+  bool get _groupOwnsSplit => (widget.transaction?.groupSplit ?? false) && _groupId != null && _isDebit;
+
+  /// The signed-in user's id: the row's owner, or the group's "me".
+  String? get _myUserId => widget.transaction?.userId ?? _groupDetail?.me?.id;
+
+  /// Who it is shared between in its group, as the server takes it: null
+  /// for everyone, an empty list when it cannot be said yet.
+  List<String>? get _groupShareWith => switch (_groupShare) {
+        GroupShare.everyone => null,
+        GroupShare.justMine => _myUserId == null ? const [] : [_myUserId!],
+        GroupShare.chosen => _groupChosen.toList(),
+      };
+
   @override
   void initState() {
     super.initState();
@@ -262,9 +288,17 @@ class _EditSheetState extends State<_EditSheet> {
     for (final split in _savedLoanSplits) {
       _loanParts.add(_LoanPart(loanId: split.loanId, picked: true, amountMinor: split.amountMinor));
     }
-    _tripJustMine = t?.tripShareWith?.isNotEmpty ?? false;
-    _onTrip = t?.tripId != null;
-    _showMore = _tripJustMine;
+    _groupId = t?.groupId;
+    _groupName = t?.groupName;
+    final shareWith = t?.groupShareWith ?? const <String>[];
+    if (shareWith.isEmpty) {
+      _groupShare = GroupShare.everyone;
+    } else if (shareWith.length == 1 && shareWith.single == t?.userId) {
+      _groupShare = GroupShare.justMine;
+    } else {
+      _groupShare = GroupShare.chosen;
+      _groupChosen.addAll(shareWith);
+    }
 
     // One kind wins, in the order the server itself would weigh them.
     _kind = switch (t) {
@@ -273,7 +307,9 @@ class _EditSheetState extends State<_EditSheet> {
       _ when t.isTransfer => _Kind.transfer,
       _ when t.type == 'DEBIT' && t.cardPaymentFor != null => _Kind.cardBill,
       _ when t.type == 'DEBIT' && t.loanSplits.isNotEmpty => _Kind.loan,
-      _ when t.split != null => _Kind.split,
+      // A split the group keeps is the group's to change, not a split
+      // of the user's own.
+      _ when t.split != null && !t.groupSplit && !t.offLedger => _Kind.split,
       _ when t.type == 'CREDIT' && t.isEarmarked => _Kind.earmark,
       _ when t.type == 'CREDIT' && t.isSalary => _Kind.salary,
       _ when t.type == 'CREDIT' && t.refundOf.isNotEmpty => _Kind.refund,
@@ -306,6 +342,7 @@ class _EditSheetState extends State<_EditSheet> {
     _loadLoans();
     _loadPresets();
     _loadCards();
+    if (_groupId != null) _loadGroup(_groupId!);
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _revealSelectedChip());
   }
@@ -365,6 +402,17 @@ class _EditSheetState extends State<_EditSheet> {
           _cards = result.map((c) => CardStatus.fromJson(c as Map<String, dynamic>)).toList());
     } catch (_) {
       // Advisory only.
+    }
+  }
+
+  /// The group's people, for "Choose who" and to know which is the user.
+  Future<void> _loadGroup(String groupId) async {
+    try {
+      final json = await ApiClient.instance.get('/groups/$groupId') as Map<String, dynamic>;
+      if (!mounted || groupId != _groupId) return;
+      setState(() => _groupDetail = GroupDetail.fromJson(json));
+    } catch (_) {
+      // "Everyone" and "Just mine" still work; "Choose who" waits.
     }
   }
 
@@ -604,7 +652,6 @@ class _EditSheetState extends State<_EditSheet> {
       // across to a payment.
       _isSpecial = false;
       _isFixed = false;
-      _tripJustMine = type == 'DEBIT' && _tripJustMine;
       _autoFillTransfer();
     });
   }
@@ -927,6 +974,25 @@ class _EditSheetState extends State<_EditSheet> {
       return _fail('Pick which fixed cost this went towards, or turn Fixed cost off.');
     }
 
+    // The group it goes in, and who it is shared between there.
+    final groupFields = <String, dynamic>{};
+    final hadGroup = widget.transaction?.groupId;
+    if (_isDebit) {
+      if (_groupId != hadGroup) groupFields['groupId'] = _groupId;
+      if (_groupId != null) {
+        final shareWith = _groupShareWith;
+        if (shareWith != null && shareWith.isEmpty) {
+          return _fail(_groupShare == GroupShare.justMine
+              ? "Couldn't tell which person in the group is you - try again in a moment."
+              : 'Pick at least one person in $_groupName to share it with.');
+        }
+        groupFields['groupShareWith'] = shareWith;
+      }
+    } else if (hadGroup != null) {
+      // Money in is never group spending.
+      groupFields['groupId'] = null;
+    }
+
     setState(() {
       _saving = true;
       _error = null;
@@ -951,7 +1017,16 @@ class _EditSheetState extends State<_EditSheet> {
       // it really was cash. The server clears this on its own when an
       // account is set; sending it covers the cash case too.
       if (_unknownAccount && _accountPicked) 'accountUnknown': false,
+      ...groupFields,
     };
+    // A split the group keeps is worked out by the server from who is in
+    // the group; sending one would make it the user's own split instead.
+    if (_groupKeepsSplit || _offLedger) {
+      body.remove('split');
+      body.remove('people');
+    }
+    // Someone else's money was never on any account of the user's.
+    if (_offLedger) body.remove('accountId');
     // Fields only the edit route takes. On a new row they go in a second
     // call straight after, or a card bill added by hand would quietly
     // forget which card it paid.
@@ -969,16 +1044,6 @@ class _EditSheetState extends State<_EditSheet> {
                 LoanSplit(loanId: part.loanId, amountMinor: parseRupees(part.amount.text) ?? 0).toJson(),
             ]
           : const <Map<String, dynamic>>[],
-      // Taken off the trip, or narrowed to the payer alone, or widened back
-      // to everyone on it.
-      if (widget.transaction?.tripId != null && !_onTrip) 'tripId': null,
-      if (widget.transaction?.tripId != null && _onTrip)
-        'tripShareWith': _tripJustMine ? [widget.transaction!.userId] : null,
-      // Put on a trip by hand, whatever its date. Saved as an edit, so the
-      // trip's re-scans never take it back off.
-      if (_pickedTrip != null && _isDebit) 'tripId': _pickedTrip!.id,
-      if (_pickedTrip != null && _isDebit && widget.transaction != null)
-        'tripShareWith': _tripJustMine ? [widget.transaction!.userId] : null,
     };
 
     final navigator = Navigator.of(context);
@@ -1132,21 +1197,33 @@ class _EditSheetState extends State<_EditSheet> {
                       Expanded(flex: 10, child: DsField(label: 'Category', child: _categoryPicker())),
                     ],
                   ),
-                  _personRow(),
+                  if (!_offLedger) _personRow(),
                   _presetRow(),
                   const SizedBox(height: 18),
 
-                  _kindPicker(),
-                  AnimatedSize(
-                    duration: Ds.dur,
-                    curve: Ds.ease,
-                    alignment: Alignment.topCenter,
-                    child: _kindPanel() ?? const SizedBox(width: double.infinity),
-                  ),
-                  const SizedBox(height: 18),
+                  // Someone else's payment is only ever spending: what kind
+                  // of money it was is not the user's to say.
+                  if (!_offLedger) ...[
+                    _kindPicker(),
+                    AnimatedSize(
+                      duration: Ds.dur,
+                      curve: Ds.ease,
+                      alignment: Alignment.topCenter,
+                      child: _kindPanel() ?? const SizedBox(width: double.infinity),
+                    ),
+                    const SizedBox(height: 18),
+                  ],
 
+                  // Someone else paid: no account of the user's to pick.
+                  if (_offLedger)
+                    DsCallout(
+                      tone: DsTone.ac,
+                      icon: DsIcons.users,
+                      title: 'Paid by ${widget.transaction?.paidByName ?? 'someone else'} · not on any of your accounts',
+                      detail: 'Only your share counts as your spending, and you owe them that much.',
+                    )
                   // A transfer has two sides; everything else has one account.
-                  if (_kind == _Kind.transfer)
+                  else if (_kind == _Kind.transfer)
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -1219,6 +1296,8 @@ class _EditSheetState extends State<_EditSheet> {
                       decoration: _inputDecoration(context, hint: 'Note (optional)'),
                     ),
                   ),
+
+                  _groupSection(),
 
                   _moreSection(),
 
@@ -1562,8 +1641,11 @@ class _EditSheetState extends State<_EditSheet> {
     final options = <(String, bool, VoidCallback)>[
       if (_isDebit) ...[
         ('Spending', _kind == _Kind.normal, () => _selectKind(_Kind.normal)),
-        ('Split', _kind == _Kind.split && _includeMe, () => _selectKind(_Kind.split)),
-        ('Lent', _isLend, () => _selectKind(_Kind.split, includeMe: false)),
+        // The group keeps this one's split: offered there, not here.
+        if (!_groupOwnsSplit) ...[
+          ('Split', _kind == _Kind.split && _includeMe, () => _selectKind(_Kind.split)),
+          ('Lent', _isLend, () => _selectKind(_Kind.split, includeMe: false)),
+        ],
         ('To own account', _kind == _Kind.transfer, () => _selectKind(_Kind.transfer)),
         if (hasCards) ('Card bill', _kind == _Kind.cardBill, () => _selectKind(_Kind.cardBill)),
         if (hasLoans) ('Loan repayment', _kind == _Kind.loan, () => _selectKind(_Kind.loan)),
@@ -2169,14 +2251,29 @@ class _EditSheetState extends State<_EditSheet> {
 
   // ---- More ----------------------------------------------------------
 
-  Future<void> _pickTrip() async {
-    final trip = await showTripPickerSheet(context);
-    if (trip == null || !mounted) return;
+  Future<void> _pickGroup() async {
+    final group = await showGroupPickerSheet(context, currentId: _groupId);
+    if (group == null || !mounted || group.id == _groupId) return;
     setState(() {
-      _pickedTrip = trip;
-      _tripJustMine = false;
+      _groupId = group.id;
+      _groupName = group.name;
+      // Who it was for was said about the group it is leaving.
+      _groupShare = GroupShare.everyone;
+      _groupChosen.clear();
+      _groupDetail = null;
+      _error = null;
     });
+    await _loadGroup(group.id);
   }
+
+  void _setGroupShare(GroupShare share) => setState(() {
+        _groupShare = share;
+        _error = null;
+        // Choosing starts from everyone, to untick the ones it was not for.
+        if (share == GroupShare.chosen && _groupChosen.isEmpty) {
+          _groupChosen.addAll(_groupDetail?.everyone.map((m) => m.id) ?? const <String>[]);
+        }
+      });
 
   SwitchListTile _switchRow({
     required bool value,
@@ -2194,46 +2291,113 @@ class _EditSheetState extends State<_EditSheet> {
     );
   }
 
+  /// The group it is in: picked from every active group, whatever the
+  /// payment's date. Shared equally with everyone in it unless the user
+  /// says it was just theirs, or picks who.
+  Widget _groupSection() {
+    final c = context.c;
+    final t = widget.transaction;
+    // Money in is never group spending; one that somehow is can still be
+    // taken out.
+    if (!_isDebit && t?.groupId == null) return const SizedBox.shrink();
+    final name = _groupName ?? 'the group';
+    final detail = _groupDetail;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const DsLabel('Group'),
+          if (_offLedger)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: DsCallout(
+                tone: DsTone.neutral,
+                icon: DsIcons.users,
+                title: 'In $name',
+                detail: 'A payment someone else made lives in its group. To take it out, delete it.',
+              ),
+            )
+          else if (_groupId == null)
+            _MoreTile(
+              icon: DsIcons.users,
+              title: 'Add to a group',
+              subtitle: 'Shared with the people in it - equally, unless you say otherwise.',
+              onTap: _saving || !_isDebit ? null : _pickGroup,
+            )
+          else ...[
+            _switchRow(
+              value: true,
+              // Off takes it out; "Add to a group" is offered again.
+              onChanged: (_) => setState(() {
+                _groupId = null;
+                _groupName = null;
+                _groupDetail = null;
+                _groupShare = GroupShare.everyone;
+                _groupChosen.clear();
+              }),
+              title: 'On $name',
+              subtitle: 'Switch off to take it out of the group.',
+            ),
+            if (_isDebit)
+              _MoreTile(
+                icon: DsIcons.transfer,
+                title: 'Move to another group',
+                subtitle: 'Every active group is offered.',
+                onTap: _saving ? null : _pickGroup,
+              ),
+          ],
+          if (_groupId != null && _isDebit) ...[
+            const SizedBox(height: 12),
+            Text('Who was it for?', style: TextStyle(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w600, color: c.tx2)),
+            const SizedBox(height: 6),
+            DsSegmented<GroupShare>(
+              segments: const [
+                (GroupShare.everyone, 'Everyone'),
+                (GroupShare.justMine, 'Just mine'),
+                (GroupShare.chosen, 'Choose who'),
+              ],
+              selected: _groupShare,
+              onChanged: _saving ? null : _setGroupShare,
+            ),
+            const SizedBox(height: 8),
+            if (_groupShare == GroupShare.chosen)
+              detail == null
+                  ? const DsSkeleton(height: 32)
+                  : Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final member in detail.everyone)
+                          DsChip(
+                            label: member.isMe ? 'Me' : member.name,
+                            height: 32,
+                            selected: _groupChosen.contains(member.id),
+                            onTap: () => setState(() {
+                              if (!_groupChosen.remove(member.id)) _groupChosen.add(member.id);
+                            }),
+                          ),
+                      ],
+                    ),
+            if (_groupShare == GroupShare.chosen) const SizedBox(height: 8),
+            _Hint(switch (_groupShare) {
+              GroupShare.everyone => "Split equally between everyone in $name. A contact's share is owed to you, "
+                  'on the People page.',
+              GroupShare.justMine => 'Just mine on $name: left out of who owes whom.',
+              GroupShare.chosen => 'Split equally between the people ticked.',
+            }),
+          ],
+        ],
+      ),
+    );
+  }
+
   /// The rare things, out of the way until asked for.
   Widget _moreSection() {
     final c = context.c;
     final t = widget.transaction;
-    final tripName = t?.tripName ?? _pickedTrip?.name;
     final items = <Widget>[
-      if (t?.tripId == null && _pickedTrip == null && _isDebit)
-        _MoreTile(
-          icon: DsIcons.briefcase,
-          title: 'Add to a trip',
-          subtitle: 'Tickets or a booking paid before it started.',
-          onTap: _saving ? null : _pickTrip,
-        ),
-      if (_pickedTrip != null && _isDebit)
-        _switchRow(
-          value: true,
-          // Off forgets the pick, and "Add to a trip" is offered again.
-          onChanged: (_) => setState(() {
-            _pickedTrip = null;
-            _tripJustMine = false;
-          }),
-          title: 'On ${_pickedTrip!.name}',
-          subtitle: 'Goes onto the trip when you save, and stays on whatever its date.',
-        ),
-      if (t?.tripName != null)
-        _switchRow(
-          value: _onTrip,
-          onChanged: (on) => setState(() => _onTrip = on),
-          title: 'On ${t!.tripName}',
-          subtitle: _onTrip
-              ? 'Switch off to take it off the trip. It stays off, even when the trip re-scans.'
-              : 'Comes off the trip when you save, and stays off.',
-        ),
-      if (t != null && _isDebit && ((t.tripName != null && _onTrip) || _pickedTrip != null))
-        _switchRow(
-          value: _tripJustMine,
-          onChanged: (on) => setState(() => _tripJustMine = on),
-          title: 'Just mine on $tripName',
-          subtitle: 'Leave it out of who owes whom on the trip.',
-        ),
       if (t != null && _isDebit && t.type == 'DEBIT' && t.emiPlanId == null)
         _MoreTile(
           icon: DsIcons.calendar,

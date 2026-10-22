@@ -112,9 +112,13 @@ export function legMerchant(legType: TransactionType, otherAccount: AccountRow):
  * paid in cash - what "no account" means everywhere else - unless nobody
  * knows which it was on.
  */
-function hereOf(transaction: Pick<TransactionDoc, "accountId" | "accountUnknown">, accounts: Accounts): AccountRow | null {
+function hereOf(
+  transaction: Pick<TransactionDoc, "accountId" | "accountUnknown" | "offLedger">,
+  accounts: Accounts
+): AccountRow | null {
   if (transaction.accountId) return ownerOf(transaction.accountId, accounts);
-  if (transaction.accountUnknown) return null;
+  // Paid by somebody else: on no account of the user's, and not cash either.
+  if (transaction.accountUnknown || transaction.offLedger) return null;
   return [...accounts.values()].find((account) => account.accountType === "CASH") ?? null;
 }
 

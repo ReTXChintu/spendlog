@@ -9,7 +9,7 @@ import {
   runningAt,
   tripSettlement,
   tripSpendSummary,
-} from "../trips/trips.service";
+} from "../groups/groups.service";
 
 /**
  * Trippin, the suite's trip planner, tracking a trip's spending here.
@@ -222,11 +222,11 @@ async function syncMembers(trip: HydratedDocument<TripDoc>, trippin: TrippinTrip
 async function releaseOutsideWindow(trip: Pick<TripDoc, "_id" | "startedAt" | "endedAt">) {
   await Transaction.updateMany(
     {
-      tripId: trip._id,
+      groupId: trip._id,
       editedAt: null,
       $or: [{ occurredAt: { $lt: trip.startedAt } }, { occurredAt: { $gt: trip.endedAt } }],
     },
-    { $set: { tripId: null } }
+    { $set: { groupId: null } }
   );
 }
 
@@ -353,7 +353,7 @@ export async function trippinSummary(externalId: string, viewerSub: string | und
     tripSpendSummary(trip),
     tripSettlement(trip),
     viewerSub ? User.findOne({ oidcSub: viewerSub }).select("_id") : null,
-    Transaction.findOne({ tripId: trip._id }).sort({ updatedAt: -1 }).select("updatedAt"),
+    Transaction.findOne({ groupId: trip._id }).sort({ updatedAt: -1 }).select("updatedAt"),
   ]);
 
   const viewerId = viewer?._id.toString();

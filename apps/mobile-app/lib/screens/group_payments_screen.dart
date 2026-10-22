@@ -5,40 +5,45 @@ import '../widgets/ds/ds.dart';
 import '../utils/format.dart';
 import '../widgets/edit_transaction_sheet.dart';
 import '../widgets/state_block.dart';
-import 'trip_add_payments_screen.dart';
+import 'group_add_payments_screen.dart';
 
-/// Everything on a trip, everyone's. The one place to see what is on it,
-/// add what was paid before it started, and take off what does not belong:
-/// a row of the user's own opens the edit sheet, whose "On <trip>" switch
-/// takes it off. Someone else's row is theirs to change.
+/// Everything in a group, everyone's. The one place to see what is in it,
+/// add earlier payments, and take out what does not belong: a row of the
+/// user's own opens the edit sheet, whose group field takes it out.
+/// Someone else's row is theirs to change.
 ///
-/// Pops with true when anything changed, so the trip's totals are redone.
-class TripPaymentsScreen extends StatefulWidget {
-  final Trip trip;
+/// Pops with true when anything changed, so the group's totals are redone.
+class GroupPaymentsScreen extends StatefulWidget {
+  final Group group;
 
-  const TripPaymentsScreen({super.key, required this.trip});
+  const GroupPaymentsScreen({super.key, required this.group});
 
   @override
-  State<TripPaymentsScreen> createState() => _TripPaymentsScreenState();
+  State<GroupPaymentsScreen> createState() => _GroupPaymentsScreenState();
 }
 
-/// One row of GET /trips/:id/transactions, with who paid.
-class _TripRow {
+/// One row of GET /groups/:id/transactions, with who paid.
+class GroupPaymentRow {
   final Transaction transaction;
   final bool isMine;
   final String payer;
 
-  _TripRow(this.transaction, this.isMine, this.payer);
+  GroupPaymentRow(this.transaction, this.isMine, this.payer);
 
-  factory _TripRow.fromJson(Map<String, dynamic> json) {
+  factory GroupPaymentRow.fromJson(Map<String, dynamic> json) {
     final user = json['userId'];
-    final payer = user is Map<String, dynamic> ? (user['name'] ?? user['email']) as String? : null;
-    return _TripRow(Transaction.fromJson(json), json['isMine'] == true, payer ?? 'Someone');
+    final fromUser = user is Map<String, dynamic> ? (user['name'] ?? user['email']) as String? : null;
+    // The server names whoever paid: the user, or the contact on a payment
+    // someone else made.
+    final payer = json['paidByName'] as String? ??
+        (json['paidByContact'] as Map<String, dynamic>?)?['name'] as String? ??
+        fromUser;
+    return GroupPaymentRow(Transaction.fromJson(json), json['isMine'] == true, payer ?? 'Someone');
   }
 }
 
-class _TripPaymentsScreenState extends State<TripPaymentsScreen> {
-  List<_TripRow>? _rows;
+class _GroupPaymentsScreenState extends State<GroupPaymentsScreen> {
+  List<GroupPaymentRow>? _rows;
   bool _error = false;
   bool _changed = false;
 
@@ -50,10 +55,10 @@ class _TripPaymentsScreenState extends State<TripPaymentsScreen> {
 
   Future<void> _load() async {
     try {
-      final result = await ApiClient.instance.get('/trips/${widget.trip.id}/transactions') as List<dynamic>;
+      final result = await ApiClient.instance.get('/groups/${widget.group.id}/transactions') as List<dynamic>;
       if (!mounted) return;
       setState(() {
-        _rows = result.map((r) => _TripRow.fromJson(r as Map<String, dynamic>)).toList();
+        _rows = result.map((r) => GroupPaymentRow.fromJson(r as Map<String, dynamic>)).toList();
         _error = false;
       });
     } catch (_) {
@@ -61,7 +66,7 @@ class _TripPaymentsScreenState extends State<TripPaymentsScreen> {
     }
   }
 
-  Future<void> _edit(_TripRow row) async {
+  Future<void> _edit(GroupPaymentRow row) async {
     final saved = await showEditTransactionById(context, row.transaction.id);
     if (saved == true) {
       _changed = true;
@@ -72,11 +77,11 @@ class _TripPaymentsScreenState extends State<TripPaymentsScreen> {
   Future<void> _addEarlier() async {
     final messenger = ScaffoldMessenger.of(context);
     final added = await Navigator.of(context).push<int>(
-      MaterialPageRoute(builder: (_) => TripAddPaymentsScreen(trip: widget.trip)),
+      MaterialPageRoute(builder: (_) => GroupAddPaymentsScreen(group: widget.group)),
     );
     if (added == null || added == 0 || !mounted) return;
     _changed = true;
-    messenger.showSnackBar(SnackBar(content: Text(addedToTripMessage(added, widget.trip.name))));
+    messenger.showSnackBar(SnackBar(content: Text(addedToGroupMessage(added, widget.group.name))));
     await _load();
   }
 
@@ -93,7 +98,7 @@ class _TripPaymentsScreenState extends State<TripPaymentsScreen> {
       child: Scaffold(
         backgroundColor: c.bg,
         appBar: AppBar(
-          title: Text(widget.trip.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+          title: Text(widget.group.name, maxLines: 1, overflow: TextOverflow.ellipsis),
           actions: [
             IconButton(
               tooltip: 'Add earlier payments',
@@ -107,7 +112,7 @@ class _TripPaymentsScreenState extends State<TripPaymentsScreen> {
             ? StateBlock(
                 icon: Icons.wifi_off,
                 warn: true,
-                title: "Couldn't load the trip's payments",
+                title: "Couldn't load the group's payments",
                 body: 'The connection failed. Check your internet and try again.',
                 actionLabel: 'Retry',
                 onAction: _load,
@@ -119,10 +124,9 @@ class _TripPaymentsScreenState extends State<TripPaymentsScreen> {
                   )
                 : rows.isEmpty
                     ? StateBlock(
-                        icon: Icons.luggage_outlined,
-                        title: 'Nothing on this trip yet',
-                        body: 'Payments made while it runs go on by themselves. Tickets and bookings '
-                            'paid before it started can be added by hand.',
+                        icon: Icons.group_outlined,
+                        title: 'Nothing in this group yet',
+                        body: 'Pick a group when you add or edit a payment, or add earlier ones here.',
                         actionLabel: 'Add earlier payments',
                         onAction: _addEarlier,
                       )
@@ -137,7 +141,7 @@ class _TripPaymentsScreenState extends State<TripPaymentsScreen> {
                               child: Column(
                                 children: [
                                   for (var i = 0; i < rows.length; i++)
-                                    _PaymentRow(
+                                    GroupPaymentTile(
                                       row: rows[i],
                                       last: i == rows.length - 1,
                                       onTap: rows[i].isMine ? () => _edit(rows[i]) : null,
@@ -147,8 +151,7 @@ class _TripPaymentsScreenState extends State<TripPaymentsScreen> {
                             ),
                             const SizedBox(height: 12),
                             Text(
-                              'Tap one of yours to change it, or switch "On ${widget.trip.name}" off to '
-                              'take it off the trip.',
+                              'Tap one of yours to change it, or to take it out of ${widget.group.name}.',
                               style: TextStyle(fontSize: 12, height: 17 / 12, color: c.tx3),
                             ),
                           ],
@@ -160,12 +163,12 @@ class _TripPaymentsScreenState extends State<TripPaymentsScreen> {
 }
 
 /// The phone transaction row: monogram, two lines, the amount.
-class _PaymentRow extends StatelessWidget {
-  final _TripRow row;
+class GroupPaymentTile extends StatelessWidget {
+  final GroupPaymentRow row;
   final VoidCallback? onTap;
   final bool last;
 
-  const _PaymentRow({required this.row, required this.onTap, this.last = false});
+  const GroupPaymentTile({super.key, required this.row, required this.onTap, this.last = false});
 
   @override
   Widget build(BuildContext context) {
@@ -174,7 +177,7 @@ class _PaymentRow extends StatelessWidget {
     final isOut = t.type == 'DEBIT';
     final meta = [
       formatShortDate(t.occurredAt),
-      if (!row.isMine) 'Paid by ${row.payer}',
+      if (!row.isMine || t.offLedger) 'Paid by ${row.payer}',
       if (row.isMine && t.category != null) t.category!.name,
     ].join(' · ');
 

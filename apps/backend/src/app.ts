@@ -31,7 +31,7 @@ import { statementsRouter } from "./modules/statements/statements.routes";
 import { ledgerRouter } from "./modules/ledger/ledger.routes";
 import { vaultRouter } from "./modules/vault/vault.routes";
 import { transactionsRouter } from "./modules/transactions/transactions.routes";
-import { tripsRouter } from "./modules/trips/trips.routes";
+import { groupsRouter, tripsRouter } from "./modules/groups/groups.routes";
 import { APP_VERSION } from "./version";
 
 export const app = express();
@@ -66,6 +66,9 @@ app.use("/ingestion/email", emailRouter);
 app.use("/analytics", analyticsRouter);
 app.use("/emi", emiRouter);
 app.use("/loans", loansRouter);
+app.use("/groups", groupsRouter);
+// The same routes under their old name, for apps from before groups. One
+// release; see buildGroupsRouter for the little that differs.
 app.use("/trips", tripsRouter);
 app.use("/merchant-presets", presetsRouter);
 app.use("/cards", cardsRouter);

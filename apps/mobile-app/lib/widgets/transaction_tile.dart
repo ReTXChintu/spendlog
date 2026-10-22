@@ -172,7 +172,8 @@ class TransactionTile extends StatelessWidget {
                       transaction.accountUnknown ||
                       transaction.needsExplanation ||
                       transaction.isAdjustment ||
-                      transaction.tripName != null ||
+                      transaction.groupName != null ||
+                      transaction.offLedger ||
                       transaction.refundOf.isNotEmpty ||
                       transaction.refundedMinor > 0 ||
                       transaction.emiRole != null ||
@@ -205,8 +206,15 @@ class TransactionTile extends StatelessWidget {
                         // shows whose spending it was.
                         if (pocket != null)
                           DsBadge('Pocket money · ${pocket.holder}', tone: DsTone.warn, onTinted: attention),
-                        if (transaction.tripName != null)
-                          DsBadge(transaction.tripName!, tone: DsTone.ac, icon: DsIcons.briefcase, onTinted: attention),
+                        if (transaction.groupName != null)
+                          DsBadge(transaction.groupName!, tone: DsTone.ac, icon: DsIcons.users, onTinted: attention),
+                        // Somebody else's money: in no balance of the
+                        // user's, only their share counted.
+                        if (transaction.offLedger)
+                          DsBadge(
+                            transaction.paidByName != null ? 'Paid by ${transaction.paidByName}' : 'Paid by someone else',
+                            onTinted: attention,
+                          ),
                         if (transaction.refundOf.isNotEmpty)
                           DsBadge('Refund · not income', tone: DsTone.good, onTinted: attention),
                         if (transaction.refundedMinor > 0)

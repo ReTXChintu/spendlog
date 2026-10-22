@@ -45,6 +45,13 @@ export interface CountedInput {
   refundedMinor?: number | null;
   /** Money in that is set aside for a purchase still to come. */
   isEarmarked?: boolean | null;
+  /**
+   * A group payment somebody else made ("Rahul paid 2,000 for dinner").
+   * None of it left the user's accounts, but their share of it is still
+   * what they spent - it is owed to Rahul, and paying him back later is a
+   * settlement, which counts as nothing. See resolveCountedAmount.
+   */
+  offLedger?: boolean | null;
 }
 
 export interface CountedAmount {
@@ -65,6 +72,24 @@ export interface CountedAmount {
  * Order matters. A transfer that is also split is still a transfer.
  */
 export function resolveCountedAmount(transaction: CountedInput): CountedAmount {
+  // Paid by somebody else: only the user's own share is theirs, and it is
+  // spending however else the row is marked - it cannot be a transfer, a
+  // card bill or a settlement, since none of it touched an account. The
+  // share is the split the group wrote; with none, the whole thing was the
+  // user's ("just mine"). A refund comes off that share, as anywhere else.
+  // Counted here, the user's share; paying the payer back is a settlement
+  // and counts nothing, so the money is never counted twice.
+  if (transaction.offLedger) {
+    const raw = transaction.split?.myShareMinor;
+    const share = typeof raw === "number" ? Math.max(0, Math.min(raw, transaction.amountMinor)) : null;
+    const base = share ?? transaction.amountMinor;
+    const refunded = transaction.refundedMinor ?? 0;
+    if (refunded > 0) return { countedAmountMinor: Math.max(0, base - refunded), countedReason: "REFUNDED" };
+    return share === null
+      ? { countedAmountMinor: base, countedReason: "FULL" }
+      : { countedAmountMinor: share, countedReason: "SPLIT" };
+  }
+
   if (transaction.isTransfer) {
     return { countedAmountMinor: 0, countedReason: "TRANSFER" };
   }

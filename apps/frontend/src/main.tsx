@@ -7,7 +7,7 @@ import "./styles/transactions.css";
 import "./styles/analytics.css";
 import "./styles/settings.css";
 import "./styles/people.css";
-import "./styles/trips.css";
+import "./styles/groups.css";
 import "./styles/ask.css";
 import "./styles/signin.css";
 import React from "react";

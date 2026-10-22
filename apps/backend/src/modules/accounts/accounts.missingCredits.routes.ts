@@ -9,7 +9,7 @@ import { istDayKey } from "../../time";
 import { peopleCategoryId, transferCategoryId } from "../categories/categories.system";
 import { syncRefundTotal } from "../transactions/transactions.routes";
 import { ensureTransferLegs, legMerchant } from "../transactions/transactions.transfer";
-import { tripForOccurredAt } from "../trips/trips.service";
+import { groupForOccurredAt } from "../groups/groups.service";
 import { describeMissingCredits, settleMissingCredits } from "./accounts.missingCredits";
 
 /**
@@ -136,7 +136,7 @@ missingCreditsRouter.post("/missing-credits/:id/resolve", validObjectIdParam("id
     note: body.note ?? null,
     categoryId: body.categoryId ?? null,
     source: "MANUAL",
-    tripId: await tripForOccurredAt(userId, occurredAt),
+    groupId: await groupForOccurredAt(userId, occurredAt),
   };
 
   let purchaseId: Types.ObjectId | null = null;
@@ -209,7 +209,7 @@ missingCreditsRouter.post("/missing-credits/:id/resolve", validObjectIdParam("id
   credit.closedAt = new Date();
   await credit.save();
 
-  const transaction = await Transaction.findById(created._id).populate("category").populate("account").populate("trip");
+  const transaction = await Transaction.findById(created._id).populate("category").populate("account").populate("group");
   res.status(201).json({
     missingCredit: (await describeMissingCredits(userId, [credit]))[0],
     transaction: transaction!.toJSON(),

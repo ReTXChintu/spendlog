@@ -3,7 +3,7 @@ import { after, before, beforeEach, describe, it } from "node:test";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import mongoose, { Types } from "mongoose";
 import { Transaction, Trip, User } from "../../models";
-import { generateJoinCode, tripForOccurredAt } from "./trips.service";
+import { generateJoinCode, tripForOccurredAt } from "./groups.service";
 
 let mongod: MongoMemoryServer;
 
@@ -11,10 +11,8 @@ before(async () => {
   mongod = await MongoMemoryServer.create();
   await mongoose.connect(mongod.getUri("spendlog_trips_test"));
 
-  // "Only one running trip" is enforced by a partial unique index, which
-  // Mongoose builds in the background after connecting. Without waiting,
-  // the test that expects a second trip to be rejected raced the index and
-  // failed only when the suite was busy enough to lose.
+  // The indexes are built in the background after connecting; a test that
+  // depends on one must not race it.
   await Trip.init();
 });
 
@@ -37,19 +35,29 @@ async function makeUser(): Promise<Types.ObjectId> {
 const GOA_START = new Date("2026-10-01T04:00:00Z"); // 9:30am IST
 const GOA_END = new Date("2026-10-07T18:00:00Z");
 
+/**
+ * A dated group. `linked` makes it one Trippin planned, the only kind that
+ * still takes payments in by its dates.
+ */
 async function makeTrip(
   userId: Types.ObjectId,
-  overrides: { startedAt?: Date; endedAt?: Date | null } = {}
+  overrides: { startedAt?: Date; endedAt?: Date | null; linked?: boolean; archivedAt?: Date | null } = {}
 ) {
   return Trip.create({
     ownerId: userId,
     name: "Goa",
     startedAt: overrides.startedAt ?? GOA_START,
     endedAt: overrides.endedAt === undefined ? null : overrides.endedAt,
+    archivedAt: overrides.archivedAt ?? null,
     members: [{ userId, joinedAt: overrides.startedAt ?? GOA_START }],
     joinCode: generateJoinCode(),
+    source: overrides.linked
+      ? { app: "trippin", externalId: `trp_${generateJoinCode()}`, linked: true, linkedAt: GOA_START }
+      : null,
   });
 }
+
+const linked = { linked: true } as const;
 
 describe("generateJoinCode", () => {
   it("leaves out the characters people misread aloud", () => {
@@ -65,10 +73,30 @@ describe("generateJoinCode", () => {
   });
 });
 
-describe("which trip a payment belongs to", () => {
+describe("an ordinary group takes nothing in by itself", () => {
+  it("never claims a payment because of its dates", async () => {
+    // Picked in the editor, not guessed from a date: "Flatmates" has none,
+    // and a trip's dates guessed wrong more often than people liked.
+    const userId = await makeUser();
+    await makeTrip(userId);
+
+    assert.equal(await tripForOccurredAt(userId, new Date("2026-10-03T12:00:00Z")), null);
+  });
+
+  it("nor once Trippin has stopped tracking it", async () => {
+    const userId = await makeUser();
+    const trip = await makeTrip(userId, linked);
+    trip.source!.linked = false;
+    await trip.save();
+
+    assert.equal(await tripForOccurredAt(userId, new Date("2026-10-03T12:00:00Z")), null);
+  });
+});
+
+describe("which Trippin group a payment goes into", () => {
   it("claims a payment made while the trip is running", async () => {
     const userId = await makeUser();
-    const trip = await makeTrip(userId);
+    const trip = await makeTrip(userId, linked);
 
     const found = await tripForOccurredAt(userId, new Date("2026-10-03T12:00:00Z"));
     assert.equal(found?.toString(), trip._id.toString());
@@ -76,7 +104,7 @@ describe("which trip a payment belongs to", () => {
 
   it("ignores a payment made before it started", async () => {
     const userId = await makeUser();
-    await makeTrip(userId);
+    await makeTrip(userId, linked);
 
     assert.equal(await tripForOccurredAt(userId, new Date("2026-09-30T12:00:00Z")), null);
   });
@@ -85,7 +113,7 @@ describe("which trip a payment belongs to", () => {
     // The last dinner abroad does not stop being part of the trip because
     // its SMS only synced on the flight home.
     const userId = await makeUser();
-    const trip = await makeTrip(userId, { endedAt: GOA_END });
+    const trip = await makeTrip(userId, { ...linked, endedAt: GOA_END });
 
     const found = await tripForOccurredAt(userId, new Date("2026-10-06T12:00:00Z"));
     assert.equal(found?.toString(), trip._id.toString());
@@ -93,21 +121,28 @@ describe("which trip a payment belongs to", () => {
 
   it("ignores a payment made after the trip ended", async () => {
     const userId = await makeUser();
-    await makeTrip(userId, { endedAt: GOA_END });
+    await makeTrip(userId, { ...linked, endedAt: GOA_END });
 
     assert.equal(await tripForOccurredAt(userId, new Date("2026-10-09T12:00:00Z")), null);
   });
 
-  it("does not put one person's payment on another's trip", async () => {
+  it("leaves an archived group alone", async () => {
+    const userId = await makeUser();
+    await makeTrip(userId, { ...linked, endedAt: GOA_END, archivedAt: new Date() });
+
+    assert.equal(await tripForOccurredAt(userId, new Date("2026-10-03T12:00:00Z")), null);
+  });
+
+  it("does not put one person's payment in another's group", async () => {
     const [a, b] = await Promise.all([makeUser(), makeUser()]);
-    await makeTrip(a);
+    await makeTrip(a, linked);
 
     assert.equal(await tripForOccurredAt(b, new Date("2026-10-03T12:00:00Z")), null);
   });
 
   it("claims it for a member who did not start the trip", async () => {
     const [owner, friend] = await Promise.all([makeUser(), makeUser()]);
-    const trip = await makeTrip(owner);
+    const trip = await makeTrip(owner, linked);
     trip.members.push({ userId: friend, joinedAt: GOA_START });
     await trip.save();
 
@@ -117,14 +152,11 @@ describe("which trip a payment belongs to", () => {
 
   it("prefers the more recently started of two overlapping trips", async () => {
     const userId = await makeUser();
-    await makeTrip(userId, { startedAt: new Date("2026-10-01T00:00:00Z"), endedAt: GOA_END });
-    const later = await Trip.create({
-      ownerId: userId,
-      name: "Side trip",
+    await makeTrip(userId, { ...linked, startedAt: new Date("2026-10-01T00:00:00Z"), endedAt: GOA_END });
+    const later = await makeTrip(userId, {
+      ...linked,
       startedAt: new Date("2026-10-04T00:00:00Z"),
       endedAt: new Date("2026-10-05T00:00:00Z"),
-      members: [{ userId, joinedAt: new Date("2026-10-04T00:00:00Z") }],
-      joinCode: generateJoinCode(),
     });
 
     const found = await tripForOccurredAt(userId, new Date("2026-10-04T12:00:00Z"));
@@ -132,42 +164,21 @@ describe("which trip a payment belongs to", () => {
   });
 });
 
-describe("trip mode is a switch", () => {
-  it("refuses a second running trip for the same person", async () => {
+describe("groups are not a mode", () => {
+  it("lets one person have several open at once", async () => {
+    // Trips had a "one running at a time" index; "Goa" and "Flatmates"
+    // are both open, and neither is a switch.
     const userId = await makeUser();
     await makeTrip(userId);
+    await makeTrip(userId, { startedAt: new Date() });
+    await Trip.create({
+      ownerId: userId,
+      name: "Flatmates",
+      members: [{ userId, joinedAt: new Date() }],
+      joinCode: generateJoinCode(),
+    });
 
-    // Two at once would leave every payment ambiguous.
-    await assert.rejects(
-      () =>
-        Trip.create({
-          ownerId: userId,
-          name: "Another",
-          startedAt: new Date(),
-          endedAt: null,
-          members: [{ userId, joinedAt: new Date() }],
-          joinCode: generateJoinCode(),
-        }),
-      /duplicate key/i
-    );
-  });
-
-  it("allows a new one once the last has ended", async () => {
-    const userId = await makeUser();
-    const first = await makeTrip(userId);
-    first.endedAt = GOA_END;
-    await first.save();
-
-    const second = await makeTrip(userId, { startedAt: new Date("2026-11-01T00:00:00Z") });
-    assert.ok(second._id);
-  });
-
-  it("lets two people each run their own", async () => {
-    const [a, b] = await Promise.all([makeUser(), makeUser()]);
-    await makeTrip(a);
-    await makeTrip(b);
-
-    assert.equal(await Trip.countDocuments({ endedAt: null }), 2);
+    assert.equal(await Trip.countDocuments({ ownerId: userId, archivedAt: null }), 3);
   });
 });
 
