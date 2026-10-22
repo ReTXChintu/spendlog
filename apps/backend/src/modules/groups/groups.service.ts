@@ -130,37 +130,53 @@ export async function claimTransactions(
   onlyUserId?: Types.ObjectId,
   respectJoins = false
 ): Promise<number> {
-  if (!group.startedAt) return 0;
-  const startedAt = group.startedAt;
-  const until = group.endedAt ? { $lte: group.endedAt } : {};
-  // Never a payment somebody else made: it was put in its group on purpose.
-  const base = { groupId: null, editedAt: null, offLedger: { $ne: true } };
-
   let claimed = 0;
-  if (!respectJoins) {
-    const memberIds = onlyUserId ? [onlyUserId] : group.members.map((member) => member.userId);
-    const result = await Transaction.updateMany(
-      { ...base, userId: { $in: memberIds }, occurredAt: { $gte: startedAt, ...until } },
-      { $set: { groupId: group._id } }
-    );
-    claimed = result.modifiedCount;
-  } else {
-    for (const member of group.members) {
-      if (onlyUserId && !member.userId.equals(onlyUserId)) continue;
-      const from = member.joinedAt > startedAt ? member.joinedAt : startedAt;
-      if (group.endedAt && from > group.endedAt) continue;
-
-      const result = await Transaction.updateMany(
-        { ...base, userId: member.userId, occurredAt: { $gte: from, ...until } },
-        { $set: { groupId: group._id } }
-      );
-      claimed += result.modifiedCount;
-    }
+  for (const filter of claimFilters(group, onlyUserId, respectJoins)) {
+    const result = await Transaction.updateMany(filter, { $set: { groupId: group._id } });
+    claimed += result.modifiedCount;
   }
 
   // A contact in the group has a share of what was just taken in.
   if (claimed > 0) await resyncGroup(group._id);
   return claimed;
+}
+
+/** How many payments claimTransactions would take in, without taking them. */
+export async function countClaimable(
+  group: Pick<GroupDoc, "members" | "startedAt" | "endedAt">,
+  respectJoins = false
+): Promise<number> {
+  let count = 0;
+  for (const filter of claimFilters(group, undefined, respectJoins)) {
+    count += await Transaction.countDocuments(filter);
+  }
+  return count;
+}
+
+/** The queries behind claimTransactions: one, or one per member with respectJoins. */
+function claimFilters(
+  group: Pick<GroupDoc, "members" | "startedAt" | "endedAt">,
+  onlyUserId?: Types.ObjectId,
+  respectJoins = false
+): FilterQuery<TransactionDoc>[] {
+  if (!group.startedAt) return [];
+  const startedAt = group.startedAt;
+  const until = group.endedAt ? { $lte: group.endedAt } : {};
+  // Never a payment somebody else made: it was put in its group on purpose.
+  const base = { groupId: null, editedAt: null, offLedger: { $ne: true } };
+
+  if (!respectJoins) {
+    const memberIds = onlyUserId ? [onlyUserId] : group.members.map((member) => member.userId);
+    return [{ ...base, userId: { $in: memberIds }, occurredAt: { $gte: startedAt, ...until } }];
+  }
+  const filters: FilterQuery<TransactionDoc>[] = [];
+  for (const member of group.members) {
+    if (onlyUserId && !member.userId.equals(onlyUserId)) continue;
+    const from = member.joinedAt > startedAt ? member.joinedAt : startedAt;
+    if (group.endedAt && from > group.endedAt) continue;
+    filters.push({ ...base, userId: member.userId, occurredAt: { $gte: from, ...until } });
+  }
+  return filters;
 }
 
 /** Everyone in a group by id: its SpendLog users and its contacts, as strings. */

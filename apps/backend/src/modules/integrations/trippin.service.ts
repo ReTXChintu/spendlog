@@ -5,6 +5,7 @@ import { ensureCashAccount } from "../../parsing/accounts";
 import { istDayEnd, istDayKey, istDayStart } from "../../time";
 import {
   claimTransactions,
+  countClaimable,
   generateJoinCode,
   runningAt,
   tripSettlement,
@@ -47,7 +48,9 @@ export interface TrippinTrip {
 }
 
 export type TrippinEvent =
-  | { id: string; type: "trip.linked" | "trip.updated" | "trip.members_changed"; trip: TrippinTrip }
+  /** `attachTo`: link this existing group of the owner's instead of making one. */
+  | { id: string; type: "trip.linked"; trip: TrippinTrip; attachTo?: string }
+  | { id: string; type: "trip.updated" | "trip.members_changed"; trip: TrippinTrip }
   | { id: string; type: "trip.unlinked"; trip: { id: string } };
 
 /**
@@ -234,7 +237,46 @@ function findByTrippinId(externalId: string) {
   return Trip.findOne({ "source.app": "trippin", "source.externalId": externalId });
 }
 
-async function linkTrip(trippin: TrippinTrip) {
+/**
+ * The owner chose one of their existing groups for this Trippin trip
+ * (see trippinCandidates): it takes over the trip's link, so linkTrip
+ * carries on with it as a group "linked before". A group that held the
+ * link until now goes back to being an ordinary group.
+ */
+async function attachExisting(trippin: TrippinTrip, groupId: string) {
+  const group = Types.ObjectId.isValid(groupId) ? await Trip.findById(groupId) : null;
+  const owner = await resolveSuitePerson(trippin.owner);
+  if (!group || !("userId" in owner) || !group.ownerId.equals(owner.userId)) {
+    throw new TrippinRefusal(409, "attach_not_found", "That SpendLog group isn't one of the trip owner's, so it can't be linked.");
+  }
+  const source = group.source;
+  if (source?.app === "trippin" && source.externalId !== trippin.id && source.linked) {
+    throw new TrippinRefusal(
+      409,
+      "attach_linked_elsewhere",
+      `"${group.name}" is already linked to another Trippin trip. Unlink it there first.`
+    );
+  }
+  if (source?.app === "trippin" && source.externalId === trippin.id) return;
+
+  await Trip.updateMany(
+    { "source.app": "trippin", "source.externalId": trippin.id, _id: { $ne: group._id } },
+    { $unset: { source: 1 } }
+  );
+  group.source = {
+    app: "trippin",
+    externalId: trippin.id,
+    url: null,
+    linked: false,
+    linkedAt: null,
+    unlinkedAt: new Date(),
+    memberSubs: [],
+  };
+  await group.save();
+}
+
+async function linkTrip(trippin: TrippinTrip, attachTo?: string) {
+  if (attachTo) await attachExisting(trippin, attachTo);
   const window = tripWindow(trippin);
   const now = new Date();
   // Everyone on the trip when tracking is switched on planned it together,
@@ -330,7 +372,7 @@ async function unlinkTrip(externalId: string) {
 export async function applyTrippinEvent(event: TrippinEvent): Promise<Record<string, unknown>> {
   switch (event.type) {
     case "trip.linked":
-      return linkTrip(event.trip);
+      return linkTrip(event.trip, event.attachTo);
     case "trip.updated":
       return updateTrip(event.trip, true);
     case "trip.members_changed":
@@ -383,6 +425,110 @@ export async function trippinSummary(externalId: string, viewerSub: string | und
     transactionCount: summary.transactionCount,
     updatedAt,
   };
+}
+
+/** Lower-case words of two letters or more, for comparing names. */
+function nameWords(name: string): Set<string> {
+  return new Set(name.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((word) => word.length > 1));
+}
+
+/** How alike two names are, 0..1: the share of words they have in common. */
+export function nameLikeness(a: string, b: string): number {
+  const x = nameWords(a);
+  const y = nameWords(b);
+  if (x.size === 0 || y.size === 0) return 0;
+  const common = [...x].filter((word) => y.has(word)).length;
+  return common / new Set([...x, ...y]).size;
+}
+
+const DAY_MS = 86_400_000;
+
+/** Whole or part days two spans share. */
+function overlapDays(a: { from: Date; to: Date }, b: { from: Date; to: Date }): number {
+  const from = Math.max(a.from.getTime(), b.from.getTime());
+  const to = Math.min(a.to.getTime(), b.to.getTime());
+  return to < from ? 0 : Math.ceil((to - from) / DAY_MS);
+}
+
+export interface TrippinCandidate {
+  id: string;
+  name: string;
+  /** IST calendar days, or null for an undated group. */
+  startDate: string | null;
+  endDate: string | null;
+  archived: boolean;
+  /** Already holds this Trippin trip's link (linked now or before). */
+  linkedHere: boolean;
+  counts: { transactions: number; members: number };
+  /**
+   * What linking it would do to its payments: the trip's dates replace the
+   * group's, so payments put in automatically outside them leave, and the
+   * members' unfiled payments inside them come in.
+   */
+  impact: { added: number; leaving: number };
+}
+
+/**
+ * The trip owner's groups that this Trippin trip could be linked to
+ * instead of a new one, best match first: groups whose dates overlap the
+ * trip's, then those with a similar name. A group linked to a different
+ * Trippin trip is left out.
+ */
+export async function trippinCandidates(query: {
+  sub: string;
+  tripId: string;
+  title: string;
+  startDate: string;
+  endDate: string;
+}): Promise<TrippinCandidate[]> {
+  const owner = await User.findOne({ oidcSub: query.sub, role: { $ne: "KID" } }).select("_id");
+  if (!owner) return [];
+  const window = tripWindow(query);
+  const span = { from: window.startedAt, to: window.endedAt };
+  const now = new Date();
+
+  const groups = await Trip.find({
+    ownerId: owner._id,
+    $or: [
+      { source: null },
+      { "source.app": { $ne: "trippin" } },
+      { "source.linked": { $ne: true } },
+      { "source.externalId": query.tripId },
+    ],
+  });
+
+  const scored = groups.map((group) => {
+    const dated = group.startedAt ? { from: group.startedAt, to: group.endedAt ?? now } : null;
+    const days = dated ? overlapDays(dated, span) : 0;
+    const likeness = nameLikeness(group.name, query.title);
+    const linkedHere = group.source?.app === "trippin" && group.source.externalId === query.tripId;
+    return { group, score: (linkedHere ? 100 : 0) + days * 2 + likeness * 5, linkedHere };
+  });
+  scored.sort((a, b) => b.score - a.score || b.group.updatedAt.getTime() - a.group.updatedAt.getTime());
+
+  return Promise.all(
+    scored.slice(0, 10).map(async ({ group, linkedHere }) => {
+      const [transactions, leaving, added] = await Promise.all([
+        Transaction.countDocuments({ groupId: group._id, mirrorOf: null }),
+        Transaction.countDocuments({
+          groupId: group._id,
+          editedAt: null,
+          $or: [{ occurredAt: { $lt: window.startedAt } }, { occurredAt: { $gt: window.endedAt } }],
+        }),
+        countClaimable({ members: group.members, startedAt: window.startedAt, endedAt: window.endedAt }, true),
+      ]);
+      return {
+        id: group.id as string,
+        name: group.name,
+        startDate: group.startedAt ? istDayKey(group.startedAt) : null,
+        endDate: group.startedAt && group.endedAt ? istDayKey(group.endedAt) : null,
+        archived: Boolean(group.archivedAt),
+        linkedHere,
+        counts: { transactions, members: group.members.length + (group.contactMembers?.length ?? 0) },
+        impact: { added, leaving },
+      };
+    })
+  );
 }
 
 /** Whether somebody already has a SpendLog account. Kids never count. */

@@ -7,6 +7,7 @@ import {
   TrippinRefusal,
   applyTrippinEvent,
   suiteUserExists,
+  trippinCandidates,
   trippinSummary,
 } from "./trippin.service";
 
@@ -48,7 +49,15 @@ const tripSchema = z.object({
 const eventSchema = z.discriminatedUnion("type", [
   z.object({
     id: z.string().min(1).max(200),
-    type: z.enum(["trip.linked", "trip.updated", "trip.members_changed"]),
+    type: z.literal("trip.linked"),
+    occurredAt: z.string().optional(),
+    trip: tripSchema,
+    // One of the owner's existing groups to link instead of a new one.
+    attachTo: z.string().min(1).max(200).optional(),
+  }),
+  z.object({
+    id: z.string().min(1).max(200),
+    type: z.enum(["trip.updated", "trip.members_changed"]),
     occurredAt: z.string().optional(),
     trip: tripSchema,
   }),
@@ -102,6 +111,30 @@ trippinRouter.get("/trips/:trippinTripId/summary", async (req, res) => {
   const summary = await trippinSummary(req.params.trippinTripId, sub);
   if (!summary) return res.status(404).json({ linked: false });
   res.json(summary);
+});
+
+const candidatesQuery = z.object({
+  sub: z.string().min(1).max(255),
+  tripId: z.string().min(1).max(200),
+  title: z.string().max(200).default(""),
+  start: DAY,
+  end: DAY,
+});
+
+// GET /integrations/trippin/candidates?sub=&tripId=&title=&start=&end= -
+// the trip owner's groups that could be linked to this trip instead of a
+// new one, with what linking each would do to its payments.
+trippinRouter.get("/candidates", async (req, res) => {
+  const parsed = candidatesQuery.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const q = parsed.data;
+  try {
+    const candidates = await trippinCandidates({ sub: q.sub, tripId: q.tripId, title: q.title, startDate: q.start, endDate: q.end });
+    res.json({ candidates });
+  } catch (err) {
+    if (err instanceof TrippinRefusal) return res.status(err.status).json({ error: err.message, code: err.code });
+    throw err;
+  }
 });
 
 // GET /integrations/trippin/users/:sub — whether someone has SpendLog yet.

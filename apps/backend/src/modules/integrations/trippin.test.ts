@@ -593,3 +593,147 @@ describe("the running-trip overlap rule", () => {
     assert.equal((await tripOf(body.remoteId)).startedAt.getTime(), istDayStart(day(-20)).getTime(), "unchanged");
   });
 });
+
+describe("linking an existing group", () => {
+  let codeCount = 0;
+  async function group(ownerId: Types.ObjectId, name: string, from: number | null, to: number | null, extra: Record<string, unknown> = {}) {
+    codeCount += 1;
+    const startedAt = from === null ? null : istDayStart(day(from));
+    return models.Trip.create({
+      ownerId,
+      name,
+      startedAt,
+      endedAt: to === null ? null : istDayEnd(day(to)),
+      members: [{ userId: ownerId, joinedAt: startedAt ?? new Date() }],
+      joinCode: `JOIN${codeCount}X`,
+      ...extra,
+    });
+  }
+
+  const candidatesFor = async (sub: string, query: Record<string, string> = {}) => {
+    const params = new URLSearchParams({ sub, tripId: "trp_goa", title: "Goa", start: day(-20), end: day(-15), ...query });
+    const response = await signed(`/integrations/trippin/candidates?${params}`);
+    return { status: response.status, body: (await response.json()) as Record<string, any> };
+  };
+
+  it("lists the owner's groups, best match first, with what linking each would do", async () => {
+    const asha = person("Asha");
+    const owner = await existingUser(asha);
+    const other = await existingUser(person("Ravi"));
+
+    // Overlaps the trip's dates; one payment of its own falls outside them, one unfiled payment inside.
+    const overlapping = await group(owner.id, "Weekend away", -22, -16);
+    await spend(owner.id, middayOf(-22), 5000, { groupId: overlapping._id });
+    await spend(owner.id, middayOf(-18), 7000);
+    // Same name, other dates.
+    const named = await group(owner.id, "Goa 2025", -400, -395);
+    // Neither.
+    await group(owner.id, "Flatmates", null, null);
+    // Someone else's, and one of hers linked to another Trippin trip: never offered.
+    await group(other.id, "Goa", -20, -15);
+    await group(owner.id, "Goa too", -20, -15, {
+      source: { app: "trippin", externalId: "trp_other", linked: true, linkedAt: new Date(), memberSubs: [] },
+    });
+
+    const { status, body } = await candidatesFor(asha.sub);
+    assert.equal(status, 200);
+    const names = body.candidates.map((c: Record<string, any>) => c.name);
+    assert.deepEqual(names, ["Weekend away", "Goa 2025", "Flatmates"]);
+
+    const first = body.candidates[0];
+    assert.equal(first.id, overlapping.id);
+    assert.equal(first.startDate, day(-22));
+    assert.equal(first.endDate, day(-16));
+    assert.equal(first.archived, false);
+    assert.equal(first.linkedHere, false);
+    assert.deepEqual(first.counts, { transactions: 1, members: 1 });
+    assert.deepEqual(first.impact, { added: 1, leaving: 1 });
+    assert.equal(body.candidates[1].id, named.id);
+  });
+
+  it("answers an empty list for someone without SpendLog, and refuses a bad query", async () => {
+    assert.deepEqual((await candidatesFor("sub-nobody")).body, { candidates: [] });
+    const bad = await signed(`/integrations/trippin/candidates?sub=x&tripId=t&start=tomorrow&end=${day(0)}`);
+    assert.equal(bad.status, 400);
+  });
+
+  it("links the chosen group instead of making one, with the trip's name and dates", async () => {
+    const asha = person("Asha");
+    const owner = await existingUser(asha);
+    const existing = await group(owner.id, "Weekend away", -22, -16);
+    const outside = await spend(owner.id, middayOf(-22), 5000, { groupId: existing._id });
+    const kept = await spend(owner.id, middayOf(-22), 6000, { groupId: existing._id, editedAt: new Date() });
+    const inside = await spend(owner.id, middayOf(-18), 7000);
+
+    const response = await signed("/integrations/trippin/events", {
+      body: { id: "evt_attach", type: "trip.linked", trip: tripPayload({ owner: asha }), attachTo: existing.id },
+    });
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as Record<string, any>;
+    assert.equal(body.remoteId, existing.id, "the same group, not a new one");
+    assert.equal(await models.Trip.countDocuments({ ownerId: owner.id }), 1);
+
+    const linked = await tripOf(existing.id);
+    assert.equal(linked.name, "Goa");
+    assert.equal(linked.source?.externalId, "trp_goa");
+    assert.equal(linked.source?.linked, true);
+    assert.equal(linked.startedAt.getTime(), istDayStart(day(-20)).getTime());
+    assert.equal((await models.Transaction.findById(outside._id))?.groupId, null, "an automatic payment outside the dates leaves");
+    assert.equal((await models.Transaction.findById(kept._id))?.groupId?.toString(), existing.id, "one put there by hand stays");
+    assert.equal((await models.Transaction.findById(inside._id))?.groupId?.toString(), existing.id, "an unfiled one inside comes in");
+
+    // A retried delivery is answered the same, and does nothing twice.
+    const again = await signed("/integrations/trippin/events", {
+      body: { id: "evt_attach", type: "trip.linked", trip: tripPayload({ owner: asha }), attachTo: existing.id },
+    });
+    assert.deepEqual(await again.json(), body);
+  });
+
+  it("takes the link over from the group that had it before", async () => {
+    const asha = person("Asha");
+    const owner = await existingUser(asha);
+    const first = await sendEvent("trip.linked", tripPayload({ owner: asha }));
+    await sendEvent("trip.unlinked", { id: "trp_goa" });
+    const chosen = await group(owner.id, "Goa (old)", -20, -15);
+
+    const { status, body } = await (async () => {
+      const response = await signed("/integrations/trippin/events", {
+        body: { id: "evt_move", type: "trip.linked", trip: tripPayload({ owner: asha }), attachTo: chosen.id },
+      });
+      return { status: response.status, body: (await response.json()) as Record<string, any> };
+    })();
+    assert.equal(status, 200);
+    assert.equal(body.remoteId, chosen.id);
+    assert.equal((await tripOf(first.body.remoteId)).source, null, "the old group is an ordinary group again");
+
+    const summary = await signed(`/integrations/trippin/trips/trp_goa/summary?sub=${asha.sub}`);
+    assert.equal(((await summary.json()) as Record<string, any>).url.endsWith(chosen.id), true);
+  });
+
+  it("refuses someone else's group and one linked to another trip, changing nothing", async () => {
+    const asha = person("Asha");
+    const owner = await existingUser(asha);
+    const ravi = await existingUser(person("Ravi"));
+    const notHers = await group(ravi.id, "Goa", -20, -15);
+    const elsewhere = await group(owner.id, "Goa too", -20, -15, {
+      source: { app: "trippin", externalId: "trp_other", linked: true, linkedAt: new Date(), memberSubs: [] },
+    });
+
+    for (const [attachTo, code] of [
+      [notHers.id, "attach_not_found"],
+      [new Types.ObjectId().toString(), "attach_not_found"],
+      ["not-an-id", "attach_not_found"],
+      [elsewhere.id, "attach_linked_elsewhere"],
+    ] as const) {
+      const response = await signed("/integrations/trippin/events", {
+        body: { id: `evt_refuse_${code}_${attachTo}`, type: "trip.linked", trip: tripPayload({ owner: asha }), attachTo },
+      });
+      assert.equal(response.status, 409, attachTo);
+      assert.equal(((await response.json()) as Record<string, any>).code, code);
+    }
+    assert.equal((await tripOf(notHers.id)).source, null);
+    assert.equal((await tripOf(elsewhere.id)).source?.externalId, "trp_other");
+    assert.equal(await models.Trip.countDocuments({ "source.externalId": "trp_goa" }), 0, "nothing linked");
+    assert.equal(await models.SuiteEvent.countDocuments({}), 0, "a refusal isn't remembered");
+  });
+});
