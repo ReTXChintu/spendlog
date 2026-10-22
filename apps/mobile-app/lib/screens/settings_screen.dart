@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/models.dart';
+import '../models/subscription_models.dart';
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
 import '../services/push_service.dart';
@@ -20,6 +21,7 @@ import '../widgets/loan_dialog.dart';
 import 'accounts_screen.dart';
 import 'monthly_budget_screen.dart';
 import 'statements_screen.dart';
+import 'subscriptions_screen.dart';
 import 'login_screen.dart';
 import 'permission_screen.dart';
 import 'start_fresh_screen.dart';
@@ -60,6 +62,9 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
   List<Category> _categories = [];
   List<FixedCommitment> _commitments = [];
   List<Loan> _loans = [];
+
+  /// What renews, in one line; null until it has loaded.
+  SubscriptionTotals? _subscriptions;
   int? _salaryMinor;
   int? _salaryDay;
 
@@ -370,6 +375,18 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
       if (mounted) setState(() => _budget = MonthlyBudgetStatus.fromJson(json));
     } catch (_) {
       // The card says "Not set" and the editor loads it again itself.
+    }
+    await _loadSubscriptions();
+  }
+
+  /// The subscriptions line: on its own, like the budget, so a hiccup
+  /// there costs its card and nothing else.
+  Future<void> _loadSubscriptions() async {
+    try {
+      final json = await ApiClient.instance.get('/subscriptions/summary') as Map<String, dynamic>;
+      if (mounted) setState(() => _subscriptions = SubscriptionTotals.fromJson(json));
+    } catch (_) {
+      // The card keeps its general line.
     }
   }
 
@@ -1069,6 +1086,29 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
             ),
           ),
         ],
+        const SizedBox(height: kCardGap),
+        _SettingsCard(
+          icon: DsIcons.calendar,
+          title: 'Subscriptions',
+          subtitle: _subscriptions == null || _subscriptions!.isEmpty
+              ? 'Netflix, Prime, the gym - anything that renews'
+              : '${formatMoney(_subscriptions!.monthlyMinor)} a month · ${_subscriptions!.activeCount} active',
+          child: _CardBody(
+            pill: _subscriptions != null && _subscriptions!.alertCount > 0
+                ? DsBadge('${_subscriptions!.alertCount} need${_subscriptions!.alertCount == 1 ? 's' : ''} a look', tone: DsTone.warn, icon: DsIcons.alertTriangle)
+                : null,
+            text: 'Each renewal is matched to the payment that lands, counted as a fixed cost of the month, and '
+                'flagged when it does not show up or comes in at a new price. Repeating charges you are not '
+                'tracking yet are pointed out there.',
+            actions: [
+              OutlinedButton(
+                key: const ValueKey('open-subscriptions'),
+                onPressed: () => SubscriptionsScreen.open(context).then((_) => _loadSubscriptions()),
+                child: const Text('Open subscriptions'),
+              ),
+            ],
+          ),
+        ),
         const SizedBox(height: kCardGap),
         _SettingsCard(
           icon: DsIcons.bank,

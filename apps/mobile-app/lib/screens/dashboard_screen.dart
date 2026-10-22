@@ -27,6 +27,7 @@ import 'passbook_screen.dart';
 import 'people_screen.dart';
 import 'perks_screen.dart';
 import 'statements_screen.dart';
+import 'subscriptions_screen.dart';
 import 'transactions_screen.dart';
 
 /// The Dashboard tab of Home: what you need to know now.
@@ -279,7 +280,12 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
           // The month against its budget: the "Free to spend" hero. The
           // pace line is the one thing on this screen that should change
           // what you spend today.
-          MonthlyBudgetCard(budget: data.budget, onEdit: _editBudget),
+          MonthlyBudgetCard(
+            budget: data.budget,
+            onEdit: _editBudget,
+            subscriptions: data.subscriptions,
+            onSubscriptions: () => SubscriptionsScreen.open(context).then((_) => load()),
+          ),
 
           // The jobs: a calm queue, each with one verb.
           _Todos(

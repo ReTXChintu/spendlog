@@ -39,10 +39,15 @@ class TransactionsScreen extends StatefulWidget {
     this.initialAccountId,
     this.initialAccountUnknown = false,
     this.initialNeedsExplanation = false,
+    this.initialMonthKey,
   });
 
+  /// Set from the month's digest notification: the ledger opens on that
+  /// month rather than the one running. A pushed page, like the others.
+  final String? initialMonthKey;
+
   /// Whether this is a page pushed over the tabs rather than a tab.
-  bool get isPushed => initialAccountId != null || initialAccountUnknown || initialNeedsExplanation;
+  bool get isPushed => initialAccountId != null || initialAccountUnknown || initialNeedsExplanation || initialMonthKey != null;
 
   @override
   State<TransactionsScreen> createState() => TransactionsScreenState();
@@ -171,6 +176,9 @@ class TransactionsScreenState extends State<TransactionsScreen> {
         _months = months.months;
         _currentMonthKey = months.current;
         _monthIndex = _currentMonthIndex;
+        // Opened on a given month: that one, when it is among them.
+        final asked = widget.initialMonthKey == null ? -1 : _months.indexWhere((m) => m.month == widget.initialMonthKey);
+        if (asked >= 0) _monthIndex = asked;
       });
     } catch (_) {
       // Without the months there is no range to send, so the list falls

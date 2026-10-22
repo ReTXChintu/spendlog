@@ -1,7 +1,20 @@
 import { Router } from "express";
 import { Types } from "mongoose";
 import { currentUserId, requireAuth } from "../../middleware/auth";
-import { Account, CardStatement, CardVault, EmiInstalment, EmiPlan, Loan, LoanInstalment, Perk, Transaction } from "../../models";
+import {
+  Account,
+  CardStatement,
+  CardVault,
+  EmiInstalment,
+  EmiPlan,
+  Loan,
+  LoanInstalment,
+  Perk,
+  Subscription,
+  SubscriptionDoc,
+  Transaction,
+} from "../../models";
+import { totalsFor as subscriptionTotals } from "../subscriptions/subscriptions.service";
 import { istDayEnd, istDayKey, istDayStart } from "../../time";
 import { monthSoFar as monthAgainstLast, userMonth } from "../budget/budget.months";
 import { CardStatus, cardStatuses, normaliseNetwork, pickCards } from "../cards/cards.status";
@@ -50,7 +63,7 @@ dashboardRouter.get("/", async (req, res) => {
   // and the to-dos below agree about which are still open.
   await settleMissingCredits(userId);
 
-  const [cards, pace, needsCategory, emis, loans, owed, perks, statements, monthSoFar, bills, budget, money, earmarks, plan, pocketMoney, banks, todos] =
+  const [cards, pace, needsCategory, emis, loans, owed, perks, statements, monthSoFar, bills, budget, money, earmarks, plan, pocketMoney, banks, todos, subscriptions] =
     await Promise.all([
     cardStatuses(userId, now),
     budgetPace(userId, now),
@@ -69,6 +82,11 @@ dashboardRouter.get("/", async (req, res) => {
     pocketMoneyFor(userId, now),
     bankFaces(userId, now),
     balanceTodos(userId, now, { settle: false }),
+    // What renews, for the line under the budget. As it stands: the
+    // subscriptions screen brings them up to date against the ledger.
+    Subscription.find({ userId })
+      .lean()
+      .then((subs) => subscriptionTotals(userId, subs as SubscriptionDoc[], now)),
   ]);
 
   // Only the ones close enough to act on. Settled: shown here, never as a
@@ -88,6 +106,7 @@ dashboardRouter.get("/", async (req, res) => {
     // The monthly budget: spent and left, the pace, each category's
     // limit, and the savings bucket's balance.
     budget,
+    subscriptions,
     cards,
     // Every card and bank account as a card face, with everything the
     // front needs. The back - full number, expiry, name on card - is

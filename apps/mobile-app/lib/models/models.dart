@@ -2,6 +2,7 @@ import '../utils/format.dart';
 import 'budget_models.dart';
 import 'home_models.dart';
 import 'passbook_models.dart';
+import 'subscription_models.dart';
 
 export 'budget_models.dart';
 export 'home_models.dart';
@@ -297,6 +298,11 @@ class Transaction {
   /// A payment someone else made: it touches no account, passbook or cash.
   final bool offLedger;
 
+  /// Set on my share of a group payment another SpendLog user made: the id
+  /// of their payment. Everything but the category follows that payment,
+  /// and the row goes when it does.
+  final String? mirrorOf;
+
   /// The split and people on this row are kept by its group (the contacts'
   /// shares), so the editor offers the group's split rather than its own.
   final bool groupSplit;
@@ -404,6 +410,7 @@ class Transaction {
     this.paidByContactId,
     this.paidByName,
     this.offLedger = false,
+    this.mirrorOf,
     this.groupSplit = false,
     this.refundOf = const [],
     this.refundedMinor = 0,
@@ -473,6 +480,7 @@ class Transaction {
         paidByName: (json['paidByContact'] as Map<String, dynamic>?)?['name'] as String? ??
             json['paidByName'] as String?,
         offLedger: json['offLedger'] == true,
+        mirrorOf: json['mirrorOf'] is String ? json['mirrorOf'] as String : null,
         groupSplit: json['groupSplit'] == true,
         refundOf: (json['refundOf'] as List<dynamic>? ?? [])
             .map((a) => RefundAllocation.fromJson(a as Map<String, dynamic>))
@@ -2070,6 +2078,9 @@ class DashboardData {
   /// limits and the savings bucket.
   final MonthlyBudgetStatus budget;
 
+  /// What renews: the monthly total and what this month takes.
+  final SubscriptionTotals subscriptions;
+
   /// Every card and bank account as a face, for the wallet on Home.
   final Wallet wallet;
   final List<CardStatus> cards;
@@ -2114,6 +2125,7 @@ class DashboardData {
   DashboardData({
     required this.fixedCosts,
     MonthlyBudgetStatus? budget,
+    this.subscriptions = const SubscriptionTotals(),
     Wallet? wallet,
     required this.cards,
     required this.picks,
@@ -2151,6 +2163,7 @@ class DashboardData {
     return DashboardData(
       fixedCosts: FixedCosts.fromJson(json['pace'] as Map<String, dynamic>? ?? {}),
       budget: MonthlyBudgetStatus.fromJson(json['budget'] as Map<String, dynamic>? ?? {}),
+      subscriptions: SubscriptionTotals.fromJson(json['subscriptions'] as Map<String, dynamic>?),
       wallet: Wallet.fromJson(json['wallet'] as Map<String, dynamic>?),
       cards: (json['cards'] as List<dynamic>? ?? [])
           .map((card) => CardStatus.fromJson(card as Map<String, dynamic>))

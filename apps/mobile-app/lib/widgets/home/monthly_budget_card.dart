@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/models.dart';
+import '../../models/subscription_models.dart';
 import '../ds/ds.dart';
 import '../../utils/format.dart';
 
@@ -47,12 +48,23 @@ String paceMessage(MonthPace pace) {
 /// for what is free, and a thin cobalt tick where spending would be today
 /// on plan.
 class MonthlyBudgetCard extends StatelessWidget {
-  const MonthlyBudgetCard({super.key, required this.budget, required this.onEdit});
+  const MonthlyBudgetCard({
+    super.key,
+    required this.budget,
+    required this.onEdit,
+    this.subscriptions,
+    this.onSubscriptions,
+  });
 
   final MonthlyBudgetStatus budget;
 
   /// The budget editor - also how a budget is first set.
   final VoidCallback onEdit;
+
+  /// What renews, when there is anything: its line sits under the bucket,
+  /// since renewals are the fixed costs that creep.
+  final SubscriptionTotals? subscriptions;
+  final VoidCallback? onSubscriptions;
 
   @override
   Widget build(BuildContext context) {
@@ -223,6 +235,57 @@ class MonthlyBudgetCard extends StatelessWidget {
             Divider(height: 24, color: c.ln),
             _BucketRow(bucket: budget.bucket),
           ],
+          if (subscriptions != null && !subscriptions!.isEmpty) ...[
+            if (!budget.bucket.configured) const SizedBox(height: 4),
+            Divider(height: 24, color: c.ln),
+            SubscriptionsRow(totals: subscriptions!, onTap: onSubscriptions),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// What renews: the monthly total, and what this month still takes.
+class SubscriptionsRow extends StatelessWidget {
+  const SubscriptionsRow({super.key, required this.totals, this.onTap});
+
+  final SubscriptionTotals totals;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final count = totals.dueThisMonthCount;
+    final foot = count == 0
+        ? 'Nothing renews this month'
+        : '$count ${count == 1 ? 'renewal' : 'renewals'} this month'
+            '${totals.upcomingThisMonthMinor > 0 ? ' · ${formatMoneyShort(totals.upcomingThisMonthMinor)} still to come' : ''}'
+            '${totals.alertCount > 0 ? ' · ${totals.alertCount} need${totals.alertCount == 1 ? 's' : ''} a look' : ''}';
+    return InkWell(
+      key: const ValueKey('budget-subscriptions-row'),
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(Ds.rMd),
+      child: Row(
+        children: [
+          DsIconTile(DsIcons.repeat, tone: DsTone.neutral, color: c.tx2, size: 36, iconSize: 18),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Subscriptions', style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx)),
+                const SizedBox(height: 2),
+                Text(foot, style: TextStyle(fontSize: 12, height: 16 / 12, color: totals.alertCount > 0 ? c.warn : c.tx3)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '${formatMoneyShort(totals.monthlyMinor)}/mo',
+            style: kNum.copyWith(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
+          ),
+          if (onTap != null) ...[const SizedBox(width: 4), DsIcon(DsIcons.chevronRight, size: 18, color: c.tx3)],
         ],
       ),
     );

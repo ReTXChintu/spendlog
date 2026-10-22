@@ -5,6 +5,9 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import '../screens/passbook_screen.dart';
+import '../screens/subscription_detail_screen.dart';
+import '../screens/subscriptions_screen.dart';
+import '../screens/transactions_screen.dart';
 import 'api_client.dart';
 import 'credential_store.dart';
 import 'perk_import_watcher.dart' show appNavigatorKey;
@@ -23,6 +26,14 @@ const String _smsSyncType = 'SMS_SYNC';
 /// A visible push: the nightly check found an account off from the bank.
 /// Tapping it opens that account's passbook.
 const String _balanceDriftType = 'BALANCE_DRIFT';
+
+/// A visible push about a subscription: a renewal coming up, a trial
+/// ending, a renewal that never came. Tapping it opens that subscription.
+const String _subscriptionType = 'SUBSCRIPTION';
+
+/// A visible push the morning after pay day: the month that just closed.
+/// Tapping it opens the ledger on that month.
+const String _digestType = 'MONTHLY_DIGEST';
 
 /// Whether this phone is signed in as the owner. A kid's phone must never
 /// register for pushes or read SMS, and a signed-out one has no one to
@@ -103,28 +114,40 @@ class PushService {
   }
 
   /// Routes a tapped notification. Only the owner's phone gets these, and
-  /// a kid's session must never be sent to an owner's passbook, so the
+  /// a kid's session must never be sent to an owner's screens, so the
   /// role is checked here as well as at registration.
   Future<void> _openFromTap(RemoteMessage message) async {
-    if (message.data['type'] != _balanceDriftType) return;
-    final accountId = message.data['accountId'];
-    if (accountId is! String || accountId.isEmpty) return;
+    final screen = screenFor(message.data);
+    if (screen == null) return;
     if (!await _isOwner()) return;
-    final alertId = message.data['alertId'];
 
-    void open() => appNavigatorKey.currentState?.push(
-          MaterialPageRoute(
-            builder: (_) => PassbookScreen(
-              accountId: accountId,
-              alertId: alertId is String && alertId.isNotEmpty ? alertId : null,
-            ),
-          ),
-        );
+    void open() => appNavigatorKey.currentState?.push(MaterialPageRoute(builder: (_) => screen));
     // On a cold start there is no navigator until the first frame.
     if (appNavigatorKey.currentState != null) {
       open();
     } else {
       WidgetsBinding.instance.addPostFrameCallback((_) => open());
+    }
+  }
+
+  /// The screen a notification's data opens, or null for one that opens
+  /// nothing. Kept apart from the navigator so it can be checked directly.
+  static Widget? screenFor(Map<String, dynamic> data) {
+    switch (data['type']) {
+      case _balanceDriftType:
+        final accountId = data['accountId'];
+        if (accountId is! String || accountId.isEmpty) return null;
+        final alertId = data['alertId'];
+        return PassbookScreen(accountId: accountId, alertId: alertId is String && alertId.isNotEmpty ? alertId : null);
+      case _subscriptionType:
+        final id = data['subscriptionId'];
+        return id is String && id.isNotEmpty ? SubscriptionDetailScreen(id: id) : const SubscriptionsScreen();
+      case _digestType:
+        final monthKey = data['monthKey'];
+        if (monthKey is! String || monthKey.isEmpty) return null;
+        return TransactionsScreen(initialMonthKey: monthKey);
+      default:
+        return null;
     }
   }
 
