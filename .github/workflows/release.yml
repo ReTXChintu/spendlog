@@ -137,6 +137,22 @@ jobs:
           fi
           echo "All mobile secrets are present."
 
+      - name: Firebase config (push notifications)
+        # Optional: the GOOGLE_SERVICES_JSON secret (the file from the Firebase console, as JSON or
+        # base64). Without it the APK builds and runs without push notifications.
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+            echo "No GOOGLE_SERVICES_JSON secret: building without push notifications."
+            exit 0
+          fi
+          case "$GOOGLE_SERVICES_JSON" in
+            \{*) printf '%s' "$GOOGLE_SERVICES_JSON" > apps/mobile-app/android/app/google-services.json ;;
+            *) printf '%s' "$GOOGLE_SERVICES_JSON" | base64 -d > apps/mobile-app/android/app/google-services.json ;;
+          esac
+          echo "google-services.json written ($(wc -c < apps/mobile-app/android/app/google-services.json) bytes)."
+
       # Every release has to be signed with the same certificate: Android
       # refuses to install an update signed by a different key.
       - name: Restore the release keystore
