@@ -212,7 +212,8 @@ class TransactionTile extends StatelessWidget {
                         // user's, only their share counted.
                         if (transaction.offLedger)
                           DsBadge(
-                            transaction.paidByName != null ? 'Paid by ${transaction.paidByName}' : 'Paid by someone else',
+                            '${transaction.paidByName != null ? 'Paid by ${transaction.paidByName}' : 'Paid by someone else'}'
+                            '${transaction.mirrorOf != null ? ' · your share' : ''}',
                             onTinted: attention,
                           ),
                         if (transaction.refundOf.isNotEmpty)

@@ -12,6 +12,7 @@ import 'person_picker_sheet.dart';
 import 'raw_message_sheet.dart';
 import 'refund_sheet.dart';
 import 'group_picker_sheet.dart';
+import 'mirror_share_sheet.dart';
 
 /// Whether a merchant reads like a bank's raw payee rather than a name a
 /// person chose: a UPI handle ("9876@ybl") or a shouted reference
@@ -73,6 +74,11 @@ Future<bool?> showEditTransactionSheet(
   required List<Category> categories,
   required List<Account> accounts,
 }) {
+  // My share of somebody else's group payment: nothing of it is mine to
+  // change but the category, and the server would refuse the rest.
+  if (transaction?.mirrorOf != null) {
+    return showMirrorShareSheet(context, transaction: transaction!, categories: categories);
+  }
   return showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
