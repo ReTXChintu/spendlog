@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:spendlog/screens/login_screen.dart';
 import 'package:spendlog/services/api_client.dart';
 import 'package:spendlog/services/auth_service.dart';
+import 'package:spendlog/services/credential_store.dart';
 import 'package:spendlog/widgets/ds/ds.dart';
 
 /// Stands in for the browser tab AppAuth opens at the identity server.
@@ -159,10 +160,14 @@ void main() {
       await http.runWithClient(() => AuthService.instance.signIn(),
           () => MockClient((_) async => _json({'token': 'session', 'user': {}, 'gmailConnected': false})));
       expect(await ApiClient.getToken(), 'session');
+      // Kept in secure storage, which is never backed up, not in prefs.
+      expect(await CredentialStore.instance.read(CredentialStore.idTokenKey), 'id-token-from-identity-server');
+      expect((await SharedPreferences.getInstance()).getKeys(), isEmpty);
 
       await AuthService.instance.signOut();
       expect(fake.endedSessions, ['id-token-from-identity-server']);
       expect(await ApiClient.getToken(), isNull);
+      expect(await CredentialStore.instance.read(CredentialStore.idTokenKey), isNull);
     });
 
     test('still signs the phone out when the identity server cannot be reached', () async {

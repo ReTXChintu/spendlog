@@ -1,19 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android 12+: nothing of SpendLog's leaves the phone, by cloud backup or
-     by device-to-device transfer. See the note in AndroidManifest.xml. -->
+<!-- Android 12+: everything of SpendLog's is backed up and moved to a new
+     phone except flutter_secure_storage's own files, where every credential
+     lives. They are encrypted with an Android Keystore key that is never
+     backed up or transferred; restored without it, they cannot be
+     decrypted and the plugin fails on the next start. Nothing is lost: the
+     person signs in again. Keep in step with backup_rules.xml, which says
+     the same for Android 11 and below. See the note in AndroidManifest.xml.
+
+     The files, as flutter_secure_storage 11.x names them with no
+     storageNamespace set (FlutterSecureStorageConfig.java,
+     NamespacedConfigSource.java):
+       FlutterSecureStorage.xml - the encrypted values
+       FlutterSecureKeyStorage.xml - the AES key, wrapped by the Keystore key
+       FlutterSecureStorageConfiguration:FlutterSecureStorage.xml - which
+         cipher wrote them, read back to decide on a migration
+       FlutterSecureStorageConfiguration.xml - the same, where older
+         versions kept it; still read as a fallback -->
 <data-extraction-rules>
     <cloud-backup>
-        <exclude domain="root" />
-        <exclude domain="file" />
-        <exclude domain="database" />
-        <exclude domain="sharedpref" />
-        <exclude domain="external" />
+        <exclude domain="sharedpref" path="FlutterSecureStorage.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureKeyStorage.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration:FlutterSecureStorage.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration.xml" />
     </cloud-backup>
     <device-transfer>
-        <exclude domain="root" />
-        <exclude domain="file" />
-        <exclude domain="database" />
-        <exclude domain="sharedpref" />
-        <exclude domain="external" />
+        <exclude domain="sharedpref" path="FlutterSecureStorage.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureKeyStorage.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration:FlutterSecureStorage.xml" />
+        <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration.xml" />
     </device-transfer>
 </data-extraction-rules>

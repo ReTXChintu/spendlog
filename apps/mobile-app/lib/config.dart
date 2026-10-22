@@ -30,9 +30,10 @@ const String oidcRedirectUri = 'io.github.retxchintu.spendlog:/oauth2redirect';
 
 const List<String> oidcScopes = ['openid', 'email', 'profile', 'offline_access'];
 
-// Key used for the stored session JWT in SharedPreferences. Declared here
-// because the background SMS isolate reads it without going through
-// ApiClient.
+// Key the owner's session JWT is stored under, in secure storage (see
+// lib/services/credential_store.dart), never SharedPreferences: those are
+// backed up. Declared here because the background SMS, push and reminder
+// isolates read it without going through ApiClient.
 const String tokenStorageKey = 'spendlog_token';
 
 /// Where the published APK can be downloaded.

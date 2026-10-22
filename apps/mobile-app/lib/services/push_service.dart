@@ -1,17 +1,20 @@
 import 'dart:async';
 import 'dart:io' show Platform;
+import 'dart:ui' show DartPluginRegistrant;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../screens/passbook_screen.dart';
 import 'api_client.dart';
+import 'credential_store.dart';
 import 'perk_import_watcher.dart' show appNavigatorKey;
 import 'sms_service.dart';
 
 /// The FCM token this phone last gave the server, so sign-out can remove
-/// the same one even if Firebase has since handed out a new one.
-const String _registeredTokenKey = 'spendlog_push_token';
+/// the same one even if Firebase has since handed out a new one. Kept in
+/// secure storage: it belongs to this install, and a restored copy would
+/// make sign-out on a new phone unregister the old one.
+const String _registeredTokenKey = CredentialStore.pushTokenKey;
 
 /// A data-only push: a kid pulled to refresh, so read any new bank SMS on
 /// this (the owner's) phone and upload them.
@@ -47,6 +50,9 @@ Future<void> _syncSms() async {
 Future<void> pushBackgroundHandler(RemoteMessage message) async {
   if (message.data['type'] != _smsSyncType) return;
   WidgetsFlutterBinding.ensureInitialized();
+  // The session is read from secure storage, a plugin; this makes sure
+  // every plugin's Dart side is registered in this isolate too.
+  DartPluginRegistrant.ensureInitialized();
   try {
     await Firebase.initializeApp();
   } catch (_) {
@@ -148,22 +154,21 @@ class PushService {
   Future<void> _register(String token) async {
     if (!await _isOwner()) return;
     await ApiClient.instance.post('/family/devices', {'token': token});
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_registeredTokenKey, token);
+    await CredentialStore.instance.write(_registeredTokenKey, token);
   }
 
   /// Called before signing out, while the session still works, so a phone
   /// that is no longer signed in stops being woken.
   Future<void> unregister() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString(_registeredTokenKey);
+    final store = CredentialStore.instance;
+    final token = await store.read(_registeredTokenKey);
     if (token == null) return;
     try {
       await ApiClient.instance.delete('/family/devices', {'token': token});
     } catch (_) {
       // The server forgets dead tokens on its own once a send to one fails.
     }
-    await prefs.remove(_registeredTokenKey);
+    await store.delete(_registeredTokenKey);
     try {
       if (await init()) await FirebaseMessaging.instance.deleteToken();
     } catch (_) {}

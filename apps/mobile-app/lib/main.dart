@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'screens/start_screen.dart';
+import 'services/credential_store.dart';
 import 'services/perk_import_watcher.dart';
 import 'services/reminder_service.dart';
 import 'services/theme_service.dart';
@@ -17,6 +18,10 @@ void main() {
   // message, and no way to tell a crash from an empty page. This puts the
   // error on screen where it can be read and copied.
   ErrorWidget.builder = (details) => CrashCard(details);
+  // Moves any credentials an older build left in SharedPreferences into
+  // secure storage. Every read of one waits for this anyway; starting it
+  // here just means the first one waits less.
+  CredentialStore.instance.ready();
   // Loaded before the first frame so a dark-mode user never sees a light flash.
   ThemeService.instance.load();
   _ownerStartup();

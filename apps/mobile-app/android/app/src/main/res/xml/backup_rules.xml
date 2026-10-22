@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 and below: everything of SpendLog's is backed up except
+     flutter_secure_storage's own files, where every credential lives. They
+     are encrypted with an Android Keystore key that is never backed up;
+     restored without it, they cannot be decrypted and the plugin fails on
+     the next start. Nothing is lost: the person signs in again.
+
+     The same files as data_extraction_rules.xml, which covers Android 12
+     and up; keep the two in step. What each file is is noted there. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="FlutterSecureStorage.xml" />
+    <exclude domain="sharedpref" path="FlutterSecureKeyStorage.xml" />
+    <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration:FlutterSecureStorage.xml" />
+    <exclude domain="sharedpref" path="FlutterSecureStorageConfiguration.xml" />
+</full-backup-content>

@@ -1,13 +1,25 @@
 import 'dart:convert';
 import 'package:another_telephony/telephony.dart';
+import 'dart:ui' show DartPluginRegistrant;
 import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config.dart';
 import 'api_client.dart';
+import 'credential_store.dart';
+import 'install_info.dart';
 
-const String _backfillDoneKey = 'spendlog_sms_backfill_done';
-const String _permissionGrantedKey = 'spendlog_sms_permission_granted';
+/// The install that last scanned the whole inbox. See
+/// [SmsService.backfillDoneOnThisInstall].
+const String _backfillDoneKey = 'spendlog_sms_backfill_install';
+
+/// What older builds kept instead: a plain true, whichever phone wrote it.
+const String _legacyBackfillDoneKey = 'spendlog_sms_backfill_done';
+
+/// Stands in for the install's stamp where it cannot be read.
+const String _unknownInstall = 'unknown';
+
 const String _lastSyncKey = 'spendlog_sms_last_sync';
 
 /// How far back a manual sync looks when it has nothing better to go on.
@@ -66,10 +78,13 @@ Map<String, dynamic> _toPayload(SmsMessage message) => {
 @pragma('vm:entry-point')
 void backgroundSmsHandler(SmsMessage message) async {
   WidgetsFlutterBinding.ensureInitialized();
+  // The session is read from secure storage, a plugin; this makes sure
+  // every plugin's Dart side is registered in this isolate too.
+  DartPluginRegistrant.ensureInitialized();
   if (!_isSendable(message)) return;
 
-  final prefs = await SharedPreferences.getInstance();
-  final token = prefs.getString(tokenStorageKey);
+  // The owner's token only: a kid's phone has none, and sends nothing.
+  final token = await CredentialStore.instance.ownerToken();
   if (token == null) return;
 
   try {
@@ -90,20 +105,23 @@ class SmsService {
 
   final Telephony _telephony = Telephony.instance;
 
-  Future<bool> requestPermissions() async {
-    final granted = await _telephony.requestPhoneAndSmsPermissions ?? false;
-    // Remembered so Settings can show the status without re-prompting.
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_permissionGrantedKey, granted);
-    return granted;
-  }
+  /// Asks Android whether SMS access is granted right now. Never prompts.
+  /// Swapped in tests.
+  Future<bool> Function() smsPermissionGranted = () => Permission.sms.isGranted;
 
-  /// Whether SMS access was granted, for the Settings status pill. Reads the
-  /// remembered answer rather than asking, so opening Settings never triggers
-  /// a system dialog.
+  Future<bool> requestPermissions() async => await _telephony.requestPhoneAndSmsPermissions ?? false;
+
+  /// Whether SMS access is granted, for the Settings status pill and before
+  /// anything reads the inbox. Asks Android rather than a remembered answer:
+  /// a flag in SharedPreferences is restored from a backup onto a phone that
+  /// never granted anything, and permissions themselves are not restored.
+  /// Checking never shows a system dialog.
   Future<bool> hasPermission() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_permissionGrantedKey) ?? false;
+    try {
+      return await smsPermissionGranted();
+    } catch (_) {
+      return false;
+    }
   }
 
   void startListening() {
@@ -125,7 +143,8 @@ class SmsService {
   /// locally to avoid re-uploading the whole inbox on every app start.
   Future<void> runBackfillIfNeeded() async {
     final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool(_backfillDoneKey) == true) return;
+    final install = await InstallInfo.load();
+    if (await _backfillDoneOnThisInstall(prefs, install)) return;
 
     final messages = (await _telephony.getInboxSms(
       columns: [SmsColumn.ADDRESS, SmsColumn.BODY, SmsColumn.DATE],
@@ -143,10 +162,34 @@ class SmsService {
       await _postBatch(batch);
     }
 
-    await prefs.setBool(_backfillDoneKey, true);
+    await prefs.setString(_backfillDoneKey, install.stamp ?? _unknownInstall);
     // The whole inbox has just been covered, so a later manual sync only
     // has to look at what arrives from here on.
     await prefs.setInt(_lastSyncKey, DateTime.now().millisecondsSinceEpoch);
+  }
+
+  /// Whether this install has already scanned this phone's inbox.
+  ///
+  /// Kept per install, as the install's stamp rather than true: the flag is
+  /// in SharedPreferences and backed up, and restored onto a new phone a
+  /// plain true would skip the scan of an inbox nobody has read yet. The
+  /// server dedupes, so the one cost of scanning again is the upload.
+  @visibleForTesting
+  static Future<bool> backfillDoneOnThisInstall(SharedPreferences prefs, InstallInfo install) =>
+      _backfillDoneOnThisInstall(prefs, install);
+
+  static Future<bool> _backfillDoneOnThisInstall(SharedPreferences prefs, InstallInfo install) async {
+    final stamp = install.stamp ?? _unknownInstall;
+    // The old plain flag. Trusted only when an older build of this same
+    // install wrote it, so an update does not upload the whole inbox again.
+    if (prefs.getBool(_legacyBackfillDoneKey) == true) {
+      await prefs.remove(_legacyBackfillDoneKey);
+      if (install.updatedInPlace) {
+        await prefs.setString(_backfillDoneKey, stamp);
+        return true;
+      }
+    }
+    return prefs.getString(_backfillDoneKey) == stamp;
   }
 
   /// Scans both at once: the phone's inbox and the connected mailbox.

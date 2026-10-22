@@ -21,17 +21,24 @@
          refusing still adds the person, by name. -->
     <uses-permission android:name="android.permission.READ_CONTACTS"/>
 
-    <!-- No Android backup of any kind. The session token lives in the app's
-         own storage, and a backup carried it - still signed in - onto a
-         reinstall or a new phone. allowBackup covers cloud backup up to
-         Android 11; dataExtractionRules also covers device-to-device
-         transfer from Android 12 on. Signing in again is one tap. -->
+    <!-- Android backup stays on, so settings and preferences follow the
+         person to a reinstall or a new phone. Credentials never do: every
+         one lives in flutter_secure_storage (lib/services/credential_store.dart),
+         encrypted with an Android Keystore key that is never backed up and
+         is destroyed on uninstall. A restored backup therefore opens at
+         sign-in, never signed in.
+
+         The plugin's own files are excluded besides. Restored without the
+         key that encrypted them, they cannot be decrypted, and the plugin
+         fails to unwrap its key on the next start. fullBackupContent says
+         so for Android 11 and below, dataExtractionRules for cloud backup
+         and device-to-device transfer from Android 12 on; the two exclude
+         the same files. -->
     <application
         android:label="SpendLog"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:allowBackup="false"
-        android:fullBackupContent="false"
+        android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules">
         <activity
             android:name=".MainActivity"

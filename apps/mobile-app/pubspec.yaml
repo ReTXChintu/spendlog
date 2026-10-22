@@ -36,6 +36,19 @@ dependencies:
   firebase_core: ^4.15.0
   firebase_messaging: ^16.7.0
   flutter_appauth: ^12.1.0
+  # Every credential lives here, never in SharedPreferences: it is
+  # encrypted with an Android Keystore key that is never backed up and dies
+  # with the app, so a restored backup cannot bring a session back.
+  # See lib/services/credential_store.dart and res/xml/backup_rules.xml.
+  flutter_secure_storage: ^11.2.0
+  # When this install happened, which is how data a backup restored is told
+  # apart from data this same install wrote (lib/services/install_info.dart).
+  package_info_plus: ^10.2.2
+  # Reads whether Android grants SMS access right now, without prompting.
+  # A remembered "granted" flag can be restored onto a phone that never
+  # granted anything. Held at 12: 13 brings permission_handler_android 14,
+  # which compiles against SDK 37, and this AGP cannot find that platform.
+  permission_handler: ^12.0.1
 
 dev_dependencies:
   flutter_test:

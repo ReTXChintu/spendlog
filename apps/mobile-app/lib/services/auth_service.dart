@@ -1,8 +1,8 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_appauth/flutter_appauth.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../config.dart';
 import 'api_client.dart';
+import 'credential_store.dart';
 
 /// A sign-in failure with something worth showing the user. The platform
 /// errors underneath are codes and stack traces, which say nothing about
@@ -90,10 +90,6 @@ class AuthService {
   /// Swapped in tests; the real one opens a browser tab.
   OidcAuthenticator authenticator = const AppAuthAuthenticator();
 
-  /// The last ID token, kept only to tell the identity server whose
-  /// session to end at sign-out.
-  static const _idTokenKey = 'spendlog_oidc_id_token';
-
   Future<bool> isLoggedIn() async => (await ApiClient.getToken()) != null;
 
   /// Signs in at the identity server and trades its ID token with our
@@ -118,8 +114,7 @@ class AuthService {
     }
 
     await ApiClient.setToken(result['token'] as String);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_idTokenKey, idToken);
+    await CredentialStore.instance.write(CredentialStore.idTokenKey, idToken);
     return true;
   }
 
@@ -127,9 +122,9 @@ class AuthService {
   /// phone is signed out first and regardless: failing to reach the
   /// identity server must never leave somebody stuck signed in.
   Future<void> signOut() async {
-    final prefs = await SharedPreferences.getInstance();
-    final idToken = prefs.getString(_idTokenKey);
-    await prefs.remove(_idTokenKey);
+    final store = CredentialStore.instance;
+    final idToken = await store.read(CredentialStore.idTokenKey);
+    await store.delete(CredentialStore.idTokenKey);
     await ApiClient.clearToken();
 
     if (idToken == null) return;

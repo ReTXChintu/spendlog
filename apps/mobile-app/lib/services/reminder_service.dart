@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ui' show DartPluginRegistrant;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,6 +10,7 @@ import 'package:timezone/data/latest_10y.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:workmanager/workmanager.dart';
 import '../config.dart';
+import 'credential_store.dart';
 import 'perk_reader.dart';
 import 'plan_warning_rule.dart';
 
@@ -405,6 +407,9 @@ class ReminderService {
 void reminderTaskDispatcher() {
   Workmanager().executeTask((task, _) async {
     if (task != _nagTask) return true;
+    // The session is read from secure storage, a plugin; this makes sure
+    // every plugin's Dart side is registered in this isolate too.
+    DartPluginRegistrant.ensureInitialized();
 
     // Both run off the one periodic task rather than two: waking twice as
     // often to ask two questions costs the same battery and twice the
@@ -421,7 +426,7 @@ Future<bool> _remindIfAnythingIsUnfiled() async {
   final prefs = await SharedPreferences.getInstance();
   if (!(prefs.getBool(_nagEnabledKey) ?? false)) return true;
 
-  final token = prefs.getString(tokenStorageKey);
+  final token = await CredentialStore.instance.ownerToken();
   if (token == null) return true;
 
   final now = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
@@ -491,7 +496,7 @@ Future<bool> _tellAboutNewBills() async {
   final prefs = await SharedPreferences.getInstance();
   if (!(prefs.getBool(_billsEnabledKey) ?? false)) return true;
 
-  final token = prefs.getString(tokenStorageKey);
+  final token = await CredentialStore.instance.ownerToken();
   if (token == null) return true;
 
   try {
@@ -607,7 +612,7 @@ Future<void> _tellAboutFinishedImport() async {
   final jobId = prefs.getString(perkImportWatchKey);
   if (jobId == null) return;
 
-  final token = prefs.getString(tokenStorageKey);
+  final token = await CredentialStore.instance.ownerToken();
   if (token == null) return;
 
   try {
@@ -643,7 +648,7 @@ Future<void> _warnAboutSavingsPlan() async {
   final prefs = await SharedPreferences.getInstance();
   if (!(prefs.getBool(_planEnabledKey) ?? true)) return;
 
-  final token = prefs.getString(tokenStorageKey);
+  final token = await CredentialStore.instance.ownerToken();
   if (token == null) return;
 
   final nowIst = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
