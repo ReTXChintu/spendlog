@@ -107,6 +107,11 @@ accountsRouter.get("/overview", async (req, res) => {
               creditLimitMinor: status.creditLimitMinor,
               usedMinor: status.groupUsedMinor ?? status.usedMinor,
               availableMinor: status.availableMinor,
+              availableSource: status.availableSource,
+              availableAsOf: status.availableAsOf,
+              availableLimitAnchorMinor: status.availableLimitAnchorMinor,
+              chargedSinceAnchorMinor: status.chargedSinceAnchorMinor,
+              paidSinceAnchorMinor: status.paidSinceAnchorMinor,
               state: status.state,
             }
           : null,
@@ -201,6 +206,10 @@ const accountFields = {
     .nullable()
     .optional(),
   creditLimitMinor: z.number().int().nonnegative().nullable().optional(),
+  /// A credit card's limit left, as the bank's app shows it. Null clears
+  /// it. Without a moment given, it is as of now.
+  availableLimitMinor: z.number().int().nonnegative().max(1_000_000_000_00).nullable().optional(),
+  availableLimitAt: z.coerce.date().nullable().optional(),
   statementDay: z.number().int().min(1).max(31).nullable().optional(),
   dueDay: z.number().int().min(1).max(31).nullable().optional(),
   isActive: z.boolean().optional(),
@@ -240,6 +249,41 @@ function withBalanceMoment<T extends { openingBalanceMinor?: number | null; open
   return data;
 }
 
+/**
+ * The same for a card's limit left: as of now when no moment is given,
+ * and the moment cleared with the figure.
+ */
+function withLimitMoment<T extends { availableLimitMinor?: number | null; availableLimitAt?: Date | null }>(
+  data: T
+): T {
+  if (data.availableLimitMinor === null) return { ...data, availableLimitAt: null };
+  if (data.availableLimitMinor !== undefined && !data.availableLimitAt) {
+    return { ...data, availableLimitAt: new Date() };
+  }
+  return data;
+}
+
+/**
+ * Splits a card's limit left off the rest of an edit, when the card draws
+ * on another card's limit: the bank's figure is the pot's, so it is kept
+ * on the holder, where every card in the group reads it. Returns what to
+ * set on the account itself and what, if anything, on the holder.
+ */
+function limitAnchorFor<T extends { availableLimitMinor?: number | null; availableLimitAt?: Date | null }>(
+  data: T,
+  holderId: Types.ObjectId | null
+): { own: T; holder: { availableLimitMinor: number | null; availableLimitAt: Date | null } | null } {
+  const timed = withLimitMoment(data);
+  if (!holderId || timed.availableLimitMinor === undefined) return { own: timed, holder: null };
+  const { availableLimitMinor, availableLimitAt, ...rest } = timed;
+  return {
+    own: rest as T,
+    holder: { availableLimitMinor: availableLimitMinor ?? null, availableLimitAt: availableLimitAt ?? null },
+  };
+}
+
+const LIMIT_ON_CARDS_ONLY = "Only a credit card has a limit left to set.";
+
 // POST /accounts — for an account no message has revealed yet, typically
 // cash or a bank that never texts.
 accountsRouter.post("/", async (req, res) => {
@@ -274,13 +318,19 @@ accountsRouter.post("/", async (req, res) => {
   const shares = await resolveSharedLimit(userId, null, parsed.data);
   if (typeof shares === "string") return res.status(400).json({ error: shares });
 
+  if (parsed.data.availableLimitMinor != null && accountType !== "CARD") {
+    return res.status(400).json({ error: LIMIT_ON_CARDS_ONLY });
+  }
+  const limit = limitAnchorFor(withBalanceMoment(parsed.data), shares);
+
   const created = await Account.create({
     userId,
-    ...withBalanceMoment(parsed.data),
+    ...limit.own,
     last4,
     linkedAccountId: link,
     sharesLimitWith: shares,
   });
+  if (limit.holder) await Account.updateOne({ _id: shares, userId }, { $set: limit.holder });
   res.status(201).json(created);
 });
 
@@ -381,11 +431,19 @@ accountsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   });
   if (typeof shares === "string") return res.status(400).json({ error: shares });
 
+  // Clearing is harmless on anything; a figure only means something on a
+  // credit card, as it will be after this edit.
+  if (parsed.data.availableLimitMinor != null && (parsed.data.accountType ?? account.accountType) !== "CARD") {
+    return res.status(400).json({ error: LIMIT_ON_CARDS_ONLY });
+  }
+  const holderId = parsed.data.sharesLimitWith === undefined ? (account.sharesLimitWith ?? null) : shares;
+  const limit = limitAnchorFor(withBalanceMoment(parsed.data), holderId);
+
   const updated = await Account.findOneAndUpdate(
     { _id: req.params.id, userId },
     {
       $set: {
-        ...withBalanceMoment(parsed.data),
+        ...limit.own,
         ...(parsed.data.linkedAccountId === undefined ? {} : { linkedAccountId: link }),
         ...(parsed.data.sharesLimitWith === undefined ? {} : { sharesLimitWith: shares }),
       },
@@ -393,6 +451,7 @@ accountsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
     { new: true, runValidators: true }
   );
   if (!updated) return res.status(404).json({ error: "Not found" });
+  if (limit.holder) await Account.updateOne({ _id: holderId, userId }, { $set: limit.holder });
 
   // One emergency fund: marking this one unmarks whichever was before.
   if (parsed.data.isSavings) {

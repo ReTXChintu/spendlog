@@ -352,8 +352,11 @@ describe("a card's second 'payment received'", () => {
     assert.equal(credits[0].sources.length, 2);
     assert.equal(credits[0].transferPairId?.toString(), paid.transaction!._id.toString());
     assert.equal(await bills.paidTowards(userId, hdfcCardId, SINCE), 4_031_00);
-    assert.equal(afterFirst, 10_000_00 - 4_031_00);
-    assert.equal(await outstanding(hdfcCardId), 10_000_00 - 4_031_00);
+    // The first message states what is left of the limit after the
+    // payment, so from then on the card owes its limit less that figure -
+    // and the second message, the same payment, changes nothing.
+    assert.equal(afterFirst, 50_000_00 - 17_099_80);
+    assert.equal(await outstanding(hdfcCardId), afterFirst);
   });
 
   it("is not a second payment of the same amount, made and reported on its own", async () => {

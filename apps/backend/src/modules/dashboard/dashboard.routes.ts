@@ -224,6 +224,8 @@ async function cardFaces(userId: Types.ObjectId, cards: CardStatus[], now: Date)
       outstandingIsEstimate: card.outstandingIsEstimate,
       usedMinor: card.groupUsedMinor ?? card.usedMinor,
       availableMinor: card.availableMinor,
+      availableSource: card.availableSource,
+      availableAsOf: card.availableAsOf,
       sharesLimitWith: card.sharesLimitWith,
       cycleStart: card.cycleStart,
       cycleEnd: card.cycleEnd,

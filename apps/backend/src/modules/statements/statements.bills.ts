@@ -189,13 +189,22 @@ export async function outstandingByCard(
  * - for a payment whose bank side SpendLog never saw, because it left an
  * account that does not text. A card-side credit already paired with its
  * debit is the same money as that debit, so only an unpaired one counts.
+ *
+ * `exclude` leaves rows out by id: a payment already counted in a figure
+ * the bank stated after it, along with the other side of that payment.
  */
-export async function paidTowards(userId: Types.ObjectId, cardId: Types.ObjectId, since: Date): Promise<number> {
+export async function paidTowards(
+  userId: Types.ObjectId,
+  cardId: Types.ObjectId,
+  since: Date,
+  exclude: Types.ObjectId[] = []
+): Promise<number> {
   const [paid] = await Transaction.aggregate<{ total: number }>([
     {
       $match: {
         userId,
         occurredAt: { $gte: since },
+        ...(exclude.length > 0 ? { _id: { $nin: exclude } } : {}),
         $or: [
           // Never a debit on the card itself: that is a purchase on it.
           { type: "DEBIT", cardPaymentFor: cardId, accountId: { $ne: cardId } },

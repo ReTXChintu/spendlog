@@ -372,6 +372,16 @@ export interface AccountDoc {
   /// shared.
   sharesLimitWith?: Types.ObjectId | null;
   creditLimitMinor?: number | null;
+  /// What the card had left of its limit at a known moment, typed in off
+  /// the bank's app - the card's answer to a bank account's starting
+  /// balance. Everything charged and paid on the card after it is taken
+  /// away and added back to say what is left now, which holds even for
+  /// purchases SpendLog never saw before that moment. A newer "Avl Lmt" in
+  /// one of the bank's own messages takes over from it. On a card that
+  /// shares its limit this is kept on the holder, since the bank's figure
+  /// is the pot's.
+  availableLimitMinor?: number | null;
+  availableLimitAt?: Date | null;
   /// Day of month the card statement is generated, and the day it is due.
   /// Each card bills on its own day, and every card figure - what was
   /// spent since the last bill, what is owed, what is left of the limit -
@@ -461,6 +471,8 @@ const accountSchema = new Schema<AccountDoc>(
     linkedAccountId: { type: Schema.Types.ObjectId, ref: "Account", default: null },
     sharesLimitWith: { type: Schema.Types.ObjectId, ref: "Account", default: null },
     creditLimitMinor: { type: Number, default: null },
+    availableLimitMinor: { type: Number, default: null },
+    availableLimitAt: { type: Date, default: null },
     statementDay: { type: Number, default: null, min: 1, max: 31 },
     dueDay: { type: Number, default: null, min: 1, max: 31 },
     // AES-256-GCM ciphertext, never the password itself, and never

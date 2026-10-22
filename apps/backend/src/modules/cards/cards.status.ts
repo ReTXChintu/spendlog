@@ -1,5 +1,5 @@
 import { Types } from "mongoose";
-import { Account, Transaction } from "../../models";
+import { Account, AccountDoc, Transaction } from "../../models";
 import { istDayKey } from "../../time";
 import { CardNetwork, CARD_NETWORKS } from "../../types";
 import { BillingCycle, cycleFor, floatDays } from "./cards.cycle";
@@ -116,7 +116,23 @@ export interface CardStatus {
   /// For a card that shares its limit, this is the group's figure: the one
   /// limit, less every member's outstanding. Spend on either card and both
   /// show less, which is what the bank does.
+  ///
+  /// When the limit's left was ever stated - typed in, or printed as "Avl
+  /// Lmt" on one of the bank's messages - this is that figure carried
+  /// forward instead, and needs neither a cycle nor a credit limit.
   availableMinor: number | null;
+  /// Where availableMinor comes from: added up from the card's own rows,
+  /// or carried forward from a figure the user ("you") or the bank's
+  /// message ("sms") stated.
+  availableSource: "computed" | "you" | "sms";
+  /// When that stated figure was true. Null when computed.
+  availableAsOf: Date | null;
+  /// The stated figure itself, and what was charged (net of refunds) and
+  /// paid on the limit since - so a screen can say how it got from there
+  /// to now. All null when computed.
+  availableLimitAnchorMinor: number | null;
+  chargedSinceAnchorMinor: number | null;
+  paidSinceAnchorMinor: number | null;
   /// The other cards this one shares a limit with, named. Empty for a card
   /// with a limit of its own.
   sharesLimitWith: string[];
@@ -165,12 +181,30 @@ export async function chargedBetween(
   from: Date,
   to: Date
 ): Promise<number> {
+  return Math.max(0, await netChargedBetween(userId, cardId, from, to));
+}
+
+/**
+ * The same sum without the floor: a stretch with more refunds than
+ * purchases comes out below zero, which is what a limit gets back.
+ *
+ * `exclude` leaves rows out by id - the one whose own message stated a
+ * figure already true after it, which must not be counted a second time.
+ */
+export async function netChargedBetween(
+  userId: Types.ObjectId,
+  cardId: Types.ObjectId,
+  from: Date,
+  to: Date,
+  exclude: Types.ObjectId[] = []
+): Promise<number> {
   const [row] = await Transaction.aggregate<{ total: number }>([
     {
       $match: {
         userId,
         accountId: cardId,
         occurredAt: { $gte: from, $lt: to },
+        ...(exclude.length > 0 ? { _id: { $nin: exclude } } : {}),
         // Its own bill payments, but not a purchase wrongly marked as
         // paying this very card - that is a charge all the same.
         $and: [{ $or: [{ cardPaymentFor: null }, { cardPaymentFor: cardId }] }],
@@ -186,7 +220,7 @@ export async function chargedBetween(
     },
   ]);
 
-  return Math.max(0, row?.total ?? 0);
+  return row?.total ?? 0;
 }
 
 /** Whole days from the start of today, in IST, to a date. */
@@ -257,6 +291,97 @@ async function lastBillFor(
   };
 }
 
+/**
+ * What a limit had left at a known moment, and what has happened to it
+ * since.
+ */
+export interface LimitAnchor {
+  /// "you": typed in off the bank's app. "sms": the "Avl Lmt" the bank
+  /// printed on one of its own messages, true just after that payment.
+  source: "you" | "sms";
+  minor: number;
+  at: Date;
+  /// Net of refunds since the anchor, on every card drawing on the limit.
+  chargedMinor: number;
+  /// Bill payments since, towards any of those cards.
+  paidMinor: number;
+  /// What is left now: the anchor, less the charges, plus the payments.
+  availableMinor: number;
+}
+
+/**
+ * Rows a limit counts after its anchor may also arrive a little in the
+ * future by the server's clock - a bank's timestamp a minute ahead - so the
+ * window runs a day past now rather than stopping at it.
+ */
+const ANCHOR_HORIZON_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The newest thing known about what a limit has left - the figure the user
+ * typed in, or the bank's own "Avl Lmt" on a later message - carried
+ * forward to now.
+ *
+ * The bank's figure is what its system said just after that payment, so
+ * that payment is not counted again, nor the bank-side half of it when it
+ * was a bill payment the card acknowledged. A card that shares its limit
+ * reads the holder's anchor and everything charged and paid on every card
+ * of the group, because the bank's figure is the pot's.
+ *
+ * Null when nothing was ever stated for this limit.
+ */
+export async function limitAnchor(
+  userId: Types.ObjectId,
+  holder: Pick<AccountDoc, "availableLimitMinor" | "availableLimitAt">,
+  memberIds: Types.ObjectId[],
+  now = new Date()
+): Promise<LimitAnchor | null> {
+  const stated = await Transaction.findOne({
+    userId,
+    accountId: { $in: memberIds },
+    statedAvailableLimitMinor: { $ne: null },
+  })
+    .sort({ occurredAt: -1, _id: -1 })
+    .select("occurredAt statedAvailableLimitMinor transferPairId");
+
+  const typed =
+    holder.availableLimitMinor != null && holder.availableLimitAt
+      ? { minor: holder.availableLimitMinor, at: holder.availableLimitAt }
+      : null;
+
+  // The newer of the two. A figure typed in at the very moment of a
+  // message is taken as the user's, since they will have read it later.
+  let base: { source: "you" | "sms"; minor: number; at: Date; exclude: Types.ObjectId[] };
+  if (stated && (!typed || stated.occurredAt.getTime() > typed.at.getTime())) {
+    base = {
+      source: "sms",
+      minor: stated.statedAvailableLimitMinor!,
+      at: stated.occurredAt,
+      exclude: [stated._id, ...(stated.transferPairId ? [stated.transferPairId] : [])],
+    };
+  } else if (typed) {
+    base = { source: "you", minor: typed.minor, at: typed.at, exclude: [] };
+  } else {
+    return null;
+  }
+
+  const until = new Date(now.getTime() + ANCHOR_HORIZON_MS);
+  const [charged, paid] = await Promise.all([
+    Promise.all(memberIds.map((id) => netChargedBetween(userId, id, base.at, until, base.exclude))),
+    Promise.all(memberIds.map((id) => paidTowards(userId, id, base.at, base.exclude))),
+  ]);
+  const chargedMinor = charged.reduce((sum, value) => sum + value, 0);
+  const paidMinor = paid.reduce((sum, value) => sum + value, 0);
+
+  return {
+    source: base.source,
+    minor: base.minor,
+    at: base.at,
+    chargedMinor,
+    paidMinor,
+    availableMinor: Math.max(0, base.minor - chargedMinor + paidMinor),
+  };
+}
+
 export async function cardStatuses(userId: Types.ObjectId, now = new Date()): Promise<CardStatus[]> {
   const [cards, bills] = await Promise.all([
     Account.find({ userId, accountType: "CARD", isActive: true }),
@@ -321,17 +446,43 @@ export async function cardStatuses(userId: Types.ObjectId, now = new Date()): Pr
   }
   const byId = new Map(measured.map((row) => [row.card.id, row.card]));
 
-  const rows = measured.map(({ card, own, cycle, unbilledMinor, bill, outstandingMinor }): CardStatus => {
+  // What each limit was last said to have left, carried forward. One per
+  // pot, read from the holder - or, when the holder is closed and so not
+  // here, the card itself.
+  const memberIdsByHolder = new Map<string, Types.ObjectId[]>();
+  for (const row of measured) {
+    const holder = holderOf(row.card);
+    memberIdsByHolder.set(holder, [...(memberIdsByHolder.get(holder) ?? []), row.card._id]);
+  }
+  const anchors = new Map(
+    await Promise.all(
+      [...memberIdsByHolder].map(
+        async ([holder, memberIds]) =>
+          [holder, await limitAnchor(userId, byId.get(holder) ?? byId.get(memberIds[0].toString())!, memberIds, now)] as const
+      )
+    )
+  );
+
+  const rows = measured.map(({ card, own, cycle, unbilledMinor, bill, outstandingMinor: worked }): CardStatus => {
     const holder = holderOf(card);
     const holderCard = byId.get(holder) ?? card;
     const members = membersByHolder.get(holder) ?? [];
     const shared = members.length > 1;
+    const anchor = anchors.get(holder) ?? null;
 
     const creditLimitMinor = holderCard.creditLimitMinor ?? null;
-    const groupUsedMinor = shared ? (usedByHolder.get(holder) ?? null) : null;
+
+    // With a figure the bank stated, what is owed against the limit is the
+    // limit less what it says is left - which counts what SpendLog never
+    // saw. Without one, it is added up from the card's own rows.
+    const anchoredUsed =
+      anchor && creditLimitMinor !== null ? Math.max(0, creditLimitMinor - anchor.availableMinor) : null;
+    const outstandingMinor = anchoredUsed !== null && !shared ? anchoredUsed : worked;
+    const groupUsedMinor = !shared ? null : anchoredUsed ?? usedByHolder.get(holder) ?? null;
     const usedAgainstLimit = shared ? groupUsedMinor : outstandingMinor;
-    const availableMinor =
-      creditLimitMinor === null || usedAgainstLimit === null
+    const availableMinor = anchor
+      ? anchor.availableMinor
+      : creditLimitMinor === null || usedAgainstLimit === null
         ? null
         : Math.max(0, creditLimitMinor - usedAgainstLimit);
 
@@ -356,11 +507,16 @@ export async function cardStatuses(userId: Types.ObjectId, now = new Date()): Pr
       unbilledMinor,
       billedUnpaidMinor: bill?.owedMinor ?? null,
       outstandingMinor,
-      outstandingIsEstimate: bill?.isEstimate ?? false,
+      outstandingIsEstimate: outstandingMinor === anchoredUsed && anchoredUsed !== null ? false : (bill?.isEstimate ?? false),
       lastBill: bill,
       billIsPaid: bill ? bill.isPaid : null,
       usedMinor: outstandingMinor,
       availableMinor,
+      availableSource: anchor?.source ?? "computed",
+      availableAsOf: anchor?.at ?? null,
+      availableLimitAnchorMinor: anchor?.minor ?? null,
+      chargedSinceAnchorMinor: anchor?.chargedMinor ?? null,
+      paidSinceAnchorMinor: anchor?.paidMinor ?? null,
       sharesLimitWith: shared
         ? members.filter((name) => name !== (card.nickname?.trim() || card.bankName))
         : [],
