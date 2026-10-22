@@ -160,6 +160,9 @@ export interface UserDoc {
   /// each that has run. Checked at start-up so each runs once per user,
   /// and again only when its version is raised.
   backfills?: Map<string, number>;
+  /// Merchants the user said are not subscriptions, as merchant keys, so
+  /// "Netflix ₹649 every month - track it?" is not asked again.
+  dismissedSubscriptionKeys?: string[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -280,6 +283,7 @@ const userSchema = new Schema<UserDoc>(
     },
     lastSmsPingAt: { type: Date, default: null },
     backfills: { type: Map, of: Number, default: undefined },
+    dismissedSubscriptionKeys: { type: [String], default: [] },
   },
   {
     timestamps: true,
@@ -718,6 +722,10 @@ export interface TransactionDoc {
   /// bill this is real spending and counts in full - the link is about
   /// knowing the commitment has been met, and by how much.
   commitmentId?: Types.ObjectId | null;
+  /// The subscription this payment renewed (Netflix for the month), found
+  /// by matching or linked by hand. Real spending, counted in full, and a
+  /// fixed cost of the month like a commitment's payment.
+  subscriptionId?: Types.ObjectId | null;
   /// Set when only part of this bill was the user's own spending. The rest
   /// is money owed back, and countedAmountMinor drops to the share.
   split?: TransactionSplit | null;
@@ -900,6 +908,7 @@ const transactionSchema = new Schema<TransactionDoc>(
     isSalary: { type: Boolean, default: false },
     cardPaymentFor: { type: Schema.Types.ObjectId, ref: "Account", default: null },
     commitmentId: { type: Schema.Types.ObjectId, ref: "FixedCommitment", default: null },
+    subscriptionId: { type: Schema.Types.ObjectId, ref: "Subscription", default: null },
     split: { type: transactionSplitSchema, default: null },
     isSettlement: { type: Boolean, default: false },
     pending: { type: Boolean, default: false },
@@ -1670,6 +1679,154 @@ export const FixedCommitment = model<FixedCommitmentDoc>(
   "FixedCommitment",
   fixedCommitmentSchema
 );
+
+/**
+ * Something that renews - Netflix, a gym, the broadband - and what it
+ * costs each time. Lives beside the fixed costs rather than inside them:
+ * a fixed cost is ticked off or paid against by hand, a subscription is
+ * matched to the charge that lands and watched for the one that does not.
+ * Both are fixed costs of the month to the budget (budget.monthly.ts).
+ *
+ * The schedule is worked out from anchorOn and the frequency
+ * (subscriptions.schedule.ts); nextRenewalOn is the first renewal not yet
+ * settled in `renewals`, and moves on as each is matched, marked paid,
+ * skipped, or given up on as missed.
+ */
+export const SUBSCRIPTION_STATUSES = ["active", "trial", "paused", "cancelled"] as const;
+export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUSES)[number];
+export const SUBSCRIPTION_PAY_METHODS = ["card", "upi", "bank", "wallet", "cash"] as const;
+export type SubscriptionPayMethod = (typeof SUBSCRIPTION_PAY_METHODS)[number];
+export const RENEWAL_STATUSES = ["paid", "missed", "skipped"] as const;
+export type RenewalStatus = (typeof RENEWAL_STATUSES)[number];
+
+/** One renewal that has come due, and what became of it. */
+export interface SubscriptionRenewal {
+  /// The day it was due, YYYY-MM-DD in IST.
+  dueOn: string;
+  status: RenewalStatus;
+  /// The payment that renewed it, when one was found or linked. Paid
+  /// with none is cash, or a payment SpendLog never saw.
+  transactionId?: Types.ObjectId | null;
+  amountMinor?: number | null;
+  paidOn?: string | null;
+}
+
+export interface SubscriptionPrice {
+  amountMinor: number;
+  /// The day this price applied from.
+  fromOn: string;
+}
+
+export interface SubscriptionShare {
+  contactId: Types.ObjectId;
+  amountMinor: number;
+}
+
+export interface SubscriptionDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  name: string;
+  amountMinor: number;
+  currency: string;
+  /// Renews every `every` `unit`s: 1 month, 3 months, 2 weeks, 45 days.
+  every: number;
+  unit: "day" | "week" | "month" | "year";
+  /// The day the schedule is counted from. The start date, until the next
+  /// renewal is moved by hand or the frequency changes, when it becomes
+  /// that renewal - so "renews on the 5th" stays on the 5th.
+  anchorOn: string;
+  /// The first renewal not yet settled, YYYY-MM-DD.
+  nextRenewalOn: string;
+  startedOn: string;
+  /// A free trial's last day. The first charge comes at nextRenewalOn.
+  trialEndsOn?: string | null;
+  payMethod?: SubscriptionPayMethod | null;
+  accountId?: Types.ObjectId | null;
+  categoryId?: Types.ObjectId | null;
+  notes?: string | null;
+  status: SubscriptionStatus;
+  pausedOn?: string | null;
+  cancelledOn?: string | null;
+  /// Every price it has had, oldest first; the last is amountMinor.
+  priceHistory: SubscriptionPrice[];
+  /// Who shares it and for how much of each charge. Their parts go on the
+  /// matched payment as people, so People knows what they owe.
+  sharedWith: SubscriptionShare[];
+  /// How many days before a renewal (and a trial's end) to say so. 0 is never.
+  remindDaysBefore: number;
+  /// Merchant keys (see merchantKey) the charges have come under, so the
+  /// next one is recognised however the bank spells it.
+  merchantKeys: string[];
+  renewals: SubscriptionRenewal[];
+  /// The renewal dates already said something about, so each is once.
+  lastRemindedOn?: string | null;
+  lastNudgedOn?: string | null;
+  trialRemindedOn?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const subscriptionRenewalSchema = new Schema<SubscriptionRenewal>(
+  {
+    dueOn: { type: String, required: true },
+    status: { type: String, enum: RENEWAL_STATUSES, required: true },
+    transactionId: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
+    amountMinor: { type: Number, default: null },
+    paidOn: { type: String, default: null },
+  },
+  { _id: false }
+);
+
+const subscriptionPriceSchema = new Schema<SubscriptionPrice>(
+  {
+    amountMinor: { type: Number, required: true, min: 0 },
+    fromOn: { type: String, required: true },
+  },
+  { _id: false }
+);
+
+const subscriptionShareSchema = new Schema<SubscriptionShare>(
+  {
+    contactId: { type: Schema.Types.ObjectId, ref: "Contact", required: true },
+    amountMinor: { type: Number, required: true, min: 1 },
+  },
+  { _id: false }
+);
+
+const subscriptionSchema = new Schema<SubscriptionDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    name: { type: String, required: true, trim: true },
+    amountMinor: { type: Number, required: true, min: 0 },
+    currency: { type: String, default: "INR" },
+    every: { type: Number, required: true, min: 1 },
+    unit: { type: String, enum: ["day", "week", "month", "year"], required: true },
+    anchorOn: { type: String, required: true },
+    nextRenewalOn: { type: String, required: true },
+    startedOn: { type: String, required: true },
+    trialEndsOn: { type: String, default: null },
+    payMethod: { type: String, enum: SUBSCRIPTION_PAY_METHODS, default: null },
+    accountId: { type: Schema.Types.ObjectId, ref: "Account", default: null },
+    categoryId: { type: Schema.Types.ObjectId, ref: "Category", default: null },
+    notes: { type: String, default: null },
+    status: { type: String, enum: SUBSCRIPTION_STATUSES, default: "active" },
+    pausedOn: { type: String, default: null },
+    cancelledOn: { type: String, default: null },
+    priceHistory: { type: [subscriptionPriceSchema], default: [] },
+    sharedWith: { type: [subscriptionShareSchema], default: [] },
+    remindDaysBefore: { type: Number, default: 2, min: 0, max: 30 },
+    merchantKeys: { type: [String], default: [] },
+    renewals: { type: [subscriptionRenewalSchema], default: [] },
+    lastRemindedOn: { type: String, default: null },
+    lastNudgedOn: { type: String, default: null },
+    trialRemindedOn: { type: String, default: null },
+  },
+  { timestamps: true, ...serialization }
+);
+
+subscriptionSchema.index({ userId: 1, status: 1, nextRenewalOn: 1 });
+
+export const Subscription = model<SubscriptionDoc>("Subscription", subscriptionSchema);
 
 /**
  * One row of a credit card statement, with what reconciling made of it.

@@ -32,6 +32,7 @@ import { ledgerRouter } from "./modules/ledger/ledger.routes";
 import { vaultRouter } from "./modules/vault/vault.routes";
 import { transactionsRouter } from "./modules/transactions/transactions.routes";
 import { groupsRouter, tripsRouter } from "./modules/groups/groups.routes";
+import { subscriptionsRouter } from "./modules/subscriptions/subscriptions.routes";
 import { APP_VERSION } from "./version";
 
 export const app = express();
@@ -73,6 +74,7 @@ app.use("/trips", tripsRouter);
 app.use("/merchant-presets", presetsRouter);
 app.use("/cards", cardsRouter);
 app.use("/budget", budgetRouter);
+app.use("/subscriptions", subscriptionsRouter);
 app.use("/statements", statementsRouter);
 app.use("/vault", vaultRouter);
 app.use("/ledger", ledgerRouter);

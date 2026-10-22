@@ -18,6 +18,7 @@ import { runDailyFundRefresh } from "./modules/funds/funds.cache";
 import { runSipStepsBackfill } from "./modules/funds/funds.backfill";
 import { runGroupSharesBackfill } from "./modules/groups/groups.backfill";
 import { runGroupMirrorsBackfill } from "./modules/groups/groups.mirrors";
+import { runSubscriptionNotices } from "./modules/subscriptions/subscriptions.notify";
 import { runTransferLegBackfill } from "./modules/transactions/transactions.transfer";
 import { runLoanSplitBackfill } from "./modules/loans/loans.backfill";
 import { syncAllConnectedEmails } from "./modules/ingestion/gmail.service";
@@ -32,6 +33,9 @@ const FUND_REFRESH_CHECK_MS = 30 * 60 * 1000;
 // The same, for the nightly check of every balance against the bank's
 // (accounts.drift.ts): due after half past ten at night, guarded in Mongo.
 const DRIFT_CHECK_MS = 30 * 60 * 1000;
+
+// And for the jobs that run once a morning (jobs/daily.ts).
+const DAILY_JOB_CHECK_MS = 30 * 60 * 1000;
 
 // Shared with the frontend's static server, which is plain JS outside this
 // TypeScript project — hence the runtime require rather than an import.
@@ -165,6 +169,13 @@ async function start() {
     runNightlyDriftCheck().catch((err) => console.error("Balance drift check failed:", err));
   checkDrift();
   setInterval(checkDrift, DRIFT_CHECK_MS);
+
+  // Subscriptions: renewals coming up, trials ending and renewals that
+  // never came, once a morning (guarded in Mongo like the drift check).
+  const subscriptionNotices = () =>
+    runSubscriptionNotices().catch((err) => console.error("Subscription notices failed:", err));
+  subscriptionNotices();
+  setInterval(subscriptionNotices, DAILY_JOB_CHECK_MS);
 }
 
 start().catch((err) => {

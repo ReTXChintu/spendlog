@@ -13,6 +13,7 @@ import { istDayKey, istDayStart } from "../../time";
 import { UserMonth, monthLabel, userMonth, userMonths } from "./budget.months";
 import { BucketSummary, bucketSummary } from "./budget.bucket";
 import { isCardBillCommitment } from "../cards/cards.billPayment";
+import { subscriptionsStillDue } from "../subscriptions/subscriptions.service";
 
 /**
  * One amount for the month, and everything the month costs held against it.
@@ -291,10 +292,10 @@ export interface MonthlyBudgetStatus {
 
 /** Spending in a month by category, and how much of it was fixed costs. */
 async function spendingIn(userId: Types.ObjectId, month: Pick<UserMonth, "start" | "end">) {
-  // One pass. A payment towards a commitment or a card EMI's instalment is
-  // a fixed cost; a loan repayment is one for the part put down to its
-  // loans, and anything it was not split to yet is the day to day, the
-  // same as everything else.
+  // One pass. A payment towards a commitment, a subscription's renewal or
+  // a card EMI's instalment is a fixed cost; a loan repayment is one for
+  // the part put down to its loans, and anything it was not split to yet
+  // is the day to day, the same as everything else.
   const rows = await Transaction.aggregate<{ _id: Types.ObjectId | null; total: number; fixed: number }>([
     {
       $match: {
@@ -308,7 +309,13 @@ async function spendingIn(userId: Types.ObjectId, month: Pick<UserMonth, "start"
       $addFields: {
         fixedPart: {
           $cond: [
-            { $or: [{ $gt: ["$commitmentId", null] }, { $eq: ["$emiRole", "INSTALMENT"] }] },
+            {
+              $or: [
+                { $gt: ["$commitmentId", null] },
+                { $gt: ["$subscriptionId", null] },
+                { $eq: ["$emiRole", "INSTALMENT"] },
+              ],
+            },
             "$countedAmountMinor",
             {
               $min: [
@@ -350,11 +357,12 @@ async function spendingIn(userId: Types.ObjectId, month: Pick<UserMonth, "start"
 /**
  * Fixed costs still to go out this month, by the category they will land
  * in ("none" where that is not known): every active commitment's
- * shortfall, the way the pace card works it out, and any loan or card EMI
- * instalment due in the month and not yet paid.
+ * shortfall, the way the pace card works it out, every subscription
+ * renewal still to come, and any loan or card EMI instalment due in the
+ * month and not yet paid.
  */
 async function fixedStillDue(userId: Types.ObjectId, month: UserMonth): Promise<Map<string, number>> {
-  const [commitments, paidRows, loanDue, emiDue] = await Promise.all([
+  const [commitments, paidRows, loanDue, emiDue, renewals] = await Promise.all([
     FixedCommitment.find({ userId, isActive: true }),
     Transaction.aggregate<{ _id: Types.ObjectId; total: number }>([
       {
@@ -373,11 +381,14 @@ async function fixedStillDue(userId: Types.ObjectId, month: UserMonth): Promise<
       dueDate: { $gte: month.start, $lt: month.end },
     }).select("amountMinor paidMinor"),
     EmiInstalment.find({ userId, status: "DUE", dueDate: { $gte: month.start, $lt: month.end } }).select("amountMinor"),
+    subscriptionsStillDue(userId, month),
   ]);
   const paid = new Map(paidRows.map((row) => [row._id.toString(), row.total]));
 
   const due = new Map<string, number>();
   const add = (key: string, amount: number) => due.set(key, (due.get(key) ?? 0) + amount);
+  // A renewal still to come lands in its subscription's category.
+  for (const [key, amount] of renewals) add(key, amount);
 
   // A commitment is ticked against its period's first day, which for the
   // current month is the month's own first day.
