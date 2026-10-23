@@ -45,6 +45,10 @@ export type CountedReason = (typeof COUNTED_REASONS)[number];
 export const EMI_PLAN_STATUSES = ["ACTIVE", "CLOSED", "CANCELLED"] as const;
 export type EmiPlanStatus = (typeof EMI_PLAN_STATUSES)[number];
 
+// Made from a purchase SpendLog saw, or typed in for one it never did.
+export const EMI_PLAN_ORIGINS = ["CONVERTED", "EXISTING"] as const;
+export type EmiPlanOrigin = (typeof EMI_PLAN_ORIGINS)[number];
+
 export const EMI_INSTALMENT_STATUSES = ["DUE", "PAID", "SKIPPED"] as const;
 export type EmiInstalmentStatus = (typeof EMI_INSTALMENT_STATUSES)[number];
 

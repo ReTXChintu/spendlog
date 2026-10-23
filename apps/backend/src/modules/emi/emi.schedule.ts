@@ -70,11 +70,30 @@ export function buildSchedule(
   months: number,
   monthlyAmountMinor: number
 ): ScheduledInstalment[] {
+  return scheduleAround(startDate, 0, months, monthlyAmountMinor);
+}
+
+/**
+ * The same schedule, laid out around one known instalment rather than the
+ * first: the one due on `anchor` is number `anchorIndex + 1`.
+ *
+ * For an EMI already running, the date known for certain is the next one
+ * due, and every other date is counted from it. Counting back to the first
+ * and then forward again would lose a month-end day: an EMI due on the
+ * 31st, one month paid, would start on the 28th of February and bill on
+ * the 28th ever after.
+ */
+export function scheduleAround(
+  anchor: Date,
+  anchorIndex: number,
+  months: number,
+  monthlyAmountMinor: number
+): ScheduledInstalment[] {
   const schedule: ScheduledInstalment[] = [];
   for (let i = 0; i < months; i += 1) {
     schedule.push({
       seq: i + 1,
-      dueDate: addMonths(startDate, i),
+      dueDate: addMonths(anchor, i - anchorIndex),
       amountMinor: monthlyAmountMinor,
     });
   }

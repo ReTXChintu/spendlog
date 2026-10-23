@@ -6,6 +6,7 @@ import {
   COMMITMENT_KINDS,
   COUNTED_REASONS,
   EMI_INSTALMENT_STATUSES,
+  EMI_PLAN_ORIGINS,
   EMI_PLAN_STATUSES,
   EMI_ROLES,
   LOAN_INSTALMENT_STATUSES,
@@ -27,6 +28,7 @@ import {
   CommitmentKind,
   CountedReason,
   EmiInstalmentStatus,
+  EmiPlanOrigin,
   EmiPlanStatus,
   EmiRole,
   LoanInstalmentStatus,
@@ -1158,8 +1160,13 @@ export interface EmiPlanDoc {
   _id: Types.ObjectId;
   userId: Types.ObjectId;
   /// The purchase that was converted. Kept so cancelling a plan can put it
-  /// back to counting in full.
-  sourceTransactionId: Types.ObjectId;
+  /// back to counting in full. Null on an EMI that was already running
+  /// before SpendLog saw anything - there is no purchase to point at.
+  sourceTransactionId?: Types.ObjectId | null;
+  /// CONVERTED: made from a purchase SpendLog saw. EXISTING: typed in for
+  /// an EMI whose purchase predates tracking, so nothing is kept out of
+  /// the totals and only the instalments from here on are real rows.
+  origin: EmiPlanOrigin;
   accountId?: Types.ObjectId | null;
   label?: string | null;
   principalMinor: number;
@@ -1181,7 +1188,8 @@ export interface EmiPlanDoc {
 const emiPlanSchema = new Schema<EmiPlanDoc>(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
-    sourceTransactionId: { type: Schema.Types.ObjectId, ref: "Transaction", required: true },
+    sourceTransactionId: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
+    origin: { type: String, enum: EMI_PLAN_ORIGINS, default: "CONVERTED" },
     accountId: { type: Schema.Types.ObjectId, ref: "Account", default: null },
     label: { type: String, default: null },
     principalMinor: { type: Number, required: true, min: 1 },
@@ -1197,8 +1205,18 @@ const emiPlanSchema = new Schema<EmiPlanDoc>(
 );
 
 // One plan per purchase: converting the same transaction twice would
-// double-count the whole thing.
-emiPlanSchema.index({ sourceTransactionId: 1 }, { unique: true });
+// double-count the whole thing. Partial, because an EMI typed in for a
+// purchase SpendLog never saw has no purchase, and every such plan would
+// otherwise collide on null. Named apart from the old non-partial index so
+// db.ts can drop that one by name (see dropSupersededIndexes).
+emiPlanSchema.index(
+  { sourceTransactionId: 1 },
+  {
+    unique: true,
+    name: "sourceTransactionId_1_converted",
+    partialFilterExpression: { sourceTransactionId: { $type: "objectId" } },
+  }
+);
 
 export const EmiPlan = model<EmiPlanDoc>("EmiPlan", emiPlanSchema);
 
@@ -1214,6 +1232,10 @@ export interface EmiInstalmentDoc {
   /// The real debit, once one has arrived and been matched to it.
   transactionId?: Types.ObjectId | null;
   paidAt?: Date | null;
+  /// Paid with no transaction to show for it, because it was paid before
+  /// SpendLog was tracking - said so when an existing EMI was added. Never
+  /// counted as spending or as money still committed.
+  paidBeforeTracking: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -1228,6 +1250,7 @@ const emiInstalmentSchema = new Schema<EmiInstalmentDoc>(
     status: { type: String, enum: EMI_INSTALMENT_STATUSES, default: "DUE" },
     transactionId: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
     paidAt: { type: Date, default: null },
+    paidBeforeTracking: { type: Boolean, default: false },
   },
   { timestamps: true, ...serialization }
 );

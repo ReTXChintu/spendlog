@@ -34,22 +34,39 @@ export async function connectDatabase(): Promise<void> {
  * a deployment that skipped a version land in the same state as one that
  * did not.
  */
-async function dropSupersededIndexes(): Promise<void> {
+export async function dropSupersededIndexes(): Promise<void> {
   const superseded = [
     // Was unique on { userId, sourceRef }. The second half is Gmail's
     // attachment id, which is minted per fetch rather than being a name
     // for anything, so it identified nothing and every sync read every
     // statement again. Identity moved to mailKey and fileHash.
     { collection: "cardstatements", index: "userId_1_sourceRef_1" },
+    // Was unique on every plan's sourceTransactionId. An EMI typed in for
+    // a purchase SpendLog never saw has none, so the replacement only
+    // covers plans that do (sourceTransactionId_1_converted). Its rebuild
+    // fails while this one exists - same keys, other options - so it is
+    // built again below once this is gone.
+    {
+      collection: "emiplans",
+      index: "sourceTransactionId_1",
+      rebuild: async () => (await import("./models")).EmiPlan.createIndexes(),
+    },
   ];
 
-  for (const { collection, index } of superseded) {
+  for (const { collection, index, rebuild } of superseded as {
+    collection: string;
+    index: string;
+    rebuild?: () => Promise<unknown>;
+  }[]) {
+    let dropped = false;
     try {
       await mongoose.connection.collection(collection).dropIndex(index);
+      dropped = true;
     } catch {
       // Already dropped, or never existed on this deployment. Both fine:
       // this runs on every boot and has to be a no-op on all but one.
     }
+    if (dropped && rebuild) await rebuild();
   }
 }
 

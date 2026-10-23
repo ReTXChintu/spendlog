@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { addMonths, buildSchedule, monthlyInstalmentMinor } from "./emi.schedule";
+import { addMonths, buildSchedule, monthlyInstalmentMinor, scheduleAround } from "./emi.schedule";
 
 describe("monthlyInstalmentMinor", () => {
   it("splits a no-cost EMI evenly", () => {
@@ -92,5 +92,41 @@ describe("buildSchedule", () => {
     const total = schedule.reduce((sum, entry) => sum + entry.amountMinor, 0);
 
     assert.equal(total, 320000 * 12);
+  });
+});
+
+describe("addMonths backwards", () => {
+  it("steps back across a year end and keeps the time of day", () => {
+    assert.equal(addMonths(new Date("2026-01-15T10:00:00Z"), -2).toISOString(), "2025-11-15T10:00:00.000Z");
+  });
+
+  it("clamps to the end of a shorter month, as going forwards does", () => {
+    assert.equal(addMonths(new Date("2027-03-31T00:00:00Z"), -1).toISOString().slice(0, 10), "2027-02-28");
+    assert.equal(addMonths(new Date("2028-03-31T00:00:00Z"), -1).toISOString().slice(0, 10), "2028-02-29");
+  });
+
+});
+
+describe("scheduleAround", () => {
+  it("puts the known instalment on its date and counts the rest from it", () => {
+    const next = new Date("2026-11-05T00:00:00Z");
+    const schedule = scheduleAround(next, 5, 12, 1);
+    assert.equal(schedule.length, 12);
+    assert.equal(schedule[5].dueDate.toISOString(), next.toISOString());
+    assert.equal(schedule[0].dueDate.toISOString().slice(0, 10), "2026-06-05");
+    assert.equal(schedule[11].dueDate.toISOString().slice(0, 10), "2027-05-05");
+  });
+
+  it("keeps a month-end day: due on the 31st stays on the 31st where a month has one", () => {
+    const schedule = scheduleAround(new Date("2027-03-31T00:00:00Z"), 1, 4, 1);
+    assert.deepEqual(
+      schedule.map((entry) => entry.dueDate.toISOString().slice(0, 10)),
+      ["2027-02-28", "2027-03-31", "2027-04-30", "2027-05-31"]
+    );
+  });
+
+  it("is buildSchedule when anchored on the first instalment", () => {
+    const start = new Date("2026-09-10T00:00:00Z");
+    assert.deepEqual(scheduleAround(start, 0, 3, 7), buildSchedule(start, 3, 7));
   });
 });
