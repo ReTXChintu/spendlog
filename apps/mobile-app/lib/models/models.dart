@@ -1472,6 +1472,26 @@ class EmiPlan {
   final int remainingMinor;
   final String status;
 
+  /// "CONVERTED" when made from a purchase SpendLog saw, "EXISTING" when
+  /// typed in for one that predates tracking. An older server sends
+  /// neither, and every plan it has was converted.
+  final String origin;
+
+  /// The card or bank account it is billed to, with its name for showing.
+  final String? accountId;
+  final String? accountLabel;
+  final DateTime? startDate;
+  final List<EmiInstalment> instalments;
+
+  /// The first instalment still due, or null once nothing is.
+  final EmiInstalment? nextDue;
+
+  /// Paid with nothing to show for it, because before SpendLog tracked.
+  final int paidBeforeTrackingCount;
+
+  /// When SpendLog began importing for this user.
+  final DateTime? trackingSince;
+
   EmiPlan({
     required this.id,
     this.label,
@@ -1482,18 +1502,97 @@ class EmiPlan {
     required this.paidCount,
     required this.remainingMinor,
     required this.status,
+    this.origin = 'CONVERTED',
+    this.accountId,
+    this.accountLabel,
+    this.startDate,
+    this.instalments = const [],
+    this.nextDue,
+    this.paidBeforeTrackingCount = 0,
+    this.trackingSince,
   });
 
-  factory EmiPlan.fromJson(Map<String, dynamic> json) => EmiPlan(
-        id: json['id'] as String,
-        label: json['label'] as String?,
-        principalMinor: json['principalMinor'] as int,
-        months: json['months'] as int,
-        monthlyAmountMinor: json['monthlyAmountMinor'] as int,
-        totalPayableMinor: json['totalPayableMinor'] as int,
-        paidCount: json['paidCount'] as int? ?? 0,
-        remainingMinor: json['remainingMinor'] as int? ?? 0,
-        status: json['status'] as String? ?? 'ACTIVE',
+  bool get isActive => status == 'ACTIVE';
+  bool get isExisting => origin == 'EXISTING';
+  String get name => (label == null || label!.trim().isEmpty) ? 'EMI' : label!;
+
+  /// The day the last instalment falls due.
+  DateTime? get endsOn => instalments.isEmpty ? null : instalments.last.dueDate;
+
+  factory EmiPlan.fromJson(Map<String, dynamic> json) {
+    // The list populates the account; a freshly created plan sends its id.
+    final account = json['accountId'];
+    String? accountId;
+    String? accountLabel;
+    if (account is Map<String, dynamic>) {
+      accountId = account['id'] as String?;
+      final nickname = (account['nickname'] as String?)?.trim();
+      final last4 = account['last4'] as String?;
+      final name = (nickname == null || nickname.isEmpty) ? account['bankName'] as String? ?? 'Account' : nickname;
+      accountLabel = last4 == null ? name : '$name ••$last4';
+    } else if (account is String) {
+      accountId = account;
+    }
+    final next = json['nextDue'];
+    return EmiPlan(
+      id: json['id'] as String,
+      label: json['label'] as String?,
+      principalMinor: json['principalMinor'] as int,
+      months: json['months'] as int,
+      monthlyAmountMinor: json['monthlyAmountMinor'] as int,
+      totalPayableMinor: json['totalPayableMinor'] as int,
+      paidCount: json['paidCount'] as int? ?? 0,
+      remainingMinor: json['remainingMinor'] as int? ?? 0,
+      status: json['status'] as String? ?? 'ACTIVE',
+      origin: json['origin'] as String? ?? 'CONVERTED',
+      accountId: accountId,
+      accountLabel: accountLabel,
+      startDate: DateTime.tryParse(json['startDate'] as String? ?? ''),
+      instalments: (json['instalments'] as List<dynamic>? ?? [])
+          .map((row) => EmiInstalment.fromJson(row as Map<String, dynamic>))
+          .toList(),
+      nextDue: next is Map<String, dynamic> ? EmiInstalment.fromJson(next) : null,
+      paidBeforeTrackingCount: json['paidBeforeTrackingCount'] as int? ?? 0,
+      trackingSince: DateTime.tryParse(json['trackingSince'] as String? ?? ''),
+    );
+  }
+}
+
+/// One month of an EMI: due, paid by a debit SpendLog matched, paid before
+/// SpendLog was tracking, or skipped when the plan was closed early.
+class EmiInstalment {
+  final String? id;
+  final int seq;
+  final DateTime dueDate;
+  final int amountMinor;
+  final String status;
+  final String? transactionId;
+  final DateTime? paidAt;
+  final bool paidBeforeTracking;
+
+  const EmiInstalment({
+    this.id,
+    required this.seq,
+    required this.dueDate,
+    required this.amountMinor,
+    this.status = 'DUE',
+    this.transactionId,
+    this.paidAt,
+    this.paidBeforeTracking = false,
+  });
+
+  bool get isDue => status == 'DUE';
+  bool get isPaid => status == 'PAID';
+
+  factory EmiInstalment.fromJson(Map<String, dynamic> json) => EmiInstalment(
+        id: json['id'] as String?,
+        seq: json['seq'] as int? ?? 0,
+        dueDate: DateTime.parse(json['dueDate'] as String),
+        amountMinor: json['amountMinor'] as int? ?? 0,
+        status: json['status'] as String? ?? 'DUE',
+        transactionId: json['transactionId'] as String?,
+        paidAt: DateTime.tryParse(json['paidAt'] as String? ?? ''),
+        paidBeforeTracking: json['paidBeforeTracking'] == true,
       );
 }
 

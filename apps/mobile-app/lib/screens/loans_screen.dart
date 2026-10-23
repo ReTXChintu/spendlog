@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
 import '../widgets/ds/ds.dart';
+import '../widgets/emi_section.dart';
 import '../utils/format.dart';
 import '../utils/loan_tab.dart';
 import '../widgets/loan_dialog.dart';
@@ -88,7 +89,7 @@ class _LoansScreenState extends State<LoansScreen> {
       },
       child: Scaffold(
         backgroundColor: c.bg,
-        appBar: AppBar(title: const Text('Loans')),
+        appBar: AppBar(title: const Text('Loans & EMIs')),
         body: _loading
             ? const Center(child: DsSpinner())
             : _failed
@@ -125,6 +126,10 @@ class _LoansScreenState extends State<LoansScreen> {
                         ],
                         if (_loans.isEmpty)
                           const DsEmpty(icon: DsIcons.banknote, message: 'No loans yet. Add one from Settings.'),
+                        const SizedBox(height: kCardGap),
+                        // A card's EMIs sit beside loans: both are a fixed
+                        // amount a month for a fixed term.
+                        EmiSection(onChanged: () => _changed = true),
                       ],
                     ),
                   ),

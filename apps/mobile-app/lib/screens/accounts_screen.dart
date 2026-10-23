@@ -7,6 +7,7 @@ import '../widgets/account_balance_panel.dart';
 import '../widgets/card_available_panel.dart';
 import '../widgets/card_vault_panel.dart';
 import '../widgets/edit_account_sheet.dart';
+import '../widgets/emi_section.dart';
 import '../widgets/pocket_money.dart';
 import '../widgets/state_block.dart';
 import 'passbook_screen.dart';
@@ -795,6 +796,13 @@ class _AccountsScreenState extends State<AccountsScreen> {
                 Expanded(child: _latestBill(row.bill)),
               ],
             ),
+          ],
+
+          // The card's EMIs, and the way to add one that began before
+          // SpendLog - here, where the card's limit and bills already are.
+          if (isCard) ...[
+            const SizedBox(height: 8),
+            EmiSection(key: ValueKey('emis-${account.id}'), accountId: account.id, onChanged: _load),
           ],
 
           if (row.debitCards.isNotEmpty) ...[

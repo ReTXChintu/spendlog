@@ -356,6 +356,8 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
               GridItem(HomeTile(
                 label: 'EMIs running',
                 icon: DsIcons.repeat,
+                // Each plan and its months are on Loans & EMIs.
+                onTap: () => LoansScreen.open(context).then((_) => load()),
                 child: _TileBody(
                   figure: formatMoney(data.emiMonthlyMinor),
                   sub: 'a month across ${data.emiCount == 1 ? 'one plan' : '${data.emiCount} plans'} · '
