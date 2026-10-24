@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { GoogleAuth } from "google-auth-library";
 import { Types } from "mongoose";
 import { User } from "../../models";
+import { distinctTokens } from "./family.devices";
 
 /**
  * Waking the owner's phone so it reads new SMS, when a kid asks for fresh
@@ -120,7 +121,8 @@ export async function sendNotification(
   if (!config) return { sent: false, reason: "not-configured" };
 
   const user = await User.findById(userId).select("fcmTokens");
-  const tokens = (user?.fcmTokens ?? []).map((entry) => entry.token);
+  // Each phone once, even if its token was ever stored twice.
+  const tokens = distinctTokens(user?.fcmTokens);
   if (tokens.length === 0) return { sent: false, reason: "no-device" };
 
   const devices = await deliver(config, userId, tokens, {
@@ -145,7 +147,7 @@ export async function pingOwnerForSms(ownerId: Types.ObjectId, now = new Date())
   if (!config) return { pinged: false, reason: "not-configured" };
 
   const owner = await User.findById(ownerId).select("fcmTokens lastSmsPingAt").orFail();
-  const tokens = (owner.fcmTokens ?? []).map((entry) => entry.token);
+  const tokens = distinctTokens(owner.fcmTokens);
   if (tokens.length === 0) return { pinged: false, reason: "no-device" };
 
   if (owner.lastSmsPingAt && now.getTime() - owner.lastSmsPingAt.getTime() < PING_EVERY_MS) {

@@ -6,6 +6,7 @@ import { validObjectIdParam } from "../../middleware/validate";
 import { Account, MerchantPreset, User } from "../../models";
 import { MIN_PASSWORD_LENGTH, hashPassword } from "./family.password";
 import { pushAvailable } from "./family.push";
+import { registerDevice } from "./family.devices";
 
 export const familyRouter = Router();
 familyRouter.use(requireAuth);
@@ -153,13 +154,7 @@ familyRouter.post("/devices", async (req, res) => {
   const parsed = deviceSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "A device token is required" });
 
-  const ownerId = currentUserId(req);
-  await User.updateOne({ _id: ownerId }, { $pull: { fcmTokens: { token: parsed.data.token } } });
-  await User.updateOne(
-    { _id: ownerId },
-    // The newest few: a phone reinstalled ten times should not be woken ten times.
-    { $push: { fcmTokens: { $each: [{ token: parsed.data.token, updatedAt: new Date() }], $slice: -5 } } }
-  );
+  await registerDevice(currentUserId(req), parsed.data.token);
   res.status(204).end();
 });
 
