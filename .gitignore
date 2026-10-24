@@ -51,6 +51,3 @@ Thumbs.db
 # Firebase — push config and the server key, never committed
 apps/mobile-app/android/app/google-services.json
 apps/backend/key.json
-
-# Sibling apps and the identity server, each its own git repo.
-/projects/
