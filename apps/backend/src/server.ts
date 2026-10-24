@@ -22,6 +22,9 @@ import { runMonthlyDigests } from "./modules/budget/budget.digest";
 import { runSubscriptionNotices } from "./modules/subscriptions/subscriptions.notify";
 import { runTransferLegBackfill } from "./modules/transactions/transactions.transfer";
 import { runLoanSplitBackfill } from "./modules/loans/loans.backfill";
+import { runReferenceSplitBackfill } from "./modules/transactions/transactions.referenceSplit";
+import { runStatedTimeBackfill } from "./modules/transactions/transactions.statedTime";
+import { runFcmTokenDedupeBackfill } from "./modules/family/family.devices";
 import { syncAllConnectedEmails } from "./modules/ingestion/gmail.service";
 
 const EMAIL_SYNC_INTERVAL_MS = 15 * 60 * 1000;
@@ -135,6 +138,18 @@ async function start() {
   Promise.all([legsDone, statedDone])
     .then(() => runMissingCreditBackfill())
     .catch((err) => console.error("Missing credit backfill failed:", err));
+  // Payments of the same amount minutes apart that were merged before
+  // duplicate detection read the bank's reference, taken apart; then every
+  // row moved to the time its message states rather than when it arrived -
+  // after the split, so each half takes its own message's time. After the
+  // card bill passes, which pair rows by time.
+  legsDone
+    .then(() => runReferenceSplitBackfill())
+    .catch((err) => console.error("Reference split failed:", err))
+    .then(() => runStatedTimeBackfill())
+    .catch((err) => console.error("Stated-time backfill failed:", err));
+  // A phone's push token kept once, however often it was registered.
+  runFcmTokenDedupeBackfill().catch((err) => console.error("Push token cleanup failed:", err));
   runAccountUnknownBackfill().catch((err) => console.error("Account unknown backfill failed:", err));
   // Loan repayments onto loanSplits, and every loan's instalments covered
   // by what was actually paid towards it rather than one tick per payment.

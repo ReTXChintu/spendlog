@@ -67,8 +67,10 @@ const SINCE = on("2026-10-01");
 
 const CSB_PURCHASE = (rupees: string) =>
   `Rs.${rupees} debited to your Edge CSB Bank RuPay Credit Card ending 6623 on 9/10/26, 8:40 PM - (UPI Ref no.123456789012). To dispute, call 18002667. Thanks for using the Jupiter App.`;
+// Jupiter writes the month first: 10/11/26 is 11 October, the day these
+// tests deliver it.
 const CSB_FROM_ACCOUNT =
-  "Rs 677.00 credited to your Edge CSB Bank RuPay Credit Card ending 6623 from a/c no. XX1614 on 9/11/26, 4:08 PM - (UPI Ref no. 123456789012). Thanks for using the Jupiter App.";
+  "Rs 677.00 credited to your Edge CSB Bank RuPay Credit Card ending 6623 from a/c no. XX1614 on 10/11/26, 4:08 PM - (UPI Ref no. 123456789012). Thanks for using the Jupiter App.";
 const HDFC_PAID = "Rs.4031.00 debited from A/c XX5130 on 15-10-26 towards HDFC Bank Credit Card XX1377. -Federal Bank";
 const HDFC_RECEIVED_1 =
   "DEAR HDFCBANK CARDMEMBER, PAYMENT OF Rs. 4031.00 RECEIVED TOWARDS YOUR CREDIT CARD ENDING WITH 1377 ON 15-10-2026.YOUR AVAILABLE LIMIT IS RS. 17099.80";

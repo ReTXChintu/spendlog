@@ -4,6 +4,7 @@ import { Types } from "mongoose";
 import { env } from "../../env";
 import { EmailConnection } from "../../models";
 import { ingestRawMessage } from "../../parsing/ingest";
+import { htmlToText } from "../../parsing/reference";
 
 export const GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 
@@ -183,6 +184,26 @@ function extractPlainText(payload: gmail_v1.Schema$MessagePart | undefined): str
   return null;
 }
 
+/**
+ * The HTML part as the text a person reads in it, for an email with no
+ * plain-text part: HDFC's alerts are HTML only, and Gmail's preview stops
+ * before the transaction's reference number.
+ */
+function extractHtmlText(payload: gmail_v1.Schema$MessagePart | undefined): string | null {
+  if (!payload) return null;
+
+  if (payload.mimeType === "text/html" && payload.body?.data) {
+    return htmlToText(decodeBase64Url(payload.body.data));
+  }
+
+  for (const part of payload.parts ?? []) {
+    const text = extractHtmlText(part);
+    if (text) return text;
+  }
+
+  return null;
+}
+
 const TRANSACTION_QUERY =
   '(debited OR credited OR "has been debited" OR "has been credited" OR UPI OR "a/c" OR spent)';
 
@@ -229,7 +250,9 @@ async function syncConnection(
       scanned += 1;
 
       const message = await gmail.users.messages.get({ userId: "me", id: ref.id, format: "full" });
-      const bodyText = extractPlainText(message.data.payload) ?? message.data.snippet ?? "";
+      const plainText = extractPlainText(message.data.payload);
+      const bodyText = plainText ?? message.data.snippet ?? "";
+      const detailText = plainText ?? extractHtmlText(message.data.payload);
       const receivedAt = message.data.internalDate ? new Date(Number(message.data.internalDate)) : new Date();
 
       // One email that can't be read must not stop the rest: thrown, it
@@ -242,6 +265,7 @@ async function syncConnection(
           source: "EMAIL",
           sourceRef: ref.id,
           receivedAt,
+          detailText,
         });
         if (result.status === "created") created += 1;
       } catch (error) {

@@ -9,6 +9,8 @@ import { groupForOccurredAt, syncGroupSplit } from "../modules/groups/groups.ser
 import { findDuplicate, detectSelfTransfer } from "./dedupe";
 import { parseStatedFigures } from "./balance";
 import { parseTransactionText } from "./parser";
+import { statedMoment } from "./moment";
+import { transactionReference } from "./reference";
 import { horizonFor } from "../modules/ledger/ledger.horizon";
 import {
   cardBillAccount,
@@ -69,13 +71,19 @@ export async function ingestRawMessage(params: {
   source: TransactionSource;
   sourceRef: string | null;
   receivedAt: Date;
+  /// The whole message as a person reads it, when rawText is only part of
+  /// it: an HTML-only email stores Gmail's short preview, and the bank's
+  /// reference is further down. Read for the reference, never stored.
+  detailText?: string | null;
 }): Promise<IngestResult> {
   const parsed = parseTransactionText(params.rawText);
   if (!parsed) {
     return { status: "ignored", transaction: null };
   }
 
-  const occurredAt = parsed.occurredAt ?? params.receivedAt;
+  // When the text says when the money moved, that wins over when the
+  // message happened to arrive: an SMS can come hours late. See moment.ts.
+  const occurredAt = parsed.occurredAt ?? statedMoment(params.rawText, params.receivedAt) ?? params.receivedAt;
 
   // Older than this ledger goes back. A mailbox holds months of alerts and
   // a phone holds years, and importing them would fill the app with a
@@ -105,15 +113,25 @@ export async function ingestRawMessage(params: {
     : null;
   const stated = statedFiguresFor(params.rawText, accountType);
 
+  // The bank's number for this payment, which is what tells it from
+  // another of the same amount minutes away. See reference.ts.
+  const reference = transactionReference(params.rawText) ?? transactionReference(params.detailText);
   const entry = {
     source: params.source,
     sourceRef: params.sourceRef,
     rawText: params.rawText,
     receivedAt: params.receivedAt,
+    reference: reference?.value ?? null,
+    referenceKind: reference?.kind ?? null,
   };
   const found = { userId: params.userId, amountMinor: parsed.amountMinor, type: parsed.type, accountId, occurredAt };
 
-  let duplicate = await findDuplicate({ ...found, sourceRef: params.sourceRef });
+  let duplicate = await findDuplicate({
+    ...found,
+    sourceRef: params.sourceRef,
+    receivedAt: params.receivedAt,
+    reference,
+  });
   // A leg SpendLog wrote in is not a message, so the time window alone
   // does not make it this one: only on the account this message names.
   if (duplicate?.autoLeg && !(await couldBeSameAccount(params.userId, duplicate.accountId, accountId))) {
@@ -209,6 +227,8 @@ export async function ingestRawMessage(params: {
     rawText: params.rawText,
     source: params.source,
     sourceRef: params.sourceRef,
+    reference: entry.reference,
+    referenceKind: entry.referenceKind,
     occurredAt,
     statedBalanceMinor: stated.balanceMinor,
     statedAvailableLimitMinor: stated.availableLimitMinor,
@@ -216,14 +236,7 @@ export async function ingestRawMessage(params: {
     // typed in by hand with no account is cash; one a bank sent a message
     // about never is, and guessing cash is how the cash balance drifts.
     accountUnknown: accountId === null,
-    sources: [
-      {
-        source: params.source,
-        sourceRef: params.sourceRef,
-        rawText: params.rawText,
-        receivedAt: params.receivedAt,
-      },
-    ],
+    sources: [entry],
   });
 
   // A contact in the group it went into has a share of it.
@@ -281,6 +294,11 @@ async function absorbMessage(
   const { entry, parsed, accountId, stated } = message;
   if (row.sources.some((existing) => isSameMessage(existing, entry))) return false;
   row.sources.push(entry);
+  // The first reference any of its messages quoted is the row's.
+  if (!row.reference && entry.reference) {
+    row.reference = entry.reference;
+    row.referenceKind = entry.referenceKind ?? null;
+  }
 
   // Only ever fills gaps, and only while nobody has corrected the row by
   // hand. A person's answer outranks a second parse of the same event,

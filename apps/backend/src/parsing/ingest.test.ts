@@ -68,8 +68,14 @@ describe("ingestion pipeline (real MongoDB)", () => {
     const userId = await makeUser();
     const base = { userId, source: "SMS" as const, sourceRef: null };
 
+    // Two payments on the card, each with its own UPI reference: the same
+    // reference twice would be the same payment reported twice.
     await ingestRawMessage({ ...base, rawText: HDFC_CARD_SMS, receivedAt: new Date("2026-09-03T10:00:00Z") });
-    await ingestRawMessage({ ...base, rawText: HDFC_CARD_SMS, receivedAt: new Date("2026-09-04T10:00:00Z") });
+    await ingestRawMessage({
+      ...base,
+      rawText: HDFC_CARD_SMS.replace("661266604357", "661266604358"),
+      receivedAt: new Date("2026-09-04T10:00:00Z"),
+    });
 
     assert.equal(await Account.countDocuments({ userId }), 1);
     assert.equal(await Transaction.countDocuments({ userId }), 2);

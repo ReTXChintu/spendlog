@@ -48,6 +48,9 @@ import {
 import { resolveCountedAmount } from "./counted";
 import { LendingFields, LendingInput, contactForMerchant, isPlain, lendingFields, lendingKindOf } from "./lent";
 import { istMonthKey } from "../time";
+import type { ReferenceKind } from "../parsing/reference";
+
+const REFERENCE_KINDS: ReferenceKind[] = ["RRN", "UTR", "REF", "TXN", "AUTH"];
 
 // Responses are serialized with `id` (a string) rather than Mongo's `_id`,
 // which is the shape the web and mobile clients already consume. Virtuals
@@ -583,6 +586,11 @@ export interface TransactionSourceEntry {
   sourceRef?: string | null;
   rawText?: string | null;
   receivedAt: Date;
+  /// The bank's reference this message quoted, and in which numbering
+  /// scheme (see parsing/reference.ts). What keeps two same-amount
+  /// payments minutes apart from being taken for one.
+  reference?: string | null;
+  referenceKind?: ReferenceKind | null;
 }
 
 /**
@@ -611,6 +619,11 @@ export interface TransactionDoc {
   rawText?: string | null; // original SMS body / email snippet
   source: TransactionSource;
   sourceRef?: string | null; // provider message id, for dedup + audit trail
+  /// The bank's own reference for the payment (UPI RRN, UTR, Ref No), from
+  /// the first message that quoted one, and its numbering scheme. Two rows
+  /// with different references of one kind are two payments, however alike.
+  reference?: string | null;
+  referenceKind?: ReferenceKind | null;
   dedupeKey?: string | null;
   /// The group this was spent in, if any (was `tripId`, still readable and
   /// writable under that name). A label in itself: a meal on holiday is
@@ -870,6 +883,8 @@ const transactionSourceSchema = new Schema<TransactionSourceEntry>(
     sourceRef: { type: String, default: null },
     rawText: { type: String, default: null },
     receivedAt: { type: Date, required: true },
+    reference: { type: String, default: null },
+    referenceKind: { type: String, enum: REFERENCE_KINDS, default: null },
   },
   { _id: false }
 );
@@ -892,6 +907,8 @@ const transactionSchema = new Schema<TransactionDoc>(
     rawText: { type: String, default: null },
     source: { type: String, enum: TRANSACTION_SOURCES, required: true },
     sourceRef: { type: String, default: null },
+    reference: { type: String, default: null },
+    referenceKind: { type: String, enum: REFERENCE_KINDS, default: null },
     dedupeKey: { type: String, default: null },
     // Aliased to the old names, so old clients' `tripId`, old tests and
     // rows written by them keep meaning the same thing.
@@ -1044,6 +1061,8 @@ transactionSchema.pre("findOneAndUpdate", async function (next) {
 transactionSchema.index({ userId: 1, occurredAt: -1 });
 transactionSchema.index({ userId: 1, dedupeKey: 1 });
 transactionSchema.index({ sourceRef: 1 });
+// A second message about a payment finds it by the bank's reference.
+transactionSchema.index({ userId: 1, reference: 1 }, { partialFilterExpression: { reference: { $type: "string" } } });
 // Totting up what has come back against a purchase, and finding the
 // refunds to unlink when one is deleted.
 transactionSchema.index({ "refundOf.transactionId": 1 });
