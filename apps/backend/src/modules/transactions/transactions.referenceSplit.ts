@@ -23,7 +23,9 @@ import { groupForOccurredAt, syncGroupSplit } from "../groups/groups.service";
  */
 
 export const REFERENCE_SPLIT_BACKFILL = "referenceSplit";
-export const REFERENCE_SPLIT_BACKFILL_VERSION = 1;
+// 2: rows with a refund allocation are split too (the allocation stays on
+// the original), which version 1 had left alone.
+export const REFERENCE_SPLIT_BACKFILL_VERSION = 2;
 
 type Entry = TransactionSourceEntry;
 
@@ -99,12 +101,13 @@ function withReference(entry: Entry): Entry {
  * Rows that are more than a plain payment - one leg of a pair, a mirror of
  * someone else's, an EMI or loan instalment, a card bill - are tied to
  * other rows, and cloning one would leave the tie pointing at only half.
- * Left as they are.
+ * Left as they are. A refund allocation is not one of these: it stays on
+ * the row it was made on and is simply not copied.
  */
 function isTied(row: HydratedDocument<TransactionDoc>): boolean {
   return Boolean(
     row.transferPairId || row.autoLeg || row.autoLegOf || row.mirrorOf || row.emiPlanId || row.loanId ||
-      row.cardPaymentFor || row.refundOf?.length || row.loanSplits?.length
+      row.cardPaymentFor || row.loanSplits?.length
   );
 }
 
@@ -155,6 +158,7 @@ export async function splitRowByReference(row: HydratedDocument<TransactionDoc>)
       // A row someone corrected by hand stays out of automatic passes,
       // and so does its twin.
       editedAt: row.editedAt ?? null,
+      kindEditedAt: row.kindEditedAt ?? null,
       statedBalanceMinor: figures.balanceMinor,
       statedAvailableLimitMinor: figures.availableLimitMinor,
       sources: batch.entries.map(withReference),

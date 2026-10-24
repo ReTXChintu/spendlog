@@ -170,6 +170,40 @@ describe("repairs for rows stored before", () => {
     assert.equal(await Transaction.countDocuments({ userId }), 2);
   });
 
+  it("splits a row marked as a contact paying back, leaving its refund allocation on the original", async () => {
+    const userId = await makeUser();
+    const contactId = new Types.ObjectId();
+    const refunded = new Types.ObjectId();
+    const entry = (ref: string, sourceRef: string, wall: string) => ({
+      rawText: hdfcSms(ref),
+      source: "SMS" as const,
+      sourceRef,
+      receivedAt: ist(wall),
+    });
+    const merged = await Transaction.create({
+      userId,
+      amountMinor: 35000,
+      type: "CREDIT",
+      source: "SMS",
+      occurredAt: ist("2026-10-23T11:12:52"),
+      isSettlement: true,
+      people: [{ contactId, amountMinor: 35000 }],
+      refundOf: [{ transactionId: refunded, amountMinor: 33097 }],
+      editedAt: ist("2026-10-24T22:43:04"),
+      kindEditedAt: ist("2026-10-24T22:43:04"),
+      sources: [entry("666285487168", "VM-1", "2026-10-23T11:12:52"), entry("666291491063", "AD-1", "2026-10-23T11:25:37")],
+    });
+
+    assert.equal(await splitMergedPayments(userId), 1);
+    const twin = await Transaction.findOne({ userId, _id: { $ne: merged._id } }).orFail();
+    const original = await Transaction.findById(merged._id).orFail();
+    assert.equal(twin.isSettlement, true);
+    assert.deepEqual(twin.people.map((p) => [String(p.contactId), p.amountMinor]), [[String(contactId), 35000]]);
+    assert.equal(twin.refundOf.length, 0);
+    assert.equal(original.refundOf.length, 1);
+    assert.equal(twin.reference, "666291491063");
+  });
+
   it("writes references onto rows that never had them", async () => {
     const userId = await makeUser();
     const row = await Transaction.create({
