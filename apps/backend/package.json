@@ -1,6 +1,6 @@
 {
   "name": "@spendlog/backend",
-  "version": "0.6.17",
+  "version": "0.6.18",
   "private": true,
   "main": "dist/server.js",
   "scripts": {
