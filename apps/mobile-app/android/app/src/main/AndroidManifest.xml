@@ -109,6 +109,12 @@
             </intent-filter>
         </receiver>
 
+        <!-- Pushes Firebase shows while the app is closed go in the same
+             channel as the ones the app shows while it is open. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="spendlog-alerts" />
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

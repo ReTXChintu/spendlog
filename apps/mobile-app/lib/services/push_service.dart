@@ -13,6 +13,7 @@ import 'api_client.dart';
 import 'credential_store.dart';
 import 'deep_links.dart' show GroupLinkScreen;
 import 'perk_import_watcher.dart' show appNavigatorKey;
+import 'reminder_service.dart';
 import 'sms_service.dart';
 
 /// The FCM token this phone last gave the server, so sign-out can remove
@@ -102,8 +103,14 @@ class PushService {
     try {
       FirebaseMessaging.onBackgroundMessage(pushBackgroundHandler);
       FirebaseMessaging.onMessage.listen((message) {
-        if (message.data['type'] == _smsSyncType) _syncInForeground();
+        if (message.data['type'] == _smsSyncType) {
+          _syncInForeground();
+        } else {
+          _showInForeground(message);
+        }
       });
+      ReminderService.instance.onPushOpened = _openData;
+      ReminderService.instance.createPushChannel().catchError((_) {});
       FirebaseMessaging.instance.onTokenRefresh.listen((token) {
         _register(token).catchError((_) {});
       });
@@ -122,8 +129,10 @@ class PushService {
   /// Routes a tapped notification. Only the owner's phone gets these, and
   /// a kid's session must never be sent to an owner's screens, so the
   /// role is checked here as well as at registration.
-  Future<void> _openFromTap(RemoteMessage message) async {
-    final screen = screenFor(message.data);
+  Future<void> _openFromTap(RemoteMessage message) => _openData(message.data);
+
+  Future<void> _openData(Map<String, dynamic> data) async {
+    final screen = screenFor(data);
     if (screen == null) return;
     if (!await _isOwner()) return;
 
@@ -159,6 +168,29 @@ class PushService {
         return null;
     }
   }
+
+  /// A visible push that arrived with the app open. Firebase shows these
+  /// itself only in the background; in the foreground it was being lost.
+  Future<void> _showInForeground(RemoteMessage message) async {
+    final note = message.notification;
+    if (note == null) return;
+    if (!await _isOwner()) return;
+    try {
+      await ReminderService.instance.showPush(
+        id: foregroundNotificationId(message.messageId),
+        title: note.title ?? 'SpendLog',
+        body: note.body ?? '',
+        data: message.data,
+      );
+    } catch (_) {
+      // Notifications switched off; nothing else to do with it.
+    }
+  }
+
+  /// One id per push, so a second does not replace the first, kept clear
+  /// of the reminders' fixed ids below 1000.
+  static int foregroundNotificationId(String? messageId) =>
+      1000 + ((messageId ?? DateTime.now().toIso8601String()).hashCode & 0x7fffffff) % 1000000;
 
   /// A refresh can arrive while a sync is already running; one is enough.
   Future<void> _syncInForeground() async {

@@ -39,6 +39,33 @@ const String perkImportWatchKey = 'spendlog_perk_import_watch';
 /// What a coupons notification opens when tapped.
 const String perksPayload = 'perks';
 
+/// Starts the payload of a push the app showed itself; the push's data
+/// follows, as JSON, so a tap opens the same screen the shade's would.
+const String pushPayloadPrefix = 'push:';
+
+/// Where the server's pushes go: the ones the app shows while it is open,
+/// and (through the manifest) the ones Firebase shows while it is not.
+const AndroidNotificationChannel pushChannel = AndroidNotificationChannel(
+  'spendlog-alerts',
+  'Alerts',
+  description: 'Balance checks, subscriptions, groups and the monthly summary.',
+  importance: Importance.high,
+);
+
+/// The payload for a push shown by the app, and back again. Null for a
+/// payload that is not one, or whose data cannot be read.
+String pushPayload(Map<String, dynamic> data) => '$pushPayloadPrefix${jsonEncode(data)}';
+
+Map<String, dynamic>? pushDataFrom(String payload) {
+  if (!payload.startsWith(pushPayloadPrefix)) return null;
+  try {
+    final data = jsonDecode(payload.substring(pushPayloadPrefix.length));
+    return data is Map<String, dynamic> ? data : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 /// Notification ids. Fixed so that re-scheduling replaces rather than piles up.
 const int _dailyNotificationId = 1;
 const int _nagNotificationId = 2;
@@ -128,8 +155,33 @@ class ReminderService {
     }
   }
 
+  /// The same for a tapped push the app showed itself, which gets the
+  /// push's data rather than a payload string.
+  void Function(Map<String, dynamic> data)? _onPushOpen;
+  Map<String, dynamic>? _pendingPushOpen;
+
+  set onPushOpened(void Function(Map<String, dynamic> data)? handler) {
+    _onPushOpen = handler;
+    final pending = _pendingPushOpen;
+    if (handler != null && pending != null) {
+      _pendingPushOpen = null;
+      handler(pending);
+    }
+  }
+
   void _opened(String? payload) {
     if (payload == null) return;
+    if (payload.startsWith(pushPayloadPrefix)) {
+      final data = pushDataFrom(payload);
+      if (data == null) return;
+      final handler = _onPushOpen;
+      if (handler == null) {
+        _pendingPushOpen = data;
+      } else {
+        handler(data);
+      }
+      return;
+    }
     final handler = _onOpen;
     if (handler == null) {
       _pendingOpen = payload;
@@ -142,6 +194,43 @@ class ReminderService {
   Future<void> showImportFinished(PerkImportJob job) async {
     await init();
     await _showImportFinished(_plugin, job);
+  }
+
+  /// Created up front so Firebase can use it for the pushes it shows
+  /// itself, which it only does into a channel that already exists.
+  Future<void> createPushChannel() async {
+    await init();
+    await _plugin
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(pushChannel);
+  }
+
+  /// A push that arrived while the app was open. Firebase only puts a
+  /// push in the shade while the app is in the background; in the
+  /// foreground it hands it to the app, which has to show it or lose it.
+  Future<void> showPush({
+    required int id,
+    required String title,
+    required String body,
+    required Map<String, dynamic> data,
+  }) async {
+    await init();
+    await _plugin.show(
+      id: id,
+      title: title,
+      body: body,
+      notificationDetails: NotificationDetails(
+        android: AndroidNotificationDetails(
+          pushChannel.id,
+          pushChannel.name,
+          channelDescription: pushChannel.description,
+          importance: pushChannel.importance,
+          priority: Priority.high,
+          styleInformation: BigTextStyleInformation(body),
+        ),
+      ),
+      payload: pushPayload(data),
+    );
   }
 
   Future<bool> planWarningsEnabled() async =>
