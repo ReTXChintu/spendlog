@@ -6,6 +6,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import '../screens/flagged_entries_screen.dart';
 import '../screens/groups_screen.dart';
+import '../screens/other_paid_screen.dart';
 import '../screens/passbook_screen.dart';
 import '../screens/subscription_detail_screen.dart';
 import '../screens/subscriptions_screen.dart';
@@ -171,6 +172,8 @@ class PushService {
         return TransactionsScreen(initialMonthKey: monthKey);
       case _entryCheckType:
         return const FlaggedEntriesScreen();
+      case otherPaidType:
+        return const OtherPaidScreen();
       default:
         return null;
     }

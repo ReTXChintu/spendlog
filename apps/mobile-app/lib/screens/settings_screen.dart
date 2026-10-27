@@ -7,6 +7,7 @@ import '../models/subscription_models.dart';
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
 import '../services/push_service.dart';
+import '../services/other_paid_check.dart';
 import '../services/reminder_service.dart';
 import '../services/theme_service.dart';
 import '../services/sms_service.dart';
@@ -58,6 +59,10 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
   bool _nagReminder = false;
   bool _billReminder = false;
   bool _planWarnings = true;
+
+  /// The evening "did anyone else pay?" check, and the groups it can ask about.
+  OtherPaidSettings _otherPaid = const OtherPaidSettings();
+  List<Group> _activeGroups = [];
 
   List<MerchantPreset> _presets = [];
   List<Category> _categories = [];
@@ -468,14 +473,40 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
     final bills = await ReminderService.instance.billsEnabled();
     final lastRun = await ReminderService.instance.followUpsLastRan();
     final plan = await ReminderService.instance.planWarningsEnabled();
+    final otherPaid = await OtherPaidCheck.instance.ensure().catchError((_) => const OtherPaidSettings());
+    var groups = <Group>[];
+    try {
+      final rows = await ApiClient.instance.get('/groups/active') as List<dynamic>;
+      groups = rows.whereType<Map<String, dynamic>>().map(Group.fromJson).toList();
+    } catch (_) {
+      // Only the group picker waits for these.
+    }
     if (!mounted) return;
     setState(() {
+      _otherPaid = otherPaid;
+      _activeGroups = groups;
       _dailyReminder = daily;
       _nagReminder = nag;
       _billReminder = bills;
       _planWarnings = plan;
       _nagLastRun = lastRun;
     });
+  }
+
+  Future<void> _setOtherPaid({bool? enabled, TimeOfDay? time, Group? group}) async {
+    if (enabled != null) await OtherPaidCheck.instance.setEnabled(enabled);
+    if (time != null) await OtherPaidCheck.instance.setTime(time.hour, time.minute);
+    if (group != null) await OtherPaidCheck.instance.setGroup(group.id, group.name);
+    final next = await OtherPaidCheck.instance.settings();
+    if (mounted) setState(() => _otherPaid = next);
+  }
+
+  Future<void> _pickOtherPaidTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: _otherPaid.hour, minute: _otherPaid.minute),
+    );
+    if (picked != null) await _setOtherPaid(time: picked);
   }
 
   /// Every switch goes through here so a refused permission shows on
@@ -879,8 +910,48 @@ class SettingsScreenState extends State<SettingsScreen> with SingleTickerProvide
                       'still uncategorised. Stops as soon as none are.',
                   value: _nagReminder,
                   onChanged: (on) => _setReminder('nag', on),
-                  last: true,
                 ),
+                _ToggleRow(
+                  title: 'Ask who else paid, each evening',
+                  subtitle: "A flatmate's payment never reaches your messages. A notification asks, and Home "
+                      'keeps asking until you add it or say nothing was paid.',
+                  value: _otherPaid.enabled,
+                  onChanged: (on) => _setOtherPaid(enabled: on),
+                  last: !_otherPaid.enabled,
+                ),
+                if (_otherPaid.enabled)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4, bottom: 8),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        OutlinedButton.icon(
+                          key: const ValueKey('other-paid-time'),
+                          onPressed: _pickOtherPaidTime,
+                          icon: const DsIcon(DsIcons.bell, size: 16),
+                          label: Text(TimeOfDay(hour: _otherPaid.hour, minute: _otherPaid.minute).format(context)),
+                        ),
+                        if (_activeGroups.isEmpty)
+                          Text('Start a group first.', style: TextStyle(fontSize: 13, color: c.tx3))
+                        else
+                          DropdownButton<String>(
+                            key: const ValueKey('other-paid-group'),
+                            value: _activeGroups.any((g) => g.id == _otherPaid.groupId) ? _otherPaid.groupId : null,
+                            hint: const Text('Pick a group'),
+                            items: [
+                              for (final group in _activeGroups)
+                                DropdownMenuItem(value: group.id, child: Text(group.name, overflow: TextOverflow.ellipsis)),
+                            ],
+                            onChanged: (id) {
+                              final group = _activeGroups.where((g) => g.id == id).firstOrNull;
+                              if (group != null) _setOtherPaid(group: group);
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
                 // Said out loud because it is the thing that goes wrong.
                 // Android stops background work on most phones once the
                 // app has been away a while, and the reminders fall back

@@ -72,6 +72,10 @@ const int _nagNotificationId = 2;
 const int _billNotificationId = 3;
 const int _couponNotificationId = 4;
 const int _planNotificationId = 5;
+const int _otherPaidNotificationId = 6;
+
+/// What the evening "did anyone else pay?" opens, as a push's data type.
+const String otherPaidType = 'OTHER_PAID';
 
 /// The hours the nagging runs between.
 const int _nagFromHour = 6;
@@ -231,6 +235,37 @@ class ReminderService {
       ),
       payload: pushPayload(data),
     );
+  }
+
+  /// The evening "did anyone else pay?" for a group, every day at [hour]
+  /// and [minute] IST. Re-scheduling replaces it, so calling this on every
+  /// launch keeps one. A tap opens the "someone else paid" form.
+  Future<void> scheduleOtherPaid({required int hour, required int minute, required String groupName}) async {
+    await init();
+    final now = tz.TZDateTime.now(tz.local);
+    final today = tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
+    await _plugin.zonedSchedule(
+      id: _otherPaidNotificationId,
+      title: 'Did anyone in $groupName pay for something today?',
+      body: 'Add what they paid now, so the split stays right.',
+      scheduledDate: today.isAfter(now) ? today : today.add(const Duration(days: 1)),
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'spendlog-other-paid',
+          'Who else paid',
+          channelDescription: 'Each evening, a reminder to add what someone else in your group paid.',
+          importance: Importance.defaultImportance,
+        ),
+      ),
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      matchDateTimeComponents: DateTimeComponents.time,
+      payload: pushPayload(const {'type': otherPaidType}),
+    );
+  }
+
+  Future<void> cancelOtherPaid() async {
+    await init();
+    await _plugin.cancel(id: _otherPaidNotificationId);
   }
 
   Future<bool> planWarningsEnabled() async =>

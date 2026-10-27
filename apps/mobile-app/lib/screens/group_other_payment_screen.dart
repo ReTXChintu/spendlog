@@ -15,7 +15,10 @@ import '../widgets/group_picker_sheet.dart';
 class GroupOtherPaymentScreen extends StatefulWidget {
   final GroupDetail detail;
 
-  const GroupOtherPaymentScreen({super.key, required this.detail});
+  /// Told once the payment is saved, before the screen closes.
+  final VoidCallback? onSaved;
+
+  const GroupOtherPaymentScreen({super.key, required this.detail, this.onSaved});
 
   @override
   State<GroupOtherPaymentScreen> createState() => _GroupOtherPaymentScreenState();
@@ -122,6 +125,7 @@ class _GroupOtherPaymentScreenState extends State<GroupOtherPaymentScreen> {
         'shareWith': shareWith,
         if (parts != null) 'shareAmounts': groupPartsBody(parts),
       });
+      widget.onSaved?.call();
       navigator.pop(true);
       messenger.showSnackBar(SnackBar(content: Text('Saved. You owe ${_payer!.name} your share.')));
     } catch (e) {

@@ -21,6 +21,8 @@ import '../widgets/state_block.dart';
 import '../widgets/what_came_in_sheet.dart';
 import 'accounts_screen.dart';
 import 'flagged_entries_screen.dart';
+import 'other_paid_screen.dart';
+import '../services/other_paid_check.dart';
 import 'investments/investments_screen.dart';
 import 'loans_screen.dart';
 import 'monthly_budget_screen.dart';
@@ -78,6 +80,11 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
   FundPortfolio? _funds;
   bool _fundsFailed = false;
 
+  /// The evening "did anyone else pay?" check, and whether today is
+  /// answered. Asked on Home until it is.
+  OtherPaidSettings? _otherPaid;
+  bool _otherPaidAnswered = true;
+
   // Kept alive so swiping to Analytics and back does not refetch and lose
   // the scroll position.
   @override
@@ -105,9 +112,35 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
       unawaited(ReminderService.instance.updateFollowUps(data.needsCategoryYesterday));
       unawaited(_loadPeople());
       unawaited(_loadFunds());
+      unawaited(_loadOtherPaid());
     } catch (_) {
       if (mounted) setState(() => _failed = true);
     }
+  }
+
+  Future<void> _loadOtherPaid() async {
+    try {
+      final settings = await OtherPaidCheck.instance.ensure();
+      final answered = await OtherPaidCheck.instance.answeredToday();
+      if (mounted) {
+        setState(() {
+          _otherPaid = settings;
+          _otherPaidAnswered = answered;
+        });
+      }
+    } catch (_) {
+      // The card simply does not show.
+    }
+  }
+
+  Future<void> _addOtherPaid() async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const OtherPaidScreen()));
+    await load();
+  }
+
+  Future<void> _nothingToday() async {
+    await OtherPaidCheck.instance.markAnswered();
+    if (mounted) setState(() => _otherPaidAnswered = true);
   }
 
   Future<void> _loadPeople() async {
@@ -300,6 +333,15 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
             onSubscriptions: () => SubscriptionsScreen.open(context).then((_) => load()),
             onOpenPayment: _openTransaction,
           ),
+
+          // A flatmate's payment never reaches the user's messages: asked
+          // about every day until today is answered.
+          if (_otherPaid != null && _otherPaid!.enabled && _otherPaid!.hasGroup && !_otherPaidAnswered)
+            OtherPaidCard(
+              groupName: _otherPaid!.groupName!,
+              onAdd: _addOtherPaid,
+              onNothing: _nothingToday,
+            ),
 
           // The jobs: a calm queue, each with one verb.
           _Todos(
@@ -678,6 +720,64 @@ class _Todos extends StatelessWidget {
             DsSectionHeader('Needs you', badge: DsCountBadge(jobs.length)),
             const SizedBox(height: 4),
             for (var i = 0; i < jobs.length; i++) _JobRow(job: jobs[i], last: i == jobs.length - 1),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// "Did anyone in Flatmates pay for something today?", with the two
+/// answers.
+class OtherPaidCard extends StatelessWidget {
+  const OtherPaidCard({super.key, required this.groupName, required this.onAdd, required this.onNothing});
+
+  final String groupName;
+  final VoidCallback onAdd;
+  final VoidCallback onNothing;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Padding(
+      padding: const EdgeInsets.only(top: kCardGap),
+      child: DsCard(
+        key: const ValueKey('other-paid-card'),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const DsIconTile(DsIcons.users, tone: DsTone.ac),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Did anyone in $groupName pay for something today?',
+                        style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        "It won't reach your messages, so the split is only right if it's added here.",
+                        style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton(onPressed: onAdd, child: const Text('Add what they paid')),
+                OutlinedButton(onPressed: onNothing, child: const Text('Nothing today')),
+              ],
+            ),
           ],
         ),
       ),
