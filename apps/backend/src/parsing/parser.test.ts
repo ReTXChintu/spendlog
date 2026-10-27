@@ -42,6 +42,25 @@ describe("real-world SMS formats", () => {
     assert.equal(result.account?.accountType, "BANK");
   });
 
+  it("reads the account from 'account ending', not the masked phone number in the payee's UPI handle", () => {
+    const result = parseTransactionText(
+      "Dear Customer, Greetings from HDFC Bank! Rs.10000.00 is debited from your account ending 8342 towards VPA ******9438@yescred (BISWAJIT PANDA) on 27-10-26. UPI transaction reference no.: 666605021296."
+    );
+
+    assert.ok(result);
+    assert.equal(result.amountMinor, 1000000);
+    assert.equal(result.type, "DEBIT");
+    assert.equal(result.account?.bankName, "HDFC Bank");
+    assert.equal(result.account?.last4, "8342");
+    assert.equal(result.account?.accountType, "BANK");
+  });
+
+  it("never takes a masked number inside a UPI handle for the account", () => {
+    const result = parseTransactionText("Rs.250.00 debited towards VPA xxxxxx4321@ybl on 27-10-26 -HDFC Bank");
+    assert.ok(result);
+    assert.notEqual(result.account?.last4, "4321");
+  });
+
   it("parses a CSB/Jupiter credit card payment", () => {
     const result = parseTransactionText(
       "₹654.00 paid from your Edge CSB Bank RuPay Credit Card to FlipkartInternetPvtLtd Bengaluru kaIN on 2026-09-02T20:14:43.739597+05:30 IST. To raise an issue, call 8655055086. Thank you for using Jupiter."
@@ -173,7 +192,20 @@ describe("messages that must be ignored", () => {
       "a promo mentioning a txn",
       "Flat Rs.100 cashback on your next txn above Rs.500. Offer valid till 30-09-26.",
     ],
+    [
+      "a loan advert that says money is sent",
+      "Get a personal loan of Rs. 3,000 on Meesho sent directly to your bank account. Check your offer now: https://ltl.sh/1z15jfkk5d6",
+    ],
+    ["a pre-approved loan offer", "You are eligible for a pre-approved loan of Rs 50,000 credited instantly. Apply now."],
   ] as const;
+
+  it("still reads a real alert that ends with an offer", () => {
+    const parsed = parseTransactionText(
+      "Rs 500.00 debited from a/c XX1234 on 12-10-26 to VPA shop@okaxis. Get a personal loan of Rs 2 lakh, apply now."
+    );
+    assert.equal(parsed?.amountMinor, 50000);
+    assert.equal(parsed?.type, "DEBIT");
+  });
 
   for (const [label, text] of ignored) {
     it(`ignores ${label}`, () => {

@@ -25,6 +25,14 @@ const NOISE_RE =
 
 const CREDIT_RE = /\b(credited|received|deposited|refund(?:ed)?|credit of|added to)\b/i;
 const DEBIT_RE = /\b(debited|spent|paid|sent|withdrawn|deducted|charged|purchase of|debit of|used for|was used)\b/i;
+// An advert's wording: "Get a personal loan of Rs. 3,000 on Meesho sent
+// directly to your bank account. Check your offer now". It carries an
+// amount and a verb ("sent"), so it is only told apart by what it asks
+// for - and only trusted when the message names no account, card or UPI
+// handle, since a real alert can carry an offer at its tail.
+const ADVERT_RE =
+  /\b(pre-?approved|check (?:your|the) offer|offer (?:now|ends|valid)|apply now|avail now|claim now|get (?:an? )?(?:instant |personal |quick )*loan|loan (?:of|upto|up to)|you are eligible|limited period)\b/i;
+
 // Weak signal: card alerts often say only "Txn Rs.105.00". Only trusted
 // when the message also identifies a specific account/card or a UPI handle,
 // so marketing texts mentioning a "txn" don't become transactions.
@@ -74,9 +82,9 @@ const SIGNATURE_RE = /[-–]\s*([A-Za-z][A-Za-z ]{2,30})\s*$/;
 
 // "Card 1377", "Card XX2009", "Card ending 1234", "Card ending in 4321"
 const CARD_LAST4_RE = /card\s*(?:no\.?\s*)?(?:ending(?:\s+in|\s+with)?\s*)?(?:x+|\*+)?\s*(\d{4})\b/i;
-// "a/c X5130", "A/c XX1234", "ac no 1234"
-const ACCOUNT_LAST4_RE = /a\/?c\s*(?:no\.?)?\s*(?:x+|\*+)?\s*(\d{4})\b/i;
-const ACCOUNT_WORD_LAST4_RE = /account\s*(?:no\.?)?\s*(?:x+|\*+)?\s*(\d{4})\b/i;
+// "a/c X5130", "A/c XX1234", "ac no 1234", "account ending 8342"
+const ACCOUNT_LAST4_RE = /a\/?c\s*(?:no\.?)?\s*(?:ending(?:\s+in|\s+with)?\s*)?(?:x+|\*+)?\s*(\d{4})\b/i;
+const ACCOUNT_WORD_LAST4_RE = /account\s*(?:no\.?)?\s*(?:ending(?:\s+in|\s+with)?\s*)?(?:x+|\*+)?\s*(\d{4})\b/i;
 const MASKED_LAST4_RE = /(?:x{2,}|\*{2,})\s*(\d{4})\b/i;
 
 const CARD_CONTEXT_RE = /\b(credit card|debit card|rupay|visa|mastercard|card)\b/i;
@@ -159,14 +167,18 @@ function detectBankName(full: string): string | null {
 
 function extractAccount(core: string, full: string): ParsedTransaction["account"] {
   const bankName = detectBankName(full);
+  // A UPI handle is the payee's, and its digits are often a phone number
+  // masked like an account's: "towards VPA ******9438@yescred" is not
+  // account 9438. Numbers are looked for with every handle taken out.
+  const numbers = core.replace(ANY_VPA_RE, " ");
 
-  const cardMatch = core.match(CARD_LAST4_RE);
+  const cardMatch = numbers.match(CARD_LAST4_RE);
   if (cardMatch) {
     return { bankName: bankName ?? "Unknown Bank", last4: cardMatch[1], accountType: "CARD" };
   }
 
   const accountMatch =
-    core.match(ACCOUNT_LAST4_RE) ?? core.match(ACCOUNT_WORD_LAST4_RE) ?? core.match(MASKED_LAST4_RE);
+    numbers.match(ACCOUNT_LAST4_RE) ?? numbers.match(ACCOUNT_WORD_LAST4_RE) ?? numbers.match(MASKED_LAST4_RE);
   if (accountMatch) {
     return { bankName: bankName ?? "Unknown Bank", last4: accountMatch[1], accountType: "BANK" };
   }
@@ -265,6 +277,7 @@ export function parseTransactionText(text: string): ParsedTransaction | null {
   if (!amountMatch) return null;
 
   const account = extractAccount(core, text);
+  if (ADVERT_RE.test(core) && !account?.last4 && !VPA_RE.test(core)) return null;
   const merchant = extractMerchant(core);
 
   let type = detectType(core);
