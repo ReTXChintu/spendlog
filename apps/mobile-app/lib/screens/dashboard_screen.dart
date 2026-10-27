@@ -20,6 +20,7 @@ import '../widgets/pocket_money.dart';
 import '../widgets/state_block.dart';
 import '../widgets/what_came_in_sheet.dart';
 import 'accounts_screen.dart';
+import 'flagged_entries_screen.dart';
 import 'investments/investments_screen.dart';
 import 'loans_screen.dart';
 import 'monthly_budget_screen.dart';
@@ -215,6 +216,18 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
     await load();
   }
 
+  /// One of the month's biggest payments, in its editor.
+  Future<void> _openTransaction(String transactionId) async {
+    await showEditTransactionById(context, transactionId);
+    await load();
+  }
+
+  /// The entries the AI check thinks were read wrong.
+  Future<void> _openFlagged() async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FlaggedEntriesScreen()));
+    await load();
+  }
+
   Future<void> _editBudget() async {
     final data = _data;
     if (data == null) return;
@@ -285,6 +298,7 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
             onEdit: _editBudget,
             subscriptions: data.subscriptions,
             onSubscriptions: () => SubscriptionsScreen.open(context).then((_) => load()),
+            onOpenPayment: _openTransaction,
           ),
 
           // The jobs: a calm queue, each with one verb.
@@ -299,6 +313,7 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
             onOpenUnknownAccount: _openUnknownAccount,
             onOpenMissingCredit: _openMissingCredit,
             onOpenStatementDue: _openStatementDue,
+            onOpenFlagged: _openFlagged,
           ),
 
           // Every card and account, so where one stands is here rather
@@ -492,6 +507,9 @@ class _Todos extends StatelessWidget {
   /// A statement due: that account's statements.
   final Future<void> Function(BalanceTodo todo) onOpenStatementDue;
 
+  /// Entries the AI check doubts: the screen to answer them on.
+  final VoidCallback onOpenFlagged;
+
   const _Todos({
     required this.data,
     this.onOpenTransactions,
@@ -503,6 +521,7 @@ class _Todos extends StatelessWidget {
     required this.onOpenUnknownAccount,
     required this.onOpenMissingCredit,
     required this.onOpenStatementDue,
+    required this.onOpenFlagged,
   });
 
   @override
@@ -561,6 +580,20 @@ class _Todos extends StatelessWidget {
           onTap: onOpenUnknownAccount,
         ));
       }
+    }
+
+    // An entry that may not be real is wrong in every total, so it goes
+    // before categorising, which only sorts what is there.
+    if (data.flaggedEntries > 0) {
+      final count = data.flaggedEntries;
+      jobs.add((
+        icon: DsIcons.sparkles,
+        tone: DsTone.warn,
+        text: '$count ${count == 1 ? 'entry looks' : 'entries look'} wrong',
+        meta: "The AI check thinks ${count == 1 ? 'it was' : 'they were'} read wrong from the bank's message",
+        verb: 'Review',
+        onTap: onOpenFlagged,
+      ));
     }
 
     if (data.needsCategoryYesterday > 0) {

@@ -19,6 +19,7 @@ import { runSipStepsBackfill } from "./modules/funds/funds.backfill";
 import { runGroupSharesBackfill } from "./modules/groups/groups.backfill";
 import { runGroupMirrorsBackfill } from "./modules/groups/groups.mirrors";
 import { runMonthlyDigests } from "./modules/budget/budget.digest";
+import { runAiEntryChecks } from "./modules/transactions/transactions.aiCheck";
 import { runSubscriptionNotices } from "./modules/subscriptions/subscriptions.notify";
 import { runTransferLegBackfill } from "./modules/transactions/transactions.transfer";
 import { runLoanSplitBackfill } from "./modules/loans/loans.backfill";
@@ -197,6 +198,12 @@ async function start() {
   const monthlyDigests = () => runMonthlyDigests().catch((err) => console.error("Monthly digests failed:", err));
   monthlyDigests();
   setInterval(monthlyDigests, DAILY_JOB_CHECK_MS);
+
+  // The AI's second reading of what was recorded, once a morning, for
+  // everyone with a Gemini key.
+  const aiEntryChecks = () => runAiEntryChecks().catch((err) => console.error("AI entry check failed:", err));
+  aiEntryChecks();
+  setInterval(aiEntryChecks, DAILY_JOB_CHECK_MS);
 }
 
 start().catch((err) => {

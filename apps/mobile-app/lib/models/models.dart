@@ -2250,6 +2250,9 @@ class DashboardData {
   final CardPicks picks;
   final int needsCategoryYesterday;
   final int needsCategoryMonth;
+
+  /// Entries the AI check thinks were read wrong, waiting to be looked at.
+  final int flaggedEntries;
   final int emiCount;
   final int emiMonthlyMinor;
   final int emiRemainingMinor;
@@ -2294,6 +2297,7 @@ class DashboardData {
     required this.picks,
     required this.needsCategoryYesterday,
     required this.needsCategoryMonth,
+    this.flaggedEntries = 0,
     required this.emiCount,
     required this.emiMonthlyMinor,
     required this.emiRemainingMinor,
@@ -2334,6 +2338,7 @@ class DashboardData {
       picks: CardPicks.fromJson(json['picks'] as Map<String, dynamic>? ?? {}),
       needsCategoryYesterday: needs['yesterday'] as int? ?? 0,
       needsCategoryMonth: needs['month'] as int? ?? 0,
+      flaggedEntries: json['flaggedEntries'] as int? ?? 0,
       emiCount: emis['count'] as int? ?? 0,
       emiMonthlyMinor: emis['monthlyMinor'] as int? ?? 0,
       emiRemainingMinor: emis['remainingMinor'] as int? ?? 0,

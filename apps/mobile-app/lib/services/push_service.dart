@@ -4,6 +4,7 @@ import 'dart:ui' show DartPluginRegistrant;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import '../screens/flagged_entries_screen.dart';
 import '../screens/groups_screen.dart';
 import '../screens/passbook_screen.dart';
 import '../screens/subscription_detail_screen.dart';
@@ -41,6 +42,10 @@ const String _digestType = 'MONTHLY_DIGEST';
 /// A group: someone joined it, Trippin put me in it, or a payment there
 /// includes my share. Opens the group (or the list, for several).
 const String _groupType = 'GROUP';
+
+/// A visible push from the morning's AI check: entries that look read
+/// wrong. Opens the list of them.
+const String _entryCheckType = 'ENTRY_CHECK';
 
 /// Whether this phone is signed in as the owner. A kid's phone must never
 /// register for pushes or read SMS, and a signed-out one has no one to
@@ -164,6 +169,8 @@ class PushService {
         final monthKey = data['monthKey'];
         if (monthKey is! String || monthKey.isEmpty) return null;
         return TransactionsScreen(initialMonthKey: monthKey);
+      case _entryCheckType:
+        return const FlaggedEntriesScreen();
       default:
         return null;
     }

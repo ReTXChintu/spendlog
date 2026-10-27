@@ -34,6 +34,8 @@ import {
 import { ensureCardBillLeg, syncCardBillLeg } from "../cards/cards.billLeg";
 import { cardPaymentProblem } from "../cards/cards.billPayment.service";
 import { mergeTransactions } from "./transactions.merge";
+import { checkEntries } from "./transactions.aiCheck";
+import { AiError } from "../ai/ai.gemini";
 import { IST_OFFSET, istDayEnd, istDayKey, istDayStart } from "../../time";
 import { TRANSACTION_TYPES } from "../../types";
 
@@ -228,6 +230,30 @@ transactionsRouter.get("/review", async (req, res) => {
   ]);
 
   res.json({ day, total, uncategorized });
+});
+
+// GET /transactions/flagged — what the AI check thinks was read wrong,
+// newest first, waiting to be deleted, fixed or said to be right.
+transactionsRouter.get("/flagged", async (req, res) => {
+  const rows = await Transaction.find({ userId: currentUserId(req), aiFlag: { $ne: null } })
+    .sort({ occurredAt: -1 })
+    .limit(100)
+    .populate("category")
+    .populate("account");
+  res.json(rows);
+});
+
+// POST /transactions/check — run the AI check now rather than waiting for
+// the morning. Reads only what has not been read yet.
+transactionsRouter.post("/check", async (req, res) => {
+  try {
+    const result = await checkEntries(currentUserId(req));
+    if (!result.ran) return res.status(409).json({ error: "Add a Gemini API key in Settings first." });
+    res.json({ checked: result.checked, flagged: result.flagged });
+  } catch (error) {
+    if (error instanceof AiError) return res.status(error.status).json({ error: error.message });
+    throw error;
+  }
 });
 
 transactionsRouter.get("/:id", validObjectIdParam("id"), async (req, res) => {
@@ -823,6 +849,8 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
         ...(people !== undefined ? { people } : {}),
         editedAt: new Date(),
         ...(kindChanged ? { kindEditedAt: new Date() } : {}),
+        // Looked at and corrected by a person: the AI check's doubt is answered.
+        aiFlag: null,
       },
     },
     { new: true }
@@ -852,6 +880,17 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   }
 
   res.json({ ...updated.toJSON(), transferLeg });
+});
+
+// POST /transactions/:id/flag/dismiss — "it's right": the AI check's flag
+// comes off, and no later check flags this row again.
+transactionsRouter.post("/:id/flag/dismiss", validObjectIdParam("id"), async (req, res) => {
+  const result = await Transaction.updateOne(
+    { _id: req.params.id, userId: currentUserId(req) },
+    { $set: { aiFlag: null, aiFlagDismissedAt: new Date() } }
+  );
+  if (result.matchedCount === 0) return res.status(404).json({ error: "Not found" });
+  res.status(204).end();
 });
 
 transactionsRouter.delete("/:id", validObjectIdParam("id"), async (req, res) => {

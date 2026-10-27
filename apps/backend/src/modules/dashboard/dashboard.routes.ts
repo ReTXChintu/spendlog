@@ -63,7 +63,7 @@ dashboardRouter.get("/", async (req, res) => {
   // and the to-dos below agree about which are still open.
   await settleMissingCredits(userId);
 
-  const [cards, pace, needsCategory, emis, loans, owed, perks, statements, monthSoFar, bills, budget, money, earmarks, plan, pocketMoney, banks, todos, subscriptions] =
+  const [cards, pace, needsCategory, emis, loans, owed, perks, statements, monthSoFar, bills, budget, money, earmarks, plan, pocketMoney, banks, todos, subscriptions, flaggedEntries] =
     await Promise.all([
     cardStatuses(userId, now),
     budgetPace(userId, now),
@@ -87,6 +87,7 @@ dashboardRouter.get("/", async (req, res) => {
     Subscription.find({ userId })
       .lean()
       .then((subs) => subscriptionTotals(userId, subs as SubscriptionDoc[], now)),
+    Transaction.countDocuments({ userId, aiFlag: { $ne: null } }),
   ]);
 
   // Only the ones close enough to act on. Settled: shown here, never as a
@@ -133,6 +134,8 @@ dashboardRouter.get("/", async (req, res) => {
     // with, a difference written in and not yet explained, payments no
     // account could be placed for.
     todos,
+    // Entries the AI check thinks were read wrong, waiting to be looked at.
+    flaggedEntries,
   });
 });
 

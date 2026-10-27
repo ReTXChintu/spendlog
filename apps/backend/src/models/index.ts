@@ -809,9 +809,39 @@ export interface TransactionDoc {
   /// balance, because which one it moved is the thing nobody knows. Still
   /// spending, so it still counts in the month.
   accountUnknown?: boolean;
+  /// When the AI check last read this row. Set whether or not it found
+  /// anything, so each row is read once.
+  aiCheckedAt?: Date | null;
+  /// What the AI check thinks is wrong with this row, waiting for the user
+  /// to delete it, fix it or say it is right. See transactions.aiCheck.ts.
+  aiFlag?: AiFlag | null;
+  /// Said to be right after a flag, so no later check flags it again.
+  aiFlagDismissedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
+
+export const AI_FLAG_KINDS = ["NOT_A_TRANSACTION", "WRONG_AMOUNT", "WRONG_DIRECTION", "DUPLICATE"] as const;
+export type AiFlagKind = (typeof AI_FLAG_KINDS)[number];
+
+export interface AiFlag {
+  kind: AiFlagKind;
+  /// Why, in a sentence the user can act on.
+  reason: string;
+  /// For a duplicate: the row it repeats.
+  duplicateOf?: Types.ObjectId | null;
+  flaggedAt: Date;
+}
+
+const aiFlagSchema = new Schema<AiFlag>(
+  {
+    kind: { type: String, enum: AI_FLAG_KINDS, required: true },
+    reason: { type: String, required: true },
+    duplicateOf: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
+    flaggedAt: { type: Date, required: true },
+  },
+  { _id: false }
+);
 
 export interface RefundAllocation {
   transactionId: Types.ObjectId;
@@ -951,6 +981,9 @@ const transactionSchema = new Schema<TransactionDoc>(
     isAdjustment: { type: Boolean, default: false },
     needsExplanation: { type: Boolean, default: false },
     accountUnknown: { type: Boolean, default: false },
+    aiCheckedAt: { type: Date, default: null },
+    aiFlag: { type: aiFlagSchema, default: null },
+    aiFlagDismissedAt: { type: Date, default: null },
     sources: { type: [transactionSourceSchema], default: [] },
     mergedFrom: { type: [mergedSnapshotSchema], default: [] },
     countedAmountMinor: { type: Number, default: 0 },
