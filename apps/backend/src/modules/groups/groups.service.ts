@@ -12,7 +12,7 @@ import {
 } from "../../models";
 import { istDayKey } from "../../time";
 import { syncMirrors } from "./groups.mirrors";
-import { TripOpening, computeBalances, settle, shareOut } from "./groups.settlement";
+import { ShareAmount, TripOpening, computeBalances, settle, sharesOf } from "./groups.settlement";
 
 /**
  * The one place in the app where a query is scoped by something other than
@@ -189,8 +189,24 @@ export function groupMemberIds(group: Pick<GroupDoc, "members" | "contactMembers
 
 type GroupRow = Pick<
   TransactionDoc,
-  "userId" | "amountMinor" | "countedAmountMinor" | "groupShareWith" | "groupSplit" | "paidBy"
+  "userId" | "amountMinor" | "countedAmountMinor" | "groupShareWith" | "groupShareAmounts" | "groupSplit" | "paidBy"
 >;
+
+/** A row's typed parts as the settlement takes them, or null when it is split equally. */
+export function shareAmountsOf(row: Pick<TransactionDoc, "groupShareAmounts">): ShareAmount[] | null {
+  return row.groupShareAmounts?.length
+    ? row.groupShareAmounts.map((entry) => ({ memberId: entry.memberId.toString(), amountMinor: entry.amountMinor }))
+    : null;
+}
+
+/** Each member's part of a group row: as typed, or equal between whoever it was for. */
+export function rowShares(
+  row: Pick<TransactionDoc, "groupShareWith" | "groupShareAmounts">,
+  amountMinor: number,
+  memberIds: string[]
+): Map<string, number> {
+  return sharesOf(amountMinor, sharersOf(row, memberIds), shareAmountsOf(row));
+}
 
 /** Who paid for a group row: the contact who did, or the row's owner. */
 export function payerOf(row: Pick<TransactionDoc, "userId" | "paidBy">): string {
@@ -247,6 +263,7 @@ type SplitRow = Pick<
   | "amountMinor"
   | "groupId"
   | "groupShareWith"
+  | "groupShareAmounts"
   | "groupSplit"
   | "paidBy"
   | "split"
@@ -298,7 +315,7 @@ export function groupSplitFor(
   if (!group) return paidByContact ? "keep" : clear();
   if (!paidByContact && !groupCanSplit(row)) return clear();
 
-  const shares = shareOut(row.amountMinor, sharersOf(row, groupMemberIds(group)));
+  const shares = rowShares(row, row.amountMinor, groupMemberIds(group));
   const owner = row.userId.toString();
   const myShareMinor = shares.get(owner) ?? 0;
 
@@ -483,13 +500,14 @@ export async function groupSettlement(
     type: "DEBIT",
     mirrorOf: null,
     $or: [{ countedAmountMinor: { $gt: 0 } }, { groupSplit: true }],
-  }).select("userId paidBy amountMinor countedAmountMinor groupShareWith groupSplit");
+  }).select("userId paidBy amountMinor countedAmountMinor groupShareWith groupShareAmounts groupSplit");
 
   const expenses = transactions
     .map((transaction) => ({
       payerId: payerOf(transaction),
       amountMinor: groupAmountOf(transaction),
       sharerIds: sharersOf(transaction, memberIds),
+      shareAmounts: shareAmountsOf(transaction),
     }))
     .filter((expense) => expense.amountMinor > 0);
 
@@ -540,6 +558,7 @@ export async function createPaidByContact(
     categoryId?: string | null;
     currency?: string;
     shareWith?: string[] | null;
+    shareAmounts?: { memberId: string; amountMinor: number }[] | null;
   }
 ) {
   const contact = group.contactMembers.find(
@@ -547,7 +566,8 @@ export async function createPaidByContact(
   );
   if (!contact) throw new GroupPaymentError("Add them to the group from your contacts first.");
 
-  const shareWith = await checkShareWith(group, body.shareWith);
+  const typed = checkShareAmounts(groupMemberIds(group), body.shareAmounts, body.amountMinor);
+  const shareWith = typed ? typed.shareWith : await checkShareWith(group, body.shareWith);
 
   const created = await Transaction.create({
     userId,
@@ -563,6 +583,7 @@ export async function createPaidByContact(
     paidBy: { contactId: contact.contactId, userId: null },
     groupId: group._id,
     groupShareWith: shareWith,
+    groupShareAmounts: typed?.amounts ?? null,
     occurredAt: body.occurredAt,
     source: "MANUAL",
     editedAt: new Date(),
@@ -586,6 +607,37 @@ export async function checkShareWith(
     throw new GroupPaymentError("Everyone it's shared with has to be in the group.");
   }
   return unique.map((id) => new Types.ObjectId(id));
+}
+
+/**
+ * Parts typed by hand, checked against the group and the payment: everyone
+ * named is a member (or already on this row), and the parts add up to the
+ * payment exactly. Returns the parts to store and the members they name,
+ * which become the row's groupShareWith; null for an equal split.
+ */
+export function checkShareAmounts(
+  allowedIds: string[],
+  amounts: { memberId: string; amountMinor: number }[] | null | undefined,
+  totalMinor: number
+): { amounts: { memberId: Types.ObjectId; amountMinor: number }[]; shareWith: Types.ObjectId[] } | null {
+  if (!amounts || amounts.length === 0) return null;
+  const allowed = new Set(allowedIds);
+  const ids = amounts.map((entry) => entry.memberId);
+  if (new Set(ids).size !== ids.length) throw new GroupPaymentError("The same person is on it twice.");
+  if (ids.some((id) => !allowed.has(id))) throw new GroupPaymentError("Everyone it's shared with has to be in the group.");
+  if (amounts.some((entry) => !Number.isInteger(entry.amountMinor) || entry.amountMinor < 0)) {
+    throw new GroupPaymentError("Each part has to be zero or more.");
+  }
+  const sum = amounts.reduce((total, entry) => total + entry.amountMinor, 0);
+  if (sum !== totalMinor) {
+    throw new GroupPaymentError(
+      `The parts add up to ₹${(sum / 100).toFixed(2)}, but the payment is ₹${(totalMinor / 100).toFixed(2)}.`
+    );
+  }
+  const kept = amounts
+    .filter((entry) => entry.amountMinor > 0)
+    .map((entry) => ({ memberId: new Types.ObjectId(entry.memberId), amountMinor: entry.amountMinor }));
+  return { amounts: kept, shareWith: kept.map((entry) => entry.memberId) };
 }
 
 /**

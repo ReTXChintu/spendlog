@@ -199,6 +199,10 @@ class _EditSheetState extends State<_EditSheet> {
   /// On [GroupShare.chosen]: the member ids it is shared between.
   final Set<String> _groupChosen = {};
 
+  /// On [GroupShare.custom]: each member's part as typed, by member id.
+  /// Filled once the group's people are known.
+  final Map<String, TextEditingController> _groupParts = {};
+
   /// The group's people, for "Choose who" and for knowing which one is the
   /// user. Null until loaded.
   GroupDetail? _groupDetail;
@@ -268,7 +272,30 @@ class _EditSheetState extends State<_EditSheet> {
         GroupShare.everyone => null,
         GroupShare.justMine => _myUserId == null ? const [] : [_myUserId!],
         GroupShare.chosen => _groupChosen.toList(),
+        // Sent as parts instead; the server names the same people.
+        GroupShare.custom => null,
       };
+
+  /// A box for every member of the group, starting from the parts saved on
+  /// the row, else from what an equal split between whoever it is for now
+  /// would give - so switching to Custom starts from the current split.
+  void _fillGroupParts() {
+    final detail = _groupDetail;
+    if (detail == null) return;
+    final saved = widget.transaction?.groupId == _groupId ? widget.transaction?.groupShareAmounts ?? const {} : const <String, int>{};
+    final ids = detail.everyone.map((m) => m.id).toList();
+    final sharers = switch (_groupShare) {
+      GroupShare.justMine => [if (_myUserId != null) _myUserId!],
+      GroupShare.chosen => ids.where(_groupChosen.contains).toList(),
+      _ => ids,
+    };
+    final equal = groupShareOut(_totalMinor, sharers);
+    for (final id in ids) {
+      if (_groupParts.containsKey(id)) continue;
+      final start = saved.isNotEmpty ? saved[id] ?? 0 : equal[id] ?? 0;
+      _groupParts[id] = TextEditingController(text: start > 0 ? _rupees(start) : '');
+    }
+  }
 
   @override
   void initState() {
@@ -297,7 +324,9 @@ class _EditSheetState extends State<_EditSheet> {
     _groupId = t?.groupId;
     _groupName = t?.groupName;
     final shareWith = t?.groupShareWith ?? const <String>[];
-    if (shareWith.isEmpty) {
+    if (t != null && t.groupShareAmounts.isNotEmpty) {
+      _groupShare = GroupShare.custom;
+    } else if (shareWith.isEmpty) {
       _groupShare = GroupShare.everyone;
     } else if (shareWith.length == 1 && shareWith.single == t?.userId) {
       _groupShare = GroupShare.justMine;
@@ -360,6 +389,9 @@ class _EditSheetState extends State<_EditSheet> {
     _note.dispose();
     _groupLabel.dispose();
     _myShareManual.dispose();
+    for (final box in _groupParts.values) {
+      box.dispose();
+    }
     for (final person in _people) {
       person.amount.dispose();
     }
@@ -416,7 +448,10 @@ class _EditSheetState extends State<_EditSheet> {
     try {
       final json = await ApiClient.instance.get('/groups/$groupId') as Map<String, dynamic>;
       if (!mounted || groupId != _groupId) return;
-      setState(() => _groupDetail = GroupDetail.fromJson(json));
+      setState(() {
+        _groupDetail = GroupDetail.fromJson(json);
+        if (_groupShare == GroupShare.custom) _fillGroupParts();
+      });
     } catch (_) {
       // "Everyone" and "Just mine" still work; "Choose who" waits.
     }
@@ -985,7 +1020,13 @@ class _EditSheetState extends State<_EditSheet> {
     final hadGroup = widget.transaction?.groupId;
     if (_isDebit) {
       if (_groupId != hadGroup) groupFields['groupId'] = _groupId;
-      if (_groupId != null) {
+      if (_groupId != null && _groupShare == GroupShare.custom) {
+        if (_groupParts.isEmpty) return _fail("$_groupName's people haven't loaded yet - try again in a moment.");
+        final parts = readGroupParts(_groupParts);
+        final problem = groupPartsProblem(parts, _totalMinor);
+        if (problem != null) return _fail(problem);
+        groupFields['groupShareAmounts'] = groupPartsBody(parts);
+      } else if (_groupId != null) {
         final shareWith = _groupShareWith;
         if (shareWith != null && shareWith.isEmpty) {
           return _fail(_groupShare == GroupShare.justMine
@@ -2266,6 +2307,7 @@ class _EditSheetState extends State<_EditSheet> {
       // Who it was for was said about the group it is leaving.
       _groupShare = GroupShare.everyone;
       _groupChosen.clear();
+      _clearGroupParts();
       _groupDetail = null;
       _error = null;
     });
@@ -2273,6 +2315,9 @@ class _EditSheetState extends State<_EditSheet> {
   }
 
   void _setGroupShare(GroupShare share) => setState(() {
+        // Typing parts starts from the split being left, so it is filled
+        // before the choice changes.
+        if (share == GroupShare.custom) _fillGroupParts();
         _groupShare = share;
         _error = null;
         // Choosing starts from everyone, to untick the ones it was not for.
@@ -2280,6 +2325,13 @@ class _EditSheetState extends State<_EditSheet> {
           _groupChosen.addAll(_groupDetail?.everyone.map((m) => m.id) ?? const <String>[]);
         }
       });
+
+  void _clearGroupParts() {
+    for (final box in _groupParts.values) {
+      box.dispose();
+    }
+    _groupParts.clear();
+  }
 
   SwitchListTile _switchRow({
     required bool value,
@@ -2329,7 +2381,7 @@ class _EditSheetState extends State<_EditSheet> {
             _MoreTile(
               icon: DsIcons.users,
               title: 'Add to a group',
-              subtitle: 'Shared with the people in it - equally, unless you say otherwise.',
+              subtitle: 'Shared with the people in it - equally, or by amounts you type.',
               onTap: _saving || !_isDebit ? null : _pickGroup,
             )
           else ...[
@@ -2342,6 +2394,7 @@ class _EditSheetState extends State<_EditSheet> {
                 _groupDetail = null;
                 _groupShare = GroupShare.everyone;
                 _groupChosen.clear();
+                _clearGroupParts();
               }),
               title: 'On $name',
               subtitle: 'Switch off to take it out of the group.',
@@ -2362,12 +2415,24 @@ class _EditSheetState extends State<_EditSheet> {
               segments: const [
                 (GroupShare.everyone, 'Everyone'),
                 (GroupShare.justMine, 'Just mine'),
-                (GroupShare.chosen, 'Choose who'),
+                (GroupShare.chosen, 'Choose'),
+                (GroupShare.custom, 'Custom'),
               ],
               selected: _groupShare,
               onChanged: _saving ? null : _setGroupShare,
             ),
             const SizedBox(height: 8),
+            if (_groupShare == GroupShare.custom) ...[
+              detail == null
+                  ? const DsSkeleton(height: 32)
+                  : GroupPartsEditor(
+                      members: detail.everyone,
+                      boxes: _groupParts,
+                      totalMinor: _totalMinor,
+                      onChanged: () => setState(() => _error = null),
+                    ),
+              const SizedBox(height: 8),
+            ],
             if (_groupShare == GroupShare.chosen)
               detail == null
                   ? const DsSkeleton(height: 32)
@@ -2392,6 +2457,8 @@ class _EditSheetState extends State<_EditSheet> {
                   'on the People page.',
               GroupShare.justMine => 'Just mine on $name: left out of who owes whom.',
               GroupShare.chosen => 'Split equally between the people ticked.',
+              GroupShare.custom => "Each person's part as typed - only yours counts as your spending. "
+                  "A contact's part is owed to you, on the People page.",
             }),
           ],
         ],

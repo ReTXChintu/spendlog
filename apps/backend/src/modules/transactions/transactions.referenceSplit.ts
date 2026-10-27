@@ -145,6 +145,7 @@ export async function splitRowByReference(row: HydratedDocument<TransactionDoc>)
       referenceKind: batch.reference.kind,
       groupId,
       groupShareWith: row.groupShareWith ?? null,
+      groupShareAmounts: row.groupShareAmounts ?? null,
       split: row.split ?? null,
       people: row.people ?? [],
       isSettlement: row.isSettlement,

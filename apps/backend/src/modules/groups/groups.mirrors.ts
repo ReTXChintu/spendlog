@@ -1,8 +1,7 @@
 import { HydratedDocument, Types } from "mongoose";
 import { runOncePerUser } from "../../backfill";
 import { Contact, Group, GroupDoc, Transaction, TransactionDoc, User } from "../../models";
-import { shareOut } from "./groups.settlement";
-import { groupMemberIds, sharersOf } from "./groups.service";
+import { groupMemberIds, rowShares } from "./groups.service";
 import { noteShare } from "./groups.notify";
 
 /**
@@ -49,7 +48,7 @@ async function wantedMirrors(row: Source, group: GroupShape | null): Promise<Map
   const wanted = new Map<string, number>();
   if (row.mirrorOf || !group || !row.groupId || row.type !== "DEBIT" || !row.groupSplit) return wanted;
 
-  const shares = shareOut(row.amountMinor, sharersOf(row, groupMemberIds(group)));
+  const shares = rowShares(row, row.amountMinor, groupMemberIds(group));
   const owner = row.userId.toString();
   const members = new Set(group.members.map((member) => member.userId.toString()));
   const named = [...shares.entries()].filter(([id, share]) => id !== owner && share > 0);
@@ -89,6 +88,7 @@ function mirrorFields(row: Source, group: GroupShape, share: number, paidByName:
     pending: row.pending,
     groupId: group._id,
     groupShareWith: row.groupShareWith ?? null,
+    groupShareAmounts: row.groupShareAmounts ?? null,
     groupSplit: true,
     offLedger: true,
     split: { myShareMinor: share, groupLabel: group.name.slice(0, 60) },
@@ -102,6 +102,13 @@ function mirrorFields(row: Source, group: GroupShape, share: number, paidByName:
 
 const sameIds = (a: unknown[] | null | undefined, b: unknown[] | null | undefined) =>
   (a ?? []).length === (b ?? []).length && (a ?? []).every((id, i) => String(id) === String((b ?? [])[i]));
+
+type Amounts = { memberId: unknown; amountMinor: number }[] | null | undefined;
+const sameAmounts = (a: Amounts, b: Amounts) =>
+  (a ?? []).length === (b ?? []).length &&
+  (a ?? []).every(
+    (entry, i) => String(entry.memberId) === String((b ?? [])[i].memberId) && entry.amountMinor === (b ?? [])[i].amountMinor
+  );
 
 /**
  * Brings the mirrors of one row up to date: written for whoever should
@@ -149,6 +156,7 @@ export async function syncMirrors(row: Source, known?: GroupShape | null): Promi
       mirror.pending === next.pending &&
       mirror.groupId?.equals(next.groupId) &&
       sameIds(mirror.groupShareWith, next.groupShareWith) &&
+      sameAmounts(mirror.groupShareAmounts, next.groupShareAmounts) &&
       mirror.split?.myShareMinor === share &&
       mirror.split?.groupLabel === next.split.groupLabel &&
       String(mirror.paidBy?.userId ?? "") === String(next.paidBy.userId ?? "") &&

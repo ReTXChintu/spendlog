@@ -18,6 +18,7 @@ import {
   GroupPaymentError,
   assertGroupMember,
   checkShareWith,
+  checkShareAmounts,
   createPaidByContact,
   groupForOccurredAt,
   groupMemberIds,
@@ -281,6 +282,12 @@ const loanSplitBody = z.object({
   amountMinor: z.number().int().positive(),
 });
 
+// One member's part of a group payment, typed by hand.
+const groupShareAmountBody = z.object({
+  memberId: z.string().regex(OBJECT_ID),
+  amountMinor: z.number().int().min(0),
+});
+
 const createTransactionSchema = z.object({
   amountMinor: z.number().int().positive(),
   currency: z.string().min(1).max(8).default("INR"),
@@ -322,6 +329,9 @@ const createTransactionSchema = z.object({
   // null: everyone in the group, equally. A list narrows it.
   groupShareWith: z.array(z.string().regex(OBJECT_ID)).max(100).nullable().optional(),
   tripShareWith: z.array(z.string().regex(OBJECT_ID)).max(100).nullable().optional(),
+  // Each member's part, typed by hand instead of equal; adds up to the
+  // payment. null or an empty list goes back to equal.
+  groupShareAmounts: z.array(groupShareAmountBody).max(100).nullable().optional(),
   // Paid by one of the user's contacts in the group, not by the user: no
   // account moved. The same as POST /groups/:id/payments.
   paidBy: z
@@ -380,6 +390,7 @@ transactionsRouter.post("/", async (req, res) => {
         categoryId: parsed.data.categoryId ?? null,
         currency: parsed.data.currency,
         shareWith: shareAsked,
+        shareAmounts: parsed.data.groupShareAmounts,
       });
       const tx = await Transaction.findById(created._id)
         .populate("category")
@@ -394,9 +405,12 @@ transactionsRouter.post("/", async (req, res) => {
   }
 
   let groupShareWith: Types.ObjectId[] | null = null;
+  let groupShareAmounts: { memberId: Types.ObjectId; amountMinor: number }[] | null = null;
   if (group) {
     try {
-      groupShareWith = await checkShareWith(group, shareAsked);
+      const typed = checkShareAmounts(groupMemberIds(group), parsed.data.groupShareAmounts, parsed.data.amountMinor);
+      groupShareAmounts = typed?.amounts ?? null;
+      groupShareWith = typed ? typed.shareWith : await checkShareWith(group, shareAsked);
     } catch (error) {
       if (error instanceof GroupPaymentError) return res.status(400).json({ error: error.message });
       throw error;
@@ -461,6 +475,7 @@ transactionsRouter.post("/", async (req, res) => {
     // in takes it in by itself.
     groupId: group ? group._id : await groupForOccurredAt(userId, parsed.data.occurredAt),
     groupShareWith,
+    groupShareAmounts,
     isTransfer: parsed.data.isTransfer ?? false,
     split: parsed.data.split ?? null,
     isSettlement: parsed.data.isSettlement ?? false,
@@ -539,6 +554,9 @@ const updateTransactionSchema = z.object({
   // null means everyone in the group, equally; a list narrows it.
   groupShareWith: z.array(z.string().regex(OBJECT_ID)).max(100).nullable().optional(),
   tripShareWith: z.array(z.string().regex(OBJECT_ID)).max(100).nullable().optional(),
+  // Each member's part, typed by hand instead of equal; adds up to the
+  // payment. null or an empty list goes back to equal.
+  groupShareAmounts: z.array(groupShareAmountBody).max(100).nullable().optional(),
   pending: z.boolean().optional(),
   // Who it was for or from. An empty list takes everyone off it.
   people: z.array(personShareBody).max(20).optional(),
@@ -648,6 +666,7 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
     tripId: tripIdField,
     groupShareWith: shareField,
     tripShareWith: tripShareField,
+    groupShareAmounts: amountsAsked,
     ...data
   } = parsed.data;
   const groupAsked = groupIdField !== undefined ? groupIdField : tripIdField;
@@ -753,10 +772,33 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
     }
     groupFields.groupId = groupAsked ? new Types.ObjectId(groupAsked) : null;
     // "Just me" was said about the group it is leaving, and may name
-    // people who are not in the next one.
+    // people who are not in the next one. So were any parts typed for it.
     if (shareAsked === undefined) groupFields.groupShareWith = null;
+    if (amountsAsked === undefined) groupFields.groupShareAmounts = null;
   }
-  if (shareAsked !== undefined) {
+  if (amountsAsked?.length) {
+    // Typed parts: checked against the group it will be in, and against
+    // the amount it will have once this edit lands.
+    const groupId = groupChanged ? (groupAsked ?? null) : (existing.groupId?.toString() ?? null);
+    const group = groupId ? await Group.findById(groupId) : null;
+    if (!group) return res.status(400).json({ error: "Parts can only be typed for a payment in a group." });
+    const allowed = [
+      ...groupMemberIds(group),
+      ...(!groupChanged ? (existing.groupShareWith ?? []).map(String) : []),
+    ];
+    try {
+      const typed = checkShareAmounts(allowed, amountsAsked, data.amountMinor ?? existing.amountMinor)!;
+      groupFields.groupShareAmounts = typed.amounts;
+      groupFields.groupShareWith = typed.shareWith;
+    } catch (error) {
+      if (error instanceof GroupPaymentError) return res.status(400).json({ error: error.message });
+      throw error;
+    }
+  } else if (amountsAsked !== undefined || shareAsked !== undefined) {
+    // Back to equal - said outright, or by picking who it was for again.
+    groupFields.groupShareAmounts = null;
+  }
+  if (shareAsked !== undefined && !amountsAsked?.length) {
     const groupId = groupChanged ? (groupAsked ?? null) : (existing.groupId?.toString() ?? null);
     const group = groupId ? await Group.findById(groupId) : null;
     if (!group || !shareAsked || shareAsked.length === 0) {

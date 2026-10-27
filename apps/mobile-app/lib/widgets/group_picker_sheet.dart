@@ -4,8 +4,106 @@ import '../services/api_client.dart';
 import 'ds/ds.dart';
 import '../utils/format.dart';
 
-/// Who a group payment is shared between.
-enum GroupShare { everyone, justMine, chosen }
+/// Who a group payment is shared between. [custom] types each one's part.
+enum GroupShare { everyone, justMine, chosen, custom }
+
+/// The parts typed, by member id - a blank or unreadable box is nothing.
+Map<String, int> readGroupParts(Map<String, TextEditingController> boxes) => {
+      for (final entry in boxes.entries) entry.key: parseRupees(entry.value.text) ?? 0,
+    };
+
+/// The parts as the server takes them: every member with a part, and only
+/// those.
+List<Map<String, dynamic>> groupPartsBody(Map<String, int> parts) => [
+      for (final entry in parts.entries)
+        if (entry.value > 0) {'memberId': entry.key, 'amountMinor': entry.value},
+    ];
+
+/// What is wrong with the parts against the payment, or null when they add
+/// up to it.
+String? groupPartsProblem(Map<String, int> parts, int totalMinor) {
+  final sum = parts.values.fold<int>(0, (total, part) => total + part);
+  if (sum == 0) return 'Type at least one person\'s part.';
+  if (sum == totalMinor) return null;
+  return sum > totalMinor
+      ? 'The parts add up to ${formatMoney(sum)}, ${formatMoney(sum - totalMinor)} more than the payment.'
+      : 'The parts add up to ${formatMoney(sum)}, ${formatMoney(totalMinor - sum)} short of the payment.';
+}
+
+/// Each member of a group with a box for their part, and a line saying
+/// whether the parts add up to the payment. The boxes are the caller's, by
+/// member id, so they keep what was typed across rebuilds.
+class GroupPartsEditor extends StatelessWidget {
+  const GroupPartsEditor({
+    super.key,
+    required this.members,
+    required this.boxes,
+    required this.totalMinor,
+    required this.onChanged,
+  });
+
+  final List<GroupMember> members;
+  final Map<String, TextEditingController> boxes;
+  final int totalMinor;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final problem = groupPartsProblem(readGroupParts(boxes), totalMinor);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final member in members)
+          if (boxes[member.id] != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      member.isMe ? 'Me' : member.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: 132,
+                    child: TextField(
+                      key: ValueKey('group-part-${member.id}'),
+                      controller: boxes[member.id],
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      textAlign: TextAlign.right,
+                      onChanged: (_) => onChanged(),
+                      style: kNum.copyWith(fontSize: 14, fontWeight: FontWeight.w600, color: c.tx),
+                      decoration: InputDecoration(
+                        isDense: true,
+                        hintText: '0.00',
+                        prefixText: '₹ ',
+                        prefixStyle: TextStyle(fontSize: 14, color: c.tx3, fontWeight: FontWeight.w500),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        Text(
+          problem ?? 'Adds up to ${formatMoney(totalMinor)}.',
+          style: TextStyle(
+            fontSize: 12,
+            height: 16 / 12,
+            fontWeight: problem == null ? FontWeight.w400 : FontWeight.w600,
+            color: problem == null ? c.tx3 : c.crit,
+          ),
+        ),
+      ],
+    );
+  }
+}
 
 /// Each person's part of [amountMinor], the way the server works it out:
 /// whole paise, the remainder going to the earliest ids, so the parts add

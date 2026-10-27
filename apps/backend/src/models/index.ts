@@ -638,6 +638,10 @@ export interface TransactionDoc {
   /// list narrows it, and a list of just the payer is how a souvenir stays
   /// out of everyone else's arithmetic. (Was `tripShareWith`.)
   groupShareWith?: Types.ObjectId[] | null;
+  /// Each member's part, when it was not split equally: typed by hand, and
+  /// adding up to the payment when saved. groupShareWith then names the
+  /// same members. See sharesOf in groups.settlement.ts.
+  groupShareAmounts?: { memberId: Types.ObjectId; amountMinor: number }[] | null;
   /// The old names of the two above, as Mongoose aliases of them: the same
   /// values, readable and writable either way.
   tripId?: Types.ObjectId | null;
@@ -833,6 +837,14 @@ export interface AiFlag {
   flaggedAt: Date;
 }
 
+const groupShareAmountSchema = new Schema(
+  {
+    memberId: { type: Schema.Types.ObjectId, required: true },
+    amountMinor: { type: Number, required: true, min: 0 },
+  },
+  { _id: false }
+);
+
 const aiFlagSchema = new Schema<AiFlag>(
   {
     kind: { type: String, enum: AI_FLAG_KINDS, required: true },
@@ -944,6 +956,7 @@ const transactionSchema = new Schema<TransactionDoc>(
     // rows written by them keep meaning the same thing.
     groupId: { type: Schema.Types.ObjectId, ref: "Group", default: null, alias: "tripId" },
     groupShareWith: { type: [Schema.Types.ObjectId], default: null, alias: "tripShareWith" },
+    groupShareAmounts: { type: [groupShareAmountSchema], default: null },
     paidBy: { type: paidBySchema, default: null },
     offLedger: { type: Boolean, default: false },
     groupSplit: { type: Boolean, default: false },

@@ -301,6 +301,9 @@ class Transaction {
   /// equally; just the owner's own id is "just mine".
   final List<String>? groupShareWith;
 
+  /// Each member's part, by member id, when it was not split equally.
+  final Map<String, int> groupShareAmounts;
+
   /// On a payment someone else made: which of the user's contacts paid.
   final String? paidByContactId;
   final String? paidByName;
@@ -417,6 +420,7 @@ class Transaction {
     this.groupId,
     this.groupName,
     this.groupShareWith,
+    this.groupShareAmounts = const {},
     this.paidByContactId,
     this.paidByName,
     this.offLedger = false,
@@ -485,6 +489,11 @@ class Transaction {
         // The trip names are what an older server sent; the same values.
         groupId: (json['groupId'] ?? json['tripId']) as String?,
         groupShareWith: ((json['groupShareWith'] ?? json['tripShareWith']) as List<dynamic>?)?.cast<String>(),
+        groupShareAmounts: {
+          for (final part in (json['groupShareAmounts'] as List<dynamic>? ?? const []))
+            if (part is Map<String, dynamic> && part['memberId'] is String && part['amountMinor'] is int)
+              part['memberId'] as String: part['amountMinor'] as int,
+        },
         groupName: ((json['group'] ?? json['trip']) as Map<String, dynamic>?)?['name'] as String?,
         paidByContactId: (json['paidBy'] as Map<String, dynamic>?)?['contactId'] as String?,
         paidByName: (json['paidByContact'] as Map<String, dynamic>?)?['name'] as String? ??

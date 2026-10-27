@@ -27,6 +27,9 @@ class _GroupOtherPaymentScreenState extends State<GroupOtherPaymentScreen> {
   String? _payerId;
   GroupShare _share = GroupShare.everyone;
   final Set<String> _chosen = {};
+
+  /// On [GroupShare.custom]: each member's part as typed, by member id.
+  final Map<String, TextEditingController> _parts = {};
   late DateTime _occurredAt;
   bool _saving = false;
   String? _error;
@@ -40,12 +43,18 @@ class _GroupOtherPaymentScreenState extends State<GroupOtherPaymentScreen> {
     final mine = _detail.myContacts;
     if (mine.length == 1) _payerId = mine.single.id;
     _chosen.addAll(_detail.everyone.map((m) => m.id));
+    for (final member in _detail.everyone) {
+      _parts[member.id] = TextEditingController();
+    }
   }
 
   @override
   void dispose() {
     _amount.dispose();
     _merchant.dispose();
+    for (final box in _parts.values) {
+      box.dispose();
+    }
     super.dispose();
   }
 
@@ -60,13 +69,15 @@ class _GroupOtherPaymentScreenState extends State<GroupOtherPaymentScreen> {
         GroupShare.everyone => null,
         GroupShare.justMine => _myId == null ? const [] : [_myId!],
         GroupShare.chosen => _detail.everyone.map((m) => m.id).where(_chosen.contains).toList(),
+        GroupShare.custom => null,
       };
 
   /// The user's own part of it: what counts as their spending, and what
   /// they will owe whoever paid.
   int get _myShareMinor {
-    final ids = _shareWith ?? _detail.everyone.map((m) => m.id).toList();
     final me = _myId;
+    if (_share == GroupShare.custom) return me == null ? 0 : readGroupParts(_parts)[me] ?? 0;
+    final ids = _shareWith ?? _detail.everyone.map((m) => m.id).toList();
     if (me == null || !ids.contains(me)) return 0;
     return groupShareOut(_totalMinor, ids)[me] ?? 0;
   }
@@ -92,6 +103,9 @@ class _GroupOtherPaymentScreenState extends State<GroupOtherPaymentScreen> {
           ? "Couldn't tell which member is you. Go back and open the group again."
           : 'Pick at least one person it was for.');
     }
+    final parts = _share == GroupShare.custom ? readGroupParts(_parts) : null;
+    final partsProblem = parts == null ? null : groupPartsProblem(parts, total);
+    if (partsProblem != null) return setState(() => _error = partsProblem);
 
     setState(() {
       _saving = true;
@@ -106,6 +120,7 @@ class _GroupOtherPaymentScreenState extends State<GroupOtherPaymentScreen> {
         'occurredAt': fromIstWallClock(_occurredAt).toIso8601String(),
         'merchant': _merchant.text.trim().isEmpty ? null : _merchant.text.trim(),
         'shareWith': shareWith,
+        if (parts != null) 'shareAmounts': groupPartsBody(parts),
       });
       navigator.pop(true);
       messenger.showSnackBar(SnackBar(content: Text('Saved. You owe ${_payer!.name} your share.')));
@@ -214,13 +229,31 @@ class _GroupOtherPaymentScreenState extends State<GroupOtherPaymentScreen> {
                     (GroupShare.everyone, 'Everyone'),
                     (GroupShare.justMine, 'Just me'),
                     (GroupShare.chosen, 'Choose'),
+                    (GroupShare.custom, 'Custom'),
                   ],
                   selected: _share,
                   onChanged: (share) => setState(() {
+                    // Typing parts starts from an equal split of what is entered.
+                    if (share == GroupShare.custom && readGroupParts(_parts).values.every((p) => p == 0)) {
+                      final equal = groupShareOut(_totalMinor, _detail.everyone.map((m) => m.id).toList());
+                      for (final entry in _parts.entries) {
+                        final part = equal[entry.key] ?? 0;
+                        entry.value.text = part > 0 ? (part / 100).toStringAsFixed(2) : '';
+                      }
+                    }
                     _share = share;
                     _error = null;
                   }),
                 ),
+                if (_share == GroupShare.custom) ...[
+                  const SizedBox(height: 10),
+                  GroupPartsEditor(
+                    members: _detail.everyone,
+                    boxes: _parts,
+                    totalMinor: _totalMinor,
+                    onChanged: () => setState(() => _error = null),
+                  ),
+                ],
                 if (_share == GroupShare.chosen) ...[
                   const SizedBox(height: 10),
                   Wrap(

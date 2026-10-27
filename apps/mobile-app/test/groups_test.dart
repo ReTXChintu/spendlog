@@ -325,8 +325,8 @@ void main() {
       await http.runWithClient(() async {
         await open(tester);
         await pick(tester, 'Goa');
-        await tester.ensureVisible(find.text('Choose who'));
-        await tester.tap(find.text('Choose who'));
+        await tester.ensureVisible(find.text('Choose'));
+        await tester.tap(find.text('Choose'));
         await tester.pumpAndSettle();
         // Everyone starts ticked; untick the two not in on it.
         await tester.ensureVisible(find.text('Asha'));
@@ -338,6 +338,73 @@ void main() {
 
       final patch = patchOf(calls);
       expect((patch['groupShareWith'] as List).toSet(), {'me', 'rahul'});
+    });
+
+    testWidgets('"Custom" starts from the equal split and sends the parts typed', (tester) async {
+      final calls = _Calls();
+      await http.runWithClient(() async {
+        await open(tester);
+        await pick(tester, 'Goa');
+        await tester.ensureVisible(find.text('Custom'));
+        await tester.tap(find.text('Custom'));
+        await tester.pumpAndSettle();
+
+        // ₹8,400 between four: ₹2,100 each to start.
+        expect(find.text('Adds up to ₹8,400.00.'), findsOneWidget);
+        await tester.enterText(find.byKey(const ValueKey('group-part-me')), '400');
+        await tester.pumpAndSettle();
+        expect(find.textContaining('short of the payment'), findsOneWidget);
+        await tester.enterText(find.byKey(const ValueKey('group-part-rahul')), '3800');
+        await tester.pumpAndSettle();
+        expect(find.text('Adds up to ₹8,400.00.'), findsOneWidget);
+        await save(tester);
+      }, () => _groupServer(calls));
+
+      final patch = patchOf(calls);
+      expect(patch.containsKey('groupShareWith'), isFalse);
+      expect(
+        {for (final part in patch['groupShareAmounts'] as List) part['memberId']: part['amountMinor']},
+        {'me': 40000, 'asha': 210000, 'rahul': 380000, 'meera': 210000},
+      );
+    });
+
+    testWidgets('"Custom" will not save parts that do not add up', (tester) async {
+      final calls = _Calls();
+      await http.runWithClient(() async {
+        await open(tester);
+        await pick(tester, 'Goa');
+        await tester.ensureVisible(find.text('Custom'));
+        await tester.tap(find.text('Custom'));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byKey(const ValueKey('group-part-asha')), '5000');
+        await tester.pumpAndSettle();
+        await save(tester);
+      }, () => _groupServer(calls));
+
+      expect(calls.to('PATCH', '/transactions/t9'), isEmpty);
+      expect(find.textContaining('more than the payment'), findsWidgets);
+    });
+
+    testWidgets('a payment saved with parts opens on them', (tester) async {
+      final calls = _Calls();
+      await http.runWithClient(() async {
+        await open(
+          tester,
+          transaction: ticket(extra: {
+            'groupId': 'goa1',
+            'group': {'name': 'Goa'},
+            'groupShareWith': ['me', 'asha'],
+            'groupShareAmounts': [
+              {'memberId': 'me', 'amountMinor': 100000},
+              {'memberId': 'asha', 'amountMinor': 740000},
+            ],
+          }),
+        );
+        await tester.ensureVisible(find.byKey(const ValueKey('group-part-asha')));
+        expect(tester.widget<TextField>(find.byKey(const ValueKey('group-part-me'))).controller!.text, '1000.00');
+        expect(tester.widget<TextField>(find.byKey(const ValueKey('group-part-asha'))).controller!.text, '7400.00');
+        expect(tester.widget<TextField>(find.byKey(const ValueKey('group-part-rahul'))).controller!.text, '');
+      }, () => _groupServer(calls));
     });
 
     testWidgets('switching the pick off before saving leaves the group alone', (tester) async {
@@ -647,6 +714,31 @@ void main() {
 
       final body = jsonDecode(calls.to('POST', '/groups/goa1/payments').single.body) as Map<String, dynamic>;
       expect(body['shareWith'], ['me']);
+    });
+
+    testWidgets('"Custom" sends each one\'s part, and my part is what I owe', (tester) async {
+      final calls = _Calls();
+      await http.runWithClient(() async {
+        await open(tester);
+        await tester.enterText(find.byType(TextField).at(0), '1000');
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Custom'));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byKey(const ValueKey('group-part-me')), '100');
+        await tester.enterText(find.byKey(const ValueKey('group-part-asha')), '400');
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('Save payment'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('Your share is ₹100.00', skipOffstage: false), findsOneWidget);
+        await tester.tap(find.text('Save payment'));
+        await tester.pumpAndSettle();
+      }, () => _groupServer(calls));
+
+      final body = jsonDecode(calls.to('POST', '/groups/goa1/payments').single.body) as Map<String, dynamic>;
+      expect(
+        {for (final part in body['shareAmounts'] as List) part['memberId']: part['amountMinor']},
+        {'me': 10000, 'asha': 40000, 'rahul': 25000, 'meera': 25000},
+      );
     });
 
     test('shares come out the way the server splits them', () {

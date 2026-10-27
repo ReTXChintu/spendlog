@@ -490,6 +490,7 @@ export function buildGroupsRouter(options: { legacy: boolean }): Router {
       // "Just me" was said about whichever group it was in before, and
       // names people who may not be in this one.
       row.groupShareWith = null;
+      row.groupShareAmounts = null;
       row.editedAt = new Date();
       await row.save();
       await syncGroupSplit(row, group);
@@ -508,6 +509,12 @@ export function buildGroupsRouter(options: { legacy: boolean }): Router {
     currency: z.string().min(1).max(8).optional(),
     /** null: everyone equally. [own user id]: just mine. Any members: equal among them. */
     shareWith: z.array(z.string().regex(OBJECT_ID)).max(100).nullable().optional(),
+    // Each member's part, typed by hand instead of equal.
+    shareAmounts: z
+      .array(z.object({ memberId: z.string().regex(OBJECT_ID), amountMinor: z.number().int().min(0) }))
+      .max(100)
+      .nullable()
+      .optional(),
   });
 
   // POST /:id/payments — a payment somebody else made for the group:
@@ -531,6 +538,7 @@ export function buildGroupsRouter(options: { legacy: boolean }): Router {
         categoryId: parsed.data.categoryId ?? null,
         currency: parsed.data.currency,
         shareWith: parsed.data.shareWith,
+        shareAmounts: parsed.data.shareAmounts,
       });
       const tx = await Transaction.findById(created._id)
         .populate("category")

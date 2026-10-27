@@ -13,6 +13,14 @@ export interface TripExpense {
   amountMinor: number;
   /** Everyone it was for. The payer is usually among them. */
   sharerIds: string[];
+  /** Each one's part when it was not split equally; see sharesOf. */
+  shareAmounts?: ShareAmount[] | null;
+}
+
+/** One member's part of a group payment, typed by hand rather than equal. */
+export interface ShareAmount {
+  memberId: string;
+  amountMinor: number;
 }
 
 /**
@@ -71,6 +79,48 @@ export function shareOut(amountMinor: number, sharerIds: string[]): Map<string, 
 }
 
 /**
+ * Splits an amount in proportion to parts typed by hand.
+ *
+ * The parts add up to the payment when they are saved, and then each gets
+ * exactly its own. When the amount differs - the payment was edited, or
+ * part of it came back as a refund - each keeps its proportion, in whole
+ * paise, the leftover paise going to the largest remainders so the parts
+ * still come to the amount exactly.
+ */
+export function shareByAmounts(amountMinor: number, amounts: ShareAmount[]): Map<string, number> {
+  const shares = new Map<string, number>();
+  const positive = amounts.filter((entry) => entry.amountMinor > 0);
+  const total = positive.reduce((sum, entry) => sum + entry.amountMinor, 0);
+  if (total <= 0) return shares;
+
+  const ordered = [...positive].sort((a, b) => (a.memberId < b.memberId ? -1 : a.memberId > b.memberId ? 1 : 0));
+  const exact = ordered.map((entry) => (amountMinor * entry.amountMinor) / total);
+  const floors = exact.map(Math.floor);
+  let remainder = amountMinor - floors.reduce((sum, value) => sum + value, 0);
+  const byRemainder = exact
+    .map((value, index) => ({ index, fraction: value - floors[index] }))
+    .sort((a, b) => b.fraction - a.fraction || a.index - b.index);
+  for (const { index } of byRemainder) {
+    if (remainder <= 0) break;
+    floors[index] += 1;
+    remainder -= 1;
+  }
+  ordered.forEach((entry, index) => shares.set(entry.memberId, floors[index]));
+  return shares;
+}
+
+/** Each sharer's part: the amounts typed by hand when there are any, else equal. */
+export function sharesOf(
+  amountMinor: number,
+  sharerIds: string[],
+  amounts?: ShareAmount[] | null
+): Map<string, number> {
+  return amounts?.some((entry) => entry.amountMinor > 0)
+    ? shareByAmounts(amountMinor, amounts)
+    : shareOut(amountMinor, sharerIds);
+}
+
+/**
  * What each person put in against what was spent on them, starting from
  * whatever they already owed each other.
  */
@@ -85,7 +135,7 @@ export function computeBalances(expenses: TripExpense[], openings: TripOpening[]
   for (const expense of expenses) {
     if (expense.sharerIds.length === 0) continue;
     bump(paid, expense.payerId, expense.amountMinor);
-    for (const [id, share] of shareOut(expense.amountMinor, expense.sharerIds)) {
+    for (const [id, share] of sharesOf(expense.amountMinor, expense.sharerIds, expense.shareAmounts)) {
       bump(owed, id, share);
     }
   }
