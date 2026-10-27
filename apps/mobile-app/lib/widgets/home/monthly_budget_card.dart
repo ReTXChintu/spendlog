@@ -54,12 +54,16 @@ class MonthlyBudgetCard extends StatelessWidget {
     required this.onEdit,
     this.subscriptions,
     this.onSubscriptions,
+    this.onOpenPayment,
   });
 
   final MonthlyBudgetStatus budget;
 
   /// The budget editor - also how a budget is first set.
   final VoidCallback onEdit;
+
+  /// One of the biggest payments, opened to check or correct it.
+  final void Function(String transactionId)? onOpenPayment;
 
   /// What renews, when there is anything: its line sits under the bucket,
   /// since renewals are the fixed costs that creep.
@@ -230,6 +234,20 @@ class MonthlyBudgetCard extends StatelessWidget {
                     : 'Mostly ${unassigned.categories.take(2).map((x) => x.name).join(' and ')}',
               ),
           ],
+          if (budget.topPayments.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Divider(height: 24, color: c.ln),
+            Text(
+              over ? 'Biggest payments · why it went over' : 'Biggest payments this month',
+              style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
+            ),
+            const SizedBox(height: 6),
+            for (final payment in budget.topPayments)
+              TopPaymentRow(
+                payment: payment,
+                onTap: onOpenPayment == null ? null : () => onOpenPayment!(payment.id),
+              ),
+          ],
           if (budget.bucket.configured) ...[
             const SizedBox(height: 4),
             Divider(height: 24, color: c.ln),
@@ -287,6 +305,64 @@ class SubscriptionsRow extends StatelessWidget {
           ),
           if (onTap != null) ...[const SizedBox(width: 4), DsIcon(DsIcons.chevronRight, size: 18, color: c.tx3)],
         ],
+      ),
+    );
+  }
+}
+
+/// One of the month's biggest payments: what, its category and day, and
+/// what it counts - with what actually left the account beside it when a
+/// split or refund made that different.
+class TopPaymentRow extends StatelessWidget {
+  const TopPaymentRow({super.key, required this.payment, this.onTap});
+
+  final TopPayment payment;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final sub = [
+      payment.categoryName ?? 'Uncategorized',
+      if (payment.occurredAt != null) formatShortDate(payment.occurredAt!),
+      if (payment.amountMinor != payment.countedAmountMinor) 'your part of ${formatMoneyShort(payment.amountMinor)}',
+    ].join(' · ');
+
+    return InkWell(
+      key: ValueKey('top-payment-${payment.id}'),
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(Ds.rMd),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 7),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    payment.merchant ?? 'Payment',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx),
+                  ),
+                  Text(
+                    sub,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              formatMoneyShort(payment.countedAmountMinor),
+              style: kNum.copyWith(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx),
+            ),
+            if (onTap != null) ...[const SizedBox(width: 4), DsIcon(DsIcons.chevronRight, size: 18, color: c.tx3)],
+          ],
+        ),
       ),
     );
   }

@@ -49,6 +49,17 @@ final _dashboardJson = <String, dynamic>{
     'spentMinor': 1766000,
     'leftMinor': 234000,
     'isOver': false,
+    'topPayments': [
+      {
+        'id': 'p1', 'merchant': 'A merchant with a very long name that has to be cut short somewhere',
+        'categoryName': 'Lent & borrowed', 'occurredAt': '2026-09-15T15:38:00.000Z',
+        'amountMinor': 1284605, 'countedAmountMinor': 1284605,
+      },
+      {
+        'id': 'p2', 'merchant': 'Bar', 'categoryName': 'Food & Dining', 'occurredAt': '2026-09-18T18:28:00.000Z',
+        'amountMinor': 481400, 'countedAmountMinor': 160467,
+      },
+    ],
     'pace': {
       'status': 'high', 'dayOfMonth': 25, 'daysInMonth': 30, 'daysLeft': 6, 'remainingMinor': 234000,
       'safeDailyMinor': 30000, 'expectedSpentMinor': 1600000, 'aheadByMinor': 166000, 'dailyAverageMinor': 60000,

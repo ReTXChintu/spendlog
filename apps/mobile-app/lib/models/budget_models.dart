@@ -283,6 +283,10 @@ class MonthlyBudgetStatus {
   final UnassignedPool? unassigned;
   final BucketSummary bucket;
 
+  /// The month's biggest payments by what they count: the reasons the
+  /// month went where it did. Empty from an older server.
+  final List<TopPayment> topPayments;
+
   /// The old daily budget times the days in the month, offered as a
   /// starting amount and never applied by itself.
   final int? suggestedMonthlyMinor;
@@ -300,6 +304,7 @@ class MonthlyBudgetStatus {
     this.categories = const [],
     this.unassigned,
     this.bucket = const BucketSummary(),
+    this.topPayments = const [],
     this.suggestedMonthlyMinor,
   });
 
@@ -320,9 +325,41 @@ class MonthlyBudgetStatus {
       categories: _maps(json['categories']).map(CategoryBudget.fromJson).toList(),
       unassigned: UnassignedPool.maybe(json['unassigned']),
       bucket: BucketSummary.fromJson(_mapOrNull(json['bucket'])),
+      topPayments: _maps(json['topPayments']).map(TopPayment.fromJson).where((p) => p.id.isNotEmpty).toList(),
       suggestedMonthlyMinor: _intOrNull(json['suggestedMonthlyMinor']),
     );
   }
+}
+
+/// One of the month's biggest payments.
+class TopPayment {
+  final String id;
+  final String? merchant;
+  final String? categoryName;
+  final DateTime? occurredAt;
+
+  /// What left the account, and the part of it that counts against the
+  /// budget - less for a split, a refund or a loan to a friend.
+  final int amountMinor;
+  final int countedAmountMinor;
+
+  const TopPayment({
+    required this.id,
+    this.merchant,
+    this.categoryName,
+    this.occurredAt,
+    this.amountMinor = 0,
+    this.countedAmountMinor = 0,
+  });
+
+  factory TopPayment.fromJson(Map<String, dynamic> json) => TopPayment(
+        id: _str(json['id']) ?? '',
+        merchant: _str(json['merchant']),
+        categoryName: _str(json['categoryName']),
+        occurredAt: DateTime.tryParse(_str(json['occurredAt']) ?? '')?.toLocal(),
+        amountMinor: _int(json['amountMinor']),
+        countedAmountMinor: _int(json['countedAmountMinor']),
+      );
 }
 
 /// A credit card's last bill, as the face needs it: the statement the bank

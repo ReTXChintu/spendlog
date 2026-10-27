@@ -230,6 +230,27 @@ describe("the month against its budget", () => {
     assert.equal(status.pace!.fixedPaidMinor, 12_000_00);
   });
 
+  it("names the month's five biggest payments by what they count, card bills and transfers left out", async () => {
+    await withUser({ monthlyBudgetHistory: [budgetFrom("2026-10", 20_000)] });
+    const rent = await models.Category.create({ name: "Housing" });
+    await spend("2026-10-01", 12_000, { categoryId: rent._id, merchant: "Rent" });
+    await spend("2026-10-02", 15_000, { cardPaymentFor: new Types.ObjectId(), merchant: "Card bill" });
+    await spend("2026-10-02", 14_000, { isTransfer: true, merchant: "To savings" });
+    await spend("2026-10-03", 6_000, { split: { myShareMinor: 2_000_00 }, merchant: "Dinner" });
+    for (const [day, rupees] of [["2026-10-04", 3_000], ["2026-10-05", 2_500], ["2026-10-06", 1_000], ["2026-10-07", 500]] as const) {
+      await spend(day, rupees, { merchant: `Shop ${rupees}` });
+    }
+    await spend("2026-09-30", 50_000, { merchant: "Last month" });
+
+    const status = await monthly.monthlyBudgetStatus(userId, undefined, on("2026-10-09"));
+    assert.deepEqual(
+      status.topPayments.map((p) => [p.merchant, p.countedAmountMinor / 100]),
+      [["Rent", 12_000], ["Shop 3000", 3_000], ["Shop 2500", 2_500], ["Dinner", 2_000], ["Shop 1000", 1_000]]
+    );
+    assert.equal(status.topPayments[0].categoryName, "Housing");
+    assert.equal(status.topPayments[3].amountMinor, 6_000_00);
+  });
+
   it("nets a refund off through the month's own total", async () => {
     await withUser({ monthlyBudgetHistory: [budgetFrom("2026-10", 20_000)] });
     const purchase = await spend("2026-10-03", 2_000);

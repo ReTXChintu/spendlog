@@ -285,9 +285,70 @@ export interface MonthlyBudgetStatus {
   categories: CategoryBudget[];
   unassigned: UnassignedPool | null;
   bucket: BucketSummary;
+  /// The month's biggest payments by what they count, so the reason a
+  /// month went over - and took from the bucket - can be named.
+  topPayments: TopPayment[];
   /// The old daily budget times the days in this month, offered as a
   /// starting amount and never applied by itself. Null without one.
   suggestedMonthlyMinor: number | null;
+}
+
+export interface TopPayment {
+  id: string;
+  merchant: string | null;
+  categoryName: string | null;
+  occurredAt: string;
+  /// What left the account, and the part of it that counts: less for a
+  /// split, a refund or a loan to a friend.
+  amountMinor: number;
+  countedAmountMinor: number;
+}
+
+export const TOP_PAYMENTS = 5;
+
+/** The month's biggest payments, on what counts - the same rows its spent total adds up. */
+export async function topPaymentsIn(
+  userId: Types.ObjectId,
+  month: Pick<UserMonth, "start" | "end">,
+  limit = TOP_PAYMENTS
+): Promise<TopPayment[]> {
+  const rows = await Transaction.aggregate<{
+    _id: Types.ObjectId;
+    merchant: string | null;
+    categoryName: string | null;
+    occurredAt: Date;
+    amountMinor: number;
+    countedAmountMinor: number;
+  }>([
+    {
+      $match: {
+        userId,
+        type: "DEBIT",
+        occurredAt: { $gte: month.start, $lt: month.end },
+        countedAmountMinor: { $gt: 0 },
+      },
+    },
+    { $sort: { countedAmountMinor: -1, occurredAt: -1 } },
+    { $limit: limit },
+    { $lookup: { from: "categories", localField: "categoryId", foreignField: "_id", as: "category" } },
+    {
+      $project: {
+        merchant: 1,
+        occurredAt: 1,
+        amountMinor: 1,
+        countedAmountMinor: 1,
+        categoryName: { $ifNull: [{ $first: "$category.name" }, null] },
+      },
+    },
+  ]);
+  return rows.map((row) => ({
+    id: row._id.toString(),
+    merchant: row.merchant ?? null,
+    categoryName: row.categoryName,
+    occurredAt: row.occurredAt.toISOString(),
+    amountMinor: row.amountMinor,
+    countedAmountMinor: row.countedAmountMinor,
+  }));
 }
 
 /** Spending in a month by category ("none" for uncategorised), and how much of it was fixed costs. */
@@ -455,7 +516,11 @@ export async function monthlyBudgetStatus(
   const described = describe(month, months.bySalary, months.recent[0].key, now);
   const entry = monthlyBudgetFor(user, month.key);
 
-  const [byCategory, bucket] = await Promise.all([spendingIn(userId, month), bucketSummary(userId, now)]);
+  const [byCategory, bucket, topPayments] = await Promise.all([
+    spendingIn(userId, month),
+    bucketSummary(userId, now),
+    topPaymentsIn(userId, month),
+  ]);
   const spentMinor = [...byCategory.values()].reduce((sum, row) => sum + row.spent, 0);
 
   const suggestedMonthlyMinor = user.dailyBudgetMinor ? user.dailyBudgetMinor * described.daysInMonth : null;
@@ -474,6 +539,7 @@ export async function monthlyBudgetStatus(
       categories: [],
       unassigned: null,
       bucket,
+      topPayments,
       suggestedMonthlyMinor,
     };
   }
@@ -558,6 +624,7 @@ export async function monthlyBudgetStatus(
         .sort((a, b) => b.spentMinor - a.spentMinor),
     },
     bucket,
+    topPayments,
     suggestedMonthlyMinor,
   };
 }
