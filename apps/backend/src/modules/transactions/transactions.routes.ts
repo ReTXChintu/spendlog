@@ -38,6 +38,7 @@ import { mergeTransactions } from "./transactions.merge";
 import { checkEntries } from "./transactions.aiCheck";
 import { AiError } from "../ai/ai.gemini";
 import { DepositPartError, checkDepositParts } from "../deposits/deposits.service";
+import { TowardsError, applyCommitmentShares, checkTowards } from "../budget/budget.commitmentShares";
 import { IST_OFFSET, istDayEnd, istDayKey, istDayStart } from "../../time";
 import { TRANSACTION_TYPES } from "../../types";
 
@@ -283,6 +284,14 @@ const loanSplitBody = z.object({
   amountMinor: z.number().int().positive(),
 });
 
+// One person's money in, put towards their part of a shared fixed cost.
+const towardsBody = z.object({
+  commitmentId: z.string().regex(OBJECT_ID),
+  contactId: z.string().regex(OBJECT_ID),
+  periodKey: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  amountMinor: z.number().int().positive(),
+});
+
 // One deposit's part of a payment put into RDs and FDs.
 const depositPartBody = z.object({
   depositId: z.string().regex(OBJECT_ID),
@@ -332,6 +341,9 @@ const createTransactionSchema = z.object({
   // The RDs and FDs it went into, and how much into each. An empty list
   // takes it out of all of them.
   depositParts: z.array(depositPartBody).max(20).optional(),
+  // On money in from people: how much of each one's part went towards
+  // which shared fixed cost, for which period. An empty list clears it.
+  towards: z.array(towardsBody).max(40).optional(),
   // The group it goes in, picked in the editor - nothing is put in one by
   // itself any more, bar a Trippin trip's dates. tripId is the old name.
   groupId: z.string().regex(OBJECT_ID).nullable().optional(),
@@ -471,6 +483,18 @@ transactionsRouter.post("/", async (req, res) => {
     }
   }
 
+  // What money in from people was towards: only money in, and only from
+  // the people on it.
+  let towards: Awaited<ReturnType<typeof checkTowards>> = [];
+  if (parsed.data.type === "CREDIT" && parsed.data.towards?.length) {
+    try {
+      towards = await checkTowards(currentUserId(req), people, parsed.data.towards);
+    } catch (error) {
+      if (error instanceof TowardsError) return res.status(400).json({ error: error.message });
+      throw error;
+    }
+  }
+
   // The RDs and FDs it went into: only a payment goes into one.
   let depositParts: Awaited<ReturnType<typeof checkDepositParts>> = [];
   if (parsed.data.type === "DEBIT" && parsed.data.depositParts?.length) {
@@ -508,8 +532,13 @@ transactionsRouter.post("/", async (req, res) => {
     cardPaymentFor: parsed.data.type === "DEBIT" ? (parsed.data.cardPaymentFor ?? null) : null,
     commitmentId: parsed.data.type === "DEBIT" ? (parsed.data.commitmentId ?? null) : null,
     depositParts,
+    towards,
     source: "MANUAL",
   });
+
+  // Picked as a fixed cost others pay back for, with no split said: split
+  // the way that fixed cost is.
+  if (created.commitmentId) await applyCommitmentShares(created);
 
   // A loan's instalments move as it is linked, so it goes through the
   // same step an edit uses rather than being written as a plain field.
@@ -562,6 +591,9 @@ const updateTransactionSchema = z.object({
   // The RDs and FDs it went into, and how much into each. An empty list
   // takes it out of all of them.
   depositParts: z.array(depositPartBody).max(20).optional(),
+  // On money in from people: how much of each one's part went towards
+  // which shared fixed cost, for which period. An empty list clears it.
+  towards: z.array(towardsBody).max(40).optional(),
   // Zero is meaningful: someone else's bill paid from the user's card, all
   // of which is owed back. null clears the split entirely.
   split: z
@@ -913,11 +945,37 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
       throw error;
     }
   }
+  // What money in from people was towards, against who it will be from.
+  // Gone when it stops being money in, or when nobody is on it any more.
+  let towardsFields: Record<string, unknown> = {};
+  const willHavePeople =
+    people ??
+    existing.people.map((person) => ({ contactId: person.contactId.toString(), amountMinor: person.amountMinor }));
+  if (willBeType !== "CREDIT" || willHavePeople.length === 0) {
+    if (existing.towards.length > 0 || data.towards !== undefined) towardsFields = { towards: [] };
+  } else if (data.towards !== undefined || existing.towards.length > 0) {
+    const asked =
+      data.towards ??
+      existing.towards.map((entry) => ({
+        commitmentId: entry.commitmentId.toString(),
+        contactId: entry.contactId.toString(),
+        periodKey: entry.periodKey,
+        amountMinor: entry.amountMinor,
+      }));
+    try {
+      towardsFields = { towards: await checkTowards(userId, willHavePeople, asked) };
+    } catch (error) {
+      if (error instanceof TowardsError) return res.status(400).json({ error: error.message });
+      throw error;
+    }
+  }
+
   const {
     loanId: _handledAbove,
     loanSplits: _alsoAbove,
     people: _checkedAbove,
     depositParts: _depositsAbove,
+    towards: _towardsAbove,
     ...fields
   } = data;
 
@@ -940,6 +998,7 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
         ...transferFields,
         ...groupFields,
         ...depositFields,
+        ...towardsFields,
         ...(people !== undefined ? { people } : {}),
         editedAt: new Date(),
         ...(kindChanged ? { kindEditedAt: new Date() } : {}),
@@ -957,6 +1016,19 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   // what this edit said - and in the response, so the app can say what
   // else changed. A card bill's card side is kept the same way, by its
   // own rules (cards.billLeg).
+  // Newly put down to a fixed cost others pay back for, and not split by
+  // this edit: split the way that fixed cost is.
+  if (updated.commitmentId && !existing.commitmentId?.equals(updated.commitmentId)) {
+    const row = await Transaction.findById(updated._id);
+    if (row && (await applyCommitmentShares(row))) {
+      updated = (await Transaction.findById(updated._id)
+        .populate("category")
+        .populate("account")
+        .populate("group")
+        .populate("paidByContact", "name"))!;
+    }
+  }
+
   const cardSide = await syncCardBillLeg(updated, existing);
   const transferLeg = cardSide.handled ? cardSide.leg : await syncTransferLegs(updated, existing);
 

@@ -21,6 +21,7 @@ import {
 import { mayBeCardPayment, recogniseCardBill } from "../modules/cards/cards.billPayment";
 import { detectAfterStatedBalance } from "../modules/accounts/accounts.missingCredits";
 import { reconcileUser } from "../modules/subscriptions/subscriptions.service";
+import { linkSharedCommitment } from "../modules/budget/budget.commitmentShares";
 import {
   adoptAutoLeg,
   couldBeSameAccount,
@@ -263,6 +264,12 @@ export async function ingestRawMessage(params: {
   // A balance stated: the gaps either side of it may be money that came
   // in without a message (accounts.missingCredits).
   await detectAfterStatedBalance(transaction);
+  // The month's payment for a fixed cost others pay the user back for -
+  // rent, say: linked to it and split, so only the user's part counts and
+  // each flatmate's is owed. Only on a payee and amount that match exactly.
+  if (!isCardBill && transaction.type === "DEBIT") {
+    await linkSharedCommitment(transaction).catch((error) => console.error("Shared fixed cost matching failed:", error));
+  }
   // A subscription's renewal, if that is what this was: matched now, so
   // the screen does not wait for the next time it is opened.
   if (transaction.type === "DEBIT") {

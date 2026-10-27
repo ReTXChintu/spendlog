@@ -307,6 +307,9 @@ class Transaction {
   /// The RDs and FDs it went into, by deposit id, and how much into each.
   final Map<String, int> depositParts;
 
+  /// On money paid back: whose part of which shared fixed cost it was.
+  final List<TowardsEntry> towards;
+
   /// On a payment someone else made: which of the user's contacts paid.
   final String? paidByContactId;
   final String? paidByName;
@@ -425,6 +428,7 @@ class Transaction {
     this.groupShareWith,
     this.groupShareAmounts = const {},
     this.depositParts = const {},
+    this.towards = const [],
     this.paidByContactId,
     this.paidByName,
     this.offLedger = false,
@@ -503,6 +507,16 @@ class Transaction {
             if (part is Map<String, dynamic> && part['depositId'] is String && part['amountMinor'] is int)
               part['depositId'] as String: part['amountMinor'] as int,
         },
+        towards: (json['towards'] as List<dynamic>? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .where((e) => e['commitmentId'] is String && e['contactId'] is String && e['amountMinor'] is int)
+            .map((e) => TowardsEntry(
+                  commitmentId: e['commitmentId'] as String,
+                  contactId: e['contactId'] as String,
+                  periodKey: e['periodKey'] as String? ?? '',
+                  amountMinor: e['amountMinor'] as int,
+                ))
+            .toList(),
         groupName: ((json['group'] ?? json['trip']) as Map<String, dynamic>?)?['name'] as String?,
         paidByContactId: (json['paidBy'] as Map<String, dynamic>?)?['contactId'] as String?,
         paidByName: (json['paidByContact'] as Map<String, dynamic>?)?['name'] as String? ??
@@ -951,6 +965,22 @@ class FixedCommitment {
   final String? categoryId;
   final String? categoryName;
 
+  /// Who pays the user back for it each month, and how much. Empty for a
+  /// fixed cost that is the user's alone.
+  final List<CommitmentShare> shares;
+
+  /// This period: each of those people's part, and what of the money they
+  /// sent back was put towards it.
+  final List<CommitmentShareStatus> shareStatus;
+
+  /// The whole of it this period, before what others pay back.
+  /// [thisPeriodAmountMinor] is the user's own part.
+  final int? fullAmountMinor;
+
+  /// The period [shareStatus] is for, by its first day - what money put
+  /// towards it is recorded against.
+  final String? periodKey;
+
   FixedCommitment({
     required this.id,
     required this.name,
@@ -964,7 +994,17 @@ class FixedCommitment {
     this.merchant,
     this.categoryId,
     this.categoryName,
+    this.shares = const [],
+    this.shareStatus = const [],
+    this.fullAmountMinor,
+    this.periodKey,
   }) : thisPeriodAmountMinor = thisPeriodAmountMinor ?? amountMinor;
+
+  /// Whether others pay the user back for it.
+  bool get isShared => shares.isNotEmpty || shareStatus.isNotEmpty;
+
+  /// What the others pay back, together.
+  int get othersMinor => shares.fold(0, (sum, share) => sum + share.amountMinor);
 
   /// Whether this period and the next are different amounts.
   bool get changesNextPeriod => thisPeriodAmountMinor != amountMinor;
@@ -994,6 +1034,66 @@ class FixedCommitment {
         categoryName: json['categoryId'] is Map<String, dynamic>
             ? (json['categoryId'] as Map<String, dynamic>)['name'] as String?
             : null,
+        shares: (json['shares'] as List<dynamic>? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .where((s) => s['contactId'] is String && s['amountMinor'] is int)
+            .map((s) => CommitmentShare(contactId: s['contactId'] as String, amountMinor: s['amountMinor'] as int))
+            .toList(),
+        shareStatus: (json['shareStatus'] as List<dynamic>? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(CommitmentShareStatus.fromJson)
+            .toList(),
+        fullAmountMinor: json['fullAmountMinor'] as int?,
+        periodKey: json['periodKey'] as String?,
+      );
+}
+
+/// Part of one person's money back, put towards their part of a shared
+/// fixed cost for a period.
+class TowardsEntry {
+  final String commitmentId;
+  final String contactId;
+  final String periodKey;
+  final int amountMinor;
+
+  const TowardsEntry({
+    required this.commitmentId,
+    required this.contactId,
+    required this.periodKey,
+    required this.amountMinor,
+  });
+}
+
+/// One person's part of a fixed cost, paid back to the user each month.
+class CommitmentShare {
+  final String contactId;
+  final int amountMinor;
+
+  const CommitmentShare({required this.contactId, required this.amountMinor});
+}
+
+/// One person's part this period, and how much of it they have sent.
+class CommitmentShareStatus {
+  final String contactId;
+  final String name;
+  final int amountMinor;
+  final int paidMinor;
+
+  const CommitmentShareStatus({
+    required this.contactId,
+    required this.name,
+    this.amountMinor = 0,
+    this.paidMinor = 0,
+  });
+
+  bool get isPaid => paidMinor >= amountMinor && amountMinor > 0;
+  int get dueMinor => (amountMinor - paidMinor).clamp(0, amountMinor);
+
+  factory CommitmentShareStatus.fromJson(Map<String, dynamic> json) => CommitmentShareStatus(
+        contactId: json['contactId'] as String? ?? '',
+        name: json['name'] as String? ?? 'Someone',
+        amountMinor: json['amountMinor'] as int? ?? 0,
+        paidMinor: json['paidMinor'] as int? ?? 0,
       );
 }
 

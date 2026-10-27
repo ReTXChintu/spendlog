@@ -3,7 +3,8 @@ import { Types } from "mongoose";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
-import { Account, FixedCommitment, Transaction, User, commitmentAmountFor } from "../../models";
+import { Account, FixedCommitment, Transaction, User, commitmentAmountFor, commitmentFullAmountFor } from "../../models";
+import { CommitmentShareError, checkCommitmentShares, shareStatusFor } from "./budget.commitmentShares";
 import { COMMITMENT_KINDS } from "../../types";
 import { budgetPace, changeCommitmentAmount, commitmentPeriod } from "./budget.pace";
 import { checkMonthlyBudget, monthlyBudgetStatus, withMonthlyBudgetChange } from "./budget.monthly";
@@ -123,6 +124,12 @@ const commitmentSchema = z.object({
     .nullable()
     .optional(),
   isActive: z.boolean().optional(),
+  // Who pays the user back for it each month, and how much. The user's own
+  // part is whatever is left.
+  shares: z
+    .array(z.object({ contactId: z.string().regex(/^[0-9a-fA-F]{24}$/), amountMinor: z.number().int().positive() }))
+    .max(20)
+    .optional(),
 });
 
 budgetRouter.get("/commitments", async (req, res) => {
@@ -131,12 +138,17 @@ budgetRouter.get("/commitments", async (req, res) => {
     FixedCommitment.find({ userId }).sort({ isActive: -1, dayOfMonth: 1 }).populate("categoryId"),
     commitmentPeriod(userId),
   ]);
+  const shares = await shareStatusFor(userId, commitments, period);
   // amountMinor is what it costs from now on; this is what this period
-  // costs, which is the old figure when a change came after it was paid.
+  // costs, which is the old figure when a change came after it was paid -
+  // and the user's own part of it, when others pay them back.
   res.json(
     commitments.map((commitment) => ({
       ...commitment.toJSON(),
       thisPeriodAmountMinor: commitmentAmountFor(commitment, period.key),
+      fullAmountMinor: commitmentFullAmountFor(commitment, period.key),
+      periodKey: period.key,
+      shareStatus: shares.get(commitment._id.toString()) ?? [],
     }))
   );
 });
@@ -145,8 +157,15 @@ budgetRouter.post("/commitments", async (req, res) => {
   const parsed = commitmentSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const created = await FixedCommitment.create({ userId: currentUserId(req), ...parsed.data });
-  res.status(201).json(created);
+  const userId = currentUserId(req);
+  try {
+    const shares = await checkCommitmentShares(userId, parsed.data.amountMinor, parsed.data.shares ?? []);
+    const created = await FixedCommitment.create({ userId, ...parsed.data, shares });
+    res.status(201).json(created);
+  } catch (error) {
+    if (error instanceof CommitmentShareError) return res.status(400).json({ error: error.message });
+    throw error;
+  }
 });
 
 // PATCH /budget/commitments/:id
@@ -163,11 +182,26 @@ budgetRouter.patch("/commitments/:id", validObjectIdParam("id"), async (req, res
   const commitment = await FixedCommitment.findOne({ _id: req.params.id, userId });
   if (!commitment) return res.status(404).json({ error: "Not found" });
 
-  if (parsed.data.amountMinor !== undefined) {
-    await changeCommitmentAmount(commitment, parsed.data.amountMinor);
+  const { shares: sharesAsked, ...rest } = parsed.data;
+  if (sharesAsked !== undefined || rest.amountMinor !== undefined) {
+    try {
+      const shares = await checkCommitmentShares(
+        userId,
+        rest.amountMinor ?? commitment.amountMinor,
+        sharesAsked ?? commitment.shares.map((share) => ({ contactId: share.contactId.toString(), amountMinor: share.amountMinor }))
+      );
+      commitment.set({ shares });
+    } catch (error) {
+      if (error instanceof CommitmentShareError) return res.status(400).json({ error: error.message });
+      throw error;
+    }
   }
 
-  commitment.set(parsed.data);
+  if (rest.amountMinor !== undefined) {
+    await changeCommitmentAmount(commitment, rest.amountMinor);
+  }
+
+  commitment.set(rest);
   await commitment.save();
   res.json(commitment);
 });

@@ -245,6 +245,12 @@ class _EditSheetState extends State<_EditSheet> {
 
   /// How much into each, by deposit id, as typed.
   final Map<String, TextEditingController> _depositBoxes = {};
+
+  /// On money paid back: how much of each person's was their part of a
+  /// shared fixed cost, by "commitmentId:contactId", as typed - and the
+  /// period each saved part was for, so an edit keeps it.
+  final Map<String, TextEditingController> _towardsBoxes = {};
+  final Map<String, String> _towardsPeriods = {};
   List<Loan> _loans = [];
   List<MerchantPreset> _presets = [];
   List<CardStatus> _cards = [];
@@ -329,6 +335,11 @@ class _EditSheetState extends State<_EditSheet> {
     _commitmentId = t?.commitmentId;
     _isFixed = _commitmentId != null;
     _intoDeposits = t != null && t.type == 'DEBIT' && t.depositParts.isNotEmpty;
+    for (final entry in t?.towards ?? const <TowardsEntry>[]) {
+      final key = '${entry.commitmentId}:${entry.contactId}';
+      _towardsBoxes[key] = TextEditingController(text: _rupees(entry.amountMinor));
+      _towardsPeriods[key] = entry.periodKey;
+    }
     for (final entry in (t?.depositParts ?? const <String, int>{}).entries) {
       _depositBoxes[entry.key] = TextEditingController(text: _rupees(entry.value));
     }
@@ -409,6 +420,9 @@ class _EditSheetState extends State<_EditSheet> {
       box.dispose();
     }
     for (final box in _depositBoxes.values) {
+      box.dispose();
+    }
+    for (final box in _towardsBoxes.values) {
       box.dispose();
     }
     for (final person in _people) {
@@ -963,7 +977,122 @@ class _EditSheetState extends State<_EditSheet> {
         _merchant.text = picked.merchant!;
       }
       _categoryId ??= picked.categoryId;
+      // Others pay the user back for it: split it the way the fixed cost
+      // says, unless the payment already says otherwise.
+      if (_isDebit && picked.shareStatus.isNotEmpty && _kind == _Kind.normal && _people.isEmpty && _groupId == null) {
+        _kind = _Kind.split;
+        _includeMe = true;
+        _custom = true;
+        for (final share in picked.shareStatus) {
+          _people.add(_Person(contactId: share.contactId, name: share.name, amountMinor: share.amountMinor));
+        }
+        if (_groupLabel.text.trim().isEmpty) _groupLabel.text = picked.name;
+      }
     });
+  }
+
+  /// The shared fixed costs a person on this money paid back is part of,
+  /// as (commitment, their status).
+  List<(FixedCommitment, CommitmentShareStatus)> _sharedFor(String contactId) => [
+        for (final commitment in _commitments)
+          for (final share in commitment.shareStatus)
+            if (share.contactId == contactId) (commitment, share),
+      ];
+
+  /// What the money paid back was put towards, as the server takes it.
+  List<Map<String, dynamic>> get _towardsBody => [
+        for (final person in _people)
+          for (final (commitment, share) in _sharedFor(person.contactId))
+            if ((parseRupees(_towardsBoxes['${commitment.id}:${share.contactId}']?.text ?? '') ?? 0) > 0)
+              {
+                'commitmentId': commitment.id,
+                'contactId': share.contactId,
+                'periodKey': _towardsPeriods['${commitment.id}:${share.contactId}'] ?? commitment.periodKey,
+                'amountMinor': parseRupees(_towardsBoxes['${commitment.id}:${share.contactId}']!.text),
+              },
+      ];
+
+  /// "What was it for?" on money paid back: each person's part of each
+  /// shared fixed cost they are on, the rest left to other splits.
+  Widget _towardsPanel() {
+    final c = context.c;
+    final rows = <Widget>[];
+    for (final person in _people) {
+      final shared = _sharedFor(person.contactId);
+      if (shared.isEmpty) continue;
+      final theirs = parseRupees(person.amount.text) ?? 0;
+      var putTowards = 0;
+      for (final (commitment, share) in shared) {
+        final key = '${commitment.id}:${share.contactId}';
+        final box = _towardsBoxes.putIfAbsent(key, TextEditingController.new);
+        putTowards += parseRupees(box.text) ?? 0;
+        rows.add(Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('${commitment.name} · ${person.name}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx)),
+                    Text(
+                      share.isPaid
+                          ? 'Their ${formatMoney(share.amountMinor)} is in this month'
+                          : 'Their part ${formatMoney(share.amountMinor)}'
+                              '${share.paidMinor > 0 ? ' · ${formatMoney(share.paidMinor)} in so far' : ''}',
+                      style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3),
+                    ),
+                  ],
+                ),
+              ),
+              TextButton(
+                key: ValueKey('towards-fill-$key'),
+                onPressed: () => setState(() {
+                  final want = share.dueMinor > 0 ? share.dueMinor : share.amountMinor;
+                  box.text = _rupees(want.clamp(0, theirs));
+                }),
+                child: const Text('All'),
+              ),
+              SizedBox(
+                width: 112,
+                child: KeyedSubtree(
+                  key: ValueKey('towards-$key'),
+                  child: _AmountBox(controller: box, onChanged: () => setState(() {})),
+                ),
+              ),
+            ],
+          ),
+        ));
+      }
+      final rest = theirs - putTowards;
+      rows.add(Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Text(
+          rest < 0
+              ? 'That puts ${formatMoney(-rest)} more towards fixed costs than came from ${person.name}.'
+              : rest == 0
+                  ? 'All of ${person.name}\'s goes to that.'
+                  : 'The rest of ${person.name}\'s, ${formatMoney(rest)}, is for other splits.',
+          style: TextStyle(
+            fontSize: 12,
+            height: 16 / 12,
+            fontWeight: rest < 0 ? FontWeight.w600 : FontWeight.w400,
+            color: rest < 0 ? c.crit : c.tx3,
+          ),
+        ),
+      ));
+    }
+    if (rows.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [const DsLabel('What was it for?'), const SizedBox(height: 6), ...rows],
+      ),
+    );
   }
 
   // ---- Date ----------------------------------------------------------
@@ -1142,6 +1271,8 @@ class _EditSheetState extends State<_EditSheet> {
       'isSalary': !_isDebit && _kind == _Kind.salary,
       'cardPaymentFor': _isDebit && _kind == _Kind.cardBill ? _cardPaymentFor : null,
       'commitmentId': _isDebit && _isFixed ? _commitmentId : null,
+      // On money paid back: whose part of which shared fixed cost it was.
+      'towards': !_isDebit && _kind == _Kind.settlement ? _towardsBody : <Map<String, dynamic>>[],
       // Every RD and FD it went into; an empty list takes it out of them all.
       'depositParts': _isDebit && _intoDeposits
           ? [
@@ -2077,6 +2208,7 @@ class _EditSheetState extends State<_EditSheet> {
               ),
             ),
           ),
+        if (!_isDebit) _towardsPanel(),
       ],
     );
   }

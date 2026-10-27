@@ -171,6 +171,24 @@ Map<String, dynamic> _transaction(String id, {bool accountUnknown = false}) => {
     };
 
 final _dashboard = <String, dynamic>{
+  // A fixed cost others pay back for, so the layout checks see whose part
+  // is in, and an entry the AI check doubts.
+  'pace': {
+    'configured': true,
+    'commitmentsRemainingMinor': 0,
+    'commitments': [
+      {
+        'id': 'rent', 'name': 'Rent', 'amountMinor': 1150000, 'thisPeriodAmountMinor': 50000, 'dayOfMonth': 22,
+        'isPaid': true,
+        'shareStatus': [
+          {'contactId': 'c1', 'name': 'Chirayu with a long surname', 'amountMinor': 400000, 'paidMinor': 400000},
+          {'contactId': 'c2', 'name': 'Harshang', 'amountMinor': 400000, 'paidMinor': 100000},
+          {'contactId': 'c3', 'name': 'Sapan', 'amountMinor': 300000, 'paidMinor': 0},
+        ],
+      },
+    ],
+  },
+  'flaggedEntries': 2,
   'money': {
     'accounts': [
       {'id': _acc, 'name': 'HDFC', 'last4': '1234', 'accountType': 'BANK', 'balanceMinor': 4745000,

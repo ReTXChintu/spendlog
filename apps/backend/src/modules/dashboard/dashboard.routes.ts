@@ -7,6 +7,7 @@ import {
   CardVault,
   EmiInstalment,
   EmiPlan,
+  FixedCommitment,
   Loan,
   LoanInstalment,
   Perk,
@@ -18,7 +19,8 @@ import { totalsFor as subscriptionTotals } from "../subscriptions/subscriptions.
 import { istDayEnd, istDayKey, istDayStart } from "../../time";
 import { monthSoFar as monthAgainstLast, userMonth } from "../budget/budget.months";
 import { CardStatus, cardStatuses, normaliseNetwork, pickCards } from "../cards/cards.status";
-import { budgetPace } from "../budget/budget.pace";
+import { budgetPace, commitmentPeriod } from "../budget/budget.pace";
+import { shareStatusFor } from "../budget/budget.commitmentShares";
 import { monthlyBudgetStatus } from "../budget/budget.monthly";
 import { perkIsLive } from "../perks/perks.match";
 import { upcomingBills } from "../statements/statements.bills";
@@ -101,9 +103,30 @@ dashboardRouter.get("/", async (req, res) => {
     .filter((perk) => perk.daysLeft <= EXPIRING_WITHIN_DAYS)
     .sort((a, b) => a.daysLeft - b.daysLeft);
 
+  // Each person's part of the fixed costs others pay back, paid or due -
+  // for the fixed costs list, which comes with the pace.
+  const paceWithShares =
+    pace.configured && pace.commitments.some((commitment) => (commitment.shares?.length ?? 0) > 0)
+      ? await (async () => {
+          const status = await shareStatusFor(
+            userId,
+            await FixedCommitment.find({ userId, isActive: true, "shares.0": { $exists: true } }).select("shares"),
+            await commitmentPeriod(userId, now)
+          );
+          return {
+            ...pace,
+            commitments: pace.commitments.map((commitment) => ({
+              ...commitment,
+              // toJSON names it `id`; _id is gone by then.
+              shareStatus: status.get(String((commitment as unknown as { id: string }).id)) ?? [],
+            })),
+          };
+        })()
+      : pace;
+
   res.json({
     today,
-    pace,
+    pace: paceWithShares,
     // The monthly budget: spent and left, the pace, each category's
     // limit, and the savings bucket's balance.
     budget,

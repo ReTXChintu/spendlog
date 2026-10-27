@@ -1,5 +1,12 @@
 import { HydratedDocument, Types } from "mongoose";
-import { FixedCommitment, FixedCommitmentDoc, Transaction, User, commitmentAmountFor } from "../../models";
+import {
+  FixedCommitment,
+  FixedCommitmentDoc,
+  Transaction,
+  User,
+  commitmentAmountFor,
+  commitmentFullAmountFor,
+} from "../../models";
 import { isCardBillCommitment } from "../cards/cards.billPayment";
 import { BudgetPeriod, budgetPeriodFor } from "./budget.period";
 
@@ -83,10 +90,13 @@ export async function changeCommitmentAmount(
   if (newAmountMinor === commitment.amountMinor) return;
 
   const period = await commitmentPeriod(commitment.userId, now);
-  const costsNow = commitmentAmountFor(commitment, period.key);
+  // Met by the user's own part (what the payment counts); remembered as the
+  // whole, which is what amountMinor holds.
+  const mineNow = commitmentAmountFor(commitment, period.key);
+  const costsNow = commitmentFullAmountFor(commitment, period.key);
   const met =
     commitment.paidForPeriod === period.key ||
-    (costsNow > 0 && (await paidTowards(commitment.userId, commitment._id, period)) >= costsNow);
+    (mineNow > 0 && (await paidTowards(commitment.userId, commitment._id, period)) >= mineNow);
 
   if (met && newAmountMinor !== costsNow) {
     commitment.previousAmountMinor = costsNow;
@@ -174,7 +184,9 @@ export async function budgetPace(userId: Types.ObjectId, now = new Date()) {
   // account, because those differ exactly when it matters. Rent of 12,000
   // paid for a flat of three, split down to a share of 4,000, is a 4,000
   // commitment met in full - not a 4,000 commitment overpaid by three times
-  // over, which is what the raw amount would have said.
+  // over, which is what the raw amount would have said. A commitment that
+  // records who pays the user back is measured by the user's own part for
+  // the same reason (commitmentAmountFor).
   const paidRows = await Transaction.aggregate<{ _id: Types.ObjectId; total: number; moved: number }>([
     {
       $match: {

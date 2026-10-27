@@ -18,6 +18,7 @@ import '../widgets/commitment_amount.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/family_section.dart';
 import '../widgets/loan_dialog.dart';
+import '../widgets/person_picker_sheet.dart';
 import 'accounts_screen.dart';
 import 'monthly_budget_screen.dart';
 import 'statements_screen.dart';
@@ -1734,6 +1735,18 @@ class _CommitmentDialogState extends State<_CommitmentDialog> {
 
   late String? _categoryId = widget.commitment?.categoryId;
   bool _saving = false;
+  String? _error;
+
+  /// Who pays the user back for it, each with their part as typed. Names
+  /// come from this period's status, which carries them.
+  late final List<_ShareRow> _shares = [
+    for (final share in widget.commitment?.shares ?? const <CommitmentShare>[])
+      _ShareRow(
+        contactId: share.contactId,
+        name: widget.commitment!.shareStatus.where((s) => s.contactId == share.contactId).firstOrNull?.name ?? 'Someone',
+        amount: TextEditingController(text: (share.amountMinor / 100).toStringAsFixed(share.amountMinor % 100 == 0 ? 0 : 2)),
+      ),
+  ];
 
   @override
   void dispose() {
@@ -1741,14 +1754,43 @@ class _CommitmentDialogState extends State<_CommitmentDialog> {
     _amount.dispose();
     _day.dispose();
     _merchant.dispose();
+    for (final share in _shares) {
+      share.amount.dispose();
+    }
     super.dispose();
+  }
+
+  int get _amountMinor => parseRupees(_amount.text) ?? 0;
+  int get _othersMinor => _shares.fold(0, (sum, share) => sum + (parseRupees(share.amount.text) ?? 0));
+
+  Future<void> _addPeople() async {
+    final picked = await showPeoplePicker(
+      context,
+      exclude: _shares.map((share) => share.contactId).toSet(),
+      title: 'Who pays you back for it?',
+    );
+    if (picked == null || picked.isEmpty || !mounted) return;
+    setState(() {
+      for (final contact in picked) {
+        _shares.add(_ShareRow(contactId: contact.id, name: contact.name, amount: TextEditingController()));
+      }
+    });
   }
 
   Future<void> _save() async {
     final rupees = double.tryParse(_amount.text.trim());
     if (_name.text.trim().isEmpty || rupees == null) return;
+    if (_shares.any((share) => (parseRupees(share.amount.text) ?? 0) <= 0)) {
+      return setState(() => _error = "Type each person's part, or take them off.");
+    }
+    if (_othersMinor > _amountMinor) {
+      return setState(() => _error = 'They pay back ${formatMoney(_othersMinor)}, more than the ${formatMoney(_amountMinor)} it comes to.');
+    }
 
-    setState(() => _saving = true);
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
     final navigator = Navigator.of(context);
 
     final body = {
@@ -1757,6 +1799,9 @@ class _CommitmentDialogState extends State<_CommitmentDialog> {
       'dayOfMonth': int.tryParse(_day.text.trim()) ?? 1,
       'merchant': _merchant.text.trim().isEmpty ? null : _merchant.text.trim(),
       'categoryId': _categoryId,
+      'shares': [
+        for (final share in _shares) {'contactId': share.contactId, 'amountMinor': parseRupees(share.amount.text) ?? 0},
+      ],
     };
 
     try {
@@ -1766,8 +1811,13 @@ class _CommitmentDialogState extends State<_CommitmentDialog> {
         await ApiClient.instance.patch('/budget/commitments/${widget.commitment!.id}', body);
       }
       navigator.pop(true);
-    } catch (_) {
-      if (mounted) setState(() => _saving = false);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _error = e is ApiException && !e.message.startsWith('{') ? e.message : "Couldn't save it. Try again.";
+        });
+      }
     }
   }
 
@@ -1794,13 +1844,17 @@ class _CommitmentDialogState extends State<_CommitmentDialog> {
                 controller: _amount,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 style: kNum.copyWith(fontSize: 15),
+                onChanged: (_) => setState(() {}),
                 decoration: const InputDecoration(
                   prefixText: '₹',
-                  helperText: 'What it costs you - your share, on a bill you pay whole for others.',
+                  helperText: 'The whole of what goes out. If others pay you back for it, add them below - only '
+                      'your part counts.',
                   helperMaxLines: 3,
                 ),
               ),
             ),
+            const SizedBox(height: 16),
+            _sharesSection(),
             const SizedBox(height: 16),
             DsField(
               label: 'Day of the month',
@@ -1816,7 +1870,12 @@ class _CommitmentDialogState extends State<_CommitmentDialog> {
               label: 'Usually paid to',
               child: TextField(
                 controller: _merchant,
-                decoration: const InputDecoration(hintText: 'Landlord'),
+                decoration: const InputDecoration(
+                  hintText: 'Landlord',
+                  helperText: "As the bank names them. With people paying you back, a payment to them of this amount "
+                      'is put down to it and split by itself.',
+                  helperMaxLines: 4,
+                ),
               ),
             ),
             const SizedBox(height: 16),
@@ -1852,4 +1911,88 @@ class _CommitmentDialogState extends State<_CommitmentDialog> {
       ],
     );
   }
+
+  /// Who pays the user back, each with their part, and what is left as the
+  /// user's own.
+  Widget _sharesSection() {
+    final c = context.c;
+    final mine = _amountMinor - _othersMinor;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text('Who pays you back',
+                  style: TextStyle(fontSize: 13, height: 18 / 13, fontWeight: FontWeight.w600, color: c.tx2)),
+            ),
+            TextButton.icon(
+              key: const ValueKey('commitment-add-people'),
+              onPressed: _saving ? null : _addPeople,
+              icon: const DsIcon(DsIcons.plus, size: 16),
+              label: const Text('Add'),
+            ),
+          ],
+        ),
+        for (final share in _shares)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(share.name,
+                      maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 14, color: c.tx)),
+                ),
+                SizedBox(
+                  width: 104,
+                  child: TextField(
+                    key: ValueKey('commitment-share-${share.contactId}'),
+                    controller: share.amount,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    textAlign: TextAlign.right,
+                    onChanged: (_) => setState(() => _error = null),
+                    style: kNum.copyWith(fontSize: 14),
+                    decoration: const InputDecoration(prefixText: '₹', isDense: true),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Take ${share.name} off',
+                  onPressed: () => setState(() {
+                    _shares.remove(share);
+                    share.amount.dispose();
+                  }),
+                  icon: DsIcon(DsIcons.x, size: 16, color: c.tx3),
+                ),
+              ],
+            ),
+          ),
+        Text(
+          _shares.isEmpty
+              ? 'Nobody - all of it is yours.'
+              : mine < 0
+                  ? 'They pay back ${formatMoney(-mine)} more than it comes to.'
+                  : 'Your part: ${formatMoney(mine)}. Theirs is owed to you each month, on People.',
+          style: TextStyle(
+            fontSize: 12,
+            height: 16 / 12,
+            fontWeight: mine < 0 ? FontWeight.w600 : FontWeight.w400,
+            color: mine < 0 ? c.crit : c.tx3,
+          ),
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 8),
+          Text(_error!, style: TextStyle(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w600, color: c.crit)),
+        ],
+      ],
+    );
+  }
+}
+
+/// One person paying back for a fixed cost, as the editor holds them.
+class _ShareRow {
+  final String contactId;
+  final String name;
+  final TextEditingController amount;
+
+  _ShareRow({required this.contactId, required this.name, required this.amount});
 }

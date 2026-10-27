@@ -844,7 +844,7 @@ class _FixedCostsTile extends StatelessWidget {
       icon: DsIcons.listChecks,
       child: Column(
         children: [
-          for (final commitment in fixed.commitments)
+          for (final commitment in fixed.commitments) ...[
             CheckboxListTile(
               value: commitment.isPaid,
               onChanged: (value) => onTogglePaid(commitment, value ?? false),
@@ -874,6 +874,28 @@ class _FixedCostsTile extends StatelessWidget {
                     )
                   : CommitmentAmount(commitment: commitment),
             ),
+            // Who pays the user back for it, and whose part is in this month.
+            if (commitment.shareStatus.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(left: 40, bottom: 6),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final share in commitment.shareStatus)
+                      DsBadge(
+                        share.isPaid
+                            ? '${share.name} ✓'
+                            : share.paidMinor > 0
+                                ? '${share.name} ${formatMoneyShort(share.dueMinor)} left'
+                                : '${share.name} ${formatMoneyShort(share.amountMinor)} due',
+                        key: ValueKey('share-${commitment.id}-${share.contactId}'),
+                        tone: share.isPaid ? DsTone.good : DsTone.warn,
+                      ),
+                  ],
+                ),
+              ),
+          ],
         ],
       ),
     );

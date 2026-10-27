@@ -826,9 +826,33 @@ export interface TransactionDoc {
   /// ₹1,000 into another"). Still spending, like any fixed cost; it is
   /// also what each deposit's total grows by. See modules/deposits.
   depositParts: DepositPart[];
+  /// On money in from people: how much of it was each person's part of a
+  /// shared fixed cost, for which period ("₹4,000 of Chirayu's ₹6,000 is
+  /// October's rent"; the rest is other splits). Their balance on People
+  /// goes down by the whole amount either way; this is what says whose
+  /// rent is in. See budget.commitmentShares.ts.
+  towards: TowardsEntry[];
   createdAt: Date;
   updatedAt: Date;
 }
+
+export interface TowardsEntry {
+  commitmentId: Types.ObjectId;
+  contactId: Types.ObjectId;
+  /// The commitment period it is for, by its key (its first day).
+  periodKey: string;
+  amountMinor: number;
+}
+
+const towardsEntrySchema = new Schema<TowardsEntry>(
+  {
+    commitmentId: { type: Schema.Types.ObjectId, ref: "FixedCommitment", required: true },
+    contactId: { type: Schema.Types.ObjectId, ref: "Contact", required: true },
+    periodKey: { type: String, required: true },
+    amountMinor: { type: Number, required: true, min: 1 },
+  },
+  { _id: false }
+);
 
 export interface DepositPart {
   depositId: Types.ObjectId;
@@ -1016,6 +1040,7 @@ const transactionSchema = new Schema<TransactionDoc>(
     aiFlag: { type: aiFlagSchema, default: null },
     aiFlagDismissedAt: { type: Date, default: null },
     depositParts: { type: [depositPartSchema], default: [] },
+    towards: { type: [towardsEntrySchema], default: [] },
     sources: { type: [transactionSourceSchema], default: [] },
     mergedFrom: { type: [mergedSnapshotSchema], default: [] },
     countedAmountMinor: { type: Number, default: 0 },
@@ -1764,12 +1789,23 @@ export interface FixedCommitmentDoc {
   /// with the next one. Once that period is over this pair means nothing.
   previousAmountMinor?: number | null;
   previousAmountPeriod?: string | null;
+  /// Who pays the user back for it each month, and how much: rent of
+  /// ₹11,500 with flatmates paying ₹4,000, ₹4,000 and ₹3,000 is ₹500 of the
+  /// user's own. The payment that goes out for it is split that way (see
+  /// budget.commitmentShares.ts), and only the user's own part is what it
+  /// costs them - commitmentAmountFor.
+  shares: CommitmentShare[];
   createdAt: Date;
   updatedAt: Date;
 }
 
-/** What a commitment costs in the period with this key. */
-export function commitmentAmountFor(
+export interface CommitmentShare {
+  contactId: Types.ObjectId;
+  amountMinor: number;
+}
+
+/** What a commitment comes to in the period with this key, the whole of it. */
+export function commitmentFullAmountFor(
   commitment: Pick<FixedCommitmentDoc, "amountMinor" | "previousAmountMinor" | "previousAmountPeriod">,
   periodKey: string
 ): number {
@@ -1777,6 +1813,30 @@ export function commitmentAmountFor(
     ? commitment.previousAmountMinor
     : commitment.amountMinor;
 }
+
+/**
+ * What a commitment costs the user in the period with this key: the whole
+ * of it less what others pay them back for it. The figure everything that
+ * counts spending measures it by - the payment for it is split down to the
+ * same part.
+ */
+export function commitmentAmountFor(
+  commitment: Pick<FixedCommitmentDoc, "amountMinor" | "previousAmountMinor" | "previousAmountPeriod"> & {
+    shares?: CommitmentShare[] | null;
+  },
+  periodKey: string
+): number {
+  const others = (commitment.shares ?? []).reduce((sum, share) => sum + share.amountMinor, 0);
+  return Math.max(0, commitmentFullAmountFor(commitment, periodKey) - others);
+}
+
+const commitmentShareSchema = new Schema<CommitmentShare>(
+  {
+    contactId: { type: Schema.Types.ObjectId, ref: "Contact", required: true },
+    amountMinor: { type: Number, required: true, min: 1 },
+  },
+  { _id: false }
+);
 
 const fixedCommitmentSchema = new Schema<FixedCommitmentDoc>(
   {
@@ -1791,6 +1851,7 @@ const fixedCommitmentSchema = new Schema<FixedCommitmentDoc>(
     paidForPeriod: { type: String, default: null },
     previousAmountMinor: { type: Number, default: null, min: 0 },
     previousAmountPeriod: { type: String, default: null },
+    shares: { type: [commitmentShareSchema], default: [] },
   },
   { timestamps: true, ...serialization }
 );
