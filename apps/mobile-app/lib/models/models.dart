@@ -304,6 +304,9 @@ class Transaction {
   /// Each member's part, by member id, when it was not split equally.
   final Map<String, int> groupShareAmounts;
 
+  /// The RDs and FDs it went into, by deposit id, and how much into each.
+  final Map<String, int> depositParts;
+
   /// On a payment someone else made: which of the user's contacts paid.
   final String? paidByContactId;
   final String? paidByName;
@@ -421,6 +424,7 @@ class Transaction {
     this.groupName,
     this.groupShareWith,
     this.groupShareAmounts = const {},
+    this.depositParts = const {},
     this.paidByContactId,
     this.paidByName,
     this.offLedger = false,
@@ -493,6 +497,11 @@ class Transaction {
           for (final part in (json['groupShareAmounts'] as List<dynamic>? ?? const []))
             if (part is Map<String, dynamic> && part['memberId'] is String && part['amountMinor'] is int)
               part['memberId'] as String: part['amountMinor'] as int,
+        },
+        depositParts: {
+          for (final part in (json['depositParts'] as List<dynamic>? ?? const []))
+            if (part is Map<String, dynamic> && part['depositId'] is String && part['amountMinor'] is int)
+              part['depositId'] as String: part['amountMinor'] as int,
         },
         groupName: ((json['group'] ?? json['trip']) as Map<String, dynamic>?)?['name'] as String?,
         paidByContactId: (json['paidBy'] as Map<String, dynamic>?)?['contactId'] as String?,

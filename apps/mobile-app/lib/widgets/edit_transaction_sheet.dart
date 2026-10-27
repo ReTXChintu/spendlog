@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../models/deposit_models.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
 import 'ds/ds.dart';
@@ -234,6 +235,16 @@ class _EditSheetState extends State<_EditSheet> {
   /// sheet opens from several places and only one of them would have
   /// had them to hand.
   List<FixedCommitment> _commitments = [];
+
+  /// The RDs and FDs a payment can go into: the open ones, plus any this
+  /// payment is already in.
+  List<Deposit> _deposits = [];
+
+  /// Whether part or all of this payment went into RDs or FDs.
+  bool _intoDeposits = false;
+
+  /// How much into each, by deposit id, as typed.
+  final Map<String, TextEditingController> _depositBoxes = {};
   List<Loan> _loans = [];
   List<MerchantPreset> _presets = [];
   List<CardStatus> _cards = [];
@@ -317,6 +328,10 @@ class _EditSheetState extends State<_EditSheet> {
     _cardPaymentFor = t?.cardPaymentFor;
     _commitmentId = t?.commitmentId;
     _isFixed = _commitmentId != null;
+    _intoDeposits = t != null && t.type == 'DEBIT' && t.depositParts.isNotEmpty;
+    for (final entry in (t?.depositParts ?? const <String, int>{}).entries) {
+      _depositBoxes[entry.key] = TextEditingController(text: _rupees(entry.value));
+    }
     _savedLoanSplits = t != null && t.type == 'DEBIT' ? t.loanSplits : const [];
     for (final split in _savedLoanSplits) {
       _loanParts.add(_LoanPart(loanId: split.loanId, picked: true, amountMinor: split.amountMinor));
@@ -374,6 +389,7 @@ class _EditSheetState extends State<_EditSheet> {
     _loadContacts();
 
     _loadCommitments();
+    _loadDeposits();
     _loadLoans();
     _loadPresets();
     _loadCards();
@@ -390,6 +406,9 @@ class _EditSheetState extends State<_EditSheet> {
     _groupLabel.dispose();
     _myShareManual.dispose();
     for (final box in _groupParts.values) {
+      box.dispose();
+    }
+    for (final box in _depositBoxes.values) {
       box.dispose();
     }
     for (final person in _people) {
@@ -467,6 +486,37 @@ class _EditSheetState extends State<_EditSheet> {
       // The form works without shortcuts.
     }
   }
+
+  Future<void> _loadDeposits() async {
+    try {
+      final json = await ApiClient.instance.get('/deposits') as Map<String, dynamic>;
+      if (!mounted) return;
+      final saved = widget.transaction?.depositParts ?? const <String, int>{};
+      setState(() {
+        _deposits = DepositList.fromJson(json).deposits.where((d) => d.isActive || saved.containsKey(d.id)).toList();
+        for (final deposit in _deposits) {
+          _depositBoxes.putIfAbsent(deposit.id, TextEditingController.new);
+        }
+      });
+    } catch (_) {
+      // The chip simply does not appear.
+    }
+  }
+
+  /// The parts typed, by deposit id, leaving out the ones with nothing.
+  Map<String, int> get _depositParts => {
+        for (final deposit in _deposits)
+          if ((parseRupees(_depositBoxes[deposit.id]?.text ?? '') ?? 0) > 0)
+            deposit.id: parseRupees(_depositBoxes[deposit.id]!.text)!,
+      };
+
+  void _toggleDeposits() => setState(() {
+        _intoDeposits = !_intoDeposits;
+        // With one deposit and nothing typed, the whole payment goes in.
+        if (_intoDeposits && _deposits.length == 1 && _depositParts.isEmpty) {
+          _depositBoxes[_deposits.single.id]?.text = _rupees(_totalMinor);
+        }
+      });
 
   Future<void> _loadCommitments() async {
     try {
@@ -693,6 +743,7 @@ class _EditSheetState extends State<_EditSheet> {
       // across to a payment.
       _isSpecial = false;
       _isFixed = false;
+      _intoDeposits = false;
       _autoFillTransfer();
     });
   }
@@ -834,6 +885,7 @@ class _EditSheetState extends State<_EditSheet> {
   void _becomePersonKind(Contact? contact) {
     _isSpecial = false;
     _isFixed = false;
+    _intoDeposits = false;
     _cardPaymentFor = null;
     bool isOn() => contact != null && _people.any((person) => person.contactId == contact.id);
 
@@ -1014,6 +1066,14 @@ class _EditSheetState extends State<_EditSheet> {
     if (_isDebit && _isFixed && _commitmentId == null) {
       return _fail('Pick which fixed cost this went towards, or turn Fixed cost off.');
     }
+    if (_isDebit && _intoDeposits) {
+      final parts = _depositParts;
+      final sum = parts.values.fold<int>(0, (total, part) => total + part);
+      if (parts.isEmpty) return _fail('Type how much went into which RD or FD, or turn Into RD/FD off.');
+      if (sum > _totalMinor) {
+        return _fail("That's ${formatMoney(sum)} into deposits, ${formatMoney(sum - _totalMinor)} more than the payment.");
+      }
+    }
 
     // The group it goes in, and who it is shared between there.
     final groupFields = <String, dynamic>{};
@@ -1082,6 +1142,12 @@ class _EditSheetState extends State<_EditSheet> {
       'isSalary': !_isDebit && _kind == _Kind.salary,
       'cardPaymentFor': _isDebit && _kind == _Kind.cardBill ? _cardPaymentFor : null,
       'commitmentId': _isDebit && _isFixed ? _commitmentId : null,
+      // Every RD and FD it went into; an empty list takes it out of them all.
+      'depositParts': _isDebit && _intoDeposits
+          ? [
+              for (final entry in _depositParts.entries) {'depositId': entry.key, 'amountMinor': entry.value},
+            ]
+          : <Map<String, dynamic>>[],
       // Every loan it repays and how much went to each; an empty list takes
       // it off them all. Short of the whole payment is fine - the rest is
       // saved as not put down to any loan yet, and shown as such.
@@ -1682,6 +1748,7 @@ class _EditSheetState extends State<_EditSheet> {
     final hasCards = _cardAccounts.isNotEmpty || _cardPaymentFor != null;
     final hasLoans = _loans.isNotEmpty || _savedLoanSplits.isNotEmpty;
     final hasCommitments = _commitments.isNotEmpty || _commitmentId != null;
+    final hasDeposits = _deposits.isNotEmpty || _intoDeposits;
 
     // (label, selected, onTap). Radio-as-chips: the chosen one is
     // ink-filled with a check, like every selected chip.
@@ -1730,7 +1797,7 @@ class _EditSheetState extends State<_EditSheet> {
         // These sit on top of whatever kind it is - rent can be split and
         // a fixed cost. A payment has no one-off toggle: one-offs count
         // against the monthly budget like everything else.
-        if (!_isDebit || hasCommitments) ...[
+        if (!_isDebit || hasCommitments || hasDeposits) ...[
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
@@ -1738,15 +1805,23 @@ class _EditSheetState extends State<_EditSheet> {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               Text('Also', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.tx3)),
-              if (_isDebit)
+              if (_isDebit && hasCommitments)
                 DsChip(
                   label: 'Fixed cost',
                   icon: DsIcons.repeat,
                   selected: _isFixed,
                   height: 32,
                   onTap: () => setState(() => _isFixed = !_isFixed),
-                )
-              else
+                ),
+              if (_isDebit && hasDeposits)
+                DsChip(
+                  label: 'Into RD/FD',
+                  icon: DsIcons.piggyBank,
+                  selected: _intoDeposits,
+                  height: 32,
+                  onTap: _toggleDeposits,
+                ),
+              if (!_isDebit)
                 DsChip(
                   label: 'Keep out of savings bucket',
                   icon: DsIcons.piggyBank,
@@ -1785,6 +1860,7 @@ class _EditSheetState extends State<_EditSheet> {
     final parts = <Widget>[
       if (main != null) main,
       if (_isDebit && _isFixed) _fixedPanel(),
+      if (_isDebit && _intoDeposits) _depositPanel(),
       if (!_isDebit && _isSpecial)
         const _Hint("Kept out of your savings bucket - it won't be counted towards what you save."),
     ];
@@ -2159,6 +2235,72 @@ class _EditSheetState extends State<_EditSheet> {
           ),
         ],
       ),
+    );
+  }
+
+  /// How much of the payment went into which RD or FD: one payment can
+  /// fund several, as when ₹3,000 to the agent is ₹2,000 into one RD and
+  /// ₹1,000 into another.
+  Widget _depositPanel() {
+    final c = context.c;
+    final sum = _depositParts.values.fold<int>(0, (total, part) => total + part);
+    final over = sum > _totalMinor;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const DsLabel('Into which RD or FD'),
+        const SizedBox(height: 6),
+        for (final deposit in _deposits)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(deposit.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx)),
+                      Text(
+                        [deposit.subtitle, if (deposit.monthlyMinor != null) '${formatMoney(deposit.monthlyMinor!)} a month']
+                            .join(' · '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 132,
+                  child: KeyedSubtree(
+                    key: ValueKey('deposit-part-${deposit.id}'),
+                    child: _AmountBox(controller: _depositBoxes[deposit.id]!, onChanged: () => setState(() {})),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        Text(
+          over
+              ? "That's ${formatMoney(sum - _totalMinor)} more than the payment."
+              : sum == _totalMinor
+                  ? 'All of it goes into deposits.'
+                  : '${formatMoney(sum)} of ${formatMoney(_totalMinor)} goes into deposits.',
+          style: TextStyle(
+            fontSize: 12,
+            height: 16 / 12,
+            fontWeight: over ? FontWeight.w600 : FontWeight.w400,
+            color: over ? c.crit : c.tx3,
+          ),
+        ),
+        const SizedBox(height: 4),
+        const _Hint("Adds to each deposit's total. Still counts as spending, against your monthly budget like any "
+            'fixed cost.'),
+      ],
     );
   }
 

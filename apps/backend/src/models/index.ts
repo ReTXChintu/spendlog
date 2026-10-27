@@ -821,9 +821,27 @@ export interface TransactionDoc {
   aiFlag?: AiFlag | null;
   /// Said to be right after a flag, so no later check flags it again.
   aiFlagDismissedAt?: Date | null;
+  /// The RDs and FDs this payment went into, and how much into each: one
+  /// payment can fund several ("₹3,000 to the agent: ₹2,000 into one RD,
+  /// ₹1,000 into another"). Still spending, like any fixed cost; it is
+  /// also what each deposit's total grows by. See modules/deposits.
+  depositParts: DepositPart[];
   createdAt: Date;
   updatedAt: Date;
 }
+
+export interface DepositPart {
+  depositId: Types.ObjectId;
+  amountMinor: number;
+}
+
+const depositPartSchema = new Schema<DepositPart>(
+  {
+    depositId: { type: Schema.Types.ObjectId, ref: "Deposit", required: true },
+    amountMinor: { type: Number, required: true, min: 1 },
+  },
+  { _id: false }
+);
 
 export const AI_FLAG_KINDS = ["NOT_A_TRANSACTION", "WRONG_AMOUNT", "WRONG_DIRECTION", "DUPLICATE"] as const;
 export type AiFlagKind = (typeof AI_FLAG_KINDS)[number];
@@ -997,6 +1015,7 @@ const transactionSchema = new Schema<TransactionDoc>(
     aiCheckedAt: { type: Date, default: null },
     aiFlag: { type: aiFlagSchema, default: null },
     aiFlagDismissedAt: { type: Date, default: null },
+    depositParts: { type: [depositPartSchema], default: [] },
     sources: { type: [transactionSourceSchema], default: [] },
     mergedFrom: { type: [mergedSnapshotSchema], default: [] },
     countedAmountMinor: { type: Number, default: 0 },
@@ -1105,6 +1124,7 @@ transactionSchema.pre("findOneAndUpdate", async function (next) {
 });
 
 transactionSchema.index({ userId: 1, occurredAt: -1 });
+transactionSchema.index({ "depositParts.depositId": 1 }, { partialFilterExpression: { "depositParts.0": { $exists: true } } });
 transactionSchema.index({ userId: 1, dedupeKey: 1 });
 transactionSchema.index({ sourceRef: 1 });
 // A second message about a payment finds it by the bank's reference.
@@ -2888,6 +2908,49 @@ const goalSchema = new Schema<GoalDoc>(
 );
 
 export const Goal = model<GoalDoc>("Goal", goalSchema);
+
+export const DEPOSIT_KINDS = ["RD", "FD"] as const;
+export type DepositKind = (typeof DEPOSIT_KINDS)[number];
+
+/**
+ * A recurring or fixed deposit, kept as a running total - no interest, no
+ * maturity date, by the user's choice. The total is what they last said
+ * it was (baselineMinor, as of baselineAt) plus every payment put into it
+ * since; saying a new total moves the baseline, the way an account's
+ * opening balance works.
+ */
+export interface DepositDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  name: string;
+  kind: DepositKind;
+  /// Where it is held: the bank, the post office, an agent.
+  institution: string | null;
+  /// What goes in each month, on an RD. Shown beside it; the total only
+  /// grows by payments actually put in.
+  monthlyMinor: number | null;
+  baselineMinor: number;
+  baselineAt: Date;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const depositSchema = new Schema<DepositDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    name: { type: String, required: true, trim: true },
+    kind: { type: String, enum: DEPOSIT_KINDS, required: true },
+    institution: { type: String, default: null, trim: true },
+    monthlyMinor: { type: Number, default: null, min: 0 },
+    baselineMinor: { type: Number, required: true, min: 0 },
+    baselineAt: { type: Date, required: true },
+    isActive: { type: Boolean, default: true },
+  },
+  { timestamps: true, ...serialization }
+);
+
+export const Deposit = model<DepositDoc>("Deposit", depositSchema);
 
 /**
  * The assistant's read of the user's funds, kept for the day like

@@ -9,12 +9,13 @@ import '../../widgets/funds/fund_widgets.dart';
 import '../../widgets/funds/goal_card.dart';
 import '../../widgets/state_block.dart';
 import 'add_fund_screen.dart';
+import 'deposits_tab.dart';
 import 'goal_editor_screen.dart';
 import 'holding_detail_screen.dart';
 import 'link_sheets.dart';
 
-/// Mutual funds: what's held and what it's worth today, the goals it's
-/// for, and the assistant's read on both.
+/// Mutual funds: what's held and what it's worth today, the RDs and FDs
+/// beside them, the goals it's for, and the assistant's read on both.
 ///
 /// Three tabs over three requests, each loaded on its own: a slow NAV
 /// source costs the Portfolio tab, not the goals, and advice that can't be
@@ -22,7 +23,7 @@ import 'link_sheets.dart';
 class InvestmentsScreen extends StatefulWidget {
   const InvestmentsScreen({super.key, this.initialTab = 0, this.onOpenAiSettings});
 
-  /// 0 Portfolio, 1 Goals, 2 Advice.
+  /// 0 Portfolio, 1 Deposits, 2 Goals, 3 Advice.
   final int initialTab;
 
   /// Settings, at the assistant's card - where the Gemini key goes.
@@ -33,7 +34,8 @@ class InvestmentsScreen extends StatefulWidget {
 }
 
 class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 3, vsync: this, initialIndex: widget.initialTab.clamp(0, 2));
+  late final TabController _tabs = TabController(length: 4, vsync: this, initialIndex: widget.initialTab.clamp(0, 3));
+  final GlobalKey<DepositsTabState> _deposits = GlobalKey<DepositsTabState>();
 
   FundPortfolio? _portfolio;
   bool _portfolioFailed = false;
@@ -212,7 +214,13 @@ class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerP
           icon: const DsIcon(DsIcons.plus, size: 20),
           label: const Text('Add fund'),
         ),
-      1 when _goals != null && _goals!.goals.isNotEmpty => FloatingActionButton.extended(
+      1 => FloatingActionButton.extended(
+          heroTag: 'add-deposit',
+          onPressed: () => _deposits.currentState?.edit(),
+          icon: const DsIcon(DsIcons.plus, size: 20),
+          label: const Text('Add deposit'),
+        ),
+      2 when _goals != null && _goals!.goals.isNotEmpty => FloatingActionButton.extended(
           heroTag: 'add-goal',
           onPressed: _editGoal,
           icon: const DsIcon(DsIcons.target, size: 20),
@@ -235,7 +243,7 @@ class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerP
               animation: _tabs,
               builder: (context, _) => DsSegmented<int>(
                 height: 32,
-                segments: const [(0, 'Portfolio'), (1, 'Goals'), (2, 'Advice')],
+                segments: const [(0, 'Funds'), (1, 'Deposits'), (2, 'Goals'), (3, 'Advice')],
                 selected: _tabs.index,
                 onChanged: (index) {
                   _tabs.animateTo(index);
@@ -251,6 +259,7 @@ class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerP
         controller: _tabs,
         children: [
           _portfolioTab(),
+          DepositsTab(key: _deposits),
           _goalsTab(),
           _adviceTab(),
         ],

@@ -37,6 +37,7 @@ import { cardPaymentProblem } from "../cards/cards.billPayment.service";
 import { mergeTransactions } from "./transactions.merge";
 import { checkEntries } from "./transactions.aiCheck";
 import { AiError } from "../ai/ai.gemini";
+import { DepositPartError, checkDepositParts } from "../deposits/deposits.service";
 import { IST_OFFSET, istDayEnd, istDayKey, istDayStart } from "../../time";
 import { TRANSACTION_TYPES } from "../../types";
 
@@ -282,6 +283,12 @@ const loanSplitBody = z.object({
   amountMinor: z.number().int().positive(),
 });
 
+// One deposit's part of a payment put into RDs and FDs.
+const depositPartBody = z.object({
+  depositId: z.string().regex(OBJECT_ID),
+  amountMinor: z.number().int().positive(),
+});
+
 // One member's part of a group payment, typed by hand.
 const groupShareAmountBody = z.object({
   memberId: z.string().regex(OBJECT_ID),
@@ -322,6 +329,9 @@ const createTransactionSchema = z.object({
   commitmentId: z.string().regex(OBJECT_ID).nullable().optional(),
   loanId: z.string().regex(OBJECT_ID).nullable().optional(),
   loanSplits: z.array(loanSplitBody).max(20).optional(),
+  // The RDs and FDs it went into, and how much into each. An empty list
+  // takes it out of all of them.
+  depositParts: z.array(depositPartBody).max(20).optional(),
   // The group it goes in, picked in the editor - nothing is put in one by
   // itself any more, bar a Trippin trip's dates. tripId is the old name.
   groupId: z.string().regex(OBJECT_ID).nullable().optional(),
@@ -461,6 +471,17 @@ transactionsRouter.post("/", async (req, res) => {
     }
   }
 
+  // The RDs and FDs it went into: only a payment goes into one.
+  let depositParts: Awaited<ReturnType<typeof checkDepositParts>> = [];
+  if (parsed.data.type === "DEBIT" && parsed.data.depositParts?.length) {
+    try {
+      depositParts = await checkDepositParts(currentUserId(req), parsed.data.amountMinor, parsed.data.depositParts);
+    } catch (error) {
+      if (error instanceof DepositPartError) return res.status(400).json({ error: error.message });
+      throw error;
+    }
+  }
+
   const created = await Transaction.create({
     userId: currentUserId(req),
     amountMinor: parsed.data.amountMinor,
@@ -486,6 +507,7 @@ transactionsRouter.post("/", async (req, res) => {
     isSalary: parsed.data.type === "CREDIT" ? (parsed.data.isSalary ?? false) : false,
     cardPaymentFor: parsed.data.type === "DEBIT" ? (parsed.data.cardPaymentFor ?? null) : null,
     commitmentId: parsed.data.type === "DEBIT" ? (parsed.data.commitmentId ?? null) : null,
+    depositParts,
     source: "MANUAL",
   });
 
@@ -537,6 +559,9 @@ const updateTransactionSchema = z.object({
   // takes it off every loan. Need not add up to the whole payment - what
   // is left over is saved as not yet put down to any loan.
   loanSplits: z.array(loanSplitBody).max(20).optional(),
+  // The RDs and FDs it went into, and how much into each. An empty list
+  // takes it out of all of them.
+  depositParts: z.array(depositPartBody).max(20).optional(),
   // Zero is meaningful: someone else's bill paid from the user's card, all
   // of which is owed back. null clears the split entirely.
   split: z
@@ -868,7 +893,33 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
     throw error;
   }
   if (loanSplits) await setLoanSplits(existing, loanSplits);
-  const { loanId: _handledAbove, loanSplits: _alsoAbove, people: _checkedAbove, ...fields } = data;
+
+  // The RDs and FDs it goes into, against the amount it will have. Money in
+  // goes into none; an edit that leaves them alone keeps them, unless the
+  // new amount is smaller than they add up to.
+  const willBeType = data.type ?? existing.type;
+  const willBeAmount = data.amountMinor ?? existing.amountMinor;
+  let depositFields: Record<string, unknown> = {};
+  if (willBeType !== "DEBIT") {
+    if (existing.depositParts.length > 0) depositFields = { depositParts: [] };
+  } else if (data.depositParts !== undefined || existing.depositParts.length > 0) {
+    const asked =
+      data.depositParts ??
+      existing.depositParts.map((part) => ({ depositId: part.depositId.toString(), amountMinor: part.amountMinor }));
+    try {
+      depositFields = { depositParts: await checkDepositParts(userId, willBeAmount, asked) };
+    } catch (error) {
+      if (error instanceof DepositPartError) return res.status(400).json({ error: error.message });
+      throw error;
+    }
+  }
+  const {
+    loanId: _handledAbove,
+    loanSplits: _alsoAbove,
+    people: _checkedAbove,
+    depositParts: _depositsAbove,
+    ...fields
+  } = data;
 
   // Whether this edit changes what kind of transaction it is, as opposed
   // to filing it. Compared against the row rather than read off the body,
@@ -888,6 +939,7 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
         ...fields,
         ...transferFields,
         ...groupFields,
+        ...depositFields,
         ...(people !== undefined ? { people } : {}),
         editedAt: new Date(),
         ...(kindChanged ? { kindEditedAt: new Date() } : {}),
