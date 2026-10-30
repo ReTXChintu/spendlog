@@ -1,6 +1,5 @@
 import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
-import '../services/api_client.dart';
 import '../services/push_service.dart';
 import '../services/deep_links.dart';
 import '../services/sms_service.dart';
@@ -8,7 +7,7 @@ import '../widgets/ds/ds.dart';
 import 'ask_screen.dart';
 import 'dashboard_screen.dart';
 import 'home_screen.dart';
-import 'ipos_screen.dart';
+import 'investments/investments_screen.dart';
 import 'settings_screen.dart';
 import 'transactions_screen.dart';
 import 'groups_screen.dart';
@@ -24,8 +23,8 @@ class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
   // Analytics is a tab inside Home now, beside the Dashboard.
-  static const _titles = ['Home', 'Transactions', 'Groups', 'Settings'];
-  static const _settingsIndex = 3;
+  static const _titles = ['Home', 'Transactions', 'Invest', 'Groups', 'Settings'];
+  static const _settingsIndex = 4;
 
   // The dashboard reloads when you come back to it, since half of what
   // it shows is a count of jobs the other tabs are where you do.
@@ -34,10 +33,6 @@ class _HomeShellState extends State<HomeShell> {
   // So the Ask screen can send somebody straight to the assistant's card.
   final _settings = GlobalKey<SettingsScreenState>();
 
-  // Whether the server can show IPOs (it has an IPO Guru key). Asked once
-  // per start; until it says yes, the button stays hidden.
-  bool _iposAvailable = false;
-
   @override
   void initState() {
     super.initState();
@@ -45,28 +40,8 @@ class _HomeShellState extends State<HomeShell> {
     // Here rather than at sign-in: this screen opens for the owner both on
     // launch and right after signing in, and never for a kid.
     PushService.instance.registerIfOwner();
-    _checkIpos();
     // A group link that arrived before sign-in opens now.
     DeepLinks.instance.flush();
-  }
-
-  /// One call, and the server answers it from its cache. Any failure leaves
-  /// the button hidden until the next start.
-  Future<void> _checkIpos() async {
-    // A kid never reaches this shell, and the server refuses a kid's token
-    // here anyway; this just makes sure a kid's phone never asks.
-    if (await ApiClient.isKidSession()) return;
-    try {
-      final json = await ApiClient.instance.get('/ipos');
-      final available = json is Map && json['available'] == true;
-      if (available && mounted) setState(() => _iposAvailable = true);
-    } catch (_) {
-      // Hidden it stays.
-    }
-  }
-
-  Future<void> _openIpos() async {
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const IposScreen()));
   }
 
   /// The plugin only delivers a foreground SMS to a channel registered in
@@ -108,6 +83,8 @@ class _HomeShellState extends State<HomeShell> {
         onOpenAiSettings: _openAssistantSettings,
       ),
       TransactionsScreen(onOpenSettings: () => setState(() => _index = _settingsIndex)),
+      // Everything invested: in one total, funds, gold, IPOs, deposits.
+      InvestmentsScreen(embedded: true, onOpenAiSettings: _openAssistantSettings),
       const GroupsScreen(),
       SettingsScreen(key: _settings),
     ];
@@ -129,12 +106,6 @@ class _HomeShellState extends State<HomeShell> {
           ],
         ),
         actions: [
-          if (_index == 0 && _iposAvailable)
-            IconButton(
-              tooltip: 'IPOs',
-              onPressed: _openIpos,
-              icon: DsIcon(DsIcons.trendingUp, size: 22, color: c.tx2),
-            ),
           if (_index == 0)
             Padding(
               padding: const EdgeInsets.only(right: 8),
@@ -163,6 +134,7 @@ class _HomeShellState extends State<HomeShell> {
           destinations: const [
             NavigationDestination(icon: DsIcon(DsIcons.home), label: 'Home'),
             NavigationDestination(icon: DsIcon(DsIcons.list), label: 'Transactions'),
+            NavigationDestination(icon: DsIcon(DsIcons.trendingUp), label: 'Invest'),
             NavigationDestination(icon: DsIcon(DsIcons.users), label: 'Groups'),
             NavigationDestination(icon: DsIcon(DsIcons.sliders), label: 'Settings'),
           ],

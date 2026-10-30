@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/deposit_models.dart';
+import '../models/metal_models.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
 import 'ds/ds.dart';
@@ -246,6 +247,14 @@ class _EditSheetState extends State<_EditSheet> {
   /// How much into each, by deposit id, as typed.
   final Map<String, TextEditingController> _depositBoxes = {};
 
+  /// Gold or silver the user holds, and whether this payment bought some:
+  /// for which holding, and the grams when typed (else worked out from the
+  /// day's rate on save).
+  List<MetalHolding> _metalHoldings = [];
+  bool _boughtMetal = false;
+  String? _metalHoldingId;
+  final TextEditingController _metalGrams = TextEditingController();
+
   /// On money paid back: how much of each person's was their part of a
   /// shared fixed cost, by "commitmentId:contactId", as typed - and the
   /// period each saved part was for, so an edit keeps it.
@@ -335,6 +344,10 @@ class _EditSheetState extends State<_EditSheet> {
     _commitmentId = t?.commitmentId;
     _isFixed = _commitmentId != null;
     _intoDeposits = t != null && t.type == 'DEBIT' && t.depositParts.isNotEmpty;
+    final bought = t?.type == 'DEBIT' ? t?.metalBuy : null;
+    _boughtMetal = bought != null;
+    _metalHoldingId = bought?.holdingId;
+    if (bought != null && bought.gramsTyped) _metalGrams.text = bought.grams.toString();
     for (final entry in t?.towards ?? const <TowardsEntry>[]) {
       final key = '${entry.commitmentId}:${entry.contactId}';
       _towardsBoxes[key] = TextEditingController(text: _rupees(entry.amountMinor));
@@ -401,6 +414,7 @@ class _EditSheetState extends State<_EditSheet> {
 
     _loadCommitments();
     _loadDeposits();
+    _loadMetalHoldings();
     _loadLoans();
     _loadPresets();
     _loadCards();
@@ -422,6 +436,7 @@ class _EditSheetState extends State<_EditSheet> {
     for (final box in _depositBoxes.values) {
       box.dispose();
     }
+    _metalGrams.dispose();
     for (final box in _towardsBoxes.values) {
       box.dispose();
     }
@@ -498,6 +513,23 @@ class _EditSheetState extends State<_EditSheet> {
           result.map((p) => MerchantPreset.fromJson(p as Map<String, dynamic>)).toList());
     } catch (_) {
       // The form works without shortcuts.
+    }
+  }
+
+  Future<void> _loadMetalHoldings() async {
+    try {
+      final rows = await ApiClient.instance.get('/metals/holdings') as List<dynamic>;
+      if (!mounted) return;
+      setState(() {
+        _metalHoldings = rows
+            .whereType<Map<String, dynamic>>()
+            .map(MetalHolding.fromJson)
+            .where((h) => h.isActive || h.id == _metalHoldingId)
+            .toList();
+        if (_metalHoldings.length == 1) _metalHoldingId ??= _metalHoldings.single.id;
+      });
+    } catch (_) {
+      // The chip simply does not appear.
     }
   }
 
@@ -758,6 +790,7 @@ class _EditSheetState extends State<_EditSheet> {
       _isSpecial = false;
       _isFixed = false;
       _intoDeposits = false;
+      _boughtMetal = false;
       _autoFillTransfer();
     });
   }
@@ -900,6 +933,7 @@ class _EditSheetState extends State<_EditSheet> {
     _isSpecial = false;
     _isFixed = false;
     _intoDeposits = false;
+    _boughtMetal = false;
     _cardPaymentFor = null;
     bool isOn() => contact != null && _people.any((person) => person.contactId == contact.id);
 
@@ -1195,6 +1229,13 @@ class _EditSheetState extends State<_EditSheet> {
     if (_isDebit && _isFixed && _commitmentId == null) {
       return _fail('Pick which fixed cost this went towards, or turn Fixed cost off.');
     }
+    if (_isDebit && _boughtMetal) {
+      if (_metalHoldingId == null) return _fail('Pick which gold or silver it bought, or turn Bought gold off.');
+      final typed = _metalGrams.text.trim();
+      if (typed.isNotEmpty && !((double.tryParse(typed) ?? 0) > 0)) {
+        return _fail('Type the grams bought, or leave it blank to work them out from the day\'s rate.');
+      }
+    }
     if (_isDebit && _intoDeposits) {
       final parts = _depositParts;
       final sum = parts.values.fold<int>(0, (total, part) => total + part);
@@ -1271,6 +1312,13 @@ class _EditSheetState extends State<_EditSheet> {
       'isSalary': !_isDebit && _kind == _Kind.salary,
       'cardPaymentFor': _isDebit && _kind == _Kind.cardBill ? _cardPaymentFor : null,
       'commitmentId': _isDebit && _isFixed ? _commitmentId : null,
+      // Gold or silver bought: grams typed, or worked out from the day's rate.
+      'metalBuy': _isDebit && _boughtMetal && _metalHoldingId != null
+          ? {
+              'holdingId': _metalHoldingId,
+              'grams': _metalGrams.text.trim().isEmpty ? null : double.tryParse(_metalGrams.text.trim()),
+            }
+          : null,
       // On money paid back: whose part of which shared fixed cost it was.
       'towards': !_isDebit && _kind == _Kind.settlement ? _towardsBody : <Map<String, dynamic>>[],
       // Every RD and FD it went into; an empty list takes it out of them all.
@@ -1880,6 +1928,7 @@ class _EditSheetState extends State<_EditSheet> {
     final hasLoans = _loans.isNotEmpty || _savedLoanSplits.isNotEmpty;
     final hasCommitments = _commitments.isNotEmpty || _commitmentId != null;
     final hasDeposits = _deposits.isNotEmpty || _intoDeposits;
+    final hasMetal = _metalHoldings.isNotEmpty || _boughtMetal;
 
     // (label, selected, onTap). Radio-as-chips: the chosen one is
     // ink-filled with a check, like every selected chip.
@@ -1928,7 +1977,7 @@ class _EditSheetState extends State<_EditSheet> {
         // These sit on top of whatever kind it is - rent can be split and
         // a fixed cost. A payment has no one-off toggle: one-offs count
         // against the monthly budget like everything else.
-        if (!_isDebit || hasCommitments || hasDeposits) ...[
+        if (!_isDebit || hasCommitments || hasDeposits || hasMetal) ...[
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
@@ -1943,6 +1992,14 @@ class _EditSheetState extends State<_EditSheet> {
                   selected: _isFixed,
                   height: 32,
                   onTap: () => setState(() => _isFixed = !_isFixed),
+                ),
+              if (_isDebit && hasMetal)
+                DsChip(
+                  label: 'Bought gold',
+                  icon: DsIcons.trendingUp,
+                  selected: _boughtMetal,
+                  height: 32,
+                  onTap: () => setState(() => _boughtMetal = !_boughtMetal),
                 ),
               if (_isDebit && hasDeposits)
                 DsChip(
@@ -1992,6 +2049,7 @@ class _EditSheetState extends State<_EditSheet> {
       if (main != null) main,
       if (_isDebit && _isFixed) _fixedPanel(),
       if (_isDebit && _intoDeposits) _depositPanel(),
+      if (_isDebit && _boughtMetal) _metalPanel(),
       if (!_isDebit && _isSpecial)
         const _Hint("Kept out of your savings bucket - it won't be counted towards what you save."),
     ];
@@ -2367,6 +2425,55 @@ class _EditSheetState extends State<_EditSheet> {
           ),
         ],
       ),
+    );
+  }
+
+  /// Which gold or silver this bought, and the grams: typed for a jeweller's
+  /// piece (making charges mean fewer grams for the money), else worked out
+  /// from the day's rate with GST when saved.
+  Widget _metalPanel() {
+    final c = context.c;
+    final saved = widget.transaction?.metalBuy;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DsField(
+          label: 'Gold or silver bought',
+          child: DropdownButtonFormField<String?>(
+            key: const ValueKey('metal-holding'),
+            initialValue: _metalHoldings.any((h) => h.id == _metalHoldingId) ? _metalHoldingId : null,
+            isExpanded: true,
+            icon: DsIcon(DsIcons.chevronDown, size: 20, color: c.tx2),
+            hint: Text('Which?', style: TextStyle(color: c.tx3)),
+            decoration: _inputDecoration(context),
+            dropdownColor: c.sf,
+            items: [
+              for (final holding in _metalHoldings)
+                DropdownMenuItem<String?>(
+                  value: holding.id,
+                  child: Text('${holding.name} · ${holding.subtitle}', overflow: TextOverflow.ellipsis),
+                ),
+            ],
+            onChanged: (id) => setState(() => _metalHoldingId = id),
+          ),
+        ),
+        const SizedBox(height: 10),
+        DsField(
+          label: 'Grams bought (optional)',
+          child: TextField(
+            key: const ValueKey('metal-grams'),
+            controller: _metalGrams,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: _inputDecoration(context, hint: 'From the day\'s rate').copyWith(suffixText: 'g'),
+          ),
+        ),
+        const SizedBox(height: 6),
+        _Hint(saved != null && !saved.gramsTyped && saved.rateMinor != null
+            ? '${formatGrams(saved.grams)} at ${formatMoney(saved.rateMinor!)}/g with GST, that day\'s rate. Type the grams '
+                "instead if it was a jeweller's piece."
+            : "Left blank, the grams are this amount at that day's IBJA rate with 3% GST. Type them for a jeweller's "
+                'piece - making charges mean fewer grams. Still counts as spending.'),
+      ],
     );
   }
 

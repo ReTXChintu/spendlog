@@ -22,6 +22,7 @@ import { mayBeCardPayment, recogniseCardBill } from "../modules/cards/cards.bill
 import { detectAfterStatedBalance } from "../modules/accounts/accounts.missingCredits";
 import { reconcileUser } from "../modules/subscriptions/subscriptions.service";
 import { linkSharedCommitment } from "../modules/budget/budget.commitmentShares";
+import { linkMetalPurchase } from "../modules/metals/metals.holdings";
 import {
   adoptAutoLeg,
   couldBeSameAccount,
@@ -269,6 +270,11 @@ export async function ingestRawMessage(params: {
   // each flatmate's is owed. Only on a payee and amount that match exactly.
   if (!isCardBill && transaction.type === "DEBIT") {
     await linkSharedCommitment(transaction).catch((error) => console.error("Shared fixed cost matching failed:", error));
+  }
+  // Gold or silver bought from a holding's payee: its grams worked out
+  // from the day's rate.
+  if (!isCardBill && transaction.type === "DEBIT") {
+    await linkMetalPurchase(transaction).catch((error) => console.error("Gold purchase matching failed:", error));
   }
   // A subscription's renewal, if that is what this was: matched now, so
   // the screen does not wait for the next time it is opened.

@@ -355,7 +355,37 @@ Map<String, Object> _routes({
       '/funds/advice': advice ?? _advice,
       '/deposits': deposits ?? const {'deposits': [], 'totalMinor': 0, 'monthlyMinor': 0},
       '/metals': metalsJson,
+      '/investments/overview': overviewJson,
+      '/ipos': const {'available': false},
     };
+
+/// Everything held: funds, a deposit, digital gold with its cost, and
+/// silver coins held before SpendLog with none.
+const overviewJson = {
+  'valueMinor': 32000000,
+  'investedMinor': 28000000,
+  'gainMinor': 2500000,
+  'gainPercent': 8.93,
+  'partial': true,
+  'parts': [
+    {'kind': 'FUNDS', 'label': 'Mutual funds', 'valueMinor': 21000000, 'investedMinor': 19000000, 'count': 3},
+    {'kind': 'DEPOSITS', 'label': 'RDs and FDs', 'valueMinor': 4200000, 'investedMinor': 4200000, 'count': 2},
+    {'kind': 'GOLD', 'label': 'Gold', 'valueMinor': 5000000, 'investedMinor': 4600000, 'count': 1},
+    {'kind': 'SILVER', 'label': 'Silver', 'valueMinor': 1800000, 'investedMinor': null, 'count': 1},
+  ],
+  'holdings': [
+    {
+      'id': 'h1', 'name': 'Digital gold with a long name for the narrow screen', 'purity': '24K', 'kind': 'DIGITAL',
+      'isActive': true, 'grams': 3.303, 'openingGrams': 3.2, 'investedMinor': 4600000, 'valueMinor': 5000000,
+      'gainMinor': 400000, 'purchases': 2, 'boughtThisMonthGrams': 0.103,
+    },
+    {
+      'id': 'h2', 'name': 'Silver coins', 'purity': 'SILVER', 'kind': 'OTHER', 'isActive': true, 'grams': 100,
+      'openingGrams': 100, 'investedMinor': null, 'valueMinor': 1800000, 'gainMinor': null, 'purchases': 0,
+      'boughtThisMonthGrams': 0,
+    },
+  ],
+};
 
 /// A day of IBJA rates, gold below its 30-day average and silver above.
 const metalsJson = {
@@ -1002,7 +1032,7 @@ void main() {
   group('InvestmentsScreen', () {
     testWidgets('loading, then the header, allocation, links banner and cards', (tester) async {
       await http.runWithClient(() async {
-        await _pump(tester, const InvestmentsScreen());
+        await _pump(tester, const InvestmentsScreen(initialTab: InvestTab.funds));
         expect(find.byType(CircularProgressIndicator), findsWidgets);
         await tester.pumpAndSettle();
       }, () => _server(_routes()));
@@ -1034,7 +1064,7 @@ void main() {
 
     testWidgets('no holdings invites the first fund', (tester) async {
       await http.runWithClient(() async {
-        await _pump(tester, const InvestmentsScreen());
+        await _pump(tester, const InvestmentsScreen(initialTab: InvestTab.funds));
         await tester.pumpAndSettle();
       }, () => _server(_routes(portfolio: _emptyPortfolio, links: _noLinks)));
 
@@ -1045,7 +1075,7 @@ void main() {
 
     testWidgets('stale prices, a failed refresh and ranks still coming', (tester) async {
       await http.runWithClient(() async {
-        await _pump(tester, const InvestmentsScreen());
+        await _pump(tester, const InvestmentsScreen(initialTab: InvestTab.funds));
         await tester.pumpAndSettle();
       }, () => _server(_routes(
             portfolio: _portfolio(stale: true, error: 'mfapi is down', peersAvailable: false),
@@ -1060,7 +1090,7 @@ void main() {
     testWidgets('a failed load says so, and Retry loads again', (tester) async {
       var calls = 0;
       await http.runWithClient(() async {
-        await _pump(tester, const InvestmentsScreen());
+        await _pump(tester, const InvestmentsScreen(initialTab: InvestTab.funds));
         await tester.pumpAndSettle();
         expect(find.text("Couldn't load your funds"), findsOneWidget);
         expect(find.text('Server sad'), findsOneWidget);
@@ -1081,7 +1111,7 @@ void main() {
 
     testWidgets('the Goals tab shows the cards and the assumptions', (tester) async {
       await http.runWithClient(() async {
-        await _pump(tester, const InvestmentsScreen(initialTab: 3));
+        await _pump(tester, const InvestmentsScreen(initialTab: InvestTab.goals));
         await tester.pumpAndSettle();
       }, () => _server(_routes()));
 
@@ -1094,7 +1124,7 @@ void main() {
 
     testWidgets('no goals yet invites the first', (tester) async {
       await http.runWithClient(() async {
-        await _pump(tester, const InvestmentsScreen(initialTab: 3));
+        await _pump(tester, const InvestmentsScreen(initialTab: InvestTab.goals));
         await tester.pumpAndSettle();
       }, () => _server(_routes(goals: _goals(goals: const []))));
 
@@ -1105,7 +1135,7 @@ void main() {
 
     testWidgets('advice shows its sections and the disclaimer', (tester) async {
       await http.runWithClient(() async {
-        await _pump(tester, const InvestmentsScreen(initialTab: 4));
+        await _pump(tester, const InvestmentsScreen(initialTab: InvestTab.advice));
         await tester.pumpAndSettle();
       }, () => _server(_routes()));
 
@@ -1127,7 +1157,7 @@ void main() {
     testWidgets('no key and no advice: how to add one, and still the disclaimer', (tester) async {
       var opened = 0;
       await http.runWithClient(() async {
-        await _pump(tester, InvestmentsScreen(initialTab: 4, onOpenAiSettings: () => opened++));
+        await _pump(tester, InvestmentsScreen(initialTab: InvestTab.advice, onOpenAiSettings: () => opened++));
         await tester.pumpAndSettle();
         expect(find.text('Advice needs a Gemini key'), findsOneWidget);
         expect(find.textContaining('Settings → You → AI assistant'), findsOneWidget);
@@ -1143,7 +1173,7 @@ void main() {
     testWidgets('Get advice posts, and a refusal is shown', (tester) async {
       final log = <http.Request>[];
       await http.runWithClient(() async {
-        await _pump(tester, const InvestmentsScreen(initialTab: 4));
+        await _pump(tester, const InvestmentsScreen(initialTab: InvestTab.advice));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Get advice'));
         await tester.pumpAndSettle();
@@ -1161,7 +1191,7 @@ void main() {
 
     testWidgets('tapping a fund opens its page with the ledger', (tester) async {
       await http.runWithClient(() async {
-        await _pump(tester, const InvestmentsScreen(), height: 14400);
+        await _pump(tester, const InvestmentsScreen(initialTab: InvestTab.funds), height: 14400);
         await tester.pumpAndSettle();
         await tester.tap(find.text('Axis Bluechip Fund'));
         await tester.pumpAndSettle();
@@ -1337,7 +1367,7 @@ void main() {
     );
 
     for (final brightness in Brightness.values) {
-      for (final (tab, last) in [(0, 'Category figures compare'), (1, 'Each total is what you last said'), (2, 'a guide, not a forecast'), (3, 'How the plans are worked out'), (4, 'This is not investment advice')]) {
+      for (final (tab, last) in [(InvestTab.mine, 'Funds at today'), (InvestTab.funds, 'Category figures compare'), (InvestTab.gold, 'a guide, not a forecast'), (InvestTab.ipos, 'IPO Guru API key'), (InvestTab.deposits, 'Each total is what you last said'), (InvestTab.goals, 'How the plans are worked out'), (InvestTab.advice, 'This is not investment advice')]) {
         testWidgets('tab $tab (${brightness.name})', (tester) async {
           await http.runWithClient(() async {
             await _pump(tester, InvestmentsScreen(initialTab: tab), brightness: brightness, height: 2400);
@@ -1345,11 +1375,16 @@ void main() {
           }, () => _server(routes));
           expect(tester.takeException(), isNull);
 
-          await tester.scrollUntilVisible(
-            find.textContaining(last),
-            300,
-            scrollable: find.byType(Scrollable).last,
-          );
+          // The page's own list: the section chips and the pages scroll
+          // sideways. A page that fits needs no scrolling.
+          if (find.textContaining(last).evaluate().isEmpty) {
+            await tester.scrollUntilVisible(
+              find.textContaining(last),
+              300,
+              scrollable: find.byWidgetPredicate((w) => w is Scrollable && w.axisDirection == AxisDirection.down).first,
+            );
+          }
+          expect(find.textContaining(last), findsWidgets);
           expect(tester.takeException(), isNull);
         });
       }

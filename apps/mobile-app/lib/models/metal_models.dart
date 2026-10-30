@@ -134,3 +134,135 @@ String? averageLine(MetalSignal signal) {
       ? '${below.toStringAsFixed(1)}% below its 30-day average'
       : '${(-below).toStringAsFixed(1)}% above its 30-day average';
 }
+
+/// Gold or silver the user owns, in grams, valued at today's rate.
+class MetalHolding {
+  final String id;
+  final String name;
+
+  /// "24K", "22K", "18K" or "SILVER".
+  final String purity;
+
+  /// "DIGITAL", "JEWELLERY" or "OTHER".
+  final String kind;
+  final String? payee;
+  final bool isActive;
+  final double grams;
+  final double openingGrams;
+  final int? investedMinor;
+  final int? valueMinor;
+  final int? gainMinor;
+  final int purchases;
+  final double boughtThisMonthGrams;
+
+  const MetalHolding({
+    required this.id,
+    required this.name,
+    this.purity = '24K',
+    this.kind = 'OTHER',
+    this.payee,
+    this.isActive = true,
+    this.grams = 0,
+    this.openingGrams = 0,
+    this.investedMinor,
+    this.valueMinor,
+    this.gainMinor,
+    this.purchases = 0,
+    this.boughtThisMonthGrams = 0,
+  });
+
+  bool get isSilver => purity == 'SILVER';
+
+  /// "24K gold · Digital", "Silver · Jewellery".
+  String get subtitle => [
+        isSilver ? 'Silver' : '$purity gold',
+        switch (kind) {
+          'DIGITAL' => 'Digital',
+          'JEWELLERY' => 'Jewellery',
+          _ => null,
+        },
+      ].whereType<String>().join(' · ');
+
+  factory MetalHolding.fromJson(Map<String, dynamic> json) => MetalHolding(
+        id: _str(json['id']) ?? '',
+        name: _str(json['name']) ?? 'Gold',
+        purity: _str(json['purity']) ?? '24K',
+        kind: _str(json['kind']) ?? 'OTHER',
+        payee: _str(json['payee']),
+        isActive: json['isActive'] != false,
+        grams: _doubleOrNull(json['grams']) ?? 0,
+        openingGrams: _doubleOrNull(json['openingGrams']) ?? 0,
+        investedMinor: _intOrNull(json['investedMinor']),
+        valueMinor: _intOrNull(json['valueMinor']),
+        gainMinor: _intOrNull(json['gainMinor']),
+        purchases: _intOrNull(json['purchases']) ?? 0,
+        boughtThisMonthGrams: _doubleOrNull(json['boughtThisMonthGrams']) ?? 0,
+      );
+}
+
+/// Grams as people say them: "3.3 g", "0.0345 g".
+String formatGrams(double grams) {
+  final fixed = grams >= 10 ? grams.toStringAsFixed(2) : grams.toStringAsFixed(4);
+  return '${fixed.contains('.') ? fixed.replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '') : fixed} g';
+}
+
+/// One kind of investment in the overview.
+class OverviewPart {
+  /// "FUNDS", "DEPOSITS", "GOLD" or "SILVER".
+  final String kind;
+  final String label;
+  final int valueMinor;
+  final int? investedMinor;
+  final int count;
+
+  const OverviewPart({required this.kind, required this.label, this.valueMinor = 0, this.investedMinor, this.count = 0});
+
+  int? get gainMinor => investedMinor == null ? null : valueMinor - investedMinor!;
+
+  factory OverviewPart.fromJson(Map<String, dynamic> json) => OverviewPart(
+        kind: _str(json['kind']) ?? '',
+        label: _str(json['label']) ?? '',
+        valueMinor: _intOrNull(json['valueMinor']) ?? 0,
+        investedMinor: _intOrNull(json['investedMinor']),
+        count: _intOrNull(json['count']) ?? 0,
+      );
+}
+
+/// Everything held, in one total.
+class InvestmentsOverview {
+  final int valueMinor;
+  final int investedMinor;
+  final int gainMinor;
+  final double? gainPercent;
+
+  /// Some of it has no cost to measure a gain against.
+  final bool partial;
+  final List<OverviewPart> parts;
+  final List<MetalHolding> holdings;
+
+  const InvestmentsOverview({
+    this.valueMinor = 0,
+    this.investedMinor = 0,
+    this.gainMinor = 0,
+    this.gainPercent,
+    this.partial = false,
+    this.parts = const [],
+    this.holdings = const [],
+  });
+
+  bool get isEmpty => parts.isEmpty && holdings.isEmpty;
+
+  factory InvestmentsOverview.fromJson(Map<String, dynamic> json) => InvestmentsOverview(
+        valueMinor: _intOrNull(json['valueMinor']) ?? 0,
+        investedMinor: _intOrNull(json['investedMinor']) ?? 0,
+        gainMinor: _intOrNull(json['gainMinor']) ?? 0,
+        gainPercent: _doubleOrNull(json['gainPercent']),
+        partial: json['partial'] == true,
+        parts: (json['parts'] as List<dynamic>? ?? const []).whereType<Map<String, dynamic>>().map(OverviewPart.fromJson).toList(),
+        holdings: (json['holdings'] as List<dynamic>? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(MetalHolding.fromJson)
+            .where((h) => h.id.isNotEmpty)
+            .toList(),
+      );
+}

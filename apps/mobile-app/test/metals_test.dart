@@ -10,7 +10,11 @@ import 'package:spendlog/screens/investments/metals_tab.dart';
 import 'package:spendlog/services/push_service.dart';
 import 'package:spendlog/theme.dart';
 
-import 'investments_test.dart' show metalsJson;
+import 'package:spendlog/models/models.dart';
+import 'package:spendlog/screens/investments/mine_tab.dart';
+import 'package:spendlog/widgets/edit_transaction_sheet.dart';
+
+import 'investments_test.dart' show metalsJson, overviewJson;
 
 MockClient _server(List<http.Request> requests, {Map<String, dynamic> rates = metalsJson}) => MockClient((request) async {
       requests.add(request);
@@ -96,9 +100,108 @@ void main() {
     });
   }
 
+  group('my investments', () {
+    test('reads everything held in one total', () {
+      final overview = InvestmentsOverview.fromJson(overviewJson);
+      expect(overview.valueMinor, 32000000);
+      expect(overview.partial, isTrue);
+      expect(overview.parts.map((p) => p.kind), ['FUNDS', 'DEPOSITS', 'GOLD', 'SILVER']);
+      expect(overview.parts.last.gainMinor, isNull);
+      expect(overview.holdings.first.subtitle, '24K gold · Digital');
+      expect(formatGrams(3.303), '3.303 g');
+      expect(formatGrams(0.0345), '0.0345 g');
+      expect(formatGrams(100), '100 g');
+    });
+
+    testWidgets('shows the total and each kind, and a kind opens its section', (tester) async {
+      final opened = <int>[];
+      await http.runWithClient(() async {
+        await _phone(tester, Scaffold(body: MineTab(onOpenSection: opened.add)));
+        expect(find.text('₹3,20,000.00'), findsOneWidget);
+        expect(find.textContaining('held before SpendLog with no cost given'), findsOneWidget);
+        await tester.tap(find.text('RDs and FDs'));
+        await tester.tap(find.text('Mutual funds'));
+      }, () => MockClient((_) async => http.Response(jsonEncode(overviewJson), 200)));
+      expect(opened, [InvestTab.deposits, InvestTab.funds]);
+    });
+
+    testWidgets('adds the gold held today', (tester) async {
+      final requests = <http.Request>[];
+      final key = GlobalKey<MineTabState>();
+      await http.runWithClient(() async {
+        await _phone(tester, Scaffold(body: MineTab(key: key, onOpenSection: (_) {})));
+        key.currentState!.addHolding();
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byKey(const ValueKey('holding-name')), 'Digital gold');
+        await tester.enterText(find.byKey(const ValueKey('holding-grams')), '3.2');
+        await tester.enterText(find.byKey(const ValueKey('holding-invested')), '40000');
+        await tester.enterText(find.byKey(const ValueKey('holding-payee')), 'SafeGold');
+        await tester.tap(find.text('Add'));
+        await tester.pumpAndSettle();
+      }, () => MockClient((request) async {
+            requests.add(request);
+            return http.Response(jsonEncode(request.method == 'POST' ? {} : overviewJson), 200);
+          }));
+
+      final post = requests.where((r) => r.method == 'POST').single;
+      expect(post.url.path, endsWith('/metals/holdings'));
+      expect(jsonDecode(post.body), {
+        'name': 'Digital gold', 'purity': '24K', 'kind': 'DIGITAL', 'grams': 3.2, 'investedMinor': 4000000, 'payee': 'SafeGold',
+      });
+    });
+
+    testWidgets("a payment marked as bought gold says which, and leaves grams to the day's rate", (tester) async {
+      final requests = <http.Request>[];
+      tester.view.physicalSize = const Size(1440, 2600);
+      tester.view.devicePixelRatio = 3;
+      addTearDown(tester.view.reset);
+      await http.runWithClient(() async {
+        await tester.pumpWidget(MaterialApp(
+          theme: buildTheme(Brightness.light),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showEditTransactionSheet(
+                  context,
+                  transaction: Transaction.fromJson({
+                    'id': 't1', 'amountMinor': 50000, 'type': 'DEBIT', 'merchant': 'SAFEGOLD', 'source': 'SMS',
+                    'occurredAt': '2026-10-30T07:30:00.000Z',
+                  }),
+                  categories: const [],
+                  accounts: const [],
+                ),
+                child: const Text('Open'),
+              ),
+            ),
+          ),
+        ));
+        await tester.tap(find.text('Open'));
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('Bought gold'));
+        await tester.tap(find.text('Bought gold'));
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('Save'));
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+      }, () => MockClient((request) async {
+            requests.add(request);
+            final path = request.url.path;
+            if (request.method == 'PATCH') return http.Response('{}', 200);
+            if (path.endsWith('/metals/holdings')) return http.Response(jsonEncode([overviewJson['holdings'] is List ? (overviewJson['holdings'] as List).first : {}]), 200);
+            if (path.endsWith('/contacts')) return http.Response('{"contacts": []}', 200);
+            if (path.endsWith('/deposits')) return http.Response('{"deposits": []}', 200);
+            return http.Response('[]', 200);
+          }));
+
+      final patch = jsonDecode(requests.where((r) => r.method == 'PATCH').single.body) as Map<String, dynamic>;
+      // The only holding is picked; no grams typed, so the server works them out.
+      expect(patch['metalBuy'], {'holdingId': 'h1', 'grams': null});
+    });
+  });
+
   test("the day's rates notification opens the Gold tab", () {
     final screen = PushService.screenFor({'type': 'METAL_RATES'});
     expect(screen, isA<InvestmentsScreen>());
-    expect((screen! as InvestmentsScreen).initialTab, 2);
+    expect((screen! as InvestmentsScreen).initialTab, InvestTab.gold);
   });
 }

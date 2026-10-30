@@ -8,24 +8,45 @@ import '../../widgets/funds/fund_text.dart';
 import '../../widgets/funds/fund_widgets.dart';
 import '../../widgets/funds/goal_card.dart';
 import '../../widgets/state_block.dart';
+import '../ipos_screen.dart';
 import 'add_fund_screen.dart';
 import 'deposits_tab.dart';
 import 'metals_tab.dart';
+import 'mine_tab.dart';
 import 'goal_editor_screen.dart';
 import 'holding_detail_screen.dart';
 import 'link_sheets.dart';
 
-/// Mutual funds: what's held and what it's worth today, the RDs and FDs
-/// beside them, the goals it's for, and the assistant's read on both.
-///
-/// Three tabs over three requests, each loaded on its own: a slow NAV
-/// source costs the Portfolio tab, not the goals, and advice that can't be
-/// made (no Gemini key) costs only the Advice tab.
-class InvestmentsScreen extends StatefulWidget {
-  const InvestmentsScreen({super.key, this.initialTab = 0, this.onOpenAiSettings});
+/// The sections of Invest, by index.
+abstract final class InvestTab {
+  static const mine = 0;
+  static const funds = 1;
+  static const gold = 2;
+  static const ipos = 3;
+  static const deposits = 4;
+  static const goals = 5;
+  static const advice = 6;
 
-  /// 0 Funds, 1 Deposits, 2 Gold (and silver), 3 Goals, 4 Advice.
+  static const labels = ['Mine', 'Funds', 'Gold', 'IPOs', 'Deposits', 'Goals', 'Advice'];
+}
+
+/// Everything invested: all of it in one total (Mine), mutual funds, gold
+/// and silver, IPOs coming up, RDs and FDs, the goals it is for, and the
+/// assistant's read on the funds.
+///
+/// Each section loads on its own: a slow NAV source costs the Funds
+/// section, not the goals, and advice that can't be made (no Gemini key)
+/// costs only Advice. A tab of the bottom bar ([embedded]), or a screen of
+/// its own when opened from a notification or a Home tile.
+class InvestmentsScreen extends StatefulWidget {
+  const InvestmentsScreen({super.key, this.initialTab = InvestTab.mine, this.onOpenAiSettings, this.embedded = false});
+
+  /// One of [InvestTab].
   final int initialTab;
+
+  /// Inside the bottom bar's Invest tab, under the shell's own title: no
+  /// app bar of its own.
+  final bool embedded;
 
   /// Settings, at the assistant's card - where the Gemini key goes.
   final VoidCallback? onOpenAiSettings;
@@ -35,7 +56,12 @@ class InvestmentsScreen extends StatefulWidget {
 }
 
 class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 5, vsync: this, initialIndex: widget.initialTab.clamp(0, 4));
+  late final TabController _tabs = TabController(
+    length: InvestTab.labels.length,
+    vsync: this,
+    initialIndex: widget.initialTab.clamp(0, InvestTab.labels.length - 1),
+  );
+  final GlobalKey<MineTabState> _mine = GlobalKey<MineTabState>();
   final GlobalKey<DepositsTabState> _deposits = GlobalKey<DepositsTabState>();
 
   FundPortfolio? _portfolio;
@@ -160,7 +186,7 @@ class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerP
 
   Future<void> _addFund([SchemeResult? scheme]) async {
     if (await AddFundScreen.open(context, scheme: scheme)) {
-      if (_tabs.index != 0) _tabs.animateTo(0);
+      if (_tabs.index != InvestTab.funds) _tabs.animateTo(InvestTab.funds);
       await _reloadAll();
     }
   }
@@ -209,19 +235,25 @@ class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerP
   Widget build(BuildContext context) {
     final c = context.c;
     final fab = switch (_tabs.index) {
-      0 when _portfolio != null && !_portfolio!.isEmpty => FloatingActionButton.extended(
+      InvestTab.mine => FloatingActionButton.extended(
+          heroTag: 'add-holding',
+          onPressed: () => _mine.currentState?.addHolding(),
+          icon: const DsIcon(DsIcons.plus, size: 20),
+          label: const Text('Add gold or silver'),
+        ),
+      InvestTab.funds when _portfolio != null && !_portfolio!.isEmpty => FloatingActionButton.extended(
           heroTag: 'add-fund',
           onPressed: _addFund,
           icon: const DsIcon(DsIcons.plus, size: 20),
           label: const Text('Add fund'),
         ),
-      1 => FloatingActionButton.extended(
+      InvestTab.deposits => FloatingActionButton.extended(
           heroTag: 'add-deposit',
           onPressed: () => _deposits.currentState?.edit(),
           icon: const DsIcon(DsIcons.plus, size: 20),
           label: const Text('Add deposit'),
         ),
-      3 when _goals != null && _goals!.goals.isNotEmpty => FloatingActionButton.extended(
+      InvestTab.goals when _goals != null && _goals!.goals.isNotEmpty => FloatingActionButton.extended(
           heroTag: 'add-goal',
           onPressed: _editGoal,
           icon: const DsIcon(DsIcons.target, size: 20),
@@ -230,42 +262,58 @@ class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerP
       _ => null,
     };
 
-    return Scaffold(
-      backgroundColor: c.bg,
-      appBar: AppBar(
-        title: const Text('Investments'),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(56),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            // The tab controller still drives the pages, so swiping works;
-            // this is just the system's one tab style.
-            child: AnimatedBuilder(
-              animation: _tabs,
-              builder: (context, _) => DsSegmented<int>(
-                height: 32,
-                segments: const [(0, 'Funds'), (1, 'Deposits'), (2, 'Gold'), (3, 'Goals'), (4, 'Advice')],
-                selected: _tabs.index,
-                onChanged: (index) {
-                  _tabs.animateTo(index);
-                  setState(() {});
-                },
+    // Seven sections are more than a segmented control holds at 360 px, so
+    // they are chips in a row that scrolls. The tab controller still drives
+    // the pages, so swiping works.
+    final sections = SizedBox(
+      height: 48,
+      child: AnimatedBuilder(
+        animation: _tabs,
+        builder: (context, _) => ListView(
+          key: const ValueKey('invest-sections'),
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+          children: [
+            for (final (index, label) in InvestTab.labels.indexed)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: DsChip(
+                  label: label,
+                  height: 32,
+                  selected: _tabs.index == index,
+                  onTap: () {
+                    _tabs.animateTo(index);
+                    setState(() {});
+                  },
+                ),
               ),
-            ),
-          ),
+          ],
         ),
       ),
+    );
+    final pages = TabBarView(
+      controller: _tabs,
+      children: [
+        MineTab(key: _mine, onOpenSection: (index) => _tabs.animateTo(index)),
+        _portfolioTab(),
+        const MetalsTab(),
+        const IposScreen(embedded: true),
+        DepositsTab(key: _deposits),
+        _goalsTab(),
+        _adviceTab(),
+      ],
+    );
+
+    return Scaffold(
+      backgroundColor: c.bg,
+      appBar: widget.embedded
+          ? null
+          : AppBar(
+              title: const Text('Investments'),
+              bottom: PreferredSize(preferredSize: const Size.fromHeight(48), child: sections),
+            ),
       floatingActionButton: fab,
-      body: TabBarView(
-        controller: _tabs,
-        children: [
-          _portfolioTab(),
-          DepositsTab(key: _deposits),
-          const MetalsTab(),
-          _goalsTab(),
-          _adviceTab(),
-        ],
-      ),
+      body: widget.embedded ? Column(children: [sections, Expanded(child: pages)]) : pages,
     );
   }
 

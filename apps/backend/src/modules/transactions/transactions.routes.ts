@@ -39,6 +39,7 @@ import { checkEntries } from "./transactions.aiCheck";
 import { AiError } from "../ai/ai.gemini";
 import { DepositPartError, checkDepositParts } from "../deposits/deposits.service";
 import { TowardsError, applyCommitmentShares, checkTowards } from "../budget/budget.commitmentShares";
+import { MetalBuyError, metalBuyFor } from "../metals/metals.holdings";
 import { IST_OFFSET, istDayEnd, istDayKey, istDayStart } from "../../time";
 import { TRANSACTION_TYPES } from "../../types";
 
@@ -344,6 +345,12 @@ const createTransactionSchema = z.object({
   // On money in from people: how much of each one's part went towards
   // which shared fixed cost, for which period. An empty list clears it.
   towards: z.array(towardsBody).max(40).optional(),
+  // A purchase of gold or silver for a holding: grams worked out from the
+  // day's rate, or typed. null takes it off.
+  metalBuy: z
+    .object({ holdingId: z.string().regex(OBJECT_ID), grams: z.number().positive().nullable().optional() })
+    .nullable()
+    .optional(),
   // The group it goes in, picked in the editor - nothing is put in one by
   // itself any more, bar a Trippin trip's dates. tripId is the old name.
   groupId: z.string().regex(OBJECT_ID).nullable().optional(),
@@ -506,6 +513,17 @@ transactionsRouter.post("/", async (req, res) => {
     }
   }
 
+  // Gold or silver bought: only a payment buys any.
+  let metalBuy: Awaited<ReturnType<typeof metalBuyFor>> | null = null;
+  if (parsed.data.type === "DEBIT" && parsed.data.metalBuy) {
+    try {
+      metalBuy = await metalBuyFor(currentUserId(req), parsed.data.amountMinor, parsed.data.occurredAt, parsed.data.metalBuy);
+    } catch (error) {
+      if (error instanceof MetalBuyError) return res.status(400).json({ error: error.message });
+      throw error;
+    }
+  }
+
   const created = await Transaction.create({
     userId: currentUserId(req),
     amountMinor: parsed.data.amountMinor,
@@ -533,6 +551,7 @@ transactionsRouter.post("/", async (req, res) => {
     commitmentId: parsed.data.type === "DEBIT" ? (parsed.data.commitmentId ?? null) : null,
     depositParts,
     towards,
+    metalBuy,
     source: "MANUAL",
   });
 
@@ -594,6 +613,12 @@ const updateTransactionSchema = z.object({
   // On money in from people: how much of each one's part went towards
   // which shared fixed cost, for which period. An empty list clears it.
   towards: z.array(towardsBody).max(40).optional(),
+  // A purchase of gold or silver for a holding: grams worked out from the
+  // day's rate, or typed. null takes it off.
+  metalBuy: z
+    .object({ holdingId: z.string().regex(OBJECT_ID), grams: z.number().positive().nullable().optional() })
+    .nullable()
+    .optional(),
   // Zero is meaningful: someone else's bill paid from the user's card, all
   // of which is owed back. null clears the split entirely.
   split: z
@@ -970,12 +995,36 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
     }
   }
 
+  // Gold or silver bought: worked out again when the amount or the day it
+  // was bought changes, unless the grams were typed.
+  let metalFields: Record<string, unknown> = {};
+  const willBeAt = data.occurredAt ?? existing.occurredAt;
+  try {
+    if (willBeType !== "DEBIT") {
+      if (existing.metalBuy) metalFields = { metalBuy: null };
+    } else if (data.metalBuy !== undefined) {
+      metalFields = { metalBuy: data.metalBuy ? await metalBuyFor(userId, willBeAmount, willBeAt, data.metalBuy) : null };
+    } else if (
+      existing.metalBuy &&
+      !existing.metalBuy.gramsTyped &&
+      (willBeAmount !== existing.amountMinor || willBeAt.getTime() !== existing.occurredAt.getTime())
+    ) {
+      metalFields = {
+        metalBuy: await metalBuyFor(userId, willBeAmount, willBeAt, { holdingId: existing.metalBuy.holdingId.toString() }),
+      };
+    }
+  } catch (error) {
+    if (error instanceof MetalBuyError) return res.status(400).json({ error: error.message });
+    throw error;
+  }
+
   const {
     loanId: _handledAbove,
     loanSplits: _alsoAbove,
     people: _checkedAbove,
     depositParts: _depositsAbove,
     towards: _towardsAbove,
+    metalBuy: _metalAbove,
     ...fields
   } = data;
 
@@ -999,6 +1048,7 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
         ...groupFields,
         ...depositFields,
         ...towardsFields,
+        ...metalFields,
         ...(people !== undefined ? { people } : {}),
         editedAt: new Date(),
         ...(kindChanged ? { kindEditedAt: new Date() } : {}),

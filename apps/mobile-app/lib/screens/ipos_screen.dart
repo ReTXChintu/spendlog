@@ -14,7 +14,10 @@ import '../widgets/state_block.dart';
 /// Guru's, fetched and cached by the server: their key stays there, and
 /// their free plan's ten calls a day are shared by everyone.
 class IposScreen extends StatefulWidget {
-  const IposScreen({super.key});
+  const IposScreen({super.key, this.embedded = false});
+
+  /// A section of Invest, under its own title: no app bar.
+  final bool embedded;
 
   @override
   State<IposScreen> createState() => _IposScreenState();
@@ -89,6 +92,7 @@ class _IposScreenState extends State<IposScreen> {
   Widget build(BuildContext context) {
     final c = context.c;
 
+    if (widget.embedded) return ColoredBox(color: c.bg, child: _body());
     return Scaffold(
       backgroundColor: c.bg,
       appBar: AppBar(title: const Text('IPOs')),

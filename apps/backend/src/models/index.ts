@@ -836,9 +836,30 @@ export interface TransactionDoc {
   /// goes down by the whole amount either way; this is what says whose
   /// rent is in. See budget.commitmentShares.ts.
   towards: TowardsEntry[];
+  /// A purchase of gold or silver: which holding, how many grams, and the
+  /// rate per gram they were worked out at (that day's, with GST) - or
+  /// typed by hand, when a jeweller's making charges meant fewer grams.
+  metalBuy?: MetalBuy | null;
   createdAt: Date;
   updatedAt: Date;
 }
+
+export interface MetalBuy {
+  holdingId: Types.ObjectId;
+  grams: number;
+  rateMinor: number | null;
+  gramsTyped: boolean;
+}
+
+const metalBuySchema = new Schema<MetalBuy>(
+  {
+    holdingId: { type: Schema.Types.ObjectId, ref: "MetalHolding", required: true },
+    grams: { type: Number, required: true, min: 0 },
+    rateMinor: { type: Number, default: null },
+    gramsTyped: { type: Boolean, default: false },
+  },
+  { _id: false }
+);
 
 export interface TowardsEntry {
   commitmentId: Types.ObjectId;
@@ -1045,6 +1066,7 @@ const transactionSchema = new Schema<TransactionDoc>(
     aiFlagDismissedAt: { type: Date, default: null },
     depositParts: { type: [depositPartSchema], default: [] },
     towards: { type: [towardsEntrySchema], default: [] },
+    metalBuy: { type: metalBuySchema, default: null },
     sources: { type: [transactionSourceSchema], default: [] },
     mergedFrom: { type: [mergedSnapshotSchema], default: [] },
     countedAmountMinor: { type: Number, default: 0 },
@@ -3009,6 +3031,53 @@ const metalRateSchema = new Schema<MetalRateDoc>(
 );
 
 export const MetalRate = model<MetalRateDoc>("MetalRate", metalRateSchema);
+
+export const METAL_PURITIES = ["24K", "22K", "18K", "SILVER"] as const;
+export type MetalPurity = (typeof METAL_PURITIES)[number];
+export const METAL_HOLDING_KINDS = ["DIGITAL", "JEWELLERY", "OTHER"] as const;
+
+/**
+ * Gold or silver the user owns, kept in grams: what they held when they
+ * started (openingGrams, and what it cost them if they know), plus every
+ * purchase since - a payment marked as one, its grams worked out from that
+ * day's rate (see modules/metals/metals.holdings.ts). Valued every day at
+ * IBJA's rate for its purity.
+ */
+export interface MetalHoldingDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  name: string;
+  purity: MetalPurity;
+  kind: (typeof METAL_HOLDING_KINDS)[number];
+  openingGrams: number;
+  /// What the opening grams cost, when known. Without it the gain is only
+  /// worked out on purchases made since.
+  openingInvestedMinor: number | null;
+  openingAt: Date;
+  /// Who a purchase is paid to ("SafeGold", the jeweller), as the bank
+  /// names them: a payment to them is put down as a purchase by itself.
+  payee: string | null;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const metalHoldingSchema = new Schema<MetalHoldingDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    name: { type: String, required: true, trim: true },
+    purity: { type: String, enum: METAL_PURITIES, required: true },
+    kind: { type: String, enum: METAL_HOLDING_KINDS, default: "OTHER" },
+    openingGrams: { type: Number, required: true, min: 0 },
+    openingInvestedMinor: { type: Number, default: null, min: 0 },
+    openingAt: { type: Date, required: true },
+    payee: { type: String, default: null, trim: true },
+    isActive: { type: Boolean, default: true },
+  },
+  { timestamps: true, ...serialization }
+);
+
+export const MetalHolding = model<MetalHoldingDoc>("MetalHolding", metalHoldingSchema);
 
 export const DEPOSIT_KINDS = ["RD", "FD"] as const;
 export type DepositKind = (typeof DEPOSIT_KINDS)[number];

@@ -310,6 +310,9 @@ class Transaction {
   /// On money paid back: whose part of which shared fixed cost it was.
   final List<TowardsEntry> towards;
 
+  /// Gold or silver bought with it, when it was a purchase.
+  final MetalBuy? metalBuy;
+
   /// On a payment someone else made: which of the user's contacts paid.
   final String? paidByContactId;
   final String? paidByName;
@@ -429,6 +432,7 @@ class Transaction {
     this.groupShareAmounts = const {},
     this.depositParts = const {},
     this.towards = const [],
+    this.metalBuy,
     this.paidByContactId,
     this.paidByName,
     this.offLedger = false,
@@ -507,6 +511,7 @@ class Transaction {
             if (part is Map<String, dynamic> && part['depositId'] is String && part['amountMinor'] is int)
               part['depositId'] as String: part['amountMinor'] as int,
         },
+        metalBuy: json['metalBuy'] is Map<String, dynamic> ? MetalBuy.fromJson(json['metalBuy'] as Map<String, dynamic>) : null,
         towards: (json['towards'] as List<dynamic>? ?? const [])
             .whereType<Map<String, dynamic>>()
             .where((e) => e['commitmentId'] is String && e['contactId'] is String && e['amountMinor'] is int)
@@ -1045,6 +1050,24 @@ class FixedCommitment {
             .toList(),
         fullAmountMinor: json['fullAmountMinor'] as int?,
         periodKey: json['periodKey'] as String?,
+      );
+}
+
+/// A purchase of gold or silver: which holding, the grams, and the rate per
+/// gram (with GST) they were worked out at - null when typed by hand.
+class MetalBuy {
+  final String holdingId;
+  final double grams;
+  final int? rateMinor;
+  final bool gramsTyped;
+
+  const MetalBuy({required this.holdingId, required this.grams, this.rateMinor, this.gramsTyped = false});
+
+  factory MetalBuy.fromJson(Map<String, dynamic> json) => MetalBuy(
+        holdingId: json['holdingId'] as String? ?? '',
+        grams: (json['grams'] as num?)?.toDouble() ?? 0,
+        rateMinor: json['rateMinor'] as int?,
+        gramsTyped: json['gramsTyped'] == true,
       );
 }
 
