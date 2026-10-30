@@ -20,6 +20,7 @@ import { runGroupSharesBackfill } from "./modules/groups/groups.backfill";
 import { runGroupMirrorsBackfill } from "./modules/groups/groups.mirrors";
 import { runMonthlyDigests } from "./modules/budget/budget.digest";
 import { runAiEntryChecks } from "./modules/transactions/transactions.aiCheck";
+import { runMetalRefresh } from "./modules/metals/metals.service";
 import { runSubscriptionNotices } from "./modules/subscriptions/subscriptions.notify";
 import { runTransferLegBackfill } from "./modules/transactions/transactions.transfer";
 import { runLoanSplitBackfill } from "./modules/loans/loans.backfill";
@@ -204,6 +205,14 @@ async function start() {
   const aiEntryChecks = () => runAiEntryChecks().catch((err) => console.error("AI entry check failed:", err));
   aiEntryChecks();
   setInterval(aiEntryChecks, DAILY_JOB_CHECK_MS);
+
+  // IBJA's gold and silver rates: read every half hour through its working
+  // day, and once now so the history is there from the start.
+  runMetalRefresh(new Date(), true).catch((err) => console.error("Metal rates refresh failed:", err));
+  setInterval(
+    () => runMetalRefresh().catch((err) => console.error("Metal rates refresh failed:", err)),
+    DAILY_JOB_CHECK_MS
+  );
 }
 
 start().catch((err) => {

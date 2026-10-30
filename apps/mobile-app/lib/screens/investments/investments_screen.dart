@@ -10,6 +10,7 @@ import '../../widgets/funds/goal_card.dart';
 import '../../widgets/state_block.dart';
 import 'add_fund_screen.dart';
 import 'deposits_tab.dart';
+import 'metals_tab.dart';
 import 'goal_editor_screen.dart';
 import 'holding_detail_screen.dart';
 import 'link_sheets.dart';
@@ -23,7 +24,7 @@ import 'link_sheets.dart';
 class InvestmentsScreen extends StatefulWidget {
   const InvestmentsScreen({super.key, this.initialTab = 0, this.onOpenAiSettings});
 
-  /// 0 Portfolio, 1 Deposits, 2 Goals, 3 Advice.
+  /// 0 Funds, 1 Deposits, 2 Gold (and silver), 3 Goals, 4 Advice.
   final int initialTab;
 
   /// Settings, at the assistant's card - where the Gemini key goes.
@@ -34,7 +35,7 @@ class InvestmentsScreen extends StatefulWidget {
 }
 
 class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 4, vsync: this, initialIndex: widget.initialTab.clamp(0, 3));
+  late final TabController _tabs = TabController(length: 5, vsync: this, initialIndex: widget.initialTab.clamp(0, 4));
   final GlobalKey<DepositsTabState> _deposits = GlobalKey<DepositsTabState>();
 
   FundPortfolio? _portfolio;
@@ -220,7 +221,7 @@ class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerP
           icon: const DsIcon(DsIcons.plus, size: 20),
           label: const Text('Add deposit'),
         ),
-      2 when _goals != null && _goals!.goals.isNotEmpty => FloatingActionButton.extended(
+      3 when _goals != null && _goals!.goals.isNotEmpty => FloatingActionButton.extended(
           heroTag: 'add-goal',
           onPressed: _editGoal,
           icon: const DsIcon(DsIcons.target, size: 20),
@@ -243,7 +244,7 @@ class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerP
               animation: _tabs,
               builder: (context, _) => DsSegmented<int>(
                 height: 32,
-                segments: const [(0, 'Funds'), (1, 'Deposits'), (2, 'Goals'), (3, 'Advice')],
+                segments: const [(0, 'Funds'), (1, 'Deposits'), (2, 'Gold'), (3, 'Goals'), (4, 'Advice')],
                 selected: _tabs.index,
                 onChanged: (index) {
                   _tabs.animateTo(index);
@@ -260,6 +261,7 @@ class InvestmentsScreenState extends State<InvestmentsScreen> with SingleTickerP
         children: [
           _portfolioTab(),
           DepositsTab(key: _deposits),
+          const MetalsTab(),
           _goalsTab(),
           _adviceTab(),
         ],

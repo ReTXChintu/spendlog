@@ -6,6 +6,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import '../screens/flagged_entries_screen.dart';
 import '../screens/groups_screen.dart';
+import '../screens/investments/investments_screen.dart';
 import '../screens/other_paid_screen.dart';
 import '../screens/passbook_screen.dart';
 import '../screens/subscription_detail_screen.dart';
@@ -47,6 +48,9 @@ const String _groupType = 'GROUP';
 /// A visible push from the morning's AI check: entries that look read
 /// wrong. Opens the list of them.
 const String _entryCheckType = 'ENTRY_CHECK';
+
+/// A visible push with the day's gold and silver rates. Opens the Gold tab.
+const String _metalRatesType = 'METAL_RATES';
 
 /// Whether this phone is signed in as the owner. A kid's phone must never
 /// register for pushes or read SMS, and a signed-out one has no one to
@@ -174,6 +178,8 @@ class PushService {
         return const FlaggedEntriesScreen();
       case otherPaidType:
         return const OtherPaidScreen();
+      case _metalRatesType:
+        return const InvestmentsScreen(initialTab: 2);
       default:
         return null;
     }

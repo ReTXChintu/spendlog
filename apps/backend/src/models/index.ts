@@ -161,6 +161,9 @@ export interface UserDoc {
   lastSmsPingAt?: Date | null;
   /// Which Gemini model answers. Null means the app's default.
   geminiModel?: string | null;
+  /// Whether the day's gold and silver rates are pushed to this user's
+  /// phone once IBJA publishes them. Off until they turn it on.
+  metalRatesPush?: boolean;
   /// One-off repairs to this user's data, by name, and the version of
   /// each that has run. Checked at start-up so each runs once per user,
   /// and again only when its version is raised.
@@ -274,6 +277,7 @@ const userSchema = new Schema<UserDoc>(
     geminiApiKeyEnc: { type: String, default: null },
     geminiApiKeyHint: { type: String, default: null },
     geminiModel: { type: String, default: null },
+    metalRatesPush: { type: Boolean, default: false },
     role: { type: String, enum: ["OWNER", "KID"], default: "OWNER" },
     parentId: { type: Schema.Types.ObjectId, ref: "User", default: null, index: true },
     kidAccountIds: { type: [Schema.Types.ObjectId], default: [] },
@@ -2969,6 +2973,42 @@ const goalSchema = new Schema<GoalDoc>(
 );
 
 export const Goal = model<GoalDoc>("Goal", goalSchema);
+
+/**
+ * One day's IBJA gold and silver rates, the same for every user: gold per
+ * 10 g and silver per kg in whole rupees, as IBJA quotes them. The latest
+ * quote of the day (PM once out); for a day only known from IBJA's history
+ * the quote is "CLOSE" and 18K is not given. See modules/metals.
+ */
+export interface MetalRateDoc {
+  _id: Types.ObjectId;
+  /// YYYY-MM-DD, IST.
+  day: string;
+  gold999: number | null;
+  gold916: number | null;
+  gold750: number | null;
+  silver999: number | null;
+  session: "AM" | "PM" | "CLOSE";
+  /// When the day's notification went out, so it goes once.
+  notifiedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const metalRateSchema = new Schema<MetalRateDoc>(
+  {
+    day: { type: String, required: true, unique: true },
+    gold999: { type: Number, default: null },
+    gold916: { type: Number, default: null },
+    gold750: { type: Number, default: null },
+    silver999: { type: Number, default: null },
+    session: { type: String, enum: ["AM", "PM", "CLOSE"], required: true },
+    notifiedAt: { type: Date, default: null },
+  },
+  { timestamps: true, ...serialization }
+);
+
+export const MetalRate = model<MetalRateDoc>("MetalRate", metalRateSchema);
 
 export const DEPOSIT_KINDS = ["RD", "FD"] as const;
 export type DepositKind = (typeof DEPOSIT_KINDS)[number];

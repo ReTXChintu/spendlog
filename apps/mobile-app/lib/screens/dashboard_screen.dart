@@ -24,6 +24,8 @@ import 'flagged_entries_screen.dart';
 import 'other_paid_screen.dart';
 import '../services/other_paid_check.dart';
 import 'investments/investments_screen.dart';
+import 'investments/metals_tab.dart';
+import '../models/metal_models.dart';
 import 'loans_screen.dart';
 import 'monthly_budget_screen.dart';
 import 'passbook_screen.dart';
@@ -80,6 +82,10 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
   FundPortfolio? _funds;
   bool _fundsFailed = false;
 
+  /// IBJA's gold and silver rates, fetched on their own: a slow answer
+  /// costs the rates tile only.
+  MetalRates? _metals;
+
   /// The evening "did anyone else pay?" check, and whether today is
   /// answered. Asked on Home until it is.
   OtherPaidSettings? _otherPaid;
@@ -113,9 +119,26 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
       unawaited(_loadPeople());
       unawaited(_loadFunds());
       unawaited(_loadOtherPaid());
+      unawaited(_loadMetals());
     } catch (_) {
       if (mounted) setState(() => _failed = true);
     }
+  }
+
+  Future<void> _loadMetals() async {
+    try {
+      final json = await ApiClient.instance.get('/metals') as Map<String, dynamic>;
+      if (mounted) setState(() => _metals = MetalRates.fromJson(json));
+    } catch (_) {
+      // The tile says what it is for, and the tab tries again.
+    }
+  }
+
+  Future<void> _openMetals() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => InvestmentsScreen(initialTab: 2, onOpenAiSettings: widget.onOpenAiSettings)),
+    );
+    await _loadMetals();
   }
 
   Future<void> _loadOtherPaid() async {
@@ -375,6 +398,9 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
           // way to start tracking one.
           const _Group('Investments'),
           InvestmentsTile(portfolio: _funds, failed: _fundsFailed, onTap: _openInvestments),
+          const SizedBox(height: kCardGap),
+          // Today's gold and silver, and whether it is a day to buy.
+          MetalsTile(rates: _metals, onTap: _openMetals),
 
           // Then two groups, in the order the questions come. Today: which
           // card and what is set aside. This month: how the rest of it is

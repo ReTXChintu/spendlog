@@ -354,7 +354,39 @@ Map<String, Object> _routes({
       '/goals': goals ?? _goals(),
       '/funds/advice': advice ?? _advice,
       '/deposits': deposits ?? const {'deposits': [], 'totalMinor': 0, 'monthlyMinor': 0},
+      '/metals': metalsJson,
     };
+
+/// A day of IBJA rates, gold below its 30-day average and silver above.
+const metalsJson = {
+  'available': true,
+  'day': '2026-10-30',
+  'session': 'AM',
+  'isToday': true,
+  'source': {'name': 'IBJA', 'url': 'https://ibjarates.com/'},
+  'gold': {
+    'perGramMinor': {'24K': 1408910, '22K': 1290560, '18K': 1056680},
+    'withGstPerGramMinor': 1451177,
+    'signal': {'averageMinor': 1430000, 'belowAveragePercent': 1.47, 'isGoodDay': true, 'changePercent': -0.96},
+    'history': [
+      {'day': '2026-10-28', 'perGramMinor': 1427070},
+      {'day': '2026-10-29', 'perGramMinor': 1422550},
+      {'day': '2026-10-30', 'perGramMinor': 1408910},
+    ],
+  },
+  'silver': {
+    'perGramMinor': 18380,
+    'perKgMinor': 18380000,
+    'withGstPerGramMinor': 18931,
+    'signal': {'averageMinor': 17000, 'belowAveragePercent': -8.12, 'isGoodDay': false, 'changePercent': -3.5},
+    'history': [
+      {'day': '2026-10-28', 'perGramMinor': 19344},
+      {'day': '2026-10-29', 'perGramMinor': 19048},
+      {'day': '2026-10-30', 'perGramMinor': 18380},
+    ],
+  },
+  'push': false,
+};
 
 /// 360 logical pixels wide.
 Future<void> _pump(WidgetTester tester, Widget home, {Brightness brightness = Brightness.light, double height = 7200}) async {
@@ -1049,7 +1081,7 @@ void main() {
 
     testWidgets('the Goals tab shows the cards and the assumptions', (tester) async {
       await http.runWithClient(() async {
-        await _pump(tester, const InvestmentsScreen(initialTab: 2));
+        await _pump(tester, const InvestmentsScreen(initialTab: 3));
         await tester.pumpAndSettle();
       }, () => _server(_routes()));
 
@@ -1062,7 +1094,7 @@ void main() {
 
     testWidgets('no goals yet invites the first', (tester) async {
       await http.runWithClient(() async {
-        await _pump(tester, const InvestmentsScreen(initialTab: 2));
+        await _pump(tester, const InvestmentsScreen(initialTab: 3));
         await tester.pumpAndSettle();
       }, () => _server(_routes(goals: _goals(goals: const []))));
 
@@ -1073,7 +1105,7 @@ void main() {
 
     testWidgets('advice shows its sections and the disclaimer', (tester) async {
       await http.runWithClient(() async {
-        await _pump(tester, const InvestmentsScreen(initialTab: 3));
+        await _pump(tester, const InvestmentsScreen(initialTab: 4));
         await tester.pumpAndSettle();
       }, () => _server(_routes()));
 
@@ -1095,7 +1127,7 @@ void main() {
     testWidgets('no key and no advice: how to add one, and still the disclaimer', (tester) async {
       var opened = 0;
       await http.runWithClient(() async {
-        await _pump(tester, InvestmentsScreen(initialTab: 3, onOpenAiSettings: () => opened++));
+        await _pump(tester, InvestmentsScreen(initialTab: 4, onOpenAiSettings: () => opened++));
         await tester.pumpAndSettle();
         expect(find.text('Advice needs a Gemini key'), findsOneWidget);
         expect(find.textContaining('Settings → You → AI assistant'), findsOneWidget);
@@ -1111,7 +1143,7 @@ void main() {
     testWidgets('Get advice posts, and a refusal is shown', (tester) async {
       final log = <http.Request>[];
       await http.runWithClient(() async {
-        await _pump(tester, const InvestmentsScreen(initialTab: 3));
+        await _pump(tester, const InvestmentsScreen(initialTab: 4));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Get advice'));
         await tester.pumpAndSettle();
@@ -1305,7 +1337,7 @@ void main() {
     );
 
     for (final brightness in Brightness.values) {
-      for (final (tab, last) in [(0, 'Category figures compare'), (1, 'Each total is what you last said'), (2, 'How the plans are worked out'), (3, 'This is not investment advice')]) {
+      for (final (tab, last) in [(0, 'Category figures compare'), (1, 'Each total is what you last said'), (2, 'a guide, not a forecast'), (3, 'How the plans are worked out'), (4, 'This is not investment advice')]) {
         testWidgets('tab $tab (${brightness.name})', (tester) async {
           await http.runWithClient(() async {
             await _pump(tester, InvestmentsScreen(initialTab: tab), brightness: brightness, height: 2400);
