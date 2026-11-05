@@ -24,6 +24,16 @@ describe("the moment a message says its payment happened", () => {
     ["DD-Mon-YY with at", "Rs 1200 spent on ICICI Card XX1111 on 22-Oct-26 at 21:45 IST at AMAZON", "2026-10-22T21:45:00"],
     ["DDMonYY glued (Federal)", "Debited Rs 161.00 from a/c X5130 on 22Oct26 18:02:11 via UPI to S. Ref 661165147047", "2026-10-22T18:02:11"],
     ["DD Mon YYYY", "A/c XX12 debited by Rs 300 on 22 Oct 2026, 08:30 PM.", "2026-10-22T20:30:00"],
+    [
+      "DD Mon, YYYY at HH:MM:SS (HDFC's card email)",
+      "Dear Customer, Greetings from HDFC Bank. We would like to inform you that Rs. 146.00 has been debited from your HDFC Bank Credit Card ending 1377 towards SWIGGY PVT LTD FOOD1 on 22 Oct, 2026 at 21:37:04.",
+      "2026-10-22T21:37:04",
+    ],
+    [
+      "a time Gmail's preview cut off after its colon",
+      "Rs. 146.00 has been debited from your HDFC Bank Credit Card ending 1377 towards SWIGGY PVT LTD FOOD1 on 22 Oct, 2026 at 21:37:",
+      "2026-10-22T21:37:00",
+    ],
     ["Mon DD, YYYY", "Payment of Rs 450 on Oct 22, 2026 at 10:05:22 hrs on your card", "2026-10-22T10:05:22"],
     ["ISO", "Txn Rs 75.00 on 2026-10-22 19:00:00 card ending 9876", "2026-10-22T19:00:00"],
     ["DD.MM.YYYY", "Rs 60 debited on 22.10.2026 at 7:15 pm from a/c **1234", "2026-10-22T19:15:00"],

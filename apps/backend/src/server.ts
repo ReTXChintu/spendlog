@@ -25,7 +25,7 @@ import { runSubscriptionNotices } from "./modules/subscriptions/subscriptions.no
 import { runTransferLegBackfill } from "./modules/transactions/transactions.transfer";
 import { runLoanSplitBackfill } from "./modules/loans/loans.backfill";
 import { runReferenceSplitBackfill } from "./modules/transactions/transactions.referenceSplit";
-import { runStatedTimeBackfill } from "./modules/transactions/transactions.statedTime";
+import { runReportedTwiceBackfill, runStatedTimeBackfill } from "./modules/transactions/transactions.statedTime";
 import { runStatementRematchBackfill } from "./modules/statements/statements.reconcile";
 import { runFcmTokenDedupeBackfill } from "./modules/family/family.devices";
 import { syncAllConnectedEmails } from "./modules/ingestion/gmail.service";
@@ -151,6 +151,10 @@ async function start() {
     .catch((err) => console.error("Reference split failed:", err))
     .then(() => runStatedTimeBackfill())
     .catch((err) => console.error("Stated-time backfill failed:", err))
+    // One payment kept as two rows because one message's time was not read:
+    // merged into the row at the time both state.
+    .then(() => runReportedTwiceBackfill())
+    .catch((err) => console.error("Reported-twice merge failed:", err))
     // Statements read before their lines were matched by the bank's number
     // added payments the ledger already had: read again, after the times
     // are right, keeping what was said about the rows they added.

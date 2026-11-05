@@ -67,8 +67,9 @@ const DAY_MONTH_RE = new RegExp(
 const MONTH_DAY_RE = new RegExp(`\\b${MONTH_NAME}\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(\\d{4})(?!\\d)`, "gi");
 
 // 1:39 AM, 01:39AM, 13:45, 13:45:10, 10:05:22 hrs. Not part of a longer
-// run of digits and colons.
-const TIME_RE = /(?<![\d:])(\d{1,2}):(\d{2})(?::(\d{2}))?(?![\d:])\s*(a\.?m\.?|p\.?m\.?|hrs|hours|ist)?/gi;
+// run of digits and colons - though a colon with nothing after it is only
+// where Gmail cut its preview short ("on 17 Oct, 2026 at 21:37:").
+const TIME_RE = /(?<![\d:])(\d{1,2}):(\d{2})(?::(\d{2}))?(?!\d)(?!:\d)\s*(a\.?m\.?|p\.?m\.?|hrs|hours|ist)?/gi;
 // 1.39 PM - a dot only with AM/PM after it, since "1.39" alone is an amount.
 const DOTTED_TIME_RE = /(?<![\d.])(\d{1,2})\.(\d{2})\s*(a\.?m\.?|p\.?m\.?)(?![a-z])/gi;
 

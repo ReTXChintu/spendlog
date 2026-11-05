@@ -5,7 +5,7 @@ import mongoose, { Types } from "mongoose";
 import { Account, Category, Transaction, User } from "../models";
 import { ingestRawMessage } from "./ingest";
 import { splitMergedPayments } from "../modules/transactions/transactions.referenceSplit";
-import { redateFromMessages } from "../modules/transactions/transactions.statedTime";
+import { mergeReportedTwice, redateFromMessages } from "../modules/transactions/transactions.statedTime";
 
 // Messages and their times as the user's phone and mailbox delivered them.
 let mongod: MongoMemoryServer;
@@ -237,5 +237,42 @@ describe("repairs for rows stored before", () => {
     assert.deepEqual((await Transaction.findById(plain._id).orFail()).occurredAt, ist("2026-10-23T01:39:00"));
     assert.deepEqual((await Transaction.findById(edited._id).orFail()).occurredAt, arrived);
     assert.equal(await redateFromMessages(userId), 0, "a second pass changes nothing");
+  });
+
+  it("merges a payment kept twice because its email's time was cut short, keeping the category given", async () => {
+    const userId = await makeUser();
+    const card = new Types.ObjectId();
+    const category = new Types.ObjectId();
+    const sms = await Transaction.create({
+      userId, accountId: card, amountMinor: 14600, type: "DEBIT", source: "SMS", merchant: "SWIGGY",
+      occurredAt: ist("2026-10-17T21:37:08"),
+      sources: [{ source: "SMS", rawText: "Spent Rs.146 On HDFC Bank Card 1377 At SWIGGY PVT LTD FOOD1 On 2026-10-17:21:37:04.", receivedAt: ist("2026-10-17T21:37:08") }],
+    });
+    // The email, at its arrival: Gmail's preview stops at "21:37:".
+    const email = await Transaction.create({
+      userId, accountId: card, amountMinor: 14600, type: "DEBIT", source: "EMAIL", merchant: "SWIGGY",
+      categoryId: category, editedAt: new Date(),
+      occurredAt: ist("2026-10-18T01:46:38"),
+      sources: [{
+        source: "EMAIL",
+        rawText: "Rs. 146.00 has been debited from your HDFC Bank Credit Card ending 1377 towards SWIGGY PVT LTD FOOD1 on 17 Oct, 2026 at 21:37:",
+        receivedAt: ist("2026-10-18T01:46:38"),
+      }],
+    });
+    // Same amount the next morning: another payment, left alone.
+    const other = await Transaction.create({
+      userId, accountId: card, amountMinor: 14600, type: "DEBIT", source: "SMS",
+      occurredAt: ist("2026-10-18T09:00:00"),
+      sources: [{ source: "SMS", rawText: "Spent Rs.146 On HDFC Bank Card 1377 At SWIGGY On 2026-10-18:09:00:00.", receivedAt: ist("2026-10-18T09:00:00") }],
+    });
+
+    assert.equal(await mergeReportedTwice(userId), 1);
+    assert.equal(await Transaction.exists({ _id: email._id }), null);
+    const kept = await Transaction.findById(sms._id).orFail();
+    assert.equal(kept.sources.length, 2);
+    assert.equal(kept.categoryId?.toString(), category.toString());
+    assert.equal(kept.mergedFrom.length, 1, "kept verbatim, so it can be split back out");
+    assert.ok(await Transaction.exists({ _id: other._id }));
+    assert.equal(await mergeReportedTwice(userId), 0, "a second pass changes nothing");
   });
 });

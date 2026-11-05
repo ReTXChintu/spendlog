@@ -192,14 +192,19 @@ export async function reconcileStatement(
       // The nearest by date. With more than one there is genuinely nothing
       // to choose between them from the statement's side, so the guess is
       // recorded as a guess rather than presented as a match.
-      const best = candidates.reduce((nearest, candidate) =>
+      // The small hours after the line's next day are only let in for a
+      // payment the statement dates a day early; with anything else to
+      // match, they are some other payment of the same amount.
+      const inWindow = candidates.filter((candidate) => candidate.occurredAt.getTime() <= line.date.getTime() + DAY_MS);
+      const fitting = inWindow.length > 0 ? inWindow : candidates;
+      const best = fitting.reduce((nearest, candidate) =>
         distance(candidate.occurredAt, line.date) < distance(nearest.occurredAt, line.date) ? candidate : nearest
       );
 
       claimed.add(best._id.toString());
       line.transactionId = best._id;
-      line.resolution = candidates.length > 1 ? "UNCERTAIN" : "MATCHED";
-      summary[candidates.length > 1 ? "uncertain" : "matched"] += 1;
+      line.resolution = fitting.length > 1 ? "UNCERTAIN" : "MATCHED";
+      summary[fitting.length > 1 ? "uncertain" : "matched"] += 1;
 
       // The statement is a third witness to a payment the SMS and the email
       // already reported, and it is the most authoritative of the three. So
