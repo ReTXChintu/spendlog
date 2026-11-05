@@ -76,6 +76,8 @@ export interface LedgerEntry {
   transferAccountId: string | null;
   accountUnknown: boolean;
   needsExplanation: boolean;
+  /// Only the day is known (a row a statement added): shown without a time.
+  timeUnknown?: boolean;
   /// A leg SpendLog wrote in for a transfer whose bank sent no message for
   /// this side, not yet confirmed by one.
   autoLeg: boolean;
@@ -141,6 +143,7 @@ export type LedgerRow = {
   source?: TransactionSource;
   statedBalanceMinor?: number | null;
   accountUnknown?: boolean;
+  timeUnknown?: boolean;
   /// Paid by somebody else (a group payment): no account of the user's moved.
   offLedger?: boolean;
   isAdjustment?: boolean;
@@ -493,6 +496,7 @@ export function buildLedger(params: {
         transferAccountId: move.transferAccountId,
         accountUnknown: Boolean(row.accountUnknown),
         needsExplanation: Boolean(row.needsExplanation),
+        timeUnknown: Boolean(row.timeUnknown),
         autoLeg: Boolean(row.autoLeg),
         note: null,
         missingCreditId: null,
@@ -541,7 +545,7 @@ export function buildLedger(params: {
 
 const ROW_FIELDS =
   "accountId type amountMinor occurredAt isTransfer transferAccountId transferPairId merchant countedReason source " +
-  "statedBalanceMinor accountUnknown offLedger isAdjustment needsExplanation autoLeg";
+  "statedBalanceMinor accountUnknown offLedger isAdjustment needsExplanation autoLeg timeUnknown";
 
 /**
  * The passbook of every tracked account among these - or of the ones

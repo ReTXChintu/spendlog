@@ -195,6 +195,9 @@ class PassbookRow {
   final bool isTransfer;
   final String? transferAccountId;
   final bool accountUnknown;
+
+  /// Only the day is known: a row a statement added. Shown without a time.
+  final bool timeUnknown;
   final bool needsExplanation;
 
   /// Written in by SpendLog for a transfer whose bank never texted this
@@ -224,6 +227,7 @@ class PassbookRow {
     this.isTransfer = false,
     this.transferAccountId,
     this.accountUnknown = false,
+    this.timeUnknown = false,
     this.needsExplanation = false,
     this.autoLeg = false,
     this.note,
@@ -264,6 +268,7 @@ class PassbookRow {
         isTransfer: _bool(json['isTransfer']),
         transferAccountId: _str(json['transferAccountId']),
         accountUnknown: _bool(json['accountUnknown']),
+        timeUnknown: _bool(json['timeUnknown']),
         needsExplanation: _bool(json['needsExplanation']),
         autoLeg: _bool(json['autoLeg']),
         note: _str(json['note']),

@@ -840,6 +840,10 @@ export interface TransactionDoc {
   /// rate per gram they were worked out at (that day's, with GST) - or
   /// typed by hand, when a jeweller's making charges meant fewer grams.
   metalBuy?: MetalBuy | null;
+  /// Only the day is known, not the time: a row a statement added, which
+  /// prints dates alone. occurredAt is that day's midnight, and the apps
+  /// show the date without a time.
+  timeUnknown?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -1067,6 +1071,7 @@ const transactionSchema = new Schema<TransactionDoc>(
     depositParts: { type: [depositPartSchema], default: [] },
     towards: { type: [towardsEntrySchema], default: [] },
     metalBuy: { type: metalBuySchema, default: null },
+    timeUnknown: { type: Boolean, default: false },
     sources: { type: [transactionSourceSchema], default: [] },
     mergedFrom: { type: [mergedSnapshotSchema], default: [] },
     countedAmountMinor: { type: Number, default: 0 },
@@ -2090,6 +2095,10 @@ export interface StatementLine {
   /// statement has one; it is the bank's own figure, and the transaction
   /// the line becomes carries it as statedBalanceMinor.
   balanceMinor?: number | null;
+  /// The bank's number for the payment, where the narration prints one -
+  /// "UPIOUT/665436956255/…" is UPI's reference, the same number its SMS
+  /// quotes. What the line is matched to the ledger by, first.
+  reference?: string | null;
 }
 
 const statementLineSchema = new Schema<StatementLine>({
@@ -2101,6 +2110,7 @@ const statementLineSchema = new Schema<StatementLine>({
   resolution: { type: String, enum: STATEMENT_LINE_RESOLUTIONS, default: "SKIPPED" },
   transactionId: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
   balanceMinor: { type: Number, default: null },
+  reference: { type: String, default: null },
 });
 
 export interface CardStatementDoc {

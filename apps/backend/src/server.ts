@@ -26,6 +26,7 @@ import { runTransferLegBackfill } from "./modules/transactions/transactions.tran
 import { runLoanSplitBackfill } from "./modules/loans/loans.backfill";
 import { runReferenceSplitBackfill } from "./modules/transactions/transactions.referenceSplit";
 import { runStatedTimeBackfill } from "./modules/transactions/transactions.statedTime";
+import { runStatementRematchBackfill } from "./modules/statements/statements.reconcile";
 import { runFcmTokenDedupeBackfill } from "./modules/family/family.devices";
 import { syncAllConnectedEmails } from "./modules/ingestion/gmail.service";
 
@@ -149,7 +150,12 @@ async function start() {
     .then(() => runReferenceSplitBackfill())
     .catch((err) => console.error("Reference split failed:", err))
     .then(() => runStatedTimeBackfill())
-    .catch((err) => console.error("Stated-time backfill failed:", err));
+    .catch((err) => console.error("Stated-time backfill failed:", err))
+    // Statements read before their lines were matched by the bank's number
+    // added payments the ledger already had: read again, after the times
+    // are right, keeping what was said about the rows they added.
+    .then(() => runStatementRematchBackfill())
+    .catch((err) => console.error("Statement rematch failed:", err));
   // A phone's push token kept once, however often it was registered.
   runFcmTokenDedupeBackfill().catch((err) => console.error("Push token cleanup failed:", err));
   runAccountUnknownBackfill().catch((err) => console.error("Account unknown backfill failed:", err));

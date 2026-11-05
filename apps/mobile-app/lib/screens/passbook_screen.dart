@@ -875,7 +875,8 @@ class _PassbookRowTile extends StatelessWidget {
       default:
         title = row.merchant ?? 'Unknown';
         subtitle = [
-          formatTime(row.on),
+          // A statement gives the day alone; a made-up midnight helps nobody.
+          if (!row.timeUnknown) formatTime(row.on),
           if (row.source != null) row.source!,
           if (row.isTransfer) 'transfer',
         ].join(' · ');

@@ -157,7 +157,9 @@ describe("gold the user owns", () => {
       rawText: "Debited Rs 500.00 from a/c X5130 via UPI to SAFEGOLD. Ref 666106275999. -Federal Bank",
       source: "SMS",
       sourceRef: "g1",
-      receivedAt: new Date("2026-10-30T13:00:00+05:30"),
+      // Now: a message from before the user's ledger begins is ignored. The
+      // latest rate on or before today is the 30th's.
+      receivedAt: new Date(),
     });
     const row = await models.Transaction.findById((result as { transaction: { _id: Types.ObjectId } }).transaction._id).lean();
     assert.equal(String(row!.metalBuy?.holdingId), digital.id);

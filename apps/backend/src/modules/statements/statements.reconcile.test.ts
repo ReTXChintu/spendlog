@@ -517,3 +517,121 @@ describe("saying by hand what a line is", () => {
     assert.equal(result, null);
   });
 });
+
+describe("matching by the bank's number", () => {
+  async function makeBank() {
+    return models.Account.create({ userId, bankName: "Federal Bank", last4: "5130", accountType: "BANK" });
+  }
+
+  async function fromSms(accountId: Types.ObjectId, at: string, amountMinor: number, reference: string) {
+    return models.Transaction.create({
+      userId,
+      accountId,
+      amountMinor,
+      type: "DEBIT",
+      merchant: "Paid by UPI",
+      source: "SMS",
+      reference,
+      referenceKind: "RRN",
+      occurredAt: new Date(at),
+      sources: [{ source: "SMS", sourceRef: `sms-${reference}`, rawText: `UPI ${reference}`, receivedAt: new Date(at), reference, referenceKind: "RRN" }],
+    });
+  }
+
+  it("reads the UPI reference out of a narration", () => {
+    assert.equal(reconcile.lineReference("UPIOUT/665436956255/97-"), "665436956255");
+    assert.equal(reconcile.lineReference("UPI IN/628769097616/sylvis-"), "628769097616");
+    assert.equal(reconcile.lineReference("UPIOUT/271109959995/ma- TFR S26637"), "271109959995");
+    assert.equal(reconcile.lineReference("UPI-MUKHWAS PAN PARLOUR"), null);
+    assert.equal(reconcile.lineReference("OFFUS EMI,PRIN NB:12,00000133051667 (Ref# 09999999981101006079509)"), null);
+  });
+
+  it("matches a payment made just after midnight that the statement puts on the day before", async () => {
+    const bank = await makeBank();
+    const sms = await fromSms(bank._id, "2026-10-15T00:15:00+05:30", 1010_00, "665436956255");
+    const statement = await makeStatement(bank._id, [
+      { day: "2026-10-14", description: "UPIOUT/665436956255/97-", amountMinor: 1010_00 },
+    ]);
+
+    const summary = await reconcile.reconcileStatement(statement);
+    assert.equal(summary.matched, 1);
+    assert.equal(summary.added, 0);
+    assert.equal(statement.lines[0].transactionId?.toString(), sms._id.toString());
+    assert.equal(statement.lines[0].reference, "665436956255");
+  });
+
+  it("pairs two payments of one amount by their numbers, not by which came first", async () => {
+    const bank = await makeBank();
+    const first = await fromSms(bank._id, "2026-10-19T01:11:00+05:30", 1000_00, "104276458537");
+    const second = await fromSms(bank._id, "2026-10-19T01:11:09+05:30", 1000_00, "104276451801");
+    const statement = await makeStatement(bank._id, [
+      { day: "2026-10-18", description: "UPIOUT/104276451801/an-", amountMinor: 1000_00 },
+      { day: "2026-10-18", description: "UPIOUT/104276458537/an-", amountMinor: 1000_00 },
+    ]);
+
+    const summary = await reconcile.reconcileStatement(statement);
+    assert.equal(summary.matched, 2);
+    assert.equal(statement.lines[0].transactionId?.toString(), second._id.toString());
+    assert.equal(statement.lines[1].transactionId?.toString(), first._id.toString());
+  });
+
+  it("finds the payment under another account by its number", async () => {
+    const bank = await makeBank();
+    const card = await makeCard();
+    const onCard = await fromSms(card._id, "2026-10-17T15:51:00+05:30", 40_00, "665667252411");
+    const statement = await makeStatement(bank._id, [
+      { day: "2026-10-17", description: "UPIOUT/665667252411/q2-", amountMinor: 40_00 },
+    ]);
+
+    assert.equal((await reconcile.reconcileStatement(statement)).matched, 1);
+    assert.equal(statement.lines[0].transactionId?.toString(), onCard._id.toString());
+    assert.equal(await models.Transaction.countDocuments({ userId }), 1);
+  });
+
+  it("never takes a payment with another number for the line's, and adds the line with its number and no time", async () => {
+    const bank = await makeBank();
+    await fromSms(bank._id, "2026-10-13T12:00:00+05:30", 80_00, "665779178711");
+    const statement = await makeStatement(bank._id, [
+      { day: "2026-10-13", description: "UPIOUT/665217502612/Q2-", amountMinor: 80_00 },
+    ]);
+
+    const summary = await reconcile.reconcileStatement(statement);
+    assert.equal(summary.added, 1);
+    const added = await models.Transaction.findOne({ userId, source: "STATEMENT" }).orFail();
+    assert.equal(added.reference, "665217502612");
+    assert.equal(added.timeUnknown, true);
+  });
+
+  it("reads again a statement that added what was there, keeping what was said about its rows", async () => {
+    const bank = await makeBank();
+    const sms = await fromSms(bank._id, "2026-10-15T00:15:00+05:30", 1010_00, "665436956255");
+    // As it was read before: the line added as new, and its row categorised.
+    const statement = await makeStatement(bank._id, [
+      { day: "2026-10-14", description: "UPIOUT/665436956255/97-", amountMinor: 1010_00 },
+      { day: "2026-10-06", description: "UPIOUT/009162391814/91-", amountMinor: 20_00 },
+    ]);
+    const category = new Types.ObjectId();
+    const rows = [];
+    for (const line of statement.lines) {
+      const row = await models.Transaction.create({
+        userId, accountId: bank._id, amountMinor: line.amountMinor, type: "DEBIT", merchant: line.description, source: "STATEMENT",
+        occurredAt: line.date, statementId: statement._id, statementLineId: line._id, categoryId: category, editedAt: new Date(),
+      });
+      line.resolution = "ADDED";
+      line.transactionId = row._id;
+      rows.push(row);
+    }
+    await statement.save();
+
+    assert.equal(await reconcile.rematchStatement(statement), 1);
+    // The duplicate went, and the SMS row took its category; the line that
+    // was really new is new again, still categorised.
+    assert.equal(await models.Transaction.exists({ _id: rows[0]._id }), null);
+    const matched = await models.Transaction.findById(sms._id).orFail();
+    assert.equal(matched.categoryId?.toString(), category.toString());
+    assert.equal(statement.lines[0].resolution, "MATCHED");
+    const readded = await models.Transaction.findById(statement.lines[1].transactionId).orFail();
+    assert.equal(readded.categoryId?.toString(), category.toString());
+    assert.equal(await models.Transaction.countDocuments({ userId }), 2);
+  });
+});

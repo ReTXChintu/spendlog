@@ -6,6 +6,8 @@ import { categorizeTransaction } from "../../parsing/categorizer";
 import { groupForOccurredAt } from "../groups/groups.service";
 import { countsAsStatementSpend, isLedgerWorthy, looksLikeCardBill } from "./statements.classify";
 import { markCardBillPayment, paysOwnCard } from "../cards/cards.billPayment.service";
+import { transactionReference } from "../../parsing/reference";
+import { runOncePerUser } from "../../backfill";
 
 /**
  * Matching a statement against the ledger, and adding what is missing.
@@ -30,6 +32,43 @@ import { markCardBillPayment, paysOwnCard } from "../cards/cards.billPayment.ser
  * because they end up written into the ledger.
  */
 const POSTING_DRIFT_DAYS = 4;
+
+/**
+ * How late after the line's day a payment may still be the line's. A
+ * payment made just after midnight is often printed against the day before
+ * (₹1,010 sent at 00:15 on the 15th, on the statement as the 14th), so the
+ * day after the line runs on into the small hours of the next.
+ */
+const LATE_SLACK_MS = 27 * 60 * 60 * 1000;
+
+// The UPI reference as a bank statement prints it in a narration:
+// "UPIOUT/665436956255/97-", "UPI IN/628769097616/sylvis-".
+const NARRATION_RRN = /(?:^|[\s-])(?:UPI\s*(?:OUT|IN)?|IMPS|MMT)\s*\/\s*(\d{12})(?!\d)/i;
+
+/**
+ * The bank's number for the payment a statement line stands for, or null:
+ * the UPI reference in a narration, else one labelled the way messages
+ * label them. The same number an SMS for the payment quotes, so the line
+ * can be matched to it exactly rather than by amount and day.
+ */
+export function lineReference(description: string): string | null {
+  const narration = description.match(NARRATION_RRN);
+  if (narration) return narration[1];
+  const labelled = transactionReference(description);
+  return labelled && (labelled.kind === "RRN" || labelled.kind === "UTR") ? labelled.value : null;
+}
+
+/** Whether a transaction carries this reference, on itself or any message for it. */
+function carriesReference(transaction: Pick<TransactionDoc, "reference" | "sources">, reference: string): boolean {
+  return transaction.reference === reference || transaction.sources.some((source) => source.reference === reference);
+}
+
+/** Every reference a transaction carries. */
+function referencesOf(transaction: Pick<TransactionDoc, "reference" | "sources">): string[] {
+  return [transaction.reference, ...transaction.sources.map((source) => source.reference)].filter(
+    (value): value is string => Boolean(value)
+  );
+}
 
 export interface ReconcileSummary {
   matched: number;
@@ -83,10 +122,28 @@ export async function reconcileStatement(
     occurredAt: { $gte: window.from, $lte: window.to },
   }).sort({ occurredAt: 1 });
 
+  // The bank's own number for each line, where its narration prints one.
+  for (const line of statement.lines) {
+    if (line.reference === undefined || line.reference === null) line.reference = lineReference(line.description);
+  }
+
+  // Every payment carrying one of those numbers, on any account: the same
+  // UPI payment can be filed under a card while the bank's statement lists
+  // it, and a number matches it wherever it was filed.
+  const references = [...new Set(statement.lines.map((line) => line.reference).filter(Boolean) as string[])];
+  const byReference =
+    references.length === 0
+      ? []
+      : await Transaction.find({
+          userId: statement.userId,
+          $or: [{ reference: { $in: references } }, { "sources.reference": { $in: references } }],
+          occurredAt: { $gte: new Date(window.from.getTime() - 3 * DAY_MS), $lte: new Date(window.to.getTime() + 3 * DAY_MS) },
+        });
+
   // A transaction may be claimed by one line only, so a statement listing
   // the same amount twice cannot match both halves to a single row.
   const claimed = new Set<string>();
-  for (const transaction of existing) {
+  for (const transaction of [...existing, ...byReference]) {
     if (transaction.statementLineId) claimed.add(transaction._id.toString());
   }
 
@@ -105,13 +162,31 @@ export async function reconcileStatement(
       continue;
     }
 
-    const candidates = existing.filter(
-      (transaction) =>
-        !claimed.has(transaction._id.toString()) &&
-        transaction.amountMinor === line.amountMinor &&
-        transaction.type === line.type &&
-        withinDrift(transaction.occurredAt, line.date)
-    );
+    // First by the bank's number: certain, whatever account the payment
+    // was filed under - as long as it is the same money.
+    const reference = line.reference ?? null;
+    const exact = reference
+      ? byReference.find(
+          (transaction) =>
+            !claimed.has(transaction._id.toString()) &&
+            carriesReference(transaction, reference) &&
+            transaction.amountMinor === line.amountMinor &&
+            transaction.type === line.type
+        )
+      : undefined;
+
+    // Then by amount and day - never a payment that carries a different
+    // number of its own, which is another payment of the same amount.
+    const candidates = exact
+      ? [exact]
+      : existing.filter(
+          (transaction) =>
+            !claimed.has(transaction._id.toString()) &&
+            transaction.amountMinor === line.amountMinor &&
+            transaction.type === line.type &&
+            withinDrift(transaction.occurredAt, line.date) &&
+            !(reference && referencesOf(transaction).length > 0 && !carriesReference(transaction, reference))
+        );
 
     if (candidates.length > 0) {
       // The nearest by date. With more than one there is genuinely nothing
@@ -291,7 +366,7 @@ function withinDrift(occurredAt: Date, lineDate: Date): boolean {
   // happened, never before. A day of slack the other way covers a line
   // dated by the transaction date instead of the posting date.
   const early = lineDate.getTime() - POSTING_DRIFT_DAYS * DAY_MS;
-  const late = lineDate.getTime() + DAY_MS;
+  const late = lineDate.getTime() + LATE_SLACK_MS;
   return occurredAt.getTime() >= early && occurredAt.getTime() <= late;
 }
 
@@ -303,7 +378,7 @@ function statementWindow(statement: HydratedDocument<CardStatementDoc>): { from:
 
   return {
     from: new Date(earliest - POSTING_DRIFT_DAYS * DAY_MS),
-    to: new Date(latest + DAY_MS),
+    to: new Date(latest + LATE_SLACK_MS),
   };
 }
 
@@ -354,7 +429,12 @@ async function addFromLine(
     source: "STATEMENT",
     cardPaymentFor: paidCard,
     sourceRef: `${statement.sourceRef}#${line._id.toString()}`,
+    reference: line.reference ?? null,
+    referenceKind: line.reference ? (/^\d{12}$/.test(line.reference) ? "RRN" : "UTR") : null,
+    // A statement prints the day alone: the row is at that day's midnight,
+    // shown without a time.
     occurredAt: line.date,
+    timeUnknown: true,
     statementId: statement._id,
     statementLineId: line._id,
     // The bank's balance after this row, where the statement prints one.
@@ -365,6 +445,7 @@ async function addFromLine(
         sourceRef: `${statement.sourceRef}#${line._id.toString()}`,
         rawText: line.description,
         receivedAt: statement.statementDate ?? new Date(),
+        reference: line.reference ?? null,
       },
     ],
   });
@@ -408,6 +489,138 @@ export async function unpickStatement(userId: Types.ObjectId, statementId: Types
   await BalanceCheckpoint.deleteMany({ userId, statementId: statement._id });
 
   return added.length;
+}
+
+/**
+ * Whether a statement read before matching by reference added a line the
+ * ledger already had: a payment from a message carrying the line's own
+ * number, or one on the same account just after midnight the next day.
+ */
+async function addedWhatWasThere(statement: HydratedDocument<CardStatementDoc>): Promise<boolean> {
+  for (const line of statement.lines) {
+    if (line.resolution !== "ADDED") continue;
+    const reference = lineReference(line.description);
+    const twin = await Transaction.exists({
+      userId: statement.userId,
+      _id: { $ne: line.transactionId },
+      source: { $in: ["SMS", "EMAIL", "MANUAL"] },
+      amountMinor: line.amountMinor,
+      type: line.type,
+      $or: [
+        ...(reference ? [{ reference }, { "sources.reference": reference }] : []),
+        {
+          accountId: statement.accountId,
+          occurredAt: { $gt: new Date(line.date.getTime() + DAY_MS), $lte: new Date(line.date.getTime() + LATE_SLACK_MS) },
+        },
+      ],
+    });
+    if (twin) return true;
+  }
+  return false;
+}
+
+/**
+ * Reads a statement against the ledger again, from scratch, keeping what
+ * the user said about the rows it added - their category, note and name.
+ * For a statement read before lines were matched by the bank's number,
+ * which added payments the ledger already had. Left alone when one of its
+ * added rows has been tied to anything more (a group, a split, a fixed
+ * cost): those are the user's to sort out. Returns how many fewer rows the
+ * statement adds now.
+ */
+export async function rematchStatement(statement: HydratedDocument<CardStatementDoc>): Promise<number> {
+  const addedIds = statement.lines.filter((line) => line.resolution === "ADDED" && line.transactionId).map((line) => line.transactionId!);
+  const added = await Transaction.find({ _id: { $in: addedIds }, statementId: statement._id, source: "STATEMENT" });
+  const tied = added.some(
+    (row) =>
+      row.groupId ||
+      row.split ||
+      row.people.length > 0 ||
+      row.commitmentId ||
+      row.loanId ||
+      (row.loanSplits?.length ?? 0) > 0 ||
+      row.depositParts.length > 0 ||
+      row.metalBuy ||
+      row.towards.length > 0 ||
+      row.isSettlement
+  );
+  if (tied) return 0;
+
+  // What the user said about each added row, by its line.
+  const said = new Map<string, { categoryId: TransactionDoc["categoryId"]; note: string | null; merchant: string | null; editedAt: Date | null }>();
+  for (const line of statement.lines) {
+    const row = added.find((candidate) => line.transactionId?.equals(candidate._id));
+    if (!row || !row.editedAt) continue;
+    said.set(line._id.toString(), {
+      categoryId: row.categoryId ?? null,
+      note: row.note ?? null,
+      merchant: row.merchant ?? null,
+      editedAt: row.editedAt,
+    });
+  }
+
+  // Undone: the rows it added go, and the rows it matched forget it.
+  await Transaction.deleteMany({ _id: { $in: added.map((row) => row._id) } });
+  for (const line of statement.lines) {
+    if (line.resolution !== "ADDED" && line.transactionId) {
+      const matched = await Transaction.findById(line.transactionId);
+      if (matched) {
+        const sourceRef = `${statement.sourceRef}#${line._id.toString()}`;
+        matched.sources = matched.sources.filter((source) => source.sourceRef !== sourceRef) as typeof matched.sources;
+        if (matched.statementLineId?.equals(line._id)) {
+          matched.statementId = null;
+          matched.statementLineId = null;
+        }
+        await matched.save();
+      }
+    }
+    line.resolution = "SKIPPED";
+    line.transactionId = null;
+    line.reference = null;
+  }
+  statement.reconciledAt = null;
+  await statement.save();
+
+  await reconcileStatement(statement);
+
+  // What was said about a row stays with it: on the row added again, or on
+  // the payment the line turned out to be, where that has nothing of its own.
+  for (const [lineId, before] of said) {
+    const line = statement.lines.find((candidate) => candidate._id.toString() === lineId);
+    if (!line?.transactionId) continue;
+    const row = await Transaction.findById(line.transactionId);
+    if (!row) continue;
+    if (row.source === "STATEMENT") {
+      row.categoryId = before.categoryId;
+      row.note = before.note;
+      row.merchant = before.merchant;
+      row.editedAt = before.editedAt;
+    } else {
+      if (!row.categoryId && before.categoryId) row.categoryId = before.categoryId;
+      if (!row.note && before.note) row.note = before.note;
+    }
+    await row.save();
+  }
+
+  const addedNow = statement.lines.filter((line) => line.resolution === "ADDED").length;
+  return addedIds.length - addedNow;
+}
+
+export const STATEMENT_REMATCH_BACKFILL = "statementReferenceMatch";
+export const STATEMENT_REMATCH_BACKFILL_VERSION = 1;
+
+/** Each user's statements that added what the ledger already had, read again. */
+export async function runStatementRematchBackfill(): Promise<{ users: number; changed: number }> {
+  return runOncePerUser(STATEMENT_REMATCH_BACKFILL, STATEMENT_REMATCH_BACKFILL_VERSION, async (userId) => {
+    // Every row a statement added knows its day and not its time.
+    await Transaction.updateMany({ userId, source: "STATEMENT", timeUnknown: { $ne: true } }, { $set: { timeUnknown: true } });
+    let changed = 0;
+    const statements = await CardStatement.find({ userId, "lines.resolution": "ADDED" });
+    for (const statement of statements) {
+      if (await addedWhatWasThere(statement)) changed += await rematchStatement(statement);
+    }
+    return changed;
+  });
 }
 
 /**

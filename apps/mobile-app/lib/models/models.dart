@@ -416,6 +416,9 @@ class Transaction {
   /// says which it was on - or that it really was cash.
   final bool accountUnknown;
 
+  /// Only the day is known: a row a statement added. Shown without a time.
+  final bool timeUnknown;
+
   Transaction({
     required this.id,
     required this.amountMinor,
@@ -469,6 +472,7 @@ class Transaction {
     this.isAdjustment = false,
     this.needsExplanation = false,
     this.accountUnknown = false,
+    this.timeUnknown = false,
   });
 
   /// The distinct kinds of message behind this row. Older rows predate the
@@ -568,6 +572,7 @@ class Transaction {
         isAdjustment: json['isAdjustment'] == true,
         needsExplanation: json['needsExplanation'] == true,
         accountUnknown: json['accountUnknown'] == true,
+        timeUnknown: json['timeUnknown'] == true,
       );
 }
 

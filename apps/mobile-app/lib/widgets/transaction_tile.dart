@@ -40,7 +40,8 @@ class TransactionTile extends StatelessWidget {
     final parts = <String>[
       if (category != null && category.isNotEmpty) category,
       if (account != null) account.label else transaction.source,
-      _time(transaction.occurredAt),
+      // A statement gives the day alone; a made-up midnight helps nobody.
+      transaction.timeUnknown ? 'from statement' : _time(transaction.occurredAt),
     ];
     return parts.join(' · ');
   }
