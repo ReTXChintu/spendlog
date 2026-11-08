@@ -9,6 +9,7 @@ import '../screens/groups_screen.dart';
 import '../screens/investments/investments_screen.dart';
 import '../screens/other_paid_screen.dart';
 import '../screens/passbook_screen.dart';
+import '../screens/statements_screen.dart';
 import '../screens/subscription_detail_screen.dart';
 import '../screens/subscriptions_screen.dart';
 import '../screens/transactions_screen.dart';
@@ -48,6 +49,9 @@ const String _groupType = 'GROUP';
 /// A visible push from the morning's AI check: entries that look read
 /// wrong. Opens the list of them.
 const String _entryCheckType = 'ENTRY_CHECK';
+
+/// A statement just read from the mailbox. Opens that account's statements.
+const String _statementType = 'STATEMENT';
 
 /// A visible push with the day's gold and silver rates. Opens the Gold tab.
 const String _metalRatesType = 'METAL_RATES';
@@ -178,6 +182,11 @@ class PushService {
         return const FlaggedEntriesScreen();
       case otherPaidType:
         return const OtherPaidScreen();
+      case _statementType:
+        final accountId = data['accountId'];
+        return accountId is String && accountId.isNotEmpty
+            ? StatementsScreen(onlyAccountId: accountId)
+            : const StatementsScreen();
       case _metalRatesType:
         return const InvestmentsScreen(initialTab: 2);
       default:

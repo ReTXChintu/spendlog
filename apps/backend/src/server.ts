@@ -21,6 +21,7 @@ import { runGroupMirrorsBackfill } from "./modules/groups/groups.mirrors";
 import { runMonthlyDigests } from "./modules/budget/budget.digest";
 import { runAiEntryChecks } from "./modules/transactions/transactions.aiCheck";
 import { runMetalRefresh } from "./modules/metals/metals.service";
+import { STATEMENT_WATCH_MS, runStatementNoticeBackfill, runStatementWatch } from "./modules/statements/statements.notify";
 import { runSubscriptionNotices } from "./modules/subscriptions/subscriptions.notify";
 import { runTransferLegBackfill } from "./modules/transactions/transactions.transfer";
 import { runLoanSplitBackfill } from "./modules/loans/loans.backfill";
@@ -182,6 +183,17 @@ async function start() {
   setInterval(() => {
     syncAllConnectedEmails().catch((err) => console.error("Background Gmail sync failed:", err));
   }, EMAIL_SYNC_INTERVAL_MS);
+
+  // Statements, read from the mailbox by themselves every hour and said as
+  // they come - after marking the ones already in as told, so the first
+  // run is not a pile of old news.
+  runStatementNoticeBackfill()
+    .catch((err) => console.error("Statement notice start failed:", err))
+    .then(() => {
+      const watch = () => runStatementWatch().catch((err) => console.error("Statement watch failed:", err));
+      watch();
+      setInterval(watch, STATEMENT_WATCH_MS);
+    });
 
   // Mutual fund NAVs: at start-up when last night's are missing, then
   // every half hour until tonight's are in.

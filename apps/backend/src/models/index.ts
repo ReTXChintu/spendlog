@@ -2197,6 +2197,9 @@ export interface CardStatementDoc {
   statementSpendMinor: number;
   knownSpendMinor: number;
   reconciledAt?: Date | null;
+  /// When the user was told this statement had come in, so it is said once
+  /// however often the mailbox is read. See statements.notify.ts.
+  notifiedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -2231,6 +2234,7 @@ const cardStatementSchema = new Schema<CardStatementDoc>(
     statementSpendMinor: { type: Number, default: 0 },
     knownSpendMinor: { type: Number, default: 0 },
     reconciledAt: { type: Date, default: null },
+    notifiedAt: { type: Date, default: null },
   },
   { timestamps: true, ...serialization }
 );
