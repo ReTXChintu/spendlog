@@ -840,6 +840,13 @@ export interface TransactionDoc {
   /// rate per gram they were worked out at (that day's, with GST) - or
   /// typed by hand, when a jeweller's making charges meant fewer grams.
   metalBuy?: MetalBuy | null;
+  /// Paid at the counter for somebody, who pays it back: not spending,
+  /// and not a loan either, though it is kept the same way (a split with
+  /// none of it the user's, the person owing the rest). People shows it
+  /// apart from what was lent, and the shop stays the merchant.
+  paidFor?: boolean;
+  /// For a gift: who it was for. Real spending; this is only who.
+  giftForContactId?: Types.ObjectId | null;
   /// Only the day is known, not the time: a row a statement added, which
   /// prints dates alone. occurredAt is that day's midnight, and the apps
   /// show the date without a time.
@@ -1072,6 +1079,8 @@ const transactionSchema = new Schema<TransactionDoc>(
     towards: { type: [towardsEntrySchema], default: [] },
     metalBuy: { type: metalBuySchema, default: null },
     timeUnknown: { type: Boolean, default: false },
+    paidFor: { type: Boolean, default: false },
+    giftForContactId: { type: Schema.Types.ObjectId, ref: "Contact", default: null },
     sources: { type: [transactionSourceSchema], default: [] },
     mergedFrom: { type: [mergedSnapshotSchema], default: [] },
     countedAmountMinor: { type: Number, default: 0 },

@@ -1,6 +1,6 @@
 import { Types } from "mongoose";
 import { Category } from "../../models";
-import { DefaultCategorySeed, PEOPLE_CATEGORY, TRANSFER_CATEGORY } from "../../parsing/default-categories";
+import { DefaultCategorySeed, GIFTING_CATEGORY, PEOPLE_CATEGORY, TRANSFER_CATEGORY } from "../../parsing/default-categories";
 
 /**
  * The system categories the apps and the server pick by name, made sure of
@@ -30,7 +30,7 @@ function ensure(seed: DefaultCategorySeed): Promise<Types.ObjectId | null> {
 }
 
 export async function ensureSystemCategories(): Promise<void> {
-  await Promise.all([ensure(PEOPLE_CATEGORY), ensure(TRANSFER_CATEGORY)]);
+  await Promise.all([ensure(PEOPLE_CATEGORY), ensure(TRANSFER_CATEGORY), ensure(GIFTING_CATEGORY)]);
 }
 
 export function transferCategoryId(): Promise<Types.ObjectId | null> {

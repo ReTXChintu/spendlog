@@ -78,6 +78,8 @@ export interface Balance {
    * shows as the row it is.
    */
   groupOpeningMinor: number;
+  /// Of givenMinor, what was paid at a counter for them rather than lent.
+  paidForMinor?: number;
   transactionCount: number;
   lastAt: Date | null;
 }
@@ -142,6 +144,7 @@ export async function balances(userId: Types.ObjectId, contactIds?: Types.Object
       _id: Types.ObjectId;
       givenMinor: number;
       returnedMinor: number;
+      paidForMinor: number;
       transactionCount: number;
       lastAt: Date;
     }>([
@@ -153,6 +156,9 @@ export async function balances(userId: Types.ObjectId, contactIds?: Types.Object
           _id: "$people.contactId",
           givenMinor: { $sum: { $cond: [OWED_TO_ME, "$people.amountMinor", 0] } },
           returnedMinor: { $sum: { $cond: [OWED_TO_ME, 0, "$people.amountMinor"] } },
+          paidForMinor: {
+            $sum: { $cond: [{ $and: [OWED_TO_ME, { $eq: ["$paidFor", true] }] }, "$people.amountMinor", 0] },
+          },
           transactionCount: { $sum: 1 },
           lastAt: { $max: "$occurredAt" },
         },
@@ -181,6 +187,7 @@ export async function balances(userId: Types.ObjectId, contactIds?: Types.Object
         balanceMinor: row.givenMinor - row.returnedMinor,
         givenMinor: row.givenMinor,
         returnedMinor: row.returnedMinor,
+        paidForMinor: row.paidForMinor,
         clearedMinor: 0,
         groupOpeningMinor: 0,
         transactionCount: row.transactionCount,

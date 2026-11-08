@@ -156,6 +156,14 @@ class _EditSheetState extends State<_EditSheet> {
   late String _type;
   late _Kind _kind;
   String? _categoryId;
+
+  /// On money lent: it was paid at a counter for them, not lent - the
+  /// same arithmetic, shown apart, the shop kept as the merchant.
+  late bool _paidFor;
+
+  /// For a gift: the contact it was for, and their name to show.
+  String? _giftForId;
+  String? _giftForName;
   String? _accountId;
   String? _transferAccountId;
   late DateTime _occurredAt;
@@ -344,6 +352,8 @@ class _EditSheetState extends State<_EditSheet> {
     _commitmentId = t?.commitmentId;
     _isFixed = _commitmentId != null;
     _intoDeposits = t != null && t.type == 'DEBIT' && t.depositParts.isNotEmpty;
+    _paidFor = t?.paidFor ?? false;
+    _giftForId = t?.giftForContactId;
     final bought = t?.type == 'DEBIT' ? t?.metalBuy : null;
     _boughtMetal = bought != null;
     _metalHoldingId = bought?.holdingId;
@@ -754,10 +764,11 @@ class _EditSheetState extends State<_EditSheet> {
   /// Money lent: a payment split where none of it was the user's.
   bool get _isLend => _isDebit && _kind == _Kind.split && !_includeMe;
 
-  void _selectKind(_Kind kind, {bool includeMe = true}) {
+  void _selectKind(_Kind kind, {bool includeMe = true, bool paidFor = false}) {
     setState(() {
       _error = null;
       _kind = kind;
+      _paidFor = kind == _Kind.split && !includeMe && paidFor;
       if (kind == _Kind.split) _includeMe = includeMe;
       if (kind == _Kind.settlement && _autoSettle) _resplitSettlement();
       if (_isLend || kind == _Kind.settlement) _fillFromPerson();
@@ -843,6 +854,54 @@ class _EditSheetState extends State<_EditSheet> {
     });
   }
 
+  /// Whether the category picked is Gifting.
+  bool get _isGift =>
+      _categoryId != null && widget.categories.any((category) => category.id == _categoryId && category.name == 'Gifting');
+
+  Future<void> _pickGiftFor() async {
+    final picked = await showPeoplePicker(context, title: 'Who was the gift for?');
+    if (picked == null || picked.isEmpty || !mounted) return;
+    setState(() {
+      _giftForId = picked.first.id;
+      _giftForName = picked.first.name;
+    });
+  }
+
+  /// "For Rahul", or a way to say who.
+  Widget _giftForRow() {
+    final c = context.c;
+    final name = _giftForName ?? _contacts.where((contact) => contact.id == _giftForId).firstOrNull?.name;
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Row(
+        children: [
+          DsIcon(DsIcons.users, size: 18, color: c.tx2),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _giftForId == null ? 'Who was the gift for?' : 'For ${name ?? 'someone'}',
+              style: TextStyle(fontSize: 14, height: 20 / 14, color: _giftForId == null ? c.tx3 : c.tx),
+            ),
+          ),
+          if (_giftForId != null)
+            IconButton(
+              tooltip: 'Clear who it was for',
+              onPressed: () => setState(() {
+                _giftForId = null;
+                _giftForName = null;
+              }),
+              icon: DsIcon(DsIcons.x, size: 16, color: c.tx3),
+            ),
+          TextButton(
+            key: const ValueKey('gift-for'),
+            onPressed: _saving ? null : _pickGiftFor,
+            child: Text(_giftForId == null ? 'Pick' : 'Change'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _addPeople() async {
     final picked = await showPeoplePicker(
       context,
@@ -879,6 +938,8 @@ class _EditSheetState extends State<_EditSheet> {
     // Still "Someone" while an existing transaction's names load.
     if (name.trim().isEmpty || name == 'Someone') return;
 
+    // Paid at a counter for them: the shop is still the merchant.
+    if (_isLend && _paidFor) return;
     if (_isLend || _kind == _Kind.settlement) {
       if (!_merchantTyped) _merchant.text = name;
       final lent = categoriesFor(widget.categories, _type)
@@ -892,6 +953,7 @@ class _EditSheetState extends State<_EditSheet> {
 
   String get _peopleTitle => switch (_kind) {
         _Kind.settlement => _isDebit ? 'Who did you pay back?' : 'Who paid you back?',
+        _ when _isLend && _paidFor => 'Who did you pay for?',
         _ when _isLend => 'Who did you lend it to?',
         _ => _isDebit ? 'Who was it split with?' : 'Whose money is in this?',
       };
@@ -1312,6 +1374,8 @@ class _EditSheetState extends State<_EditSheet> {
       'isSalary': !_isDebit && _kind == _Kind.salary,
       'cardPaymentFor': _isDebit && _kind == _Kind.cardBill ? _cardPaymentFor : null,
       'commitmentId': _isDebit && _isFixed ? _commitmentId : null,
+      'paidFor': _isLend && _paidFor,
+      'giftForContactId': _isDebit && _isGift ? _giftForId : null,
       // Gold or silver bought: grams typed, or worked out from the day's rate.
       'metalBuy': _isDebit && _boughtMetal && _metalHoldingId != null
           ? {
@@ -1490,6 +1554,7 @@ class _EditSheetState extends State<_EditSheet> {
                     ],
                   ),
                   if (!_offLedger) _personRow(),
+                  if (_isDebit && _isGift) _giftForRow(),
                   _presetRow(),
                   const SizedBox(height: 18),
 
@@ -1938,7 +2003,8 @@ class _EditSheetState extends State<_EditSheet> {
         // The group keeps this one's split: offered there, not here.
         if (!_groupOwnsSplit) ...[
           ('Split', _kind == _Kind.split && _includeMe, () => _selectKind(_Kind.split)),
-          ('Lent', _isLend, () => _selectKind(_Kind.split, includeMe: false)),
+          ('Lent', _isLend && !_paidFor, () => _selectKind(_Kind.split, includeMe: false)),
+          ('Paid for someone', _isLend && _paidFor, () => _selectKind(_Kind.split, includeMe: false, paidFor: true)),
         ],
         ('To own account', _kind == _Kind.transfer, () => _selectKind(_Kind.transfer)),
         if (hasCards) ('Card bill', _kind == _Kind.cardBill, () => _selectKind(_Kind.cardBill)),

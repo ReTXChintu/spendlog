@@ -515,7 +515,9 @@ class _PersonScreenState extends State<PersonScreen> {
                   const SizedBox(height: 10),
                   Text(
                     [
-                      'Lent ${formatMoney(contact.givenMinor)}',
+                      if (contact.givenMinor - contact.paidForMinor != 0 || contact.paidForMinor == 0)
+                        'Lent ${formatMoney(contact.givenMinor - contact.paidForMinor)}',
+                      if (contact.paidForMinor > 0) 'paid for them ${formatMoney(contact.paidForMinor)}',
                       'paid back ${formatMoney(contact.returnedMinor)}',
                       if (contact.clearedMinor != 0) 'cleared ${formatMoney(contact.clearedMinor.abs())}',
                       if (contact.phone != null) contact.phone!,

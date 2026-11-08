@@ -419,6 +419,13 @@ class Transaction {
   /// Only the day is known: a row a statement added. Shown without a time.
   final bool timeUnknown;
 
+  /// Paid at the counter for somebody, who pays it back: kept like money
+  /// lent, shown apart from it.
+  final bool paidFor;
+
+  /// For a gift: the contact it was for.
+  final String? giftForContactId;
+
   Transaction({
     required this.id,
     required this.amountMinor,
@@ -473,6 +480,8 @@ class Transaction {
     this.needsExplanation = false,
     this.accountUnknown = false,
     this.timeUnknown = false,
+    this.paidFor = false,
+    this.giftForContactId,
   });
 
   /// The distinct kinds of message behind this row. Older rows predate the
@@ -573,6 +582,8 @@ class Transaction {
         needsExplanation: json['needsExplanation'] == true,
         accountUnknown: json['accountUnknown'] == true,
         timeUnknown: json['timeUnknown'] == true,
+        paidFor: json['paidFor'] == true,
+        giftForContactId: json['giftForContactId'] is String ? json['giftForContactId'] as String : null,
       );
 }
 
@@ -2615,6 +2626,9 @@ class Contact {
   /// Lent to them or paid for them, all told.
   final int givenMinor;
 
+  /// Of [givenMinor], what was paid at a counter for them rather than lent.
+  final int paidForMinor;
+
   /// What has come back from them.
   final int returnedMinor;
 
@@ -2635,6 +2649,7 @@ class Contact {
     this.balanceMinor = 0,
     this.openingBalanceMinor = 0,
     this.givenMinor = 0,
+    this.paidForMinor = 0,
     this.returnedMinor = 0,
     this.clearedMinor = 0,
     this.groupOpeningMinor = 0,
@@ -2652,6 +2667,7 @@ class Contact {
         balanceMinor: json['balanceMinor'] as int? ?? 0,
         openingBalanceMinor: json['openingBalanceMinor'] as int? ?? 0,
         givenMinor: json['givenMinor'] as int? ?? 0,
+        paidForMinor: json['paidForMinor'] as int? ?? 0,
         returnedMinor: json['returnedMinor'] as int? ?? 0,
         clearedMinor: json['clearedMinor'] as int? ?? 0,
         groupOpeningMinor: json['groupOpeningMinor'] as int? ?? 0,

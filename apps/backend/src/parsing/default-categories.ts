@@ -39,6 +39,18 @@ export const TRANSFER_CATEGORY: DefaultCategorySeed = {
   keywords: [],
 };
 
+/**
+ * A present for someone. Real spending, with the contact it was for said
+ * on the payment (giftForContactId). The clients find it by this name.
+ */
+export const GIFTING_CATEGORY: DefaultCategorySeed = {
+  name: "Gifting",
+  icon: "ic-bag",
+  color: "#DB2777",
+  direction: "OUT",
+  keywords: ["gift", "ferns n petals", "fnp", "igp.com"],
+};
+
 // Seeded once into the Category table as system defaults (userId = null),
 // each with a matching CategoryRule so new transactions auto-categorize
 // out of the box. Users can add their own rules/categories on top of these.
@@ -129,4 +141,5 @@ export const DEFAULT_CATEGORIES: DefaultCategorySeed[] = [
   },
   PEOPLE_CATEGORY,
   TRANSFER_CATEGORY,
+  GIFTING_CATEGORY,
 ];

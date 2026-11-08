@@ -3,7 +3,7 @@ import { FilterQuery, Types } from "mongoose";
 import { z } from "zod";
 import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
-import { Account, Group, Transaction, TransactionDoc, TransactionSourceEntry } from "../../models";
+import { Account, Contact, Group, Transaction, TransactionDoc, TransactionSourceEntry } from "../../models";
 import { ingestRawMessage } from "../../parsing/ingest";
 import { checkPeople, shareablePart } from "../contacts/contacts.people";
 import { splitsOf } from "../loans/loans.allocation";
@@ -345,6 +345,11 @@ const createTransactionSchema = z.object({
   // On money in from people: how much of each one's part went towards
   // which shared fixed cost, for which period. An empty list clears it.
   towards: z.array(towardsBody).max(40).optional(),
+  // Paid at the counter for somebody who pays it back - kept like money
+  // lent (split, none of it the user's), shown apart from it.
+  paidFor: z.boolean().optional(),
+  // For a gift: the contact it was for. null takes it off.
+  giftForContactId: z.string().regex(OBJECT_ID).nullable().optional(),
   // A purchase of gold or silver for a holding: grams worked out from the
   // day's rate, or typed. null takes it off.
   metalBuy: z
@@ -513,6 +518,11 @@ transactionsRouter.post("/", async (req, res) => {
     }
   }
 
+  // Who a gift was for: one of the user's own contacts.
+  if (parsed.data.giftForContactId && !(await Contact.exists({ _id: parsed.data.giftForContactId, userId: currentUserId(req) }))) {
+    return res.status(400).json({ error: "Unknown contact" });
+  }
+
   // Gold or silver bought: only a payment buys any.
   let metalBuy: Awaited<ReturnType<typeof metalBuyFor>> | null = null;
   if (parsed.data.type === "DEBIT" && parsed.data.metalBuy) {
@@ -552,6 +562,8 @@ transactionsRouter.post("/", async (req, res) => {
     depositParts,
     towards,
     metalBuy,
+    paidFor: parsed.data.type === "DEBIT" ? (parsed.data.paidFor ?? false) : false,
+    giftForContactId: parsed.data.giftForContactId ?? null,
     source: "MANUAL",
   });
 
@@ -613,6 +625,11 @@ const updateTransactionSchema = z.object({
   // On money in from people: how much of each one's part went towards
   // which shared fixed cost, for which period. An empty list clears it.
   towards: z.array(towardsBody).max(40).optional(),
+  // Paid at the counter for somebody who pays it back - kept like money
+  // lent (split, none of it the user's), shown apart from it.
+  paidFor: z.boolean().optional(),
+  // For a gift: the contact it was for. null takes it off.
+  giftForContactId: z.string().regex(OBJECT_ID).nullable().optional(),
   // A purchase of gold or silver for a holding: grams worked out from the
   // day's rate, or typed. null takes it off.
   metalBuy: z
@@ -994,6 +1011,13 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
       throw error;
     }
   }
+
+  // Who a gift was for: one of the user's own contacts. Paid-for is a
+  // payment's, and goes when it stops being one.
+  if (data.giftForContactId && !(await Contact.exists({ _id: data.giftForContactId, userId }))) {
+    return res.status(400).json({ error: "Unknown contact" });
+  }
+  if (willBeType !== "DEBIT") data.paidFor = false;
 
   // Gold or silver bought: worked out again when the amount or the day it
   // was bought changes, unless the grams were typed.
