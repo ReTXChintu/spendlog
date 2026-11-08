@@ -527,6 +527,16 @@ class _BankTileState extends State<BankTile> {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
                 ),
+                // What of it is spoken for by savings goals.
+                if (_shown && bank.forGoalsMinor > 0) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    '${formatMoneyShort(bank.forGoalsMinor)} of it for goals',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: kNum.copyWith(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w600, color: c.tx2),
+                  ),
+                ],
                 if (_shown && drift != null) ...[
                   const SizedBox(height: 6),
                   _DriftChip(drift: drift, onTap: widget.onOpenPassbook),

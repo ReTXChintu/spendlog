@@ -38,6 +38,7 @@ import { mergeTransactions } from "./transactions.merge";
 import { checkEntries } from "./transactions.aiCheck";
 import { AiError } from "../ai/ai.gemini";
 import { DepositPartError, checkDepositParts } from "../deposits/deposits.service";
+import { GoalPartError, checkGoalParts } from "../goals/savingsGoals.service";
 import { TowardsError, applyCommitmentShares, checkTowards } from "../budget/budget.commitmentShares";
 import { MetalBuyError, metalBuyFor } from "../metals/metals.holdings";
 import { IST_OFFSET, istDayEnd, istDayKey, istDayStart } from "../../time";
@@ -294,6 +295,11 @@ const towardsBody = z.object({
 });
 
 // One deposit's part of a payment put into RDs and FDs.
+const goalPartBody = z.object({
+  goalId: z.string().regex(OBJECT_ID),
+  amountMinor: z.number().int().positive(),
+});
+
 const depositPartBody = z.object({
   depositId: z.string().regex(OBJECT_ID),
   amountMinor: z.number().int().positive(),
@@ -342,6 +348,8 @@ const createTransactionSchema = z.object({
   // The RDs and FDs it went into, and how much into each. An empty list
   // takes it out of all of them.
   depositParts: z.array(depositPartBody).max(20).optional(),
+  // The savings goals it was put aside for. An empty list clears it.
+  goalParts: z.array(goalPartBody).max(20).optional(),
   // On money in from people: how much of each one's part went towards
   // which shared fixed cost, for which period. An empty list clears it.
   towards: z.array(towardsBody).max(40).optional(),
@@ -518,6 +526,17 @@ transactionsRouter.post("/", async (req, res) => {
     }
   }
 
+  // The goals it was put aside for: only a transfer or money in can be.
+  let goalParts: Awaited<ReturnType<typeof checkGoalParts>> = [];
+  if ((parsed.data.isTransfer || parsed.data.type === "CREDIT") && parsed.data.goalParts?.length) {
+    try {
+      goalParts = await checkGoalParts(currentUserId(req), parsed.data.amountMinor, parsed.data.goalParts);
+    } catch (error) {
+      if (error instanceof GoalPartError) return res.status(400).json({ error: error.message });
+      throw error;
+    }
+  }
+
   // Who a gift was for: one of the user's own contacts.
   if (parsed.data.giftForContactId && !(await Contact.exists({ _id: parsed.data.giftForContactId, userId: currentUserId(req) }))) {
     return res.status(400).json({ error: "Unknown contact" });
@@ -560,6 +579,7 @@ transactionsRouter.post("/", async (req, res) => {
     cardPaymentFor: parsed.data.type === "DEBIT" ? (parsed.data.cardPaymentFor ?? null) : null,
     commitmentId: parsed.data.type === "DEBIT" ? (parsed.data.commitmentId ?? null) : null,
     depositParts,
+    goalParts,
     towards,
     metalBuy,
     paidFor: parsed.data.type === "DEBIT" ? (parsed.data.paidFor ?? false) : false,
@@ -622,6 +642,8 @@ const updateTransactionSchema = z.object({
   // The RDs and FDs it went into, and how much into each. An empty list
   // takes it out of all of them.
   depositParts: z.array(depositPartBody).max(20).optional(),
+  // The savings goals it was put aside for. An empty list clears it.
+  goalParts: z.array(goalPartBody).max(20).optional(),
   // On money in from people: how much of each one's part went towards
   // which shared fixed cost, for which period. An empty list clears it.
   towards: z.array(towardsBody).max(40).optional(),
@@ -987,6 +1009,22 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
       throw error;
     }
   }
+  // The goals it was put aside for, against the amount it will have. Only
+  // a transfer or money in; an edit that leaves them alone keeps them.
+  const willBeTransferRow = data.isTransfer ?? existing.isTransfer;
+  let goalFields: Record<string, unknown> = {};
+  if (!willBeTransferRow && willBeType !== "CREDIT") {
+    if ((existing.goalParts?.length ?? 0) > 0) goalFields = { goalParts: [] };
+  } else if (data.goalParts !== undefined || (existing.goalParts?.length ?? 0) > 0) {
+    const asked =
+      data.goalParts ?? existing.goalParts.map((part) => ({ goalId: part.goalId.toString(), amountMinor: part.amountMinor }));
+    try {
+      goalFields = { goalParts: await checkGoalParts(userId, willBeAmount, asked) };
+    } catch (error) {
+      if (error instanceof GoalPartError) return res.status(400).json({ error: error.message });
+      throw error;
+    }
+  }
   // What money in from people was towards, against who it will be from.
   // Gone when it stops being money in, or when nobody is on it any more.
   let towardsFields: Record<string, unknown> = {};
@@ -1047,6 +1085,7 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
     loanSplits: _alsoAbove,
     people: _checkedAbove,
     depositParts: _depositsAbove,
+    goalParts: _goalsAbove,
     towards: _towardsAbove,
     metalBuy: _metalAbove,
     ...fields
@@ -1071,6 +1110,7 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
         ...transferFields,
         ...groupFields,
         ...depositFields,
+        ...goalFields,
         ...towardsFields,
         ...metalFields,
         ...(people !== undefined ? { people } : {}),

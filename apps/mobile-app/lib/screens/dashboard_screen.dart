@@ -15,6 +15,7 @@ import '../widgets/home/home_grid.dart';
 import '../widgets/home/investments_tile.dart';
 import '../widgets/home/monthly_budget_card.dart';
 import '../widgets/home/plan_warnings.dart';
+import '../widgets/home/savings_goals_tile.dart';
 import '../widgets/home/wallet.dart';
 import '../widgets/pocket_money.dart';
 import '../widgets/state_block.dart';
@@ -31,6 +32,7 @@ import 'monthly_budget_screen.dart';
 import 'passbook_screen.dart';
 import 'people_screen.dart';
 import 'perks_screen.dart';
+import 'savings_goals_screen.dart';
 import 'statements_screen.dart';
 import 'subscriptions_screen.dart';
 import 'transactions_screen.dart';
@@ -279,6 +281,11 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
   }
 
   /// The entries the AI check thinks were read wrong.
+  Future<void> _openSavingsGoals() async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SavingsGoalsScreen()));
+    await load();
+  }
+
   Future<void> _openFlagged() async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FlaggedEntriesScreen()));
     await load();
@@ -401,6 +408,9 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
           const SizedBox(height: kCardGap),
           // Today's gold and silver, and whether it is a day to buy.
           MetalsTile(rates: _metals, onTap: _openMetals),
+          const SizedBox(height: kCardGap),
+          // Small things being saved up for, in the savings account.
+          SavingsGoalsTile(goals: data.savingsGoals, onTap: _openSavingsGoals),
 
           // Then two groups, in the order the questions come. Today: which
           // card and what is set aside. This month: how the rest of it is

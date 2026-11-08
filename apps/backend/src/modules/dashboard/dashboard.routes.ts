@@ -31,6 +31,7 @@ import { expectedBalances, tracksBalance } from "../accounts/accounts.balance";
 import { balanceTodos } from "../accounts/accounts.drift";
 import { settleMissingCredits } from "../accounts/accounts.missingCredits";
 import { PocketStatus, pocketStatuses } from "../accounts/accounts.pocket";
+import { goalsOf, spokenForByAccount } from "../goals/savingsGoals.service";
 import { LENT_PART, outsideTransactionsMinor } from "../contacts/contacts.people";
 
 export const dashboardRouter = Router();
@@ -136,6 +137,15 @@ dashboardRouter.get("/", async (req, res) => {
     // front needs. The back - full number, expiry, name on card - is
     // never here: it comes from POST /vault/cards/:id/reveal, PIN and all.
     wallet: { cards: await cardFaces(userId, cards, now), banks },
+    // The open savings goals, for their tile: what each has and needs.
+    savingsGoals: await goalsOf(userId, now).then((goals) => {
+      const open = goals.filter((goal) => goal.isActive);
+      return {
+        goals: open,
+        savedMinor: open.reduce((sum, goal) => sum + goal.savedMinor, 0),
+        perMonthMinor: open.filter((goal) => !goal.isDone).reduce((sum, goal) => sum + goal.perMonthMinor, 0),
+      };
+    }),
     picks: pickCards(cards),
     needsCategory,
     emis,
@@ -285,10 +295,11 @@ async function cardFaces(userId: Types.ObjectId, cards: CardStatus[], now: Date)
  */
 async function bankFaces(userId: Types.ObjectId, now: Date) {
   const accounts = await Account.find({ userId, isActive: true, accountType: { $in: ["BANK", "CASH", "DEBIT"] } });
-  const [balances, pockets, vaults] = await Promise.all([
+  const [balances, pockets, vaults, forGoals] = await Promise.all([
     expectedBalances(userId, accounts),
     pocketStatuses(userId, accounts, now),
     CardVault.find({ userId }).select("accountId"),
+    spokenForByAccount(userId, now),
   ]);
   const stored = new Set(vaults.map((vault) => vault.accountId.toString()));
 
@@ -314,6 +325,8 @@ async function bankFaces(userId: Types.ObjectId, now: Date) {
         /// when the bank has never said.
         drift: driftFace(balances.get(id)?.drift),
         isSavings: Boolean(account.isSavings),
+        /// Of the balance, what is set aside for savings goals.
+        forGoalsMinor: forGoals.get(id) ?? 0,
         pocket,
         debitCards: accounts
           .filter((card) => card.accountType === "DEBIT" && card.linkedAccountId?.equals(account._id))

@@ -255,6 +255,12 @@ class _EditSheetState extends State<_EditSheet> {
   /// How much into each, by deposit id, as typed.
   final Map<String, TextEditingController> _depositBoxes = {};
 
+  /// Savings goals money can be put aside for - the open ones, plus any
+  /// this row is already marked for - whether it is, and how much each.
+  List<SavingsGoal> _goals = [];
+  bool _forGoals = false;
+  final Map<String, TextEditingController> _goalBoxes = {};
+
   /// Gold or silver the user holds, and whether this payment bought some:
   /// for which holding, and the grams when typed (else worked out from the
   /// day's rate on save).
@@ -352,6 +358,10 @@ class _EditSheetState extends State<_EditSheet> {
     _commitmentId = t?.commitmentId;
     _isFixed = _commitmentId != null;
     _intoDeposits = t != null && t.type == 'DEBIT' && t.depositParts.isNotEmpty;
+    _forGoals = t != null && t.goalParts.isNotEmpty;
+    for (final entry in (t?.goalParts ?? const <String, int>{}).entries) {
+      _goalBoxes[entry.key] = TextEditingController(text: _rupees(entry.value));
+    }
     _paidFor = t?.paidFor ?? false;
     _giftForId = t?.giftForContactId;
     final bought = t?.type == 'DEBIT' ? t?.metalBuy : null;
@@ -424,6 +434,7 @@ class _EditSheetState extends State<_EditSheet> {
 
     _loadCommitments();
     _loadDeposits();
+    _loadGoals();
     _loadMetalHoldings();
     _loadLoans();
     _loadPresets();
@@ -444,6 +455,9 @@ class _EditSheetState extends State<_EditSheet> {
       box.dispose();
     }
     for (final box in _depositBoxes.values) {
+      box.dispose();
+    }
+    for (final box in _goalBoxes.values) {
       box.dispose();
     }
     _metalGrams.dispose();
@@ -558,6 +572,39 @@ class _EditSheetState extends State<_EditSheet> {
       // The chip simply does not appear.
     }
   }
+
+  Future<void> _loadGoals() async {
+    try {
+      final json = await ApiClient.instance.get('/savings-goals') as Map<String, dynamic>;
+      if (!mounted) return;
+      final saved = widget.transaction?.goalParts ?? const <String, int>{};
+      setState(() {
+        _goals = SavingsGoalList.fromJson(json).goals.where((g) => g.isActive || saved.containsKey(g.id)).toList();
+        for (final goal in _goals) {
+          _goalBoxes.putIfAbsent(goal.id, TextEditingController.new);
+        }
+      });
+    } catch (_) {
+      // The chip simply does not appear.
+    }
+  }
+
+  /// Whether this row can be put aside for a goal: a transfer, or money in.
+  bool get _goalsAllowed => _kind == _Kind.transfer || !_isDebit;
+
+  /// The amounts typed for goals, by goal id, leaving out the ones with nothing.
+  Map<String, int> get _goalParts => {
+        for (final goal in _goals)
+          if ((parseRupees(_goalBoxes[goal.id]?.text ?? '') ?? 0) > 0) goal.id: parseRupees(_goalBoxes[goal.id]!.text)!,
+      };
+
+  void _toggleGoals() => setState(() {
+        _forGoals = !_forGoals;
+        // With one goal and nothing typed, all of it is for that one.
+        if (_forGoals && _goals.length == 1 && _goalParts.isEmpty) {
+          _goalBoxes[_goals.single.id]?.text = _rupees(_totalMinor);
+        }
+      });
 
   /// The parts typed, by deposit id, leaving out the ones with nothing.
   Map<String, int> get _depositParts => {
@@ -1298,6 +1345,14 @@ class _EditSheetState extends State<_EditSheet> {
         return _fail('Type the grams bought, or leave it blank to work them out from the day\'s rate.');
       }
     }
+    if (_goalsAllowed && _forGoals) {
+      final parts = _goalParts;
+      final sum = parts.values.fold<int>(0, (total, part) => total + part);
+      if (parts.isEmpty) return _fail('Type how much is for which goal, or turn For a goal off.');
+      if (sum > _totalMinor) {
+        return _fail("That's ${formatMoney(sum)} for goals, ${formatMoney(sum - _totalMinor)} more than the amount.");
+      }
+    }
     if (_isDebit && _intoDeposits) {
       final parts = _depositParts;
       final sum = parts.values.fold<int>(0, (total, part) => total + part);
@@ -1385,6 +1440,12 @@ class _EditSheetState extends State<_EditSheet> {
           : null,
       // On money paid back: whose part of which shared fixed cost it was.
       'towards': !_isDebit && _kind == _Kind.settlement ? _towardsBody : <Map<String, dynamic>>[],
+      // Every savings goal it was put aside for; an empty list takes it off them all.
+      'goalParts': _goalsAllowed && _forGoals
+          ? [
+              for (final entry in _goalParts.entries) {'goalId': entry.key, 'amountMinor': entry.value},
+            ]
+          : <Map<String, dynamic>>[],
       // Every RD and FD it went into; an empty list takes it out of them all.
       'depositParts': _isDebit && _intoDeposits
           ? [
@@ -1994,6 +2055,7 @@ class _EditSheetState extends State<_EditSheet> {
     final hasCommitments = _commitments.isNotEmpty || _commitmentId != null;
     final hasDeposits = _deposits.isNotEmpty || _intoDeposits;
     final hasMetal = _metalHoldings.isNotEmpty || _boughtMetal;
+    final hasGoals = (_goals.isNotEmpty || _forGoals) && _goalsAllowed;
 
     // (label, selected, onTap). Radio-as-chips: the chosen one is
     // ink-filled with a check, like every selected chip.
@@ -2043,7 +2105,7 @@ class _EditSheetState extends State<_EditSheet> {
         // These sit on top of whatever kind it is - rent can be split and
         // a fixed cost. A payment has no one-off toggle: one-offs count
         // against the monthly budget like everything else.
-        if (!_isDebit || hasCommitments || hasDeposits || hasMetal) ...[
+        if (!_isDebit || hasCommitments || hasDeposits || hasMetal || hasGoals) ...[
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
@@ -2074,6 +2136,15 @@ class _EditSheetState extends State<_EditSheet> {
                   selected: _intoDeposits,
                   height: 32,
                   onTap: _toggleDeposits,
+                ),
+              if (hasGoals)
+                DsChip(
+                  key: const ValueKey('for-a-goal'),
+                  label: 'For a goal',
+                  icon: DsIcons.target,
+                  selected: _forGoals,
+                  height: 32,
+                  onTap: _toggleGoals,
                 ),
               if (!_isDebit)
                 DsChip(
@@ -2115,6 +2186,7 @@ class _EditSheetState extends State<_EditSheet> {
       if (main != null) main,
       if (_isDebit && _isFixed) _fixedPanel(),
       if (_isDebit && _intoDeposits) _depositPanel(),
+      if (_goalsAllowed && _forGoals) _goalPanel(),
       if (_isDebit && _boughtMetal) _metalPanel(),
       if (!_isDebit && _isSpecial)
         const _Hint("Kept out of your savings bucket - it won't be counted towards what you save."),
@@ -2539,6 +2611,69 @@ class _EditSheetState extends State<_EditSheet> {
                 "instead if it was a jeweller's piece."
             : "Left blank, the grams are this amount at that day's IBJA rate with 3% GST. Type them for a jeweller's "
                 'piece - making charges mean fewer grams. Still counts as spending.'),
+      ],
+    );
+  }
+
+  /// How much of it is put aside for which savings goal: one transfer into
+  /// savings can be for several.
+  Widget _goalPanel() {
+    final c = context.c;
+    final sum = _goalParts.values.fold<int>(0, (total, part) => total + part);
+    final over = sum > _totalMinor;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const DsLabel('For which goal'),
+        const SizedBox(height: 6),
+        for (final goal in _goals)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(goal.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx)),
+                      Text(
+                        '${formatMoneyShort(goal.savedMinor)} of ${formatMoneyShort(goal.targetMinor)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 132,
+                  child: KeyedSubtree(
+                    key: ValueKey('goal-part-${goal.id}'),
+                    child: _AmountBox(controller: _goalBoxes[goal.id]!, onChanged: () => setState(() {})),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        Text(
+          over
+              ? "That's ${formatMoney(sum - _totalMinor)} more than the amount."
+              : sum == _totalMinor
+                  ? 'All of it is for goals.'
+                  : '${formatMoney(sum)} of ${formatMoney(_totalMinor)} is for goals.',
+          style: TextStyle(
+            fontSize: 12,
+            height: 16 / 12,
+            fontWeight: over ? FontWeight.w600 : FontWeight.w400,
+            color: over ? c.crit : c.tx3,
+          ),
+        ),
+        const SizedBox(height: 4),
+        const _Hint('Marked against the goal in your savings. Not spending, and not income.'),
       ],
     );
   }

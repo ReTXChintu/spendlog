@@ -2,11 +2,13 @@ import '../utils/format.dart';
 import 'budget_models.dart';
 import 'home_models.dart';
 import 'passbook_models.dart';
+import 'savings_goal_models.dart';
 import 'subscription_models.dart';
 
 export 'budget_models.dart';
 export 'home_models.dart';
 export 'passbook_models.dart';
+export 'savings_goal_models.dart';
 
 class Category {
   final String id;
@@ -307,6 +309,9 @@ class Transaction {
   /// The RDs and FDs it went into, by deposit id, and how much into each.
   final Map<String, int> depositParts;
 
+  /// The savings goals it was put aside for, by goal id, and how much for each.
+  final Map<String, int> goalParts;
+
   /// On money paid back: whose part of which shared fixed cost it was.
   final List<TowardsEntry> towards;
 
@@ -441,6 +446,7 @@ class Transaction {
     this.groupShareWith,
     this.groupShareAmounts = const {},
     this.depositParts = const {},
+    this.goalParts = const {},
     this.towards = const [],
     this.metalBuy,
     this.paidByContactId,
@@ -523,6 +529,11 @@ class Transaction {
           for (final part in (json['depositParts'] as List<dynamic>? ?? const []))
             if (part is Map<String, dynamic> && part['depositId'] is String && part['amountMinor'] is int)
               part['depositId'] as String: part['amountMinor'] as int,
+        },
+        goalParts: {
+          for (final part in (json['goalParts'] as List<dynamic>? ?? const []))
+            if (part is Map<String, dynamic> && part['goalId'] is String && part['amountMinor'] is int)
+              part['goalId'] as String: part['amountMinor'] as int,
         },
         metalBuy: json['metalBuy'] is Map<String, dynamic> ? MetalBuy.fromJson(json['metalBuy'] as Map<String, dynamic>) : null,
         towards: (json['towards'] as List<dynamic>? ?? const [])
@@ -2434,6 +2445,9 @@ class DashboardData {
   /// Money received for purchases still to come.
   final Earmarks earmarks;
 
+  /// The open savings goals: what each has and needs a month.
+  final SavingsGoalList savingsGoals;
+
   /// Savings-plan rules being broken this month.
   final List<PlanRule> planWarnings;
 
@@ -2470,6 +2484,7 @@ class DashboardData {
     required this.monthSoFar,
     MoneyOnHand? money,
     Earmarks? earmarks,
+    this.savingsGoals = const SavingsGoalList(),
     this.planWarnings = const [],
     this.pocketMoney = const [],
     this.todos = const [],
@@ -2519,6 +2534,7 @@ class DashboardData {
       monthSoFar: MonthSoFar.fromJson(json['monthSoFar'] as Map<String, dynamic>? ?? {}),
       money: MoneyOnHand.fromJson(json['money'] as Map<String, dynamic>? ?? {}),
       earmarks: Earmarks.fromJson(json['earmarks'] as Map<String, dynamic>? ?? {}),
+      savingsGoals: SavingsGoalList.fromJson(json['savingsGoals'] as Map<String, dynamic>?),
       planWarnings: (json['planWarnings'] as List<dynamic>? ?? [])
           .map((w) => PlanRule.fromJson(w as Map<String, dynamic>))
           .toList(),

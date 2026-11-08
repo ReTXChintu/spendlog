@@ -14,6 +14,7 @@ import { familyRouter } from "./modules/family/family.routes";
 import { fundsRouter } from "./modules/funds/funds.routes";
 import { goalsRouter } from "./modules/funds/goals.routes";
 import { depositsRouter } from "./modules/deposits/deposits.routes";
+import { savingsGoalsRouter } from "./modules/goals/savingsGoals.routes";
 import { metalsRouter } from "./modules/metals/metals.routes";
 import { metalHoldingsRouter } from "./modules/metals/metals.holdings.routes";
 import { investmentsRouter } from "./modules/metals/investments.overview";
@@ -87,6 +88,7 @@ app.use("/ipos", ipoRouter);
 app.use("/funds", fundsRouter);
 app.use("/goals", goalsRouter);
 app.use("/deposits", depositsRouter);
+app.use("/savings-goals", savingsGoalsRouter);
 // Before /metals, whose router would otherwise take /metals/holdings.
 app.use("/metals/holdings", metalHoldingsRouter);
 app.use("/metals", metalsRouter);

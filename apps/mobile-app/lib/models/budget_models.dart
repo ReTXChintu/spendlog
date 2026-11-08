@@ -594,6 +594,9 @@ class BankFace {
   /// Of [balanceMinor], money in nobody has explained yet.
   final int provisionalMinor;
 
+  /// Of [balanceMinor], what is set aside for savings goals.
+  final int forGoalsMinor;
+
   const BankFace({
     required this.accountId,
     required this.name,
@@ -608,6 +611,7 @@ class BankFace {
     this.hasCardDetails = false,
     this.drift,
     this.provisionalMinor = 0,
+    this.forGoalsMinor = 0,
   });
 
   bool get isCash => accountType == 'CASH';
@@ -628,6 +632,7 @@ class BankFace {
       hasCardDetails: _bool(json['hasCardDetails']),
       drift: BalanceDrift.maybe(json['drift']),
       provisionalMinor: _intOrNull(json['provisionalMinor']) ?? 0,
+      forGoalsMinor: _intOrNull(json['forGoalsMinor']) ?? 0,
     );
   }
 }

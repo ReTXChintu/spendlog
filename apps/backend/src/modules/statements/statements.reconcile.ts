@@ -545,6 +545,7 @@ export async function rematchStatement(statement: HydratedDocument<CardStatement
       row.loanId ||
       (row.loanSplits?.length ?? 0) > 0 ||
       row.depositParts.length > 0 ||
+      (row.goalParts?.length ?? 0) > 0 ||
       row.metalBuy ||
       row.towards.length > 0 ||
       row.isSettlement

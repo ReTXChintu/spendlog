@@ -830,6 +830,10 @@ export interface TransactionDoc {
   /// ₹1,000 into another"). Still spending, like any fixed cost; it is
   /// also what each deposit's total grows by. See modules/deposits.
   depositParts: DepositPart[];
+  /// The savings goals this money was put aside for, and how much for
+  /// each: a transfer into savings, or money in, marked against "PS5 by
+  /// October". Not spending either way. See modules/goals.
+  goalParts: GoalPart[];
   /// On money in from people: how much of it was each person's part of a
   /// shared fixed cost, for which period ("₹4,000 of Chirayu's ₹6,000 is
   /// October's rent"; the rest is other splits). Their balance on People
@@ -894,6 +898,19 @@ export interface DepositPart {
   depositId: Types.ObjectId;
   amountMinor: number;
 }
+
+export interface GoalPart {
+  goalId: Types.ObjectId;
+  amountMinor: number;
+}
+
+const goalPartSchema = new Schema<GoalPart>(
+  {
+    goalId: { type: Schema.Types.ObjectId, ref: "SavingsGoal", required: true },
+    amountMinor: { type: Number, required: true, min: 1 },
+  },
+  { _id: false }
+);
 
 const depositPartSchema = new Schema<DepositPart>(
   {
@@ -1076,6 +1093,7 @@ const transactionSchema = new Schema<TransactionDoc>(
     aiFlag: { type: aiFlagSchema, default: null },
     aiFlagDismissedAt: { type: Date, default: null },
     depositParts: { type: [depositPartSchema], default: [] },
+    goalParts: { type: [goalPartSchema], default: [] },
     towards: { type: [towardsEntrySchema], default: [] },
     metalBuy: { type: metalBuySchema, default: null },
     timeUnknown: { type: Boolean, default: false },
@@ -1189,6 +1207,7 @@ transactionSchema.pre("findOneAndUpdate", async function (next) {
 });
 
 transactionSchema.index({ userId: 1, occurredAt: -1 });
+transactionSchema.index({ "goalParts.goalId": 1 }, { partialFilterExpression: { "goalParts.0": { $exists: true } } });
 transactionSchema.index({ "depositParts.depositId": 1 }, { partialFilterExpression: { "depositParts.0": { $exists: true } } });
 transactionSchema.index({ userId: 1, dedupeKey: 1 });
 transactionSchema.index({ sourceRef: 1 });
@@ -3144,6 +3163,62 @@ const depositSchema = new Schema<DepositDoc>(
 );
 
 export const Deposit = model<DepositDoc>("Deposit", depositSchema);
+
+/** Money added to a goal by hand, or taken out of it (negative). */
+export interface GoalAdjustment {
+  amountMinor: number;
+  on: Date;
+  note: string | null;
+}
+
+const goalAdjustmentSchema = new Schema<GoalAdjustment>(
+  {
+    amountMinor: { type: Number, required: true },
+    on: { type: Date, required: true },
+    note: { type: String, default: null, trim: true },
+  },
+  { _id: false }
+);
+
+/**
+ * Something small being saved up for - a PS5 by next October. The money
+ * sits in a savings account; the goal is what part of it is spoken for.
+ * What it has is openingMinor, plus transfers marked for it (a
+ * transaction's goalParts), plus adjustments typed in by hand.
+ */
+export interface SavingsGoalDoc {
+  _id: Types.ObjectId;
+  userId: Types.ObjectId;
+  name: string;
+  targetMinor: number;
+  /// The day it is wanted by, YYYY-MM-DD.
+  targetOn: string;
+  /// The savings account the money is kept in. Shown on it as spoken for.
+  accountId: Types.ObjectId | null;
+  /// Already put aside when the goal was made.
+  openingMinor: number;
+  adjustments: GoalAdjustment[];
+  /// False once bought or given up: kept for the record, no longer spoken for.
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const savingsGoalSchema = new Schema<SavingsGoalDoc>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    name: { type: String, required: true, trim: true },
+    targetMinor: { type: Number, required: true, min: 1 },
+    targetOn: { type: String, required: true },
+    accountId: { type: Schema.Types.ObjectId, ref: "Account", default: null },
+    openingMinor: { type: Number, default: 0, min: 0 },
+    adjustments: { type: [goalAdjustmentSchema], default: [] },
+    isActive: { type: Boolean, default: true },
+  },
+  { timestamps: true, ...serialization }
+);
+
+export const SavingsGoal = model<SavingsGoalDoc>("SavingsGoal", savingsGoalSchema);
 
 /**
  * The assistant's read of the user's funds, kept for the day like
