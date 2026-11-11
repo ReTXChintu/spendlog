@@ -8,6 +8,7 @@ import '../utils/format.dart';
 import '../utils/loan_tab.dart';
 import '../services/reminder_service.dart';
 import '../widgets/card_picker.dart';
+import '../widgets/card_strip.dart';
 import '../widgets/commitment_amount.dart';
 import '../widgets/edit_transaction_sheet.dart';
 import '../widgets/home/earmarks_tile.dart';
@@ -88,6 +89,11 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
   /// costs the rates tile only.
   MetalRates? _metals;
 
+  /// Every card's cycle, for the credit-limit warning near the top. Home
+  /// is where a warning belongs - the ledger is scanned for a payment, not
+  /// read for advice - so this is the one screen that says it in words.
+  List<CardStatus> _cards = const [];
+
   /// The evening "did anyone else pay?" check, and whether today is
   /// answered. Asked on Home until it is.
   OtherPaidSettings? _otherPaid;
@@ -122,8 +128,21 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
       unawaited(_loadFunds());
       unawaited(_loadOtherPaid());
       unawaited(_loadMetals());
+      unawaited(_loadCards());
     } catch (_) {
       if (mounted) setState(() => _failed = true);
+    }
+  }
+
+  Future<void> _loadCards() async {
+    try {
+      final rows = await ApiClient.instance.get('/cards') as List<dynamic>;
+      if (!mounted) return;
+      setState(() {
+        _cards = rows.whereType<Map<String, dynamic>>().map(CardStatus.fromJson).toList();
+      });
+    } catch (_) {
+      // Advisory only: the wallet below still shows every card's bar.
     }
   }
 
@@ -352,6 +371,10 @@ class DashboardScreenState extends State<DashboardScreen> with AutomaticKeepAliv
           // Above the money, because a broken rule is the one thing here
           // meant to change what you do next.
           PlanWarnings(warnings: data.planWarnings, onOpenPlan: widget.onOpenPlan ?? () {}),
+
+          // A card close to its limit, in words. The pace is not repeated
+          // here: the budget card right below says it already.
+          CardStrip(cards: _cards),
 
           // The month against its budget: the "Free to spend" hero. The
           // pace line is the one thing on this screen that should change

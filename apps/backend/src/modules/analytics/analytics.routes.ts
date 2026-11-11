@@ -235,18 +235,87 @@ analyticsRouter.get("/owed", async (req, res) => {
   });
 });
 
+/**
+ * How far back a merchant figure reaches. One of the user's months is the
+ * default, since that is what every other figure here covers; the longer
+ * windows are for the question only merchants raise - "how much have I
+ * actually given this shop?", which one month cannot answer.
+ */
+export const MERCHANT_RANGES = ["month", "3m", "6m", "12m", "all"] as const;
+export type MerchantRange = (typeof MERCHANT_RANGES)[number];
+
+/** How many of the user's months each window spans; "all" has no floor. */
+const RANGE_MONTHS: Record<Exclude<MerchantRange, "month" | "all">, number> = { "3m": 3, "6m": 6, "12m": 12 };
+
+export interface MerchantWindow {
+  /** Null for "all": everything the user has, however far back it goes. */
+  start: Date | null;
+  end: Date;
+  /** The user's months inside it, oldest first - at most twelve bars. */
+  months: UserMonth[];
+  bySalary: boolean;
+  label: string;
+}
+
+/**
+ * The stretch a merchant figure covers, in the user's own months. "all"
+ * still comes with twelve months of bars, since a chart of every month
+ * since the beginning would be unreadable - the totals cover everything,
+ * the bars cover the last year.
+ */
+async function merchantWindow(
+  userId: Types.ObjectId,
+  range: MerchantRange,
+  monthKey?: string,
+  now = new Date()
+): Promise<MerchantWindow> {
+  if (range === "month") {
+    const [month, { bySalary }] = await Promise.all([userMonth(userId, monthKey, now), userMonths(userId, now, 1)]);
+    return { start: month.start, end: month.end, months: [month], bySalary, label: monthLabel(month, bySalary) };
+  }
+  const span = range === "all" ? 12 : RANGE_MONTHS[range];
+  const { recent, bySalary } = await userMonths(userId, now, span);
+  const months = [...recent].reverse();
+  return {
+    start: range === "all" ? null : months[0].start,
+    end: recent[0].end,
+    months,
+    bySalary,
+    label: range === "all" ? "All time" : `Last ${span} months`,
+  };
+}
+
+/** The match for one merchant window, with its filters. */
+async function merchantMatch(
+  userId: Types.ObjectId,
+  window: MerchantWindow,
+  query: { account?: string; category?: string }
+): Promise<Record<string, unknown>> {
+  return {
+    userId,
+    occurredAt: window.start ? { $gte: window.start, $lt: window.end } : { $lt: window.end },
+    type: "DEBIT",
+    countedAmountMinor: { $gt: 0 },
+    ...(await filters(userId, query)),
+  };
+}
+
 const merchantsSchema = z.object({
   month: z
     .string()
     .regex(/^\d{4}-\d{2}$/)
     .optional(),
-  limit: z.coerce.number().int().min(1).max(50).default(15),
+  range: z.enum(MERCHANT_RANGES).default("month"),
+  // High enough for "every merchant I have ever paid" on a real ledger,
+  // which is what the list asks for when nothing is cut off at the top.
+  limit: z.coerce.number().int().min(1).max(500).default(15),
   account: z.string().regex(/^([0-9a-fA-F]{24}|cash)$/).optional(),
   category: z.string().regex(/^([0-9a-fA-F]{24}|none)$/).optional(),
 });
 
 /**
- * GET /analytics/merchants?month=YYYY-MM — where the money actually went.
+ * GET /analytics/merchants?month=YYYY-MM&range=month — where the money
+ * actually went.
  *
  * Categories say what kind of spending it was; this says who got it, which
  * is the question you can act on. "Food" is not a thing to cut back on;
@@ -260,7 +329,7 @@ analyticsRouter.get("/merchants", async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
   const userId = currentUserId(req);
-  const { start, end } = await userMonth(userId, parsed.data.month);
+  const window = await merchantWindow(userId, parsed.data.range, parsed.data.month);
 
   const rows = await Transaction.aggregate<{
     _id: string;
@@ -270,18 +339,18 @@ analyticsRouter.get("/merchants", async (req, res) => {
   }>([
     {
       $match: {
-        userId,
-        occurredAt: { $gte: start, $lt: end },
-        type: "DEBIT",
-        countedAmountMinor: { $gt: 0 },
+        ...(await merchantMatch(userId, window, parsed.data)),
         merchant: { $nin: [null, ""] },
-        ...(await filters(userId, parsed.data)),
       },
     },
+    // Oldest first, so "the first spelling" below means the first one ever
+    // seen rather than whichever document the group happened to meet first
+    // - without this the same shop can be titled differently run to run.
+    { $sort: { occurredAt: 1 } },
     {
       $group: {
         _id: { $toLower: "$merchant" },
-        // The first spelling seen, rather than the folded key, so the list
+        // The spelling first seen, rather than the folded key, so the list
         // reads the way the merchant writes its own name.
         name: { $first: "$merchant" },
         amountMinor: { $sum: "$countedAmountMinor" },
@@ -299,6 +368,119 @@ analyticsRouter.get("/merchants", async (req, res) => {
       count: row.count,
     }))
   );
+});
+
+/** Escapes regex metacharacters so a merchant's name can't alter the pattern. */
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const merchantSchema = merchantsSchema.extend({
+  /** The merchant's name as the list gave it; matched without case. */
+  name: z.string().min(1).max(120),
+});
+
+/**
+ * GET /analytics/merchant?name=Swiggy&range=6m — one merchant up close.
+ *
+ * The merchant list answers "who got the money"; this answers the next
+ * question, which is the one worth acting on: how much in all, how often,
+ * and whether it is growing month by month. Every payment to them comes
+ * with it, newest first, so the figure can be checked rather than trusted.
+ */
+analyticsRouter.get("/merchant", async (req, res) => {
+  const parsed = merchantSchema.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const userId = currentUserId(req);
+  const window = await merchantWindow(userId, parsed.data.range, parsed.data.month);
+  const { months } = window;
+  // The same case-insensitive grouping the list uses, as an exact match on
+  // the folded name - not a search, so "Swiggy" never pulls in "Swiggy
+  // Instamart" and double-counts it.
+  const match = {
+    ...(await merchantMatch(userId, window, parsed.data)),
+    merchant: { $regex: `^${escapeRegex(parsed.data.name)}$`, $options: "i" },
+  };
+
+  const [totals, byMonth, byCategory, transactions] = await Promise.all([
+    Transaction.aggregate<{ amountMinor: number; count: number; firstOn: Date; lastOn: Date }>([
+      { $match: match },
+      {
+        $group: {
+          _id: null,
+          amountMinor: { $sum: "$countedAmountMinor" },
+          count: { $sum: 1 },
+          firstOn: { $min: "$occurredAt" },
+          lastOn: { $max: "$occurredAt" },
+        },
+      },
+    ]),
+    // Each payment put in the user's month it falls in, which a calendar
+    // group-by cannot do once months run from the 15th (see /trend).
+    Transaction.aggregate<{ _id: string; amountMinor: number; count: number }>([
+      { $match: { ...match, occurredAt: { $gte: months[0].start, $lt: months[months.length - 1].end } } },
+      {
+        $group: {
+          _id: {
+            $switch: {
+              branches: months.map((month) => ({
+                case: { $and: [{ $gte: ["$occurredAt", month.start] }, { $lt: ["$occurredAt", month.end] }] },
+                then: month.key,
+              })),
+              default: "other",
+            },
+          },
+          amountMinor: { $sum: "$countedAmountMinor" },
+          count: { $sum: 1 },
+        },
+      },
+    ]),
+    Transaction.aggregate<CategoryTotal & { count: number }>([
+      { $match: match },
+      { $group: { _id: "$categoryId", amountMinor: { $sum: "$countedAmountMinor" }, count: { $sum: 1 } } },
+      { $lookup: { from: "categories", localField: "_id", foreignField: "_id", as: "category" } },
+      { $addFields: { name: { $ifNull: [{ $first: "$category.name" }, "Uncategorized"] } } },
+      { $sort: { amountMinor: -1 } },
+    ]),
+    Transaction.find(match)
+      .populate("category")
+      .populate("account")
+      .sort({ occurredAt: -1 })
+      .limit(100),
+  ]);
+
+  const totalMinor = totals[0]?.amountMinor ?? 0;
+  const count = totals[0]?.count ?? 0;
+  const amounts = new Map(byMonth.map((row) => [row._id, row]));
+
+  res.json({
+    // The name as asked for, which is the spelling the list settled on -
+    // picking one off these rows instead would disagree with the list the
+    // moment a shop spelled itself two ways.
+    merchant: parsed.data.name,
+    range: parsed.data.range,
+    label: window.label,
+    totalMinor,
+    count,
+    // The average payment, which is what "is this shop getting dearer?"
+    // actually asks - not the average month.
+    averageMinor: count > 0 ? Math.round(totalMinor / count) : 0,
+    firstOn: totals[0]?.firstOn ?? null,
+    lastOn: totals[0]?.lastOn ?? null,
+    byMonth: months.map((month) => ({
+      ...describe(month, window.bySalary),
+      amountMinor: amounts.get(month.key)?.amountMinor ?? 0,
+      count: amounts.get(month.key)?.count ?? 0,
+    })),
+    byCategory: byCategory.map((row) => ({
+      categoryId: row._id ? row._id.toString() : null,
+      name: row.name ?? "Uncategorized",
+      amountMinor: row.amountMinor,
+      count: row.count,
+    })),
+    transactions,
+  });
 });
 
 interface MonthTotals {

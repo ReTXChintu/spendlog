@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
 import '../utils/format.dart';
+import '../widgets/card_strip.dart';
 import '../widgets/charts/chart_utils.dart';
 import '../widgets/charts/column_chart.dart';
 import '../widgets/charts/daily_spend_chart.dart';
@@ -10,6 +11,7 @@ import '../widgets/charts/donut_chart.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/home/ai_insights_card.dart';
 import '../widgets/home/savings_plan_card.dart';
+import 'merchant_screen.dart';
 
 /// The Analytics tab of Home: how the month went, and what to do about it.
 ///
@@ -43,6 +45,21 @@ class AnalyticsScreenState extends State<AnalyticsScreen> with AutomaticKeepAliv
   List<Category> _categories = [];
   List<Account> _accounts = [];
   List<MerchantSpend> _merchants = [];
+
+  /// How far back the merchant list reaches. Its own control, since "what
+  /// has this shop had in all?" is a different question from the month
+  /// every other figure on this screen is about.
+  MerchantRange _merchantRange = MerchantRange.month;
+
+  /// What the warning strip has to say: a card near its limit, and the
+  /// month's pace. Both advisory, both quiet when nothing is wrong.
+  List<CardStatus> _cards = const [];
+  MonthlyBudgetStatus? _budget;
+
+  /// Narrows the merchant list as typed - a long list is only useful if
+  /// one name can be found in it.
+  final _merchantSearch = TextEditingController();
+  bool _merchantsLoading = false;
   MonthComparison? _comparison;
   List<DaySpend> _daily = [];
   List<WeekdaySpend> _weekday = [];
@@ -70,6 +87,12 @@ class AnalyticsScreenState extends State<AnalyticsScreen> with AutomaticKeepAliv
     super.initState();
     _loadMonths();
     _loadRest();
+  }
+
+  @override
+  void dispose() {
+    _merchantSearch.dispose();
+    super.dispose();
   }
 
   /// Brings the savings plan into view, from a warning on the Dashboard.
@@ -123,6 +146,32 @@ class AnalyticsScreenState extends State<AnalyticsScreen> with AutomaticKeepAliv
     }
   }
 
+  /// The merchant list's own call: the month and filters like everything
+  /// else, plus how far back it reaches and the whole list rather than the
+  /// top fifteen - the point of the list being that nothing is cut off.
+  String get _merchantsPath {
+    final params = <String, String>{
+      if (_month != null) 'month': _month!,
+      if (_accountFilter != null) 'account': _accountFilter!,
+      if (_categoryFilter != null) 'category': _categoryFilter!,
+      'range': _merchantRange.key,
+      'limit': '500',
+    };
+    return '/analytics/merchants?${Uri(queryParameters: params).query}';
+  }
+
+  /// Just the merchants again, for a change of range - the rest of the
+  /// screen is about the month and has not moved.
+  Future<void> _loadMerchants() async {
+    setState(() => _merchantsLoading = true);
+    final rows = await _list(_merchantsPath);
+    if (!mounted) return;
+    setState(() {
+      _merchants = rows.map((m) => MerchantSpend.fromJson(m as Map<String, dynamic>)).toList();
+      _merchantsLoading = false;
+    });
+  }
+
   /// Everything about the month, fetched together so switching between
   /// views is instant rather than a spinner each time.
   Future<void> _loadSummary() async {
@@ -131,7 +180,7 @@ class AnalyticsScreenState extends State<AnalyticsScreen> with AutomaticKeepAliv
       final all = _query();
       final results = await Future.wait<dynamic>([
         ApiClient.instance.get('/analytics/summary$all'),
-        _list('/analytics/merchants$all'),
+        _list(_merchantsPath),
         ApiClient.instance.get('/analytics/compare${_query(account: false, category: false)}').catchError((_) => null),
         _list('/analytics/daily$all'),
         _list('/analytics/weekday$all'),
@@ -183,6 +232,26 @@ class AnalyticsScreenState extends State<AnalyticsScreen> with AutomaticKeepAliv
       });
     } catch (_) {
       // The trend and the filter lists are extras; the month still shows.
+    }
+    await _loadWarnings();
+  }
+
+  /// A card close to its limit and the month running hot. On this screen
+  /// and on Home, where figures are read on purpose - not above the ledger,
+  /// which is scanned for one payment and has no room for advice.
+  Future<void> _loadWarnings() async {
+    try {
+      final results = await Future.wait([
+        ApiClient.instance.get('/cards'),
+        ApiClient.instance.get('/budget/monthly'),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _cards = (results[0] as List<dynamic>).whereType<Map<String, dynamic>>().map(CardStatus.fromJson).toList();
+        _budget = MonthlyBudgetStatus.fromJson(results[1] as Map<String, dynamic>);
+      });
+    } catch (_) {
+      // Advisory only, and quiet when there is nothing to say anyway.
     }
   }
 
@@ -351,6 +420,7 @@ class AnalyticsScreenState extends State<AnalyticsScreen> with AutomaticKeepAliv
               : null,
         ),
         SizedBox(height: 2, child: _loading ? const LinearProgressIndicator(minHeight: 2) : null),
+        CardStrip(cards: _cards, pace: currentMonthPace(_budget)),
         Expanded(
           child: RefreshIndicator(
             onRefresh: _refresh,
@@ -504,31 +574,7 @@ class AnalyticsScreenState extends State<AnalyticsScreen> with AutomaticKeepAliv
             ],
           ),
         ),
-      if (_view == 'merchants')
-        DsCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const _SectionTitle(
-                title: 'Spend by merchant',
-                sub: 'Where the money actually went. "Food" is not a thing to cut back on; '
-                    'ordering from one app eleven times is.',
-              ),
-              const SizedBox(height: 8),
-              if (_merchants.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    'Nothing this month has a merchant name on it yet.',
-                    style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
-                  ),
-                )
-              else
-                for (var i = 0; i < _merchants.length; i++)
-                  _MerchantRow(entry: _merchants[i], last: i == _merchants.length - 1),
-            ],
-          ),
-        ),
+      if (_view == 'merchants') _merchantsCard(c),
       if (_view == 'compare' && _comparison != null) DsCard(child: _Comparison(comparison: _comparison!)),
       const SizedBox(height: kCardGap),
       _ChartCard(
@@ -536,6 +582,125 @@ class AnalyticsScreenState extends State<AnalyticsScreen> with AutomaticKeepAliv
         child: _Trend(points: _trend, maxHeight: AnalyticsScreenState._trendHeight),
       ),
     ];
+  }
+
+  /// Where the money actually went, every merchant of them - how far back
+  /// it looks is this card's own choice, and each row opens that merchant
+  /// on its own.
+  Widget _merchantsCard(DsColors c) {
+    final term = _merchantSearch.text.trim().toLowerCase();
+    final shown = term.isEmpty
+        ? _merchants
+        : _merchants.where((entry) => entry.merchant.toLowerCase().contains(term)).toList();
+    final totalMinor = shown.fold<int>(0, (sum, entry) => sum + entry.amountMinor);
+
+    return DsCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const _SectionTitle(
+            title: 'Spend by merchant',
+            sub: 'Where the money actually went. "Food" is not a thing to cut back on; '
+                'ordering from one app eleven times is. Tap one to see every payment to them.',
+          ),
+          const SizedBox(height: 10),
+          // Its own stretch of time: one month cannot answer "how much
+          // have I given this shop?". Five short chips, so they wrap onto
+          // a second row rather than scroll out of reach sideways.
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final option in MerchantRange.values)
+                DsChip(
+                  key: ValueKey('merchant-range-${option.key}'),
+                  label: option.label,
+                  selected: option == _merchantRange,
+                  showCheck: false,
+                  height: 32,
+                  onTap: () {
+                    if (option == _merchantRange) return;
+                    setState(() => _merchantRange = option);
+                    _loadMerchants();
+                  },
+                ),
+            ],
+          ),
+          if (_merchants.length > 8) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              height: 44,
+              child: TextField(
+                key: const ValueKey('merchant-search'),
+                controller: _merchantSearch,
+                onChanged: (_) => setState(() {}),
+                style: TextStyle(fontSize: 14, height: 20 / 14, color: c.tx),
+                textAlignVertical: TextAlignVertical.center,
+                decoration: InputDecoration(
+                  hintText: 'Find a merchant',
+                  hintStyle: TextStyle(fontSize: 14, color: c.tx3),
+                  prefixIcon: Padding(
+                    padding: const EdgeInsets.only(left: 12, right: 8),
+                    child: DsIcon(DsIcons.search, size: 20, color: c.tx3),
+                  ),
+                  prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 44),
+                  suffixIcon: _merchantSearch.text.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.close, size: 18),
+                          tooltip: 'Clear',
+                          onPressed: () => setState(_merchantSearch.clear),
+                        ),
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 4),
+          if (_merchantsLoading && _merchants.isEmpty)
+            const Padding(padding: EdgeInsets.symmetric(vertical: 24), child: Center(child: DsSpinner()))
+          else if (shown.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                term.isNotEmpty
+                    ? 'No merchant here matches "$term".'
+                    : _merchantRange == MerchantRange.month
+                        ? 'Nothing this month has a merchant name on it yet.'
+                        : 'Nothing in this stretch has a merchant name on it yet.',
+                style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
+              ),
+            )
+          else ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 6, bottom: 2),
+              child: Text(
+                '${formatMoneyShort(totalMinor)} across ${shown.length} '
+                '${shown.length == 1 ? 'merchant' : 'merchants'} · ${_merchantRange.label.toLowerCase()}',
+                style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3),
+              ),
+            ),
+            for (var i = 0; i < shown.length; i++)
+              _MerchantRow(
+                entry: shown[i],
+                last: i == shown.length - 1,
+                onTap: () => _openMerchant(shown[i]),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openMerchant(MerchantSpend entry) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MerchantScreen(merchant: entry.merchant, range: _merchantRange, month: _month),
+      ),
+    );
+    // A payment may have been recategorised or deleted in there.
+    if (mounted) await _loadMerchants();
   }
 
   /// The month's categories as a ring, the biggest five named and the rest
@@ -1024,15 +1189,18 @@ class _CategoryBar extends StatelessWidget {
 
 /// A merchant: monogram, name, how many times, and what it came to.
 class _MerchantRow extends StatelessWidget {
-  const _MerchantRow({required this.entry, required this.last});
+  const _MerchantRow({required this.entry, required this.last, this.onTap});
 
   final MerchantSpend entry;
   final bool last;
 
+  /// Opens the merchant on its own. Null leaves the row as a plain figure.
+  final VoidCallback? onTap;
+
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    return Container(
+    final row = Container(
       constraints: const BoxConstraints(minHeight: 56),
       padding: const EdgeInsets.symmetric(vertical: 10),
       decoration: BoxDecoration(border: last ? null : Border(bottom: BorderSide(color: c.ln))),
@@ -1062,8 +1230,18 @@ class _MerchantRow extends StatelessWidget {
             formatMoneyShort(entry.amountMinor),
             style: kNum.copyWith(fontSize: 15, fontWeight: FontWeight.w600, color: c.tx),
           ),
+          if (onTap != null) ...[
+            const SizedBox(width: 2),
+            DsIcon(DsIcons.chevronRight, size: 18, color: c.tx3),
+          ],
         ],
       ),
+    );
+    if (onTap == null) return row;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(Ds.rMd),
+      child: row,
     );
   }
 }

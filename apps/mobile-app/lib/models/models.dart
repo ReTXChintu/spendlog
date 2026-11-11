@@ -7,6 +7,7 @@ import 'subscription_models.dart';
 
 export 'budget_models.dart';
 export 'home_models.dart';
+export 'merchant_models.dart';
 export 'passbook_models.dart';
 export 'savings_goal_models.dart';
 

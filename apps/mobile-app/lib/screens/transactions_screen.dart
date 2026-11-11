@@ -5,7 +5,6 @@ import '../services/api_client.dart';
 import '../services/sms_service.dart';
 import '../widgets/ds/ds.dart';
 import '../utils/format.dart';
-import '../widgets/card_strip.dart';
 import '../widgets/edit_transaction_sheet.dart';
 import '../widgets/state_block.dart';
 import '../widgets/transaction_tile.dart';
@@ -85,8 +84,6 @@ class TransactionsScreenState extends State<TransactionsScreen> {
   AnalyticsSummary? _summary;
   bool _hasGmail = false;
   bool _error = false;
-
-  List<CardStatus> _cards = [];
 
   /// The month on show against its budget, for the month bar. Null until
   /// it arrives, and for a month with no budget the bar simply says less.
@@ -364,19 +361,6 @@ class TransactionsScreenState extends State<TransactionsScreen> {
       });
     } catch (_) {
       // The ledger still works without the rollup and the chips.
-    }
-
-    // Card cycles, for the strip above the list. Advisory, so it never
-    // stops the ledger loading. The pace in that strip comes with the
-    // month's budget instead.
-    try {
-      final cards = await ApiClient.instance.get('/cards') as List<dynamic>;
-      if (!mounted) return;
-      setState(() {
-        _cards = cards.map((c) => CardStatus.fromJson(c as Map<String, dynamic>)).toList();
-      });
-    } catch (_) {
-      // Advisory only.
     }
   }
 
@@ -779,7 +763,6 @@ class TransactionsScreenState extends State<TransactionsScreen> {
           ),
           const SizedBox(height: 12),
           if (_accountId != null) _cycleBar(c),
-          CardStrip(cards: _cards, pace: currentMonthPace(_budget)),
           Expanded(child: _buildBody(uncategorized)),
         ],
       ),
