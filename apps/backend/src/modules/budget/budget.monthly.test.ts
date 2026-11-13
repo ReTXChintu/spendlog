@@ -337,6 +337,101 @@ describe("the month against its budget", () => {
   });
 });
 
+describe("a payment counted against another month", () => {
+  it("moves the figure without moving the payment", async () => {
+    // Paid on the 15th, salary day the 20th: the 15th still belongs to
+    // the month that opened on 20 Oct, and November's has not begun.
+    await withUser({ salaryDay: 20 });
+    await spend("2026-11-15", 1_000);
+    const pushed = await spend("2026-11-15", 4_000, { countInMonth: "2026-11" });
+
+    const october = await monthly.spentInMonth(userId, await months.userMonth(userId, "2026-10", on("2026-11-16")));
+    const november = await monthly.spentInMonth(userId, await months.userMonth(userId, "2026-11", on("2026-11-16")));
+    assert.equal(october, 1_000_00);
+    assert.equal(november, 4_000_00);
+
+    // The payment itself has not moved: it is still the 15th.
+    const row = await models.Transaction.findById(pushed._id).orFail();
+    assert.equal(row.occurredAt.toISOString(), on("2026-11-15").toISOString());
+    assert.equal(row.countInMonth, "2026-11");
+  });
+
+  it("counts in the month it happened in when nothing is said", async () => {
+    await withUser({ salaryDay: 1 });
+    await spend("2026-11-03", 2_500);
+    const november = await monthly.spentInMonth(userId, await months.userMonth(userId, "2026-11", on("2026-11-10")));
+    assert.equal(november, 2_500_00);
+  });
+
+  it("carries into the top payments of the month it counts against", async () => {
+    await withUser({ salaryDay: 20 });
+    await spend("2026-11-15", 9_000, { countInMonth: "2026-11" });
+    const top = await monthly.topPaymentsIn(userId, await months.userMonth(userId, "2026-11", on("2026-11-16")));
+    assert.equal(top.length, 1);
+    assert.equal(top[0].countedAmountMinor, 9_000_00);
+
+    const october = await monthly.topPaymentsIn(userId, await months.userMonth(userId, "2026-10", on("2026-11-16")));
+    assert.equal(october.length, 0);
+  });
+
+  it("is taken, and given back, through the payment's own route", async () => {
+    await withUser({ salaryDay: 20 });
+    const row = await spend("2026-11-15", 4_000);
+
+    const pushed = await call(`/transactions/${row._id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ countInMonth: "2026-11" }),
+    });
+    assert.equal(pushed.status, 200);
+    assert.equal(((await pushed.json()) as { countInMonth: string }).countInMonth, "2026-11");
+
+    const back = await call(`/transactions/${row._id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ countInMonth: null }),
+    });
+    assert.equal(back.status, 200);
+    assert.equal(((await back.json()) as { countInMonth: string | null }).countInMonth, null);
+
+    const bad = await call(`/transactions/${row._id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ countInMonth: "November" }),
+    });
+    assert.equal(bad.status, 400);
+  });
+
+  it("names the month a day is in, and the one after it", async () => {
+    await withUser({ salaryDay: 20 });
+    const response = await call("/budget/months-around?on=2026-11-15");
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      month: { month: string; from: string; to: string };
+      next: { month: string; from: string; to: string };
+    };
+    assert.deepEqual([body.month.month, body.month.from, body.month.to], ["2026-10", "2026-10-20", "2026-11-19"]);
+    assert.deepEqual([body.next.month, body.next.from, body.next.to], ["2026-11", "2026-11-20", "2026-12-19"]);
+
+    assert.equal((await call("/budget/months-around?on=nonsense")).status, 400);
+  });
+
+  it("rolls the year over, and holds for calendar months", async () => {
+    await withUser({ salaryDay: 20 });
+    const salary = (await (await call("/budget/months-around?on=2026-12-25")).json()) as {
+      month: { month: string };
+      next: { month: string };
+    };
+    assert.deepEqual([salary.month.month, salary.next.month], ["2026-12", "2027-01"]);
+
+    await withUser({ salaryDay: null });
+    const calendar = (await (await call("/budget/months-around?on=2026-12-25")).json()) as {
+      bySalary: boolean;
+      month: { month: string };
+      next: { month: string };
+    };
+    assert.equal(calendar.bySalary, false);
+    assert.deepEqual([calendar.month.month, calendar.next.month], ["2026-12", "2027-01"]);
+  });
+});
+
 describe("the savings bucket", () => {
   it("says it is not set until a monthly budget is", async () => {
     await withUser({ dailyBudgetMinor: 1000_00 });

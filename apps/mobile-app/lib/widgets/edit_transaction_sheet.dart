@@ -360,6 +360,7 @@ class _EditSheetState extends State<_EditSheet> {
     _cardPaymentFor = t?.cardPaymentFor;
     _commitmentId = t?.commitmentId;
     _subscriptionId = t?.subscriptionId;
+    _countInMonth = t?.countInMonth;
     _isSubscription = _subscriptionId != null;
     _isFixed = _commitmentId != null;
     _intoDeposits = t != null && t.type == 'DEBIT' && t.depositParts.isNotEmpty;
@@ -439,6 +440,7 @@ class _EditSheetState extends State<_EditSheet> {
 
     _loadCommitments();
     _loadSubscriptions();
+    _loadMonths();
     if (_kind == _Kind.refund) _loadRefundSource();
     _loadDeposits();
     _loadGoals();
@@ -648,6 +650,30 @@ class _EditSheetState extends State<_EditSheet> {
         _subscriptions = page.items
             .where((sub) => sub.isLive || sub.id == _subscriptionId)
             .toList();
+      });
+    } catch (_) {
+      // The chip simply does not appear.
+    }
+  }
+
+  /// Which of the user's months this payment's date falls in, and the one
+  /// after it - the two this row can be counted against. Null until the
+  /// server says, since only it knows the salary day.
+  UserMonth? _monthOfRow;
+  UserMonth? _monthAfterRow;
+
+  /// The month this is counted against when that is not the month it
+  /// happened in. Null is the normal case.
+  String? _countInMonth;
+
+  Future<void> _loadMonths() async {
+    final day = DateFormat('yyyy-MM-dd').format(_occurredAt);
+    try {
+      final json = await ApiClient.instance.get('/budget/months-around?on=$day') as Map<String, dynamic>;
+      if (!mounted) return;
+      setState(() {
+        _monthOfRow = UserMonth.fromJson(json['month'] as Map<String, dynamic>);
+        _monthAfterRow = UserMonth.fromJson(json['next'] as Map<String, dynamic>);
       });
     } catch (_) {
       // The chip simply does not appear.
@@ -1396,13 +1422,13 @@ class _EditSheetState extends State<_EditSheet> {
       lastDate: DateTime.now().add(const Duration(days: 1)),
     );
     if (picked == null) return;
-    setState(() => _occurredAt = DateTime(
-          picked.year,
-          picked.month,
-          picked.day,
-          _occurredAt.hour,
-          _occurredAt.minute,
-        ));
+    setState(() {
+      _occurredAt = DateTime(picked.year, picked.month, picked.day, _occurredAt.hour, _occurredAt.minute);
+      // A new day can fall in another month, so anything said about the
+      // old pair of months no longer applies.
+      _countInMonth = null;
+    });
+    await _loadMonths();
   }
 
   Future<void> _pickTime() async {
@@ -1587,6 +1613,8 @@ class _EditSheetState extends State<_EditSheet> {
       'commitmentId': _isDebit && _isFixed ? _commitmentId : null,
       // The renewal it settles is the server's to pick, from its date.
       'subscriptionId': _subscriptionAllowed && _isSubscription ? _subscriptionId : null,
+      // Which month's budget it is measured against; null is its own.
+      'countInMonth': _countInMonth,
       'paidFor': _isLend && _paidFor,
       'giftForContactId': _isDebit && _isGift ? _giftForId : null,
       // Gold or silver bought: grams typed, or worked out from the day's rate.
@@ -2213,6 +2241,7 @@ class _EditSheetState extends State<_EditSheet> {
     final hasLoans = _loans.isNotEmpty || _savedLoanSplits.isNotEmpty;
     final hasCommitments = _commitments.isNotEmpty || _commitmentId != null;
     final hasSubscriptions = (_subscriptions.isNotEmpty || _subscriptionId != null) && _subscriptionAllowed;
+    final nextMonth = _monthAfterRow;
     final hasDeposits = _deposits.isNotEmpty || _intoDeposits;
     final hasMetal = _metalHoldings.isNotEmpty || _boughtMetal;
     final hasGoals = (_goals.isNotEmpty || _forGoals) && _goalsAllowed;
@@ -2265,7 +2294,8 @@ class _EditSheetState extends State<_EditSheet> {
         // These sit on top of whatever kind it is - rent can be split and
         // a fixed cost. A payment has no one-off toggle: one-offs count
         // against the monthly budget like everything else.
-        if (!_isDebit || hasCommitments || hasSubscriptions || hasDeposits || hasMetal || hasGoals) ...[
+        if (!_isDebit || hasCommitments || hasSubscriptions || hasDeposits || hasMetal || hasGoals ||
+            nextMonth != null) ...[
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
@@ -2280,6 +2310,15 @@ class _EditSheetState extends State<_EditSheet> {
                   selected: _isFixed,
                   height: 32,
                   onTap: () => setState(() => _isFixed = !_isFixed),
+                ),
+              if (nextMonth != null)
+                DsChip(
+                  key: const ValueKey('count-next-month'),
+                  label: 'Counts next month',
+                  icon: DsIcons.calendar,
+                  selected: _countInMonth != null,
+                  height: 32,
+                  onTap: () => setState(() => _countInMonth = _countInMonth == null ? nextMonth.month : null),
                 ),
               if (hasSubscriptions)
                 DsChip(
@@ -2359,6 +2398,7 @@ class _EditSheetState extends State<_EditSheet> {
     };
     final parts = <Widget>[
       if (main != null) main,
+      if (_countInMonth != null) _countInMonthNote(),
       if (_isDebit && _isFixed) _fixedPanel(),
       if (_subscriptionAllowed && _isSubscription) _subscriptionPanel(),
       if (_isDebit && _intoDeposits) _depositPanel(),
@@ -2959,6 +2999,19 @@ class _EditSheetState extends State<_EditSheet> {
         const _Hint('Still counts as spending, against your monthly budget like everything else. Sending '
             'less than usual is fine - the dashboard says what went short rather than calling it unpaid.'),
       ],
+    );
+  }
+
+  /// What counting against another month does, with both months named -
+  /// the one it happened in and the one it is measured against.
+  Widget _countInMonthNote() {
+    final month = _monthOfRow;
+    final next = _monthAfterRow;
+    if (next == null) return const SizedBox.shrink();
+    return _Hint(
+      'Counted against ${next.label} instead of ${month?.label ?? 'the month it happened in'}. '
+      'For ${_isDebit ? 'spending' : 'money in'} that belongs to the month your pay was really for, '
+      'when the pay landed early. Still listed and charted on the day it happened.',
     );
   }
 

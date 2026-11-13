@@ -9,7 +9,7 @@ import { COMMITMENT_KINDS } from "../../types";
 import { budgetPace, changeCommitmentAmount, commitmentPeriod } from "./budget.pace";
 import { checkMonthlyBudget, monthlyBudgetStatus, withMonthlyBudgetChange } from "./budget.monthly";
 import { savingsBucket } from "./budget.bucket";
-import { userMonths } from "./budget.months";
+import { monthLabel, userMonth, userMonths } from "./budget.months";
 
 export const budgetRouter = Router();
 budgetRouter.use(requireAuth);
@@ -62,6 +62,47 @@ const monthlyBudgetSchema = z.object({
 // pace, each category's limit and the unassigned pool, and the bucket.
 budgetRouter.get("/monthly", async (req, res) => {
   res.json(await monthlyBudgetStatus(currentUserId(req)));
+});
+
+/**
+ * GET /budget/months-around?on=YYYY-MM-DD — which of the user's months a
+ * day falls in, and the one after it.
+ *
+ * For the edit sheet's "count this against another month": pay that lands
+ * on the 13th for a month opening on the 15th leaves a day or two of
+ * spending attached to the month that is ending, and the sheet has to name
+ * the month it is offering to move the figure to. Which month a day is in
+ * depends on the salary day, so only the server can answer it.
+ */
+budgetRouter.get("/months-around", async (req, res) => {
+  const on = typeof req.query.on === "string" ? req.query.on : "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(on)) return res.status(400).json({ error: "A day is YYYY-MM-DD." });
+
+  const userId = currentUserId(req);
+  const { recent, bySalary, salaryDay } = await userMonths(userId, new Date(), 36);
+  const found = recent.find((month) => on >= month.from && on <= month.to);
+
+  // Older than the months worked out above, or still to come: its key is
+  // the month of the pay day that would open it, and userMonth lays the
+  // dates out from the pay day alone.
+  const [year, mon, dayOfMonth] = on.split("-").map(Number);
+  const fallbackKey = !bySalary || dayOfMonth >= (salaryDay ?? 1)
+    ? `${year}-${String(mon).padStart(2, "0")}`
+    : `${mon === 1 ? year - 1 : year}-${String(mon === 1 ? 12 : mon - 1).padStart(2, "0")}`;
+
+  const month = found ?? (await userMonth(userId, fallbackKey));
+  const [thisYear, thisMon] = month.key.split("-").map(Number);
+  const nextKey = `${thisMon === 12 ? thisYear + 1 : thisYear}-${String(thisMon === 12 ? 1 : thisMon + 1).padStart(2, "0")}`;
+  const next = await userMonth(userId, nextKey);
+
+  // The same shape /analytics/months uses, so the clients read one.
+  const describe = (one: typeof month) => ({
+    month: one.key,
+    from: one.from,
+    to: one.to,
+    label: monthLabel(one, bySalary),
+  });
+  res.json({ bySalary, month: describe(month), next: describe(next) });
 });
 
 // GET /budget/monthly/:key — any month by its key (YYYY-MM, the month of

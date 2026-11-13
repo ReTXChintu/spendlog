@@ -347,6 +347,9 @@ const createTransactionSchema = z.object({
   // The subscription this payment renewed. The nearest open renewal is
   // the one it settles - see setSubscriptionFor.
   subscriptionId: z.string().regex(OBJECT_ID).nullable().optional(),
+  // The user's month this counts against, when it is not the one it
+  // happened in - pay that landed early, spent before the month opened.
+  countInMonth: z.string().regex(/^\d{4}-\d{2}$/).nullable().optional(),
   loanId: z.string().regex(OBJECT_ID).nullable().optional(),
   loanSplits: z.array(loanSplitBody).max(20).optional(),
   // The RDs and FDs it went into, and how much into each. An empty list
@@ -582,6 +585,7 @@ transactionsRouter.post("/", async (req, res) => {
     isSalary: parsed.data.type === "CREDIT" ? (parsed.data.isSalary ?? false) : false,
     cardPaymentFor: parsed.data.type === "DEBIT" ? (parsed.data.cardPaymentFor ?? null) : null,
     commitmentId: parsed.data.type === "DEBIT" ? (parsed.data.commitmentId ?? null) : null,
+    countInMonth: parsed.data.countInMonth ?? null,
     depositParts,
     goalParts,
     towards,
@@ -645,6 +649,9 @@ const updateTransactionSchema = z.object({
   // The subscription this payment renewed; null takes it off the one it
   // was on, leaving that month's renewal open again.
   subscriptionId: z.string().nullable().optional(),
+  // Which of the user's months this counts against; null puts it back in
+  // the month it happened in.
+  countInMonth: z.string().regex(/^\d{4}-\d{2}$/).nullable().optional(),
   // Which loan this repays, all of it. null clears it and gives back
   // whatever it was covering. The older way of saying one loan; loanSplits
   // wins when both are sent.

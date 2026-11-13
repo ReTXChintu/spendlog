@@ -380,6 +380,11 @@ class Transaction {
   /// as a fixed cost of the month like a commitment's payment.
   final String? subscriptionId;
 
+  /// The month (YYYY-MM) this counts against when that is not the month it
+  /// happened in - pay that landed early, spent before the month opened.
+  /// Null means the month it falls in.
+  final String? countInMonth;
+
   /// The loan this repays. Counts as spending in full - a loan has no
   /// purchase to keep out of the totals the way an EMI's parent does.
   /// The first of [loanSplits] when there are several.
@@ -473,6 +478,7 @@ class Transaction {
     this.cardPaymentFor,
     this.commitmentId,
     this.subscriptionId,
+    this.countInMonth,
     this.loanId,
     this.loanSplits = const [],
     this.loanUnassignedMinor = 0,
@@ -575,6 +581,7 @@ class Transaction {
         cardPaymentFor: json['cardPaymentFor'] as String?,
         commitmentId: json['commitmentId'] as String?,
         subscriptionId: json['subscriptionId'] as String?,
+        countInMonth: json['countInMonth'] as String?,
         loanId: json['loanId'] as String?,
         loanSplits: LoanSplit.listFrom(json['loanSplits'], loanId: json['loanId'] as String?, amountMinor: json['amountMinor'] as int),
         loanUnassignedMinor: json['loanUnassignedMinor'] as int? ?? 0,
