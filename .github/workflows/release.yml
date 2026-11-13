@@ -93,9 +93,15 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # Pinned, not "whatever stable is today": the suite is verified against
+      # one SDK before a tag is cut, and a newer stable has deprecated things
+      # the app still imports - that turns a clean release into a failed one
+      # with no change of ours behind it. Raise this deliberately, together
+      # with the local SDK, once the app analyzes clean on the newer one.
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: 3.47.2
           channel: stable
           cache: true
 
