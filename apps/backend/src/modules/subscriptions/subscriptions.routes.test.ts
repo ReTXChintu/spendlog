@@ -374,6 +374,90 @@ describe("subscriptions and the monthly budget", () => {
   });
 });
 
+describe("marking a payment as a subscription from the payment's own side", () => {
+  it("settles the renewal nearest the payment, and says which", async () => {
+    const netflix = await track({ nextRenewalOn: day(2) });
+    const row = await charge({ amountMinor: 649_00, merchant: "NETFLIX.COM", occurredAt: at(day(-1)) });
+
+    const saved = await call(`/transactions/${row._id}`, {
+      method: "PATCH",
+      body: { subscriptionId: netflix.id },
+    });
+    assert.equal(saved.status, 200, JSON.stringify(saved.body));
+    assert.equal(saved.body.subscriptionId, netflix.id);
+
+    // Charged a day early, so it is still the renewal due in two days.
+    const after = await stored(netflix.id);
+    const settled = after.renewals.find((renewal) => renewal.dueOn === day(2));
+    assert.equal(settled?.status, "paid");
+    assert.equal(settled?.transactionId?.toString(), row._id.toString());
+    // And the schedule has moved past it rather than asking again.
+    assert.ok(after.nextRenewalOn > day(2));
+  });
+
+  it("takes a payment off the subscription, leaving that month open", async () => {
+    const netflix = await track({ nextRenewalOn: day(0) });
+    const row = await charge({ amountMinor: 649_00, merchant: "Netflix" });
+    await call(`/transactions/${row._id}`, { method: "PATCH", body: { subscriptionId: netflix.id } });
+
+    const cleared = await call(`/transactions/${row._id}`, { method: "PATCH", body: { subscriptionId: null } });
+    assert.equal(cleared.status, 200, JSON.stringify(cleared.body));
+    assert.equal(cleared.body.subscriptionId, null);
+    const after = await stored(netflix.id);
+    assert.equal(after.renewals.some((renewal) => renewal.transactionId?.equals(row._id)), false);
+  });
+
+  it("refuses a month another payment already answered for", async () => {
+    const netflix = await track({ nextRenewalOn: day(0) });
+    const first = await charge({ amountMinor: 649_00, merchant: "Netflix" });
+    await call(`/transactions/${first._id}`, { method: "PATCH", body: { subscriptionId: netflix.id } });
+
+    // A second payment the same day has no open renewal left to settle:
+    // the next one is months out, past where a charge could be it.
+    const second = await charge({ amountMinor: 649_00, merchant: "Netflix" });
+    const refused = await call(`/transactions/${second._id}`, {
+      method: "PATCH",
+      body: { subscriptionId: netflix.id },
+    });
+    assert.equal(refused.status, 200, JSON.stringify(refused.body));
+    // It took the next month's renewal instead - the nearest one open.
+    const after = await stored(netflix.id);
+    const taken = after.renewals.find((renewal) => renewal.transactionId?.equals(second._id));
+    assert.ok(taken, "the second payment settled some renewal");
+    assert.notEqual(taken!.dueOn, day(0));
+  });
+
+  it("refuses a transfer, and lets go when a payment becomes one", async () => {
+    const netflix = await track({ nextRenewalOn: day(0) });
+    const transfer = await charge({ amountMinor: 649_00, merchant: "Netflix", isTransfer: true });
+    const refused = await call(`/transactions/${transfer._id}`, {
+      method: "PATCH",
+      body: { subscriptionId: netflix.id },
+    });
+    assert.equal(refused.status, 400);
+    assert.match(refused.body.error, /not a subscription/i);
+
+    const row = await charge({ amountMinor: 649_00, merchant: "Netflix" });
+    await call(`/transactions/${row._id}`, { method: "PATCH", body: { subscriptionId: netflix.id } });
+    const moved = await call(`/transactions/${row._id}`, { method: "PATCH", body: { isTransfer: true } });
+    assert.equal(moved.status, 200, JSON.stringify(moved.body));
+    assert.equal(moved.body.subscriptionId, null);
+    const after = await stored(netflix.id);
+    assert.equal(after.renewals.some((renewal) => renewal.transactionId?.equals(row._id)), false);
+  });
+
+  it("will not renew anything with a payment months from any renewal", async () => {
+    const netflix = await track({ nextRenewalOn: day(0) });
+    const stale = await charge({ amountMinor: 649_00, merchant: "Netflix", occurredAt: at(day(-300)) });
+    const refused = await call(`/transactions/${stale._id}`, {
+      method: "PATCH",
+      body: { subscriptionId: netflix.id },
+    });
+    assert.equal(refused.status, 400);
+    assert.match(refused.body.error, /anywhere near/i);
+  });
+});
+
 describe("what the phone is told", () => {
   it("says a renewal is coming, a trial is ending and a renewal never came - each once", async () => {
     await track({ nextRenewalOn: day(2) });

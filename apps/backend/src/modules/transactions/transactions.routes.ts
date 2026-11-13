@@ -39,6 +39,7 @@ import { checkEntries } from "./transactions.aiCheck";
 import { AiError } from "../ai/ai.gemini";
 import { DepositPartError, checkDepositParts } from "../deposits/deposits.service";
 import { GoalPartError, checkGoalParts } from "../goals/savingsGoals.service";
+import { setSubscriptionFor } from "../subscriptions/subscriptions.service";
 import { TowardsError, applyCommitmentShares, checkTowards } from "../budget/budget.commitmentShares";
 import { MetalBuyError, metalBuyFor } from "../metals/metals.holdings";
 import { IST_OFFSET, istDayEnd, istDayKey, istDayStart } from "../../time";
@@ -343,6 +344,9 @@ const createTransactionSchema = z.object({
   isSalary: z.boolean().optional(),
   cardPaymentFor: z.string().regex(OBJECT_ID).nullable().optional(),
   commitmentId: z.string().regex(OBJECT_ID).nullable().optional(),
+  // The subscription this payment renewed. The nearest open renewal is
+  // the one it settles - see setSubscriptionFor.
+  subscriptionId: z.string().regex(OBJECT_ID).nullable().optional(),
   loanId: z.string().regex(OBJECT_ID).nullable().optional(),
   loanSplits: z.array(loanSplitBody).max(20).optional(),
   // The RDs and FDs it went into, and how much into each. An empty list
@@ -591,6 +595,13 @@ transactionsRouter.post("/", async (req, res) => {
   // the way that fixed cost is.
   if (created.commitmentId) await applyCommitmentShares(created);
 
+  // Said to renew a subscription: the nearest open renewal is settled.
+  // After the write, since which renewal it is depends on its own date.
+  if (parsed.data.subscriptionId) {
+    const linked = await setSubscriptionFor(created, new Types.ObjectId(parsed.data.subscriptionId));
+    if (!linked.ok) return res.status(400).json({ error: linked.error });
+  }
+
   // A loan's instalments move as it is linked, so it goes through the
   // same step an edit uses rather than being written as a plain field.
   if (loanSplits.length > 0) await setLoanSplits(created, loanSplits);
@@ -631,6 +642,9 @@ const updateTransactionSchema = z.object({
   // The fixed monthly cost this went towards. Paying early is the point
   // of marking the payment rather than ticking a box on a due date.
   commitmentId: z.string().nullable().optional(),
+  // The subscription this payment renewed; null takes it off the one it
+  // was on, leaving that month's renewal open again.
+  subscriptionId: z.string().nullable().optional(),
   // Which loan this repays, all of it. null clears it and gives back
   // whatever it was covering. The older way of saying one loan; loanSplits
   // wins when both are sent.
@@ -1088,6 +1102,9 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
     goalParts: _goalsAbove,
     towards: _towardsAbove,
     metalBuy: _metalAbove,
+    // Which renewal it settles depends on its own date, so it goes
+    // through setSubscriptionFor below rather than being written here.
+    subscriptionId: _subscriptionBelow,
     ...fields
   } = data;
 
@@ -1130,6 +1147,37 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   // what this edit said - and in the response, so the app can say what
   // else changed. A card bill's card side is kept the same way, by its
   // own rules (cards.billLeg).
+  // Marked as renewing a subscription, or taken off the one it was on.
+  // A row that stopped being a plain payment lets go of it either way:
+  // a transfer or a card bill renews nothing.
+  const stillSpending = !updated.isTransfer && !updated.isSettlement && !updated.cardPaymentFor
+    && updated.type === "DEBIT";
+  const askedForSub = data.subscriptionId !== undefined;
+  // Asking outright for something that cannot renew a subscription is a
+  // mistake worth saying; merely turning into one lets go quietly.
+  if (askedForSub && data.subscriptionId !== null && !stillSpending) {
+    return res.status(400).json({
+      error: "A transfer, a settling-up or a card bill is not a subscription's charge.",
+    });
+  }
+  const wantedSub = askedForSub
+    ? (data.subscriptionId === null ? null : new Types.ObjectId(data.subscriptionId))
+    : stillSpending
+      ? (existing.subscriptionId ?? null)
+      : null;
+  if (askedForSub || (!stillSpending && existing.subscriptionId)) {
+    const row = await Transaction.findById(updated._id);
+    if (row) {
+      const linked = await setSubscriptionFor(row, wantedSub);
+      if (!linked.ok) return res.status(400).json({ error: linked.error });
+      updated = (await Transaction.findById(updated._id)
+        .populate("category")
+        .populate("account")
+        .populate("group")
+        .populate("paidByContact", "name"))!;
+    }
+  }
+
   // Newly put down to a fixed cost others pay back for, and not split by
   // this edit: split the way that fixed cost is.
   if (updated.commitmentId && !existing.commitmentId?.equals(updated.commitmentId)) {

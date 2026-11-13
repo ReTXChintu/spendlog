@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/deposit_models.dart';
 import '../models/metal_models.dart';
+import '../models/subscription_models.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
 import 'ds/ds.dart';
@@ -245,6 +246,12 @@ class _EditSheetState extends State<_EditSheet> {
   /// had them to hand.
   List<FixedCommitment> _commitments = [];
 
+  /// The subscriptions a payment can be the renewal of: the live ones,
+  /// plus whichever this payment already renewed.
+  List<Subscription> _subscriptions = [];
+  bool _isSubscription = false;
+  String? _subscriptionId;
+
   /// The RDs and FDs a payment can go into: the open ones, plus any this
   /// payment is already in.
   List<Deposit> _deposits = [];
@@ -356,6 +363,8 @@ class _EditSheetState extends State<_EditSheet> {
     _isSpecial = t?.isSpecial ?? false;
     _cardPaymentFor = t?.cardPaymentFor;
     _commitmentId = t?.commitmentId;
+    _subscriptionId = t?.subscriptionId;
+    _isSubscription = _subscriptionId != null;
     _isFixed = _commitmentId != null;
     _intoDeposits = t != null && t.type == 'DEBIT' && t.depositParts.isNotEmpty;
     _forGoals = t != null && t.goalParts.isNotEmpty;
@@ -433,6 +442,7 @@ class _EditSheetState extends State<_EditSheet> {
     _loadContacts();
 
     _loadCommitments();
+    _loadSubscriptions();
     _loadDeposits();
     _loadGoals();
     _loadMetalHoldings();
@@ -632,6 +642,59 @@ class _EditSheetState extends State<_EditSheet> {
     }
   }
 
+  Future<void> _loadSubscriptions() async {
+    try {
+      final json = await ApiClient.instance.get('/subscriptions') as Map<String, dynamic>;
+      if (!mounted) return;
+      final page = SubscriptionsPage.fromJson(json);
+      setState(() {
+        _subscriptions = page.items
+            .where((sub) => sub.isLive || sub.id == _subscriptionId)
+            .toList();
+      });
+    } catch (_) {
+      // The chip simply does not appear.
+    }
+  }
+
+  /// Lets go of the subscription: called inside setState wherever the row
+  /// becomes something that cannot be a renewal.
+  void _clearSubscription() {
+    _isSubscription = false;
+    _subscriptionId = null;
+  }
+
+  /// Which renewal the payment would settle, as the server will pick it:
+  /// the open one nearest its date. Said out loud before saving, so a
+  /// wrong guess can be seen rather than discovered a month later.
+  SubscriptionRenewal? get _renewalTaken {
+    final sub = _subscriptions.where((candidate) => candidate.id == _subscriptionId).firstOrNull;
+    if (sub == null) return null;
+    final day = DateTime.parse(_occurredAt.toIso8601String().substring(0, 10));
+    int gap(SubscriptionRenewal renewal) =>
+        (DateTime.tryParse(renewal.dueOn)?.difference(day).inDays ?? 99999).abs();
+    final open = [
+      for (final renewal in sub.renewals)
+        if (renewal.status != 'skipped' && (renewal.status != 'paid' || renewal.transactionId == widget.transaction?.id))
+          renewal,
+      if (!sub.renewals.any((renewal) => renewal.dueOn == sub.nextRenewalOn))
+        SubscriptionRenewal(dueOn: sub.nextRenewalOn, status: 'upcoming', amountMinor: sub.amountMinor),
+    ]
+        // The same quarter either side the server allows: further off than
+        // that and this payment is not a renewal of anything.
+        .where((renewal) => gap(renewal) <= 95)
+        .toList();
+    if (open.isEmpty) return null;
+    return open.reduce((best, renewal) => gap(renewal) < gap(best) ? renewal : best);
+  }
+
+  /// Whether this payment could be a subscription's charge at all. A
+  /// transfer, a card bill or a settling-up never is - the server refuses
+  /// that pairing - while a split one can be: a shared plan is still a
+  /// renewal.
+  bool get _subscriptionAllowed =>
+      _isDebit && _kind != _Kind.transfer && _kind != _Kind.cardBill && _kind != _Kind.settlement;
+
   /// Active loans, plus whichever this payment already repays - a closed
   /// loan should not vanish from its own list.
   Future<void> _loadLoans() async {
@@ -815,6 +878,9 @@ class _EditSheetState extends State<_EditSheet> {
     setState(() {
       _error = null;
       _kind = kind;
+      // A transfer, a card bill or a settling-up renews no subscription -
+      // and the server refuses that pairing, so it goes here.
+      if (kind == _Kind.transfer || kind == _Kind.cardBill || kind == _Kind.settlement) _clearSubscription();
       _paidFor = kind == _Kind.split && !includeMe && paidFor;
       if (kind == _Kind.split) _includeMe = includeMe;
       if (kind == _Kind.settlement && _autoSettle) _resplitSettlement();
@@ -847,6 +913,7 @@ class _EditSheetState extends State<_EditSheet> {
       // across to a payment.
       _isSpecial = false;
       _isFixed = false;
+      _clearSubscription();
       _intoDeposits = false;
       _boughtMetal = false;
       _autoFillTransfer();
@@ -1041,6 +1108,7 @@ class _EditSheetState extends State<_EditSheet> {
   void _becomePersonKind(Contact? contact) {
     _isSpecial = false;
     _isFixed = false;
+    _clearSubscription();
     _intoDeposits = false;
     _boughtMetal = false;
     _cardPaymentFor = null;
@@ -1338,6 +1406,14 @@ class _EditSheetState extends State<_EditSheet> {
     if (_isDebit && _isFixed && _commitmentId == null) {
       return _fail('Pick which fixed cost this went towards, or turn Fixed cost off.');
     }
+    if (_subscriptionAllowed && _isSubscription) {
+      if (_subscriptionId == null) {
+        return _fail('Pick which subscription this renewed, or turn Subscription off.');
+      }
+      if (_renewalTaken == null) {
+        return _fail("No renewal of that subscription falls anywhere near this payment's date.");
+      }
+    }
     if (_isDebit && _boughtMetal) {
       if (_metalHoldingId == null) return _fail('Pick which gold or silver it bought, or turn Bought gold off.');
       final typed = _metalGrams.text.trim();
@@ -1429,6 +1505,8 @@ class _EditSheetState extends State<_EditSheet> {
       'isSalary': !_isDebit && _kind == _Kind.salary,
       'cardPaymentFor': _isDebit && _kind == _Kind.cardBill ? _cardPaymentFor : null,
       'commitmentId': _isDebit && _isFixed ? _commitmentId : null,
+      // The renewal it settles is the server's to pick, from its date.
+      'subscriptionId': _subscriptionAllowed && _isSubscription ? _subscriptionId : null,
       'paidFor': _isLend && _paidFor,
       'giftForContactId': _isDebit && _isGift ? _giftForId : null,
       // Gold or silver bought: grams typed, or worked out from the day's rate.
@@ -2053,6 +2131,7 @@ class _EditSheetState extends State<_EditSheet> {
     final hasCards = _cardAccounts.isNotEmpty || _cardPaymentFor != null;
     final hasLoans = _loans.isNotEmpty || _savedLoanSplits.isNotEmpty;
     final hasCommitments = _commitments.isNotEmpty || _commitmentId != null;
+    final hasSubscriptions = (_subscriptions.isNotEmpty || _subscriptionId != null) && _subscriptionAllowed;
     final hasDeposits = _deposits.isNotEmpty || _intoDeposits;
     final hasMetal = _metalHoldings.isNotEmpty || _boughtMetal;
     final hasGoals = (_goals.isNotEmpty || _forGoals) && _goalsAllowed;
@@ -2105,7 +2184,7 @@ class _EditSheetState extends State<_EditSheet> {
         // These sit on top of whatever kind it is - rent can be split and
         // a fixed cost. A payment has no one-off toggle: one-offs count
         // against the monthly budget like everything else.
-        if (!_isDebit || hasCommitments || hasDeposits || hasMetal || hasGoals) ...[
+        if (!_isDebit || hasCommitments || hasSubscriptions || hasDeposits || hasMetal || hasGoals) ...[
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
@@ -2120,6 +2199,21 @@ class _EditSheetState extends State<_EditSheet> {
                   selected: _isFixed,
                   height: 32,
                   onTap: () => setState(() => _isFixed = !_isFixed),
+                ),
+              if (hasSubscriptions)
+                DsChip(
+                  key: const ValueKey('is-subscription'),
+                  label: 'Subscription',
+                  icon: DsIcons.refresh,
+                  selected: _isSubscription,
+                  height: 32,
+                  onTap: () => setState(() {
+                    _isSubscription = !_isSubscription;
+                    // One subscription and nothing chosen: it is that one.
+                    if (_isSubscription && _subscriptionId == null && _subscriptions.length == 1) {
+                      _subscriptionId = _subscriptions.single.id;
+                    }
+                  }),
                 ),
               if (_isDebit && hasMetal)
                 DsChip(
@@ -2185,6 +2279,7 @@ class _EditSheetState extends State<_EditSheet> {
     final parts = <Widget>[
       if (main != null) main,
       if (_isDebit && _isFixed) _fixedPanel(),
+      if (_subscriptionAllowed && _isSubscription) _subscriptionPanel(),
       if (_isDebit && _intoDeposits) _depositPanel(),
       if (_goalsAllowed && _forGoals) _goalPanel(),
       if (_isDebit && _boughtMetal) _metalPanel(),
@@ -2778,6 +2873,60 @@ class _EditSheetState extends State<_EditSheet> {
         const SizedBox(height: 8),
         const _Hint('Still counts as spending, against your monthly budget like everything else. Sending '
             'less than usual is fine - the dashboard says what went short rather than calling it unpaid.'),
+      ],
+    );
+  }
+
+  /// Which subscription this payment renewed, and - said out loud - which
+  /// month's renewal it will settle, so a wrong guess is visible before
+  /// saving rather than a month later.
+  Widget _subscriptionPanel() {
+    final c = context.c;
+    final taken = _renewalTaken;
+    final chosen = _subscriptions.where((sub) => sub.id == _subscriptionId).firstOrNull;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DsField(
+          label: 'Subscription',
+          child: DropdownButtonFormField<String?>(
+            key: const ValueKey('subscription-picker'),
+            initialValue: chosen?.id,
+            isExpanded: true,
+            icon: DsIcon(DsIcons.chevronDown, size: 20, color: c.tx2),
+            hint: Text('Which subscription?', style: TextStyle(color: c.tx3)),
+            decoration: _inputDecoration(context),
+            dropdownColor: c.sf,
+            borderRadius: BorderRadius.circular(Ds.rLg),
+            style: TextStyle(fontFamily: Ds.sans, fontSize: 15, color: c.tx, fontFeatures: Ds.tabular),
+            items: [
+              for (final sub in _subscriptions)
+                DropdownMenuItem<String?>(
+                  value: sub.id,
+                  child: Text(
+                    '${sub.name} - ${formatMoney(sub.amountMinor)} ${sub.frequencyLabel.toLowerCase()}',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+            ],
+            onChanged: (id) => setState(() {
+              _subscriptionId = id;
+              final sub = _subscriptions.where((candidate) => candidate.id == id).firstOrNull;
+              if (sub?.categoryId != null && _categoryId == null) _categoryId = sub!.categoryId;
+            }),
+          ),
+        ),
+        const SizedBox(height: 8),
+        if (chosen != null && taken != null)
+          _Hint('Settles the renewal due ${formatIsoShortDate(taken.dueOn)} - the open one nearest this '
+              "payment's date. Still counts as spending, as a fixed cost of the month.")
+        else if (chosen != null)
+          Text(
+            'No renewal of ${chosen.name} falls anywhere near this date, so there is none to settle.',
+            style: TextStyle(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w600, color: c.crit),
+          )
+        else
+          const _Hint('Marks the renewal paid without going to the subscription and hunting for this payment.'),
       ],
     );
   }

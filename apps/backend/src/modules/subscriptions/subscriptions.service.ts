@@ -159,6 +159,91 @@ export async function linkCharge(sub: Sub, row: HydratedDocument<TransactionDoc>
   });
 }
 
+/**
+ * The renewal a payment on `dayKey` most likely settles: the nearest one
+ * that nothing else has already answered for.
+ *
+ * Marking a payment as a subscription from the payment's own side has to
+ * answer "which month's renewal was that?" without asking, so this picks
+ * the closest open one either side of the day - a charge comes a little
+ * early or a little late, and either way it is still that month's.
+ * Nothing open within a quarter means this payment is not a renewal of
+ * anything, and the caller is told so rather than given a wrong month.
+ */
+export function renewalNearest(sub: SubscriptionDoc, dayKey: string, forRow?: Types.ObjectId): string | null {
+  const open = renewalsIn(sub, addDays(dayKey, -95), addDays(dayKey, 95)).filter((renewal) => {
+    if (renewal.status === "skipped") return false;
+    const saved = sub.renewals.find((entry) => entry.dueOn === renewal.on);
+    // One already paid by a different payment is somebody else's month;
+    // the row being re-saved still owns the one it had.
+    if (saved?.status === "paid" && saved.transactionId && !(forRow && saved.transactionId.equals(forRow))) {
+      return false;
+    }
+    return true;
+  });
+  if (open.length === 0) return null;
+  return open.reduce((best, renewal) =>
+    Math.abs(daysBetween(renewal.on, dayKey)) < Math.abs(daysBetween(best.on, dayKey)) ? renewal : best
+  ).on;
+}
+
+/**
+ * A payment saying for itself which subscription it renewed - the way the
+ * edit sheet marks one, rather than going to the subscription and hunting
+ * for the payment among candidates.
+ *
+ * Settles the nearest open renewal (see renewalNearest), lets go of
+ * whatever renewal this payment answered before, and says which day it
+ * took so the sheet can show it. `null` unlinks it entirely.
+ */
+export async function setSubscriptionFor(
+  row: HydratedDocument<TransactionDoc>,
+  subscriptionId: Types.ObjectId | null,
+  now = new Date()
+): Promise<{ ok: true; dueOn: string | null } | { ok: false; error: string }> {
+  const before = row.subscriptionId ?? null;
+  if (before && subscriptionId && before.equals(subscriptionId)) {
+    const sub = await Subscription.findOne({ _id: before, userId: row.userId });
+    const kept = sub?.renewals.find((renewal) => renewal.transactionId?.equals(row._id));
+    return { ok: true, dueOn: kept?.dueOn ?? null };
+  }
+
+  if (subscriptionId) {
+    if (row.type !== "DEBIT") return { ok: false, error: "Only a payment can renew a subscription." };
+    if (row.isTransfer || row.isSettlement || row.cardPaymentFor) {
+      return { ok: false, error: "A transfer, a settling-up or a card bill is not a subscription's charge." };
+    }
+  }
+
+  // Whatever it answered before is open again, so two payments can never
+  // both claim one month.
+  if (before && !before.equals(subscriptionId ?? new Types.ObjectId())) {
+    const old = await Subscription.findOne({ _id: before, userId: row.userId });
+    if (old) {
+      old.renewals = old.renewals.filter(
+        (renewal) => !renewal.transactionId?.equals(row._id)
+      ) as SubscriptionDoc["renewals"];
+      await old.save();
+    }
+    row.subscriptionId = null;
+    await row.save();
+  }
+
+  if (!subscriptionId) return { ok: true, dueOn: null };
+
+  const sub = await Subscription.findOne({ _id: subscriptionId, userId: row.userId });
+  if (!sub) return { ok: false, error: "Subscription not found" };
+  const dueOn = renewalNearest(sub, istDayKey(row.occurredAt), row._id);
+  if (!dueOn) {
+    return { ok: false, error: `No renewal of ${sub.name} falls anywhere near this payment's date.` };
+  }
+  await linkCharge(sub, row, dueOn);
+  if (sub.nextRenewalOn === dueOn) advance(sub, dueOn);
+  await sub.save();
+  await reconcileSubscription(sub, todayKey(now));
+  return { ok: true, dueOn };
+}
+
 /** Records what became of a renewal, replacing anything already said about that date. */
 export function settleRenewal(sub: Sub, dueOn: string, outcome: Omit<SubscriptionRenewal, "dueOn">): void {
   const kept = sub.renewals.filter((renewal) => renewal.dueOn !== dueOn);

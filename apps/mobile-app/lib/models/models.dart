@@ -376,6 +376,10 @@ class Transaction {
   /// The fixed monthly cost this went towards. Still counts as spending.
   final String? commitmentId;
 
+  /// The subscription this payment renewed. Still counts as spending, and
+  /// as a fixed cost of the month like a commitment's payment.
+  final String? subscriptionId;
+
   /// The loan this repays. Counts as spending in full - a loan has no
   /// purchase to keep out of the totals the way an EMI's parent does.
   /// The first of [loanSplits] when there are several.
@@ -468,6 +472,7 @@ class Transaction {
     this.isSalary = false,
     this.cardPaymentFor,
     this.commitmentId,
+    this.subscriptionId,
     this.loanId,
     this.loanSplits = const [],
     this.loanUnassignedMinor = 0,
@@ -569,6 +574,7 @@ class Transaction {
         isSalary: json['isSalary'] as bool? ?? false,
         cardPaymentFor: json['cardPaymentFor'] as String?,
         commitmentId: json['commitmentId'] as String?,
+        subscriptionId: json['subscriptionId'] as String?,
         loanId: json['loanId'] as String?,
         loanSplits: LoanSplit.listFrom(json['loanSplits'], loanId: json['loanId'] as String?, amountMinor: json['amountMinor'] as int),
         loanUnassignedMinor: json['loanUnassignedMinor'] as int? ?? 0,
