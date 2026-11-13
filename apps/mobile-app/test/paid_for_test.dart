@@ -62,7 +62,7 @@ void main() {
     expect(Contact.fromJson({'id': 'r', 'name': 'Rahul', 'givenMinor': 150000, 'paidForMinor': 50000}).paidForMinor, 50000);
   });
 
-  testWidgets('paid for someone keeps the shop, and saves who owes it as not the user\'s', (tester) async {
+  testWidgets('paid for someone reads as what they owe, and is none of it the user\'s', (tester) async {
     final requests = <http.Request>[];
     final server = _server(requests);
     await http.runWithClient(() async {
@@ -89,7 +89,9 @@ void main() {
 
     final patch = _patch(requests);
     expect(patch['paidFor'], isTrue);
-    expect(patch['merchant'], 'Big Bazaar');
+    // None of it was the user's, so the row is about what Rahul owes
+    // rather than about the shop.
+    expect(patch['merchant'], 'Owed to Rahul');
     expect(patch['split']['myShareMinor'], 0);
     expect((patch['people'] as List).single['contactId'], 'rahul');
   });

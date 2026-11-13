@@ -226,10 +226,6 @@ class _EditSheetState extends State<_EditSheet> {
   /// automatic fill (transfer, person) may replace it.
   bool _merchantTyped = false;
 
-  /// The last "Transfer to …" this sheet wrote, so changing the account
-  /// can rewrite its own suggestion without touching anything else.
-  String? _autoMerchant;
-
   /// Whether the user has chosen an account in this sheet. On a row whose
   /// message named no account, only an actual choice - an account, or
   /// "It was cash" - may say the account is now known; saving an edit to
@@ -443,6 +439,7 @@ class _EditSheetState extends State<_EditSheet> {
 
     _loadCommitments();
     _loadSubscriptions();
+    if (_kind == _Kind.refund) _loadRefundSource();
     _loadDeposits();
     _loadGoals();
     _loadMetalHoldings();
@@ -657,6 +654,29 @@ class _EditSheetState extends State<_EditSheet> {
     }
   }
 
+  /// The purchase a refund came back for, when it is linked to exactly
+  /// one: its shop names the refund, and its category files it. Fetched
+  /// because a refund link carries only an id and an amount.
+  String? _refundFrom;
+  String? _refundCategoryId;
+
+  Future<void> _loadRefundSource() async {
+    final links = widget.transaction?.refundOf ?? const [];
+    if (links.length != 1 || _refundFrom != null) return;
+    try {
+      final json = await ApiClient.instance.get('/transactions/${links.single.transactionId}') as Map<String, dynamic>;
+      if (!mounted) return;
+      final source = Transaction.fromJson(json);
+      setState(() {
+        _refundFrom = source.merchant?.trim().isEmpty ?? true ? null : source.merchant!.trim();
+        _refundCategoryId = source.category?.id;
+        if (_kind == _Kind.refund) _autoFillTransfer();
+      });
+    } catch (_) {
+      // The refund simply keeps the name it arrived with.
+    }
+  }
+
   /// Lets go of the subscription: called inside setState wherever the row
   /// becomes something that cannot be a renewal.
   void _clearSubscription() {
@@ -743,6 +763,9 @@ class _EditSheetState extends State<_EditSheet> {
           if (due.dueMinor > 0) part.amount.text = _rupees(due.dueMinor);
           if (fresh) part.picked = match != null ? match.contains(due.loanId) : due.dueMinor > 0;
         }
+        // Which loan it is was only just settled, so the row can name
+        // itself after it now.
+        if (_kind == _Kind.loan) _autoFillTransfer();
       });
     } catch (_) {
       // The rows stay as they are, to be filled by hand.
@@ -840,18 +863,71 @@ class _EditSheetState extends State<_EditSheet> {
   /// A transfer is always "Transfers", and a bank's "UPI/9876@ybl" says
   /// less than "Transfer to Cash". Never replaces a merchant typed in this
   /// sheet. Called inside setState.
-  void _autoFillTransfer() {
-    if (_kind != _Kind.transfer) return;
-    final transfers = widget.categories.where((c) => c.name == 'Transfers').firstOrNull;
-    if (transfers != null) _categoryId = transfers.id;
-
-    final other = _transferAccountId == null ? null : _accountName(_transferAccountId);
-    if (other == null || _merchantTyped) return;
-    final current = _merchant.text.trim();
-    if (current.isEmpty || current == _autoMerchant || looksLikeRawPayee(current)) {
-      _merchant.text = _isDebit ? 'Transfer to $other' : 'Transfer from $other';
-      _autoMerchant = _merchant.text;
+  /// The name and the category a kind other than plain spending writes
+  /// for itself: a card bill is its card's, an EMI its loan's, a salary
+  /// is "Salary".
+  ///
+  /// Plain spending and a split bill name nothing - the shop is already
+  /// the right answer there, and the category is a real choice.
+  ({String? merchant, String? category}) _kindNames() {
+    switch (_kind) {
+      case _Kind.transfer:
+        final other = _transferAccountId == null ? null : _accountName(_transferAccountId);
+        return (
+          merchant: other == null ? null : (_isDebit ? 'Transfer to $other' : 'Transfer from $other'),
+          category: 'Transfers',
+        );
+      case _Kind.cardBill:
+        final card = widget.accounts.where((account) => account.id == _cardPaymentFor).firstOrNull;
+        return (merchant: card == null ? null : '${card.bankName} card bill', category: 'Transfers');
+      case _Kind.loan:
+        // Named after the one loan it repays; several at once has no one
+        // name, and the panel below lists them anyway.
+        final ticked = _loanParts.where((part) => part.picked).toList();
+        final loan = ticked.length == 1
+            ? _loans.where((candidate) => candidate.id == ticked.single.loanId).firstOrNull
+            : null;
+        return (merchant: loan == null ? null : '${loan.label} EMI', category: 'EMI & Loans');
+      case _Kind.salary:
+        return (merchant: 'Salary', category: 'Income');
+      case _Kind.earmark:
+        // The merchant is whoever the money came from, which is worth
+        // keeping; only what it counts as is settled.
+        return (merchant: null, category: 'Income');
+      case _Kind.refund:
+        return (merchant: _refundFrom == null ? null : 'Refund from $_refundFrom', category: _refundCategoryId);
+      case _Kind.settlement:
+      case _Kind.split:
+      case _Kind.normal:
+        // The people kinds are named after the person, which happens as
+        // they are picked - see _fillFromPerson.
+        return (merchant: null, category: null);
     }
+  }
+
+  /// Writes those names in. A name the user typed is never touched; one
+  /// that came from a bank message is, which is the point - "NEFT/MB/..."
+  /// is nobody's idea of a card bill.
+  void _autoFillTransfer() {
+    final names = _kindNames();
+
+    final category = names.category;
+    if (category != null) {
+      // A category id (a refund's, from the purchase it came back for) or
+      // the name of one of the user's own.
+      // Either the name of one of the user's categories, or an id - a
+       // refund takes the category of the purchase it came back for.
+      final match = categoriesFor(widget.categories, _type).where((c) => c.name == category).firstOrNull;
+      if (match != null) {
+        _categoryId = match.id;
+      } else if (categoriesFor(widget.categories, _type).any((c) => c.id == category)) {
+        _categoryId = category;
+      }
+    }
+
+    final merchant = names.merchant;
+    if (merchant == null || _merchantTyped || _merchant.text.trim() == merchant) return;
+    _merchant.text = merchant;
   }
 
   /// The card this is going on, when 70% or more of its credit limit is
@@ -888,6 +964,7 @@ class _EditSheetState extends State<_EditSheet> {
       _autoFillTransfer();
     });
     if (kind == _Kind.loan) _loadLoanSuggestion();
+    if (kind == _Kind.refund) _loadRefundSource();
   }
 
   /// Changing direction has to drop anything the new one cannot mean, or
@@ -1052,10 +1129,14 @@ class _EditSheetState extends State<_EditSheet> {
     // Still "Someone" while an existing transaction's names load.
     if (name.trim().isEmpty || name == 'Someone') return;
 
-    // Paid at a counter for them: the shop is still the merchant.
-    if (_isLend && _paidFor) return;
     if (_isLend || _kind == _Kind.settlement) {
-      if (!_merchantTyped) _merchant.text = name;
+      // Paid at a counter for them: none of it was the user's, so the row
+      // is about what they owe rather than about the shop.
+      final named = _isLend && _paidFor ? 'Owed to $name' : name;
+      final current = _merchant.text.trim();
+      if (!_merchantTyped || current == name || current == 'Owed to $name') {
+        _merchant.text = named;
+      }
       final lent = categoriesFor(widget.categories, _type)
           .where((category) => category.name == 'Lent & borrowed')
           .firstOrNull;
@@ -1086,7 +1167,6 @@ class _EditSheetState extends State<_EditSheet> {
       _error = null;
       _merchant.text = contact.name;
       _merchantTyped = true;
-      _autoMerchant = null;
       final lent = _lentCategoryId;
       if (lent != null) _categoryId = lent;
       _becomePersonKind(contact);
@@ -1680,6 +1760,7 @@ class _EditSheetState extends State<_EditSheet> {
                         child: DsField(
                           label: _isDebit ? 'Paid to' : 'From',
                           child: TextField(
+                            key: const ValueKey('merchant-field'),
                             controller: _merchant,
                             textCapitalization: TextCapitalization.words,
                             onChanged: (_) => setState(() => _merchantTyped = true),
@@ -2532,7 +2613,10 @@ class _EditSheetState extends State<_EditSheet> {
               if (_cardPaymentFor != null && !_cardAccounts.any((card) => card.id == _cardPaymentFor))
                 DropdownMenuItem<String?>(value: _cardPaymentFor, child: const Text('A card no longer listed')),
             ],
-            onChanged: (value) => setState(() => _cardPaymentFor = value),
+            onChanged: (value) => setState(() {
+              _cardPaymentFor = value;
+              _autoFillTransfer();
+            }),
           ),
         ),
         const SizedBox(height: 8),
@@ -2610,6 +2694,7 @@ class _EditSheetState extends State<_EditSheet> {
             onChanged: (value) => setState(() {
               _error = null;
               part.picked = value ?? false;
+              _autoFillTransfer();
             }),
           ),
           const SizedBox(width: 4),

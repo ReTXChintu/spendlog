@@ -761,6 +761,15 @@ export interface TransactionDoc {
   /// by matching or linked by hand. Real spending, counted in full, and a
   /// fixed cost of the month like a commitment's payment.
   subscriptionId?: Types.ObjectId | null;
+  /// The user's month this counts against, when that is not the month it
+  /// happened in: the key (YYYY-MM) of a month in budget.months terms.
+  ///
+  /// Salary that lands on the 13th for a month that opens on the 15th
+  /// leaves two days of spending out of the money it was really meant to
+  /// come from. Saying so moves the figure without moving the payment:
+  /// it is still listed, and still charted, on the day it happened.
+  /// Null - the normal case - means the month it falls in.
+  countInMonth?: string | null;
   /// Set when only part of this bill was the user's own spending. The rest
   /// is money owed back, and countedAmountMinor drops to the share.
   split?: TransactionSplit | null;
@@ -1078,6 +1087,7 @@ const transactionSchema = new Schema<TransactionDoc>(
     cardPaymentFor: { type: Schema.Types.ObjectId, ref: "Account", default: null },
     commitmentId: { type: Schema.Types.ObjectId, ref: "FixedCommitment", default: null },
     subscriptionId: { type: Schema.Types.ObjectId, ref: "Subscription", default: null },
+    countInMonth: { type: String, default: null, match: /^\d{4}-\d{2}$/ },
     split: { type: transactionSplitSchema, default: null },
     isSettlement: { type: Boolean, default: false },
     pending: { type: Boolean, default: false },

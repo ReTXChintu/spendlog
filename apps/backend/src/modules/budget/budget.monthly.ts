@@ -306,10 +306,30 @@ export interface TopPayment {
 
 export const TOP_PAYMENTS = 5;
 
+/**
+ * What counts against a month: everything that happened inside it, less
+ * anything said to belong to another month, plus anything other months
+ * sent here.
+ *
+ * Pay that lands before the month it is for leaves a day or two of
+ * spending attached to the month that is ending. Transaction.countInMonth
+ * moves that figure without moving the payment, and this is the match
+ * every figure measured against a budget has to use.
+ */
+export function countsInMonth(month: Pick<UserMonth, "key" | "start" | "end">): Record<string, unknown> {
+  return {
+    $or: [
+      // `null` here also matches the rows written before this existed.
+      { occurredAt: { $gte: month.start, $lt: month.end }, countInMonth: null },
+      { countInMonth: month.key },
+    ],
+  };
+}
+
 /** The month's biggest payments, on what counts - the same rows its spent total adds up. */
 export async function topPaymentsIn(
   userId: Types.ObjectId,
-  month: Pick<UserMonth, "start" | "end">,
+  month: Pick<UserMonth, "key" | "start" | "end">,
   limit = TOP_PAYMENTS
 ): Promise<TopPayment[]> {
   const rows = await Transaction.aggregate<{
@@ -324,8 +344,8 @@ export async function topPaymentsIn(
       $match: {
         userId,
         type: "DEBIT",
-        occurredAt: { $gte: month.start, $lt: month.end },
         countedAmountMinor: { $gt: 0 },
+        ...countsInMonth(month),
       },
     },
     { $sort: { countedAmountMinor: -1, occurredAt: -1 } },
@@ -352,7 +372,7 @@ export async function topPaymentsIn(
 }
 
 /** Spending in a month by category ("none" for uncategorised), and how much of it was fixed costs. */
-export async function spendingIn(userId: Types.ObjectId, month: Pick<UserMonth, "start" | "end">) {
+export async function spendingIn(userId: Types.ObjectId, month: Pick<UserMonth, "key" | "start" | "end">) {
   // One pass. A payment towards a commitment, a subscription's renewal or
   // a card EMI's instalment is a fixed cost; a loan repayment is one for
   // the part put down to its loans, and anything it was not split to yet
@@ -362,8 +382,8 @@ export async function spendingIn(userId: Types.ObjectId, month: Pick<UserMonth, 
       $match: {
         userId,
         type: "DEBIT",
-        occurredAt: { $gte: month.start, $lt: month.end },
         countedAmountMinor: { $gt: 0 },
+        ...countsInMonth(month),
       },
     },
     {
@@ -494,7 +514,10 @@ function describe(month: UserMonth, bySalary: boolean, currentKey: string, now: 
 }
 
 /** The month's spent figure alone: the same total analytics shows. */
-export async function spentInMonth(userId: Types.ObjectId, month: Pick<UserMonth, "start" | "end">): Promise<number> {
+export async function spentInMonth(
+  userId: Types.ObjectId,
+  month: Pick<UserMonth, "key" | "start" | "end">
+): Promise<number> {
   const byCategory = await spendingIn(userId, month);
   return [...byCategory.values()].reduce((sum, entry) => sum + entry.spent, 0);
 }
