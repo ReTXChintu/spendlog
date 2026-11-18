@@ -24,6 +24,47 @@ export interface BudgetPeriod {
   daysElapsed: number;
 }
 
+/**
+ * The user's month a period is, by key: "2026-11" for the one that opens
+ * on 15 November. A month is named for the pay day it opens with (see
+ * budget.months), so this is the first day's month.
+ */
+export function monthKeyOf(period: Pick<BudgetPeriod, "key">): string {
+  return period.key.slice(0, 7);
+}
+
+/**
+ * What counts against a stretch of time: everything that happened inside
+ * it, less anything said to belong to another month, plus anything other
+ * months sent here.
+ *
+ * Pay that lands before the month it is for leaves a day or two of
+ * spending attached to the month that is ending. Transaction.countInMonth
+ * moves where that money counts without moving the day it happened, and
+ * this is the match every figure measured against a month has to use -
+ * what was spent, what a fixed cost has had paid towards it, who has paid
+ * their share - or they disagree about where the payment went.
+ *
+ * `until` caps the half that goes by date, for a figure "so far". The
+ * other half is anything sent here, whenever it happened.
+ *
+ * Spread into a $match whose other keys are not `$or`.
+ */
+export function countedIn(
+  window: { start: Date; end: Date },
+  monthKey: string,
+  until?: Date
+): Record<string, unknown> {
+  const byDate = until ? { $gte: window.start, $lt: window.end, $lte: until } : { $gte: window.start, $lt: window.end };
+  return {
+    $or: [
+      // `null` here also matches the rows written before this existed.
+      { occurredAt: byDate, countInMonth: null },
+      { countInMonth: monthKey },
+    ],
+  };
+}
+
 function istDate(year: number, month: number, day: number): Date {
   const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
   return new Date(Date.UTC(year, month, Math.min(day, lastDay)) - IST_OFFSET_MS);

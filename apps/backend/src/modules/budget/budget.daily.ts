@@ -2,7 +2,7 @@ import { Types } from "mongoose";
 import { Account, DailyBudgetChange, Loan, Transaction, User } from "../../models";
 import { peopleCategoryId } from "../categories/categories.system";
 import { IST_OFFSET, IST_OFFSET_MS, istDayKey, istMonthKey, istMonthStart } from "../../time";
-import { BudgetPeriod } from "./budget.period";
+import { BudgetPeriod, countedIn, monthKeyOf } from "./budget.period";
 import { currentBudgetPeriod } from "./budget.pace";
 
 /**
@@ -201,6 +201,9 @@ export async function dailyBudget(
       { $gt: ["$groupId", null] },
       { $gt: ["$commitmentId", null] },
       { $in: ["$accountId", pocketAccounts] },
+      // Sent here from before the month began (Transaction.countInMonth):
+      // spending this month's, on no day of it.
+      { $lt: ["$occurredAt", period.start] },
     ],
   };
   const rows = await Transaction.aggregate<{ _id: string | null; total: number; count: number }>([
@@ -208,7 +211,8 @@ export async function dailyBudget(
       $match: {
         userId,
         type: "DEBIT",
-        occurredAt: { $gte: period.start, $lte: now },
+        // Not what was sent on to another month; what was sent here is.
+        ...countedIn(period, monthKeyOf({ key: istDayKey(period.start) }), now),
         countedAmountMinor: { $gt: 0 },
       },
     },

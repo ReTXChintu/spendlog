@@ -997,12 +997,18 @@ const refundAllocationSchema = new Schema<RefundAllocation>(
 export interface PersonShare {
   contactId: Types.ObjectId;
   amountMinor: number;
+  /// Of amountMinor, what settled something kept outside SpendLog - most
+  /// often a Splitwise balance. Real money between them, so it stays on
+  /// the row, but it squares nothing here: who-owes-whom leaves it out.
+  /// Zero, or missing on rows from before it existed, is none of it.
+  elsewhereMinor?: number;
 }
 
 const personShareSchema = new Schema<PersonShare>(
   {
     contactId: { type: Schema.Types.ObjectId, ref: "Contact", required: true },
     amountMinor: { type: Number, required: true, min: 1 },
+    elsewhereMinor: { type: Number, default: 0, min: 0 },
   },
   { _id: false }
 );

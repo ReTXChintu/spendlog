@@ -7,8 +7,10 @@ import {
   TransactionDoc,
   commitmentFullAmountFor,
 } from "../../models";
-import { BudgetPeriod } from "./budget.period";
+import { BudgetPeriod, countedIn, monthKeyOf } from "./budget.period";
 import { commitmentPeriod } from "./budget.pace";
+import { userMonth } from "./budget.months";
+import { runOncePerUser } from "../../backfill";
 
 /**
  * Fixed costs other people pay the user back for.
@@ -131,7 +133,7 @@ export async function linkSharedCommitment(row: HydratedDocument<TransactionDoc>
       userId: row.userId,
       commitmentId: commitment._id,
       type: "DEBIT",
-      occurredAt: { $gte: period.start, $lt: period.end },
+      ...countedIn(period, monthKeyOf(period)),
     });
     if (taken) continue;
 
@@ -206,13 +208,21 @@ export class TowardsError extends Error {}
  * What money in from people was put towards, checked against the row it
  * will be: each entry is for a fixed cost of the user's that the person
  * is on, and no person is put down for more than their part of the row.
+ *
+ * Money sent on to another month (Transaction.countInMonth) is for that
+ * month's period, whatever period it was put down for. Roommates who pay
+ * the rent a few days before pay day are paying the coming month's -
+ * which is exactly what sending it on says - and the editor only ever
+ * offered the period that was current when it was opened.
  */
 export async function checkTowards(
   userId: Types.ObjectId,
-  people: { contactId: string; amountMinor: number }[],
-  towards: { commitmentId: string; contactId: string; periodKey: string; amountMinor: number }[]
+  people: { contactId: string; amountMinor: number; elsewhereMinor?: number }[],
+  towards: { commitmentId: string; contactId: string; periodKey: string; amountMinor: number }[],
+  countInMonth: string | null = null
 ): Promise<{ commitmentId: Types.ObjectId; contactId: Types.ObjectId; periodKey: string; amountMinor: number }[]> {
   if (towards.length === 0) return [];
+  const forPeriod = countInMonth ? (await userMonth(userId, countInMonth)).from : null;
   const commitments = await FixedCommitment.find({ userId, _id: { $in: towards.map((entry) => entry.commitmentId) } })
     .select("shares name")
     .lean();
@@ -227,17 +237,100 @@ export async function checkTowards(
     byPerson.set(entry.contactId, (byPerson.get(entry.contactId) ?? 0) + entry.amountMinor);
   }
   for (const [contactId, total] of byPerson) {
-    const theirs = people.find((person) => person.contactId === contactId)?.amountMinor ?? 0;
+    const person = people.find((entry) => entry.contactId === contactId);
+    const elsewhere = person?.elsewhereMinor ?? 0;
+    // What settled something in Splitwise can't also be their rent.
+    const theirs = (person?.amountMinor ?? 0) - elsewhere;
     if (total > theirs) {
       throw new TowardsError(
-        `That puts ₹${(total / 100).toFixed(2)} of it towards fixed costs, but only ₹${(theirs / 100).toFixed(2)} came from them.`
+        elsewhere > 0
+          ? `That puts ₹${(total / 100).toFixed(2)} of it towards fixed costs, but only ₹${(theirs / 100).toFixed(2)} is left once Splitwise's part is taken out.`
+          : `That puts ₹${(total / 100).toFixed(2)} of it towards fixed costs, but only ₹${(theirs / 100).toFixed(2)} came from them.`
       );
     }
   }
   return towards.map((entry) => ({
     commitmentId: new Types.ObjectId(entry.commitmentId),
     contactId: new Types.ObjectId(entry.contactId),
-    periodKey: entry.periodKey,
+    periodKey: forPeriod ?? entry.periodKey,
     amountMinor: entry.amountMinor,
   }));
+}
+
+/**
+ * Money in towards fixed costs that was sent on to another month before
+ * checkTowards knew to move it: put on that month's period. Safe to run
+ * twice - a row already right is left alone.
+ */
+export async function runTowardsFollowMonthBackfill(): Promise<void> {
+  await runOncePerUser("towardsFollowMonth", 1, async (userId) => {
+    const rows = await Transaction.find({ userId, type: "CREDIT", countInMonth: { $ne: null }, "towards.0": { $exists: true } });
+    let changed = 0;
+    for (const row of rows) {
+      const from = (await userMonth(userId, row.countInMonth!)).from;
+      if (row.towards.every((entry) => entry.periodKey === from)) continue;
+      for (const entry of row.towards) entry.periodKey = from;
+      row.markModified("towards");
+      await row.save();
+      changed += 1;
+    }
+    return changed;
+  });
+}
+
+/**
+ * Money people sent towards their part of a fixed cost for a month the
+ * user has not paid that cost in yet, by person.
+ *
+ * Roommates usually send their rent a few days before the rent goes out.
+ * Until the rent's own payment is recorded, that money has nothing to
+ * square on the People page and reads as the user owing it back - but it
+ * isn't owed, it's paid ahead. Once the payment lands it is split with
+ * them like any other month's, and the two cancel as they always have.
+ *
+ * Only the current month and the ones after it: a month that is over with
+ * no payment recorded against the cost is a gap in the record, not money
+ * paid ahead, and is left to show as it always has.
+ */
+export async function paidAhead(
+  userId: Types.ObjectId,
+  contactIds?: Types.ObjectId[],
+  now = new Date()
+): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  const current = await userMonth(userId, undefined, now);
+  const credits = await Transaction.find({
+    userId,
+    type: "CREDIT",
+    towards: {
+      $elemMatch: { periodKey: { $gte: current.from }, ...(contactIds ? { contactId: { $in: contactIds } } : {}) },
+    },
+  })
+    .select("towards")
+    .lean();
+  if (credits.length === 0) return result;
+
+  // Whether the cost has been paid in a month, asked once per month.
+  const paidIn = new Map<string, boolean>();
+  for (const credit of credits) {
+    for (const entry of credit.towards ?? []) {
+      if (entry.periodKey < current.from) continue;
+      if (contactIds && !contactIds.some((id) => id.equals(entry.contactId))) continue;
+      const pair = `${entry.commitmentId}:${entry.periodKey}`;
+      if (!paidIn.has(pair)) {
+        const month = await userMonth(userId, entry.periodKey.slice(0, 7), now);
+        const paid = await Transaction.exists({
+          userId,
+          commitmentId: entry.commitmentId,
+          type: "DEBIT",
+          ...countedIn(month, month.key),
+        });
+        paidIn.set(pair, !!paid);
+      }
+      if (paidIn.get(pair)) continue;
+      const key = entry.contactId.toString();
+      result.set(key, (result.get(key) ?? 0) + entry.amountMinor);
+    }
+  }
+  return result;
 }

@@ -11,6 +11,7 @@ import {
 } from "../../models";
 import { istDayKey, istDayStart } from "../../time";
 import { UserMonth, monthLabel, userMonth, userMonths } from "./budget.months";
+import { countedIn } from "./budget.period";
 import { BucketSummary, bucketSummary } from "./budget.bucket";
 import { isCardBillCommitment } from "../cards/cards.billPayment";
 import { subscriptionsStillDue } from "../subscriptions/subscriptions.service";
@@ -306,24 +307,9 @@ export interface TopPayment {
 
 export const TOP_PAYMENTS = 5;
 
-/**
- * What counts against a month: everything that happened inside it, less
- * anything said to belong to another month, plus anything other months
- * sent here.
- *
- * Pay that lands before the month it is for leaves a day or two of
- * spending attached to the month that is ending. Transaction.countInMonth
- * moves that figure without moving the payment, and this is the match
- * every figure measured against a budget has to use.
- */
+/** What counts against one of the user's months - see countedIn. */
 export function countsInMonth(month: Pick<UserMonth, "key" | "start" | "end">): Record<string, unknown> {
-  return {
-    $or: [
-      // `null` here also matches the rows written before this existed.
-      { occurredAt: { $gte: month.start, $lt: month.end }, countInMonth: null },
-      { countInMonth: month.key },
-    ],
-  };
+  return countedIn(month, month.key);
 }
 
 /** The month's biggest payments, on what counts - the same rows its spent total adds up. */
@@ -451,7 +437,7 @@ async function fixedStillDue(userId: Types.ObjectId, month: UserMonth): Promise<
           userId,
           commitmentId: { $ne: null },
           type: "DEBIT",
-          occurredAt: { $gte: month.start, $lt: month.end },
+          ...countsInMonth(month),
         },
       },
       { $group: { _id: "$commitmentId", total: { $sum: "$countedAmountMinor" } } },

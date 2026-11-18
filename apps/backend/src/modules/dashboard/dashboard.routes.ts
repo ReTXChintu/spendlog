@@ -32,7 +32,7 @@ import { balanceTodos } from "../accounts/accounts.drift";
 import { settleMissingCredits } from "../accounts/accounts.missingCredits";
 import { PocketStatus, pocketStatuses } from "../accounts/accounts.pocket";
 import { goalsOf, spokenForByAccount } from "../goals/savingsGoals.service";
-import { LENT_PART, outsideTransactionsMinor } from "../contacts/contacts.people";
+import { LENT_PART, outsideTransactionsMinor, poolAdjustmentMinor } from "../contacts/contacts.people";
 
 export const dashboardRouter = Router();
 dashboardRouter.use(requireAuth);
@@ -483,7 +483,9 @@ async function owedBalance(userId: Types.ObjectId) {
   // Opening balances and clearances are per person and outside every
   // transaction; without them a debt cleared with a gift would still read
   // as owed here while the People screen said it was settled.
-  const outside = await outsideTransactionsMinor(userId);
+  // Nor Splitwise's part of a settlement, or rent sent ahead of it going
+  // out - neither is owed, and the People screen leaves both out.
+  const outside = (await outsideTransactionsMinor(userId)) + (await poolAdjustmentMinor(userId));
   const row = rows[0];
   if (!row) return { balanceMinor: outside };
 

@@ -240,3 +240,185 @@ describe("a fixed cost others pay back for", () => {
     assert.deepEqual((await models.Transaction.findById(back.body.id).lean())!.towards, []);
   });
 });
+
+/**
+ * Pay on the 15th, and everything below paid on the 13th - two days
+ * before the month it is really for - then sent on to it with "Counts next
+ * month". The rent, Mama's monthly payment and the flatmates' money back
+ * all have to land in that month, not the one that was ending.
+ */
+describe("paying before the month it is for", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  let period: typeof import("./budget.period");
+  before(async () => {
+    period = await import("./budget.period");
+  });
+
+  async function paidOnThe15th() {
+    const setup = await flat();
+    await models.User.updateOne({ _id: setup.user.id }, { $set: { salaryDay: 15, salaryAmountMinor: 100_000_00 } });
+    const current = period.budgetPeriodFor(15, new Date());
+    // The 13th: the old month's, two days before this one opened.
+    const early = new Date(current.start.getTime() - 2 * DAY + 12 * 60 * 60 * 1000);
+    const previous = period.budgetPeriodFor(15, early);
+    return { ...setup, current, previous, early, thisMonth: period.monthKeyOf(current) };
+  }
+
+  it("ticks a fixed cost off in the month a payment was sent to", async () => {
+    const { user, early, thisMonth } = await paidOnThe15th();
+    const mama = await call("/budget/commitments", user.token, {
+      body: { name: "Mama", amountMinor: 5000_00, dayOfMonth: 20 },
+    });
+    assert.equal(mama.status, 201, JSON.stringify(mama.body));
+    const paid = await call("/transactions", user.token, {
+      body: {
+        type: "DEBIT",
+        amountMinor: 5000_00,
+        occurredAt: early.toISOString(),
+        source: "MANUAL",
+        commitmentId: mama.body.id,
+        countInMonth: thisMonth,
+      },
+    });
+    assert.equal(paid.status, 201, JSON.stringify(paid.body));
+
+    const pace = (await call("/budget/pace", user.token)).body;
+    const listed = (pace.commitments as Json[]).find((c) => c.id === mama.body.id)!;
+    assert.equal(listed.isPaid, true, "Mama reads as paid this month");
+    assert.equal(listed.shortfallMinor, 0);
+    // And it is this month's spending, not the old one's.
+    assert.ok(pace.spentMinor >= 5000_00, `spent ${pace.spentMinor}`);
+
+    // Left on its own day, it would have been last month's.
+    await call(`/transactions/${paid.body.id}`, user.token, { method: "PATCH", body: { countInMonth: null } });
+    const after = (await call("/budget/pace", user.token)).body;
+    assert.equal((after.commitments as Json[]).find((c) => c.id === mama.body.id)!.isPaid, false);
+  });
+
+  it("puts a flatmate's rent on the month it was sent to, whatever period the editor said", async () => {
+    const { user, harshang, rent, early, previous, current, thisMonth } = await paidOnThe15th();
+    const back = await call("/transactions", user.token, {
+      body: {
+        type: "CREDIT",
+        amountMinor: 4000_00,
+        occurredAt: early.toISOString(),
+        source: "MANUAL",
+        isSettlement: true,
+        countInMonth: thisMonth,
+        people: [{ contactId: harshang.id, amountMinor: 4000_00 }],
+        // What an editor opened on the 13th sent: the month that was ending.
+        towards: [{ commitmentId: rent.id, contactId: harshang.id, periodKey: previous.key, amountMinor: 4000_00 }],
+      },
+    });
+    assert.equal(back.status, 201, JSON.stringify(back.body));
+    const row = await models.Transaction.findById(back.body.id).lean();
+    assert.equal(row!.towards[0].periodKey, current.key);
+
+    const [listed] = (await call("/budget/commitments", user.token)).body as unknown as Json[];
+    const theirs = (listed.shareStatus as Json[]).find((s) => s.contactId === harshang.id)!;
+    assert.equal(theirs.paidMinor, 4000_00, "Harshang's rent is in this month");
+  });
+
+  it("moves rows saved before this onto the month they were sent to", async () => {
+    const { user, harshang, rent, early, previous, current, thisMonth } = await paidOnThe15th();
+    // Written straight to the database, the way the old route left it.
+    const row = await models.Transaction.create({
+      userId: user.id,
+      type: "CREDIT",
+      amountMinor: 4000_00,
+      currency: "INR",
+      occurredAt: early,
+      source: "MANUAL",
+      isSettlement: true,
+      countInMonth: thisMonth,
+      people: [{ contactId: harshang.id, amountMinor: 4000_00 }],
+      towards: [{ commitmentId: rent.id, contactId: harshang.id, periodKey: previous.key, amountMinor: 4000_00 }],
+    });
+    const { runTowardsFollowMonthBackfill } = await import("./budget.commitmentShares");
+    await models.User.updateOne({ _id: user.id }, { $unset: { "backfills.towardsFollowMonth": 1 } });
+    await runTowardsFollowMonthBackfill();
+    assert.equal((await models.Transaction.findById(row._id).lean())!.towards[0].periodKey, current.key);
+    // Twice is the same as once.
+    await models.User.updateOne({ _id: user.id }, { $unset: { "backfills.towardsFollowMonth": 1 } });
+    await runTowardsFollowMonthBackfill();
+    assert.equal((await models.Transaction.findById(row._id).lean())!.towards[0].periodKey, current.key);
+  });
+});
+
+/**
+ * Chirayu sends 4,960 before the rent goes out: 4,000 of it his rent,
+ * 960 squaring something kept in Splitwise. Neither part is owed back to
+ * him - one is early, the other belongs to another app.
+ */
+describe("money back that isn't owed back", () => {
+  async function chirayuPaysEarly() {
+    const setup = await flat();
+    const [listed] = (await call("/budget/commitments", setup.user.token)).body as unknown as Json[];
+    const back = await call("/transactions", setup.user.token, {
+      body: {
+        type: "CREDIT",
+        amountMinor: 4960_00,
+        occurredAt: new Date().toISOString(),
+        source: "MANUAL",
+        isSettlement: true,
+        people: [{ contactId: setup.chirayu.id, amountMinor: 4960_00, elsewhereMinor: 960_00 }],
+        towards: [{ commitmentId: setup.rent.id, contactId: setup.chirayu.id, periodKey: listed.periodKey, amountMinor: 4000_00 }],
+      },
+    });
+    assert.equal(back.status, 201, JSON.stringify(back.body));
+    return { ...setup, back: back.body, periodKey: listed.periodKey as string };
+  }
+
+  async function person(token: string, id: string): Promise<Json> {
+    const owed = (await call("/contacts", token)).body;
+    const list = Array.isArray(owed) ? owed : owed.contacts;
+    return list.find((c: Json) => c.id === id);
+  }
+
+  it("owes him nothing before the rent goes out, and says it came early", async () => {
+    const { user, chirayu } = await chirayuPaysEarly();
+    const him = await person(user.token, chirayu.id);
+    assert.equal(him.balanceMinor, 0, "not: you owe Chirayu 4,960");
+    assert.equal(him.aheadMinor, 4000_00);
+
+    // The pooled figure agrees with the People screen.
+    const pool = (await call("/analytics/owed", user.token)).body;
+    assert.equal(pool.balanceMinor, 0);
+  });
+
+  it("still owes him nothing once the rent goes out and is split", async () => {
+    const { user, chirayu, harshang } = await chirayuPaysEarly();
+    const result = await ingest.ingestRawMessage({ userId: user.id, rawText: rentSms, source: "SMS", sourceRef: "r1", receivedAt: new Date() });
+    assert.equal(result.status, "created");
+
+    const him = await person(user.token, chirayu.id);
+    assert.equal(him.balanceMinor, 0);
+    assert.ok(!him.aheadMinor, "no longer early: the rent is out");
+    // Harshang hasn't sent his yet.
+    assert.equal((await person(user.token, harshang.id)).balanceMinor, 4000_00);
+
+    // His history moves the balance by his part here, not Splitwise's.
+    const page = (await call(`/contacts/${chirayu.id}`, user.token)).body;
+    const credit = (page.history as Json[]).find((entry) => entry.amountMinor < 0)!;
+    assert.equal(credit.amountMinor, -4000_00);
+  });
+
+  it("refuses more put down to Splitwise than came from him, or rent and Splitwise together past it", async () => {
+    const { user, chirayu, rent, back, periodKey } = await chirayuPaysEarly();
+    const tooMuch = await call(`/transactions/${back.id}`, user.token, {
+      method: "PATCH",
+      body: { people: [{ contactId: chirayu.id, amountMinor: 4960_00, elsewhereMinor: 5000_00 }] },
+    });
+    assert.equal(tooMuch.status, 400, JSON.stringify(tooMuch.body));
+
+    const together = await call(`/transactions/${back.id}`, user.token, {
+      method: "PATCH",
+      body: {
+        people: [{ contactId: chirayu.id, amountMinor: 4960_00, elsewhereMinor: 1500_00 }],
+        towards: [{ commitmentId: rent.id, contactId: chirayu.id, periodKey, amountMinor: 4000_00 }],
+      },
+    });
+    assert.equal(together.status, 400, JSON.stringify(together.body));
+    assert.match(together.body.error, /Splitwise/);
+  });
+});

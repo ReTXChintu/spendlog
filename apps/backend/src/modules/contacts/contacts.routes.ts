@@ -5,7 +5,7 @@ import { currentUserId, requireAuth } from "../../middleware/auth";
 import { validObjectIdParam } from "../../middleware/validate";
 import { Contact, ContactClearance, Group, Transaction } from "../../models";
 import { removeContactFromGroups, signedOpening } from "../groups/groups.service";
-import { Balance, NO_BALANCE, balances, normalisePhone, personSign } from "./contacts.people";
+import { Balance, NO_BALANCE, balances, normalisePhone, partHere, personSign } from "./contacts.people";
 
 export const contactsRouter = Router();
 contactsRouter.use(requireAuth);
@@ -129,9 +129,11 @@ contactsRouter.get("/:id", validObjectIdParam("id"), async (req, res) => {
       // it paid some of it back.
       // A group payment they made for the user counts the way money in
       // from them does: it is what the user now owes them.
-      amountMinor:
-        (transaction.people.find((person) => person.contactId.equals(contact._id))?.amountMinor ?? 0) *
-        personSign(transaction),
+      // Splitwise's part of it squares nothing here, so it moves nothing.
+      amountMinor: (() => {
+        const person = transaction.people.find((entry) => entry.contactId.equals(contact._id));
+        return (person ? partHere(person) : 0) * personSign(transaction);
+      })(),
     })),
     // Apart from the history rather than in it, so an app from before
     // clearances still finds a transaction on every history row. Signed

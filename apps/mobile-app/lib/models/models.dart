@@ -241,7 +241,11 @@ class PersonShare {
   final String contactId;
   final int amountMinor;
 
-  const PersonShare({required this.contactId, required this.amountMinor});
+  /// Of [amountMinor], what settled something kept in Splitwise (or
+  /// anywhere outside SpendLog). Left out of who owes whom here.
+  final int elsewhereMinor;
+
+  const PersonShare({required this.contactId, required this.amountMinor, this.elsewhereMinor = 0});
 
   factory PersonShare.fromJson(Map<String, dynamic> json) {
     // A bare id normally, but a populated contact reads the same way.
@@ -249,10 +253,15 @@ class PersonShare {
     return PersonShare(
       contactId: contact is Map<String, dynamic> ? contact['id'] as String : contact as String,
       amountMinor: json['amountMinor'] as int? ?? 0,
+      elsewhereMinor: (json['elsewhereMinor'] as num?)?.round() ?? 0,
     );
   }
 
-  Map<String, dynamic> toJson() => {'contactId': contactId, 'amountMinor': amountMinor};
+  Map<String, dynamic> toJson() => {
+        'contactId': contactId,
+        'amountMinor': amountMinor,
+        if (elsewhereMinor > 0) 'elsewhereMinor': elsewhereMinor,
+      };
 }
 
 /// One loan's part of a repayment.
@@ -2669,6 +2678,11 @@ class Contact {
   /// What groups say was owed with them when each began in SpendLog. Same
   /// signs as the balance, and part of it - apart from [openingBalanceMinor].
   final int groupOpeningMinor;
+
+  /// Money they sent towards their part of a fixed cost you haven't paid
+  /// yet - rent sent a few days early. Not owed back, so already out of
+  /// the balance; said so the balance reads as what it is.
+  final int aheadMinor;
   final int transactionCount;
   final DateTime? lastAt;
 
@@ -2683,6 +2697,7 @@ class Contact {
     this.returnedMinor = 0,
     this.clearedMinor = 0,
     this.groupOpeningMinor = 0,
+    this.aheadMinor = 0,
     this.transactionCount = 0,
     this.lastAt,
   });
@@ -2701,6 +2716,7 @@ class Contact {
         returnedMinor: json['returnedMinor'] as int? ?? 0,
         clearedMinor: json['clearedMinor'] as int? ?? 0,
         groupOpeningMinor: json['groupOpeningMinor'] as int? ?? 0,
+        aheadMinor: (json['aheadMinor'] as num?)?.round() ?? 0,
         transactionCount: json['transactionCount'] as int? ?? 0,
         lastAt: json['lastAt'] != null ? DateTime.tryParse(json['lastAt'] as String) : null,
       );

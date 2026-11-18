@@ -5,7 +5,7 @@ import { currentUserId, requireAuth } from "../../middleware/auth";
 import { Account, Transaction } from "../../models";
 import { IST_OFFSET, istDayKey } from "../../time";
 import { UserMonth, monthLabel, monthSoFar, userMonth, userMonths } from "../budget/budget.months";
-import { LENT_PART, outsideTransactionsMinor } from "../contacts/contacts.people";
+import { LENT_PART, outsideTransactionsMinor, poolAdjustmentMinor } from "../contacts/contacts.people";
 
 export const analyticsRouter = Router();
 analyticsRouter.use(requireAuth);
@@ -208,8 +208,10 @@ analyticsRouter.get("/owed", async (req, res) => {
       { $group: { _id: "$type", amountMinor: { $sum: "$amountMinor" } } },
     ]),
     // Per person and outside every transaction: what was owed before
-    // SpendLog, less what was cleared without money moving.
-    outsideTransactionsMinor(userId),
+    // SpendLog, less what was cleared without money moving - and what of
+    // the settlements was Splitwise's, or rent sent ahead (see
+    // poolAdjustmentMinor), so this agrees with the People screen.
+    Promise.all([outsideTransactionsMinor(userId), poolAdjustmentMinor(userId)]).then(([a, b]) => a + b),
   ]);
 
   const lentMinor = lent[0]?.amountMinor ?? 0;

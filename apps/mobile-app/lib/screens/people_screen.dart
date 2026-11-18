@@ -533,6 +533,15 @@ class _PersonScreenState extends State<PersonScreen> {
                       style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx3),
                     ),
                   ],
+                  if (contact.aheadMinor > 0) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      key: const ValueKey('paid-ahead'),
+                      '${formatMoney(contact.aheadMinor)} sent early for a fixed cost you haven\'t paid yet '
+                      '- not owed back',
+                      style: kNum.copyWith(fontSize: 13, height: 18 / 13, color: c.tx3),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   Wrap(
                     spacing: 8,

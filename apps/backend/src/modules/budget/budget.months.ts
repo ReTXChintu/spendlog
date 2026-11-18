@@ -2,7 +2,7 @@ import { Types } from "mongoose";
 import { Transaction, User } from "../../models";
 import { IST_OFFSET_MS, istDayKey, istMonthEnd, istMonthKey, istMonthStart } from "../../time";
 import { currentBudgetPeriod } from "./budget.pace";
-import { budgetPeriodFor } from "./budget.period";
+import { budgetPeriodFor, countedIn } from "./budget.period";
 
 /**
  * What a "month" is, for this user.
@@ -130,7 +130,7 @@ export async function monthSoFar(userId: Types.ObjectId, now = new Date()) {
       {
         $match: {
           userId,
-          occurredAt: { $gte: month.start, $lt: end },
+          ...countedIn({ start: month.start, end }, month.key),
           type: "DEBIT",
           countedAmountMinor: { $gt: 0 },
         },

@@ -8,7 +8,7 @@ import {
   commitmentFullAmountFor,
 } from "../../models";
 import { isCardBillCommitment } from "../cards/cards.billPayment";
-import { BudgetPeriod, budgetPeriodFor } from "./budget.period";
+import { BudgetPeriod, budgetPeriodFor, countedIn, monthKeyOf } from "./budget.period";
 
 /**
  * The period a user's money is measured over, right now.
@@ -58,7 +58,7 @@ export async function commitmentPeriod(userId: Types.ObjectId, now = new Date())
 export async function paidTowards(
   userId: Types.ObjectId,
   commitmentId: Types.ObjectId,
-  period: Pick<BudgetPeriod, "start" | "end">
+  period: Pick<BudgetPeriod, "start" | "end" | "key">
 ): Promise<number> {
   const [row] = await Transaction.aggregate<{ total: number }>([
     {
@@ -66,7 +66,7 @@ export async function paidTowards(
         userId,
         commitmentId,
         type: "DEBIT",
-        occurredAt: { $gte: period.start, $lt: period.end },
+        ...countedIn(period, monthKeyOf(period)),
       },
     },
     { $group: { _id: null, total: { $sum: "$countedAmountMinor" } } },
@@ -162,7 +162,7 @@ export async function budgetPace(userId: Types.ObjectId, now = new Date()) {
       $match: {
         userId,
         type: "DEBIT",
-        occurredAt: { $gte: period.start, $lt: period.end },
+        ...countedIn(period, monthKeyOf(period)),
         countedAmountMinor: { $gt: 0 },
       },
     },
@@ -193,7 +193,9 @@ export async function budgetPace(userId: Types.ObjectId, now = new Date()) {
         userId,
         commitmentId: { $ne: null },
         type: "DEBIT",
-        occurredAt: { $gte: period.start, $lt: period.end },
+        // The month it counts in, so a bill paid a day before pay landed
+        // and sent on to the month it was for reads as paid there.
+        ...countedIn(period, monthKeyOf(period)),
       },
     },
     {

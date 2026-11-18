@@ -1,5 +1,6 @@
 import { Types } from "mongoose";
 import { Contact, ContactClearance, Group, Transaction, TransactionDoc } from "../../models";
+import { paidAhead } from "../budget/budget.commitmentShares";
 
 /**
  * Who owes what, and the rules for saying so on a transaction.
@@ -36,9 +37,12 @@ export function shareablePart(
 export async function checkPeople(
   userId: Types.ObjectId,
   transaction: Pick<TransactionDoc, "amountMinor" | "isSettlement" | "split">,
-  people: { contactId: string; amountMinor: number }[]
+  people: { contactId: string; amountMinor: number; elsewhereMinor?: number }[]
 ): Promise<string | null> {
   if (people.length === 0) return null;
+  if (people.some((person) => (person.elsewhereMinor ?? 0) > person.amountMinor)) {
+    return "More of someone's part is put down to Splitwise than their part comes to.";
+  }
 
   const ids = people.map((person) => person.contactId);
   if (new Set(ids).size !== ids.length) return "The same person is on it twice.";
@@ -80,6 +84,12 @@ export interface Balance {
   groupOpeningMinor: number;
   /// Of givenMinor, what was paid at a counter for them rather than lent.
   paidForMinor?: number;
+  /**
+   * Money they sent towards their part of a fixed cost the user hasn't
+   * paid yet this month (or a later one) - rent sent a few days early.
+   * Already back in the balance: it is not owed to them, only early.
+   */
+  aheadMinor?: number;
   transactionCount: number;
   lastAt: Date | null;
 }
@@ -127,6 +137,17 @@ function groupOpeningsPipeline(userId: Types.ObjectId, contactIds?: Types.Object
  */
 const OWED_TO_ME = { $and: [{ $eq: ["$type", "DEBIT"] }, { $ne: ["$offLedger", true] }] };
 
+/**
+ * A person's part of a row as it counts between them and the user: all
+ * of it, less whatever settled something kept in Splitwise.
+ */
+const PART_HERE = { $subtract: ["$people.amountMinor", { $ifNull: ["$people.elsewhereMinor", 0] }] };
+
+/** The same, for a person's entry in hand. */
+export function partHere(person: { amountMinor: number; elsewhereMinor?: number | null }): number {
+  return person.amountMinor - (person.elsewhereMinor ?? 0);
+}
+
 /** The same rule, for a row in hand: +1 adds to what they owe, -1 takes from it. */
 export function personSign(transaction: Pick<TransactionDoc, "type" | "offLedger">): 1 | -1 {
   return transaction.type === "DEBIT" && !transaction.offLedger ? 1 : -1;
@@ -139,7 +160,7 @@ export function personSign(transaction: Pick<TransactionDoc, "type" | "offLedger
  * added by whoever has the contact to hand.
  */
 export async function balances(userId: Types.ObjectId, contactIds?: Types.ObjectId[]) {
-  const [rows, cleared, openings] = await Promise.all([
+  const [rows, cleared, openings, ahead] = await Promise.all([
     Transaction.aggregate<{
       _id: Types.ObjectId;
       givenMinor: number;
@@ -154,10 +175,10 @@ export async function balances(userId: Types.ObjectId, contactIds?: Types.Object
       {
         $group: {
           _id: "$people.contactId",
-          givenMinor: { $sum: { $cond: [OWED_TO_ME, "$people.amountMinor", 0] } },
-          returnedMinor: { $sum: { $cond: [OWED_TO_ME, 0, "$people.amountMinor"] } },
+          givenMinor: { $sum: { $cond: [OWED_TO_ME, PART_HERE, 0] } },
+          returnedMinor: { $sum: { $cond: [OWED_TO_ME, 0, PART_HERE] } },
           paidForMinor: {
-            $sum: { $cond: [{ $and: [OWED_TO_ME, { $eq: ["$paidFor", true] }] }, "$people.amountMinor", 0] },
+            $sum: { $cond: [{ $and: [OWED_TO_ME, { $eq: ["$paidFor", true] }] }, PART_HERE, 0] },
           },
           transactionCount: { $sum: 1 },
           lastAt: { $max: "$occurredAt" },
@@ -178,6 +199,7 @@ export async function balances(userId: Types.ObjectId, contactIds?: Types.Object
         },
       },
     ]),
+    paidAhead(userId, contactIds),
   ]);
 
   const result = new Map<string, Balance>(
@@ -215,7 +237,34 @@ export async function balances(userId: Types.ObjectId, contactIds?: Types.Object
       lastAt: balance.lastAt && balance.lastAt > row.lastAt ? balance.lastAt : row.lastAt,
     });
   }
+  for (const [key, aheadMinor] of ahead) {
+    const balance = result.get(key);
+    if (!balance) continue;
+    result.set(key, { ...balance, balanceMinor: balance.balanceMinor + aheadMinor, aheadMinor });
+  }
   return result;
+}
+
+/**
+ * What the pooled "people owe you" figures need on top of settlements'
+ * own amounts: the part of them that settled something in Splitwise, and
+ * rent people sent ahead of it going out - neither of which is owed.
+ * Positive moves the pool towards people owing the user.
+ */
+export async function poolAdjustmentMinor(userId: Types.ObjectId): Promise<number> {
+  const [elsewhere, ahead] = await Promise.all([
+    Transaction.aggregate<{ _id: string; total: number }>([
+      { $match: { userId, isSettlement: true, "people.elsewhereMinor": { $gt: 0 } } },
+      { $group: { _id: "$type", total: { $sum: { $sum: "$people.elsewhereMinor" } } } },
+    ]),
+    paidAhead(userId),
+  ]);
+  // Splitwise money in was counted as paying the user back, and money out
+  // as the user paying back: both undone.
+  const inMinor = elsewhere.find((row) => row._id === "CREDIT")?.total ?? 0;
+  const outMinor = elsewhere.find((row) => row._id === "DEBIT")?.total ?? 0;
+  const aheadMinor = [...ahead.values()].reduce((sum, value) => sum + value, 0);
+  return inMinor - outMinor + aheadMinor;
 }
 
 /**

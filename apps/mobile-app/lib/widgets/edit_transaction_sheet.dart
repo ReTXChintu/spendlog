@@ -40,8 +40,22 @@ class _Person {
   String name;
   final TextEditingController amount;
 
-  _Person({required this.contactId, required this.name, int? amountMinor})
-      : amount = TextEditingController(text: amountMinor == null ? '' : _rupees(amountMinor));
+  /// Of their part, what settled something kept in Splitwise - shown once
+  /// asked for, or when the row already has some.
+  final TextEditingController elsewhere;
+  bool showElsewhere;
+
+  _Person({required this.contactId, required this.name, int? amountMinor, int elsewhereMinor = 0})
+      : amount = TextEditingController(text: amountMinor == null ? '' : _rupees(amountMinor)),
+        elsewhere = TextEditingController(text: elsewhereMinor > 0 ? _rupees(elsewhereMinor) : ''),
+        showElsewhere = elsewhereMinor > 0;
+
+  int get elsewhereMinor => parseRupees(elsewhere.text) ?? 0;
+
+  void dispose() {
+    amount.dispose();
+    elsewhere.dispose();
+  }
 }
 
 String _rupees(int minor) => (minor / 100).toStringAsFixed(2);
@@ -421,7 +435,12 @@ class _EditSheetState extends State<_EditSheet> {
     _myShareManual = TextEditingController(text: myShare == null ? '' : _rupees(myShare));
 
     for (final share in t?.people ?? const <PersonShare>[]) {
-      _people.add(_Person(contactId: share.contactId, name: 'Someone', amountMinor: share.amountMinor));
+      _people.add(_Person(
+        contactId: share.contactId,
+        name: 'Someone',
+        amountMinor: share.amountMinor,
+        elsewhereMinor: share.elsewhereMinor,
+      ));
     }
     if (_kind == _Kind.split) {
       // Equal if the saved parts are exactly what equal would give now;
@@ -474,7 +493,7 @@ class _EditSheetState extends State<_EditSheet> {
       box.dispose();
     }
     for (final person in _people) {
-      person.amount.dispose();
+      person.dispose();
     }
     for (final part in _loanParts) {
       part.amount.dispose();
@@ -1138,7 +1157,7 @@ class _EditSheetState extends State<_EditSheet> {
   void _removePerson(_Person person) {
     setState(() {
       _people.remove(person);
-      person.amount.dispose();
+      person.dispose();
       if (_kind == _Kind.settlement && _autoSettle) _resplitSettlement();
     });
   }
@@ -1227,7 +1246,7 @@ class _EditSheetState extends State<_EditSheet> {
         if (contact != null) {
           for (final person in _people.where((person) => person.contactId != contact.id).toList()) {
             _people.remove(person);
-            person.amount.dispose();
+            person.dispose();
           }
         }
         _includeMe = false;
@@ -1324,10 +1343,25 @@ class _EditSheetState extends State<_EditSheet> {
               {
                 'commitmentId': commitment.id,
                 'contactId': share.contactId,
-                'periodKey': _towardsPeriods['${commitment.id}:${share.contactId}'] ?? commitment.periodKey,
+                'periodKey': _towardsPeriodFor('${commitment.id}:${share.contactId}', commitment.periodKey),
                 'amountMinor': parseRupees(_towardsBoxes['${commitment.id}:${share.contactId}']!.text),
               },
       ];
+
+  /// Which period money towards a fixed cost is for. Sent on to another
+  /// month, that month's - roommates who pay a few days before pay day
+  /// are paying the coming month's rent. Brought back to its own month,
+  /// that one's. Otherwise as saved, or the period current now.
+  String? _towardsPeriodFor(String key, String? current) {
+    final month = _countInMonth;
+    if (month != null) {
+      if (_monthAfterRow?.month == month) return _monthAfterRow!.from;
+      if (_monthOfRow?.month == month) return _monthOfRow!.from;
+    } else if (widget.transaction?.countInMonth != null && _monthOfRow != null) {
+      return _monthOfRow!.from;
+    }
+    return _towardsPeriods[key] ?? current;
+  }
 
   /// "What was it for?" on money paid back: each person's part of each
   /// shared fixed cost they are on, the rest left to other splits.
@@ -1337,7 +1371,8 @@ class _EditSheetState extends State<_EditSheet> {
     for (final person in _people) {
       final shared = _sharedFor(person.contactId);
       if (shared.isEmpty) continue;
-      final theirs = parseRupees(person.amount.text) ?? 0;
+      final elsewhere = person.showElsewhere ? person.elsewhereMinor : 0;
+      final theirs = (parseRupees(person.amount.text) ?? 0) - elsewhere;
       var putTowards = 0;
       for (final (commitment, share) in shared) {
         final key = '${commitment.id}:${share.contactId}';
@@ -1385,14 +1420,17 @@ class _EditSheetState extends State<_EditSheet> {
         ));
       }
       final rest = theirs - putTowards;
+      final splitwise = elsewhere > 0 ? ' and ${formatMoney(elsewhere)} to Splitwise' : '';
       rows.add(Padding(
         padding: const EdgeInsets.only(bottom: 10),
         child: Text(
           rest < 0
-              ? 'That puts ${formatMoney(-rest)} more towards fixed costs than came from ${person.name}.'
+              ? elsewhere > 0
+                  ? 'That puts ${formatMoney(-rest)} more towards fixed costs and Splitwise than came from ${person.name}.'
+                  : 'That puts ${formatMoney(-rest)} more towards fixed costs than came from ${person.name}.'
               : rest == 0
-                  ? 'All of ${person.name}\'s goes to that.'
-                  : 'The rest of ${person.name}\'s, ${formatMoney(rest)}, is for other splits.',
+                  ? 'All of ${person.name}\'s goes to that$splitwise.'
+                  : 'The rest of ${person.name}\'s, ${formatMoney(rest)}, is for other splits$splitwise.',
           style: TextStyle(
             fontSize: 12,
             height: 16 / 12,
@@ -1480,7 +1518,12 @@ class _EditSheetState extends State<_EditSheet> {
           if (minor == null || minor <= 0) {
             return _fail('Give ${person.name} an amount, or take them off.');
           }
-          people.add(PersonShare(contactId: person.contactId, amountMinor: minor).toJson());
+          final elsewhere = person.showElsewhere ? person.elsewhereMinor : 0;
+          if (elsewhere > minor) {
+            return _fail("More of ${person.name}'s is put down to Splitwise than their "
+                '${formatMoney(minor)} comes to.');
+          }
+          people.add(PersonShare(contactId: person.contactId, amountMinor: minor, elsewhereMinor: elsewhere).toJson());
         }
         if (_settledMinor > total) {
           return _fail('${formatMoney(_settledMinor)} is put down to people, but the whole thing '
@@ -2583,7 +2626,7 @@ class _EditSheetState extends State<_EditSheet> {
               : 'Money back for bills already recorded - not counted as income.',
         ),
         const SizedBox(height: 8),
-        for (final person in _people)
+        for (final person in _people) ...[
           _ShareRow(
             leading: PersonAvatar(name: person.name, radius: 14),
             name: person.name,
@@ -2593,6 +2636,8 @@ class _EditSheetState extends State<_EditSheet> {
               onChanged: () => setState(() => _autoSettle = false),
             ),
           ),
+          _elsewhereRow(person),
+        ],
         if (_people.length > 1 && !_autoSettle)
           Align(
             alignment: Alignment.centerLeft,
@@ -2622,6 +2667,67 @@ class _EditSheetState extends State<_EditSheet> {
           ),
         if (!_isDebit) _towardsPanel(),
       ],
+    );
+  }
+
+  /// Under a person settling up: the part of theirs that squared
+  /// something kept in Splitwise, which SpendLog leaves out of who owes
+  /// whom. Offered as a link until asked for.
+  Widget _elsewhereRow(_Person person) {
+    final c = context.c;
+    if (!person.showElsewhere) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton(
+          key: ValueKey('splitwise-${person.contactId}'),
+          onPressed: () => setState(() => person.showElsewhere = true),
+          child: Text(_isDebit ? 'Part of it was for Splitwise' : 'Part of it was Splitwise'),
+        ),
+      );
+    }
+    final theirs = parseRupees(person.amount.text) ?? 0;
+    final over = person.elsewhereMinor > theirs;
+    return Padding(
+      padding: const EdgeInsets.only(left: 36, bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text('Settled in Splitwise',
+                    style: TextStyle(fontSize: 13, height: 18 / 13, fontWeight: FontWeight.w500, color: c.tx2)),
+              ),
+              IconButton(
+                tooltip: 'Not Splitwise',
+                icon: const Icon(Icons.close, size: 18),
+                onPressed: () => setState(() {
+                  person.showElsewhere = false;
+                  person.elsewhere.clear();
+                }),
+              ),
+              SizedBox(
+                width: 112,
+                child: KeyedSubtree(
+                  key: ValueKey('splitwise-amount-${person.contactId}'),
+                  child: _AmountBox(controller: person.elsewhere, onChanged: () => setState(() {})),
+                ),
+              ),
+            ],
+          ),
+          Text(
+            over
+                ? "That's more than ${person.name}'s ${formatMoney(theirs)}."
+                : 'Kept in Splitwise, so it squares nothing here.',
+            style: TextStyle(
+              fontSize: 12,
+              height: 16 / 12,
+              fontWeight: over ? FontWeight.w600 : FontWeight.w400,
+              color: over ? c.crit : c.tx3,
+            ),
+          ),
+        ],
+      ),
     );
   }
 

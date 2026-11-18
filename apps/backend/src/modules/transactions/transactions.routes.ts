@@ -276,6 +276,9 @@ transactionsRouter.get("/:id", validObjectIdParam("id"), async (req, res) => {
 const personShareBody = z.object({
   contactId: z.string().regex(OBJECT_ID),
   amountMinor: z.number().int().positive(),
+  // Of it, what settled something kept in Splitwise (or anywhere outside
+  // SpendLog) - left out of who owes whom.
+  elsewhereMinor: z.number().int().nonnegative().optional(),
 });
 
 // Mirrors the edit form field for field: the same form adds a transaction
@@ -515,7 +518,7 @@ transactionsRouter.post("/", async (req, res) => {
   let towards: Awaited<ReturnType<typeof checkTowards>> = [];
   if (parsed.data.type === "CREDIT" && parsed.data.towards?.length) {
     try {
-      towards = await checkTowards(currentUserId(req), people, parsed.data.towards);
+      towards = await checkTowards(currentUserId(req), people, parsed.data.towards, parsed.data.countInMonth ?? null);
     } catch (error) {
       if (error instanceof TowardsError) return res.status(400).json({ error: error.message });
       throw error;
@@ -766,12 +769,17 @@ async function nextLoanSplits(
 
 /** Whether two people lists say the same, in the same order. */
 function samePeople(
-  a: { contactId: unknown; amountMinor: number }[],
-  b: { contactId: unknown; amountMinor: number }[]
+  a: { contactId: unknown; amountMinor: number; elsewhereMinor?: number }[],
+  b: { contactId: unknown; amountMinor: number; elsewhereMinor?: number }[]
 ): boolean {
   return (
     a.length === b.length &&
-    a.every((entry, i) => String(entry.contactId) === String(b[i].contactId) && entry.amountMinor === b[i].amountMinor)
+    a.every(
+      (entry, i) =>
+        String(entry.contactId) === String(b[i].contactId) &&
+        entry.amountMinor === b[i].amountMinor &&
+        (entry.elsewhereMinor ?? 0) === (b[i].elsewhereMinor ?? 0)
+    )
   );
 }
 
@@ -876,13 +884,14 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
     isSettlement: data.isSettlement ?? existing.isSettlement,
     split: data.split !== undefined ? data.split : existing.split,
   };
-  let people: { contactId: string; amountMinor: number }[] | undefined = data.people;
+  let people: { contactId: string; amountMinor: number; elsewhereMinor?: number }[] | undefined = data.people;
   if (!groupKept && people === undefined && existing.people.length > 0) {
     if (shareablePart(next) === 0) people = [];
     else {
       const kept = existing.people.map((person) => ({
         contactId: person.contactId.toString(),
         amountMinor: person.amountMinor,
+        elsewhereMinor: person.elsewhereMinor ?? 0,
       }));
       const problem = await checkPeople(userId, next, kept);
       if (problem) return res.status(400).json({ error: `${problem} Update who it was for too.` });
@@ -1051,7 +1060,11 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   let towardsFields: Record<string, unknown> = {};
   const willHavePeople =
     people ??
-    existing.people.map((person) => ({ contactId: person.contactId.toString(), amountMinor: person.amountMinor }));
+    existing.people.map((person) => ({
+      contactId: person.contactId.toString(),
+      amountMinor: person.amountMinor,
+      elsewhereMinor: person.elsewhereMinor ?? 0,
+    }));
   if (willBeType !== "CREDIT" || willHavePeople.length === 0) {
     if (existing.towards.length > 0 || data.towards !== undefined) towardsFields = { towards: [] };
   } else if (data.towards !== undefined || existing.towards.length > 0) {
@@ -1064,7 +1077,8 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
         amountMinor: entry.amountMinor,
       }));
     try {
-      towardsFields = { towards: await checkTowards(userId, willHavePeople, asked) };
+      const willCountIn = data.countInMonth !== undefined ? data.countInMonth : (existing.countInMonth ?? null);
+      towardsFields = { towards: await checkTowards(userId, willHavePeople, asked, willCountIn) };
     } catch (error) {
       if (error instanceof TowardsError) return res.status(400).json({ error: error.message });
       throw error;
