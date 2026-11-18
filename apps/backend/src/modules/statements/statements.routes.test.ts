@@ -4,7 +4,13 @@ import http from "node:http";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import mongoose, { Types } from "mongoose";
-import { istDayStart } from "../../time";
+import { istDayKey, istDayStart } from "../../time";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+// A statement drawn ten days ago: inside the 60 days a bill is shown for,
+// whatever day the suite runs. A fixed date here stopped being a current
+// bill two months after it was written.
+const RECENT_STATEMENT = istDayStart(istDayKey(new Date(Date.now() - 10 * DAY_MS)));
 
 process.env.DATABASE_URL ??= "mongodb://127.0.0.1:27017/spendlog_unused";
 process.env.JWT_SECRET ??= "statement-routes-secret";
@@ -409,7 +415,7 @@ describe("marking part of a bill as covered by cashback or points", () => {
       accountId,
       sourceRef: `msg-${crypto.randomUUID()}`,
       status: "PARSED",
-      statementDate: istDayStart("2026-09-17"),
+      statementDate: RECENT_STATEMENT,
       totalDueMinor,
       lines: [],
     });
@@ -428,7 +434,8 @@ describe("marking part of a bill as covered by cashback or points", () => {
       cardPaymentFor: card._id,
       type: "DEBIT",
       amountMinor: 40105_57,
-      occurredAt: istDayStart("2026-09-20"),
+      // Paid three days after the statement.
+      occurredAt: new Date(RECENT_STATEMENT.getTime() + 3 * DAY_MS),
       description: "card bill paid",
       source: "MANUAL",
     });
@@ -500,7 +507,7 @@ describe("typing in a bill total, or correcting one that read wrong", () => {
       accountId,
       sourceRef: `msg-${crypto.randomUUID()}`,
       status: "PARSED",
-      statementDate: istDayStart("2026-09-17"),
+      statementDate: RECENT_STATEMENT,
       totalDueMinor,
       lines: [],
     });
