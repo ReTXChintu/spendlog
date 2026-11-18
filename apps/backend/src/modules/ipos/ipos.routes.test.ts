@@ -321,3 +321,64 @@ describe("GET /ipos", () => {
     assert.equal(response.status, 401);
   });
 });
+
+/**
+ * A payment marked as an IPO application, or another investment by name:
+ * a tag on the payment, and the IPO screen saying what was applied.
+ */
+describe("payments put down to an IPO", () => {
+  async function pay(body: Record<string, unknown>) {
+    const response = await realFetch(`${baseUrl}/transactions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "DEBIT", source: "MANUAL", occurredAt: new Date().toISOString(), ...body }),
+    });
+    return { status: response.status, body: (await response.json()) as any };
+  }
+
+  async function patch(id: string, body: Record<string, unknown>) {
+    const response = await realFetch(`${baseUrl}/transactions/${id}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return { status: response.status, body: (await response.json()) as any };
+  }
+
+  beforeEach(async () => {
+    await models.Transaction.deleteMany({});
+  });
+
+  it("says what was applied on the IPO's own row, however its name is written", async () => {
+    guruReplies.push(ok({ data: [item()] }));
+    // The calendar says "Acme"; one payment says "Acme Ltd IPO", another
+    // was split between it and something the user names.
+    const first = await pay({ amountMinor: 14_910_00, investmentTags: [{ kind: "IPO", name: "Acme Ltd IPO", amountMinor: 14_910_00 }] });
+    assert.equal(first.status, 201, JSON.stringify(first.body));
+    assert.equal(first.body.countedAmountMinor, 14_910_00, "still spending");
+    await pay({
+      amountMinor: 20_000_00,
+      investmentTags: [
+        { kind: "IPO", name: "acme", amountMinor: 5000_00 },
+        { kind: "OTHER", name: "PPF", amountMinor: 15_000_00 },
+      ],
+    });
+
+    const body = await getIpos();
+    assert.equal(body.open[0].appliedMinor, 19_910_00);
+  });
+
+  it("refuses more than the payment, and drops them off money in", async () => {
+    const over = await pay({
+      amountMinor: 1000_00,
+      investmentTags: [{ kind: "OTHER", name: "Stocks", amountMinor: 1500_00 }],
+    });
+    assert.equal(over.status, 400);
+
+    const ok = await pay({ amountMinor: 1000_00, investmentTags: [{ kind: "OTHER", name: "Stocks", amountMinor: 1000_00 }] });
+    assert.equal(ok.status, 201);
+    assert.equal((await patch(ok.body.id, { amountMinor: 900_00 })).status, 400, "smaller than its tags");
+    await patch(ok.body.id, { type: "CREDIT" });
+    assert.deepEqual((await models.Transaction.findById(ok.body.id).lean())!.investmentTags, []);
+  });
+});

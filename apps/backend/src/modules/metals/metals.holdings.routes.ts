@@ -74,7 +74,7 @@ metalHoldingsRouter.delete("/:id", validObjectIdParam("id"), async (req, res) =>
   const userId = currentUserId(req);
   const holding = await MetalHolding.findOneAndDelete({ _id: req.params.id, userId });
   if (!holding) return res.status(404).json({ error: "Not found" });
-  await Transaction.updateMany({ userId, "metalBuy.holdingId": holding._id }, { $set: { metalBuy: null } });
+  await Transaction.updateMany({ userId, "metalBuys.holdingId": holding._id }, { $pull: { metalBuys: { holdingId: holding._id } } });
   res.status(204).end();
 });
 

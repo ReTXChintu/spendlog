@@ -7,7 +7,7 @@ import '../../widgets/state_block.dart';
 
 /// RDs and FDs, beside the funds: what each holds, what goes in a month,
 /// and the payments that went in. A total grows by every payment put into
-/// it (from the payment's editor, "Into RD/FD") and can be corrected from
+/// it (from the payment's editor, Investment > Deposit) and can be corrected from
 /// the passbook any time. No interest and no maturity date - just the
 /// money.
 class DepositsTab extends StatefulWidget {
@@ -80,7 +80,7 @@ class DepositsTabState extends State<DepositsTab> {
         icon: DsIcons.piggyBank,
         title: 'Track your RDs and FDs',
         body: 'Add each one with what it holds today, and for an RD what goes in each month. A payment put into '
-            'it - from the payment\'s editor, "Into RD/FD" - adds to its total. One payment can go into several.',
+            'it - from the payment\'s editor, Investment > Deposit - adds to its total. One payment can go into several.',
         actionLabel: 'Add a deposit',
         onAction: () => edit(),
       );
@@ -248,7 +248,7 @@ class _DepositDetailState extends State<_DepositDetail> {
                 : const DsSkeletonRows(count: 3)
           else if (payments.isEmpty)
             Text(
-              'None yet. Open a payment, pick "Into RD/FD" and choose this one.',
+              'None yet. Open a payment, pick Investment, then Deposit, and choose this one.',
               style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3),
             )
           else

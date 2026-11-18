@@ -51,6 +51,15 @@ export async function dropSupersededIndexes(): Promise<void> {
       index: "sourceTransactionId_1",
       rebuild: async () => (await import("./models")).EmiPlan.createIndexes(),
     },
+    // Was unique on { userId, transactionId }: a debit bought one fund.
+    // One payment can now go into several, each once, so the uniqueness
+    // moved to { userId, transactionId, holdingId } - which this one would
+    // still block.
+    {
+      collection: "fundtxns",
+      index: "userId_1_transactionId_1",
+      rebuild: async () => (await import("./models")).FundTxn.createIndexes(),
+    },
   ];
 
   for (const { collection, index, rebuild } of superseded as {

@@ -21,6 +21,7 @@ import { AiError, withModel } from "../ai/ai.gemini";
 import { fundAdvice } from "./funds.advice";
 import { peers as loadPeers, requireScheme, STALE_AFTER_MS } from "./funds.cache";
 import { linkSuggestions } from "./funds.links";
+import { fundPartsOf } from "./funds.parts";
 import { FLAG_RULES } from "./funds.math";
 import { holdingJson, ledgerJson, loadPortfolio, planJson, portfolioTotals, sparkline } from "./funds.portfolio";
 import {
@@ -431,11 +432,13 @@ fundsRouter.post("/holdings/:id/link", validObjectIdParam("id"), async (req, res
   if (!holding || !transaction) return res.status(404).json({ error: "Not found" });
   if (transaction.type !== "DEBIT") return res.status(400).json({ error: "Only money going out can buy a fund." });
 
-  const existing = await FundTxn.findOne({ userId, transactionId: transaction._id });
-  if (existing && !existing.holdingId.equals(holding._id)) {
+  // Linking from here is the whole payment buying this fund. Splitting one
+  // across funds is the payment editor's (see funds.parts).
+  const links = await FundTxn.find({ userId, transactionId: transaction._id });
+  if (links.some((link) => !link.holdingId.equals(holding._id))) {
     return res.status(409).json({ error: "That payment is already linked to another fund." });
   }
-  if (!existing) {
+  if (links.length === 0) {
     try {
       await FundTxn.create({
         userId,
@@ -451,6 +454,17 @@ fundsRouter.post("/holdings/:id/link", validObjectIdParam("id"), async (req, res
     }
   }
   res.json(await holdingDetail(userId, holding._id.toString()));
+});
+
+// GET /funds/links?transactionId= — the funds a payment bought into, and
+// how much of it went into each: what its editor opens with.
+fundsRouter.get("/links", async (req, res) => {
+  const parsed = z.object({ transactionId: objectId }).safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: "Which payment?" });
+  const userId = currentUserId(req);
+  const transaction = await Transaction.findOne({ _id: parsed.data.transactionId, userId }).select("amountMinor");
+  if (!transaction) return res.status(404).json({ error: "Not found" });
+  res.json(await fundPartsOf(userId, transaction));
 });
 
 // DELETE /funds/holdings/:id/link/:transactionId — unlink. The scheduled

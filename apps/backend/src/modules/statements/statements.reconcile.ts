@@ -546,7 +546,7 @@ export async function rematchStatement(statement: HydratedDocument<CardStatement
       (row.loanSplits?.length ?? 0) > 0 ||
       row.depositParts.length > 0 ||
       (row.goalParts?.length ?? 0) > 0 ||
-      row.metalBuy ||
+      row.metalBuys.length > 0 ||
       row.towards.length > 0 ||
       row.isSettlement
   );

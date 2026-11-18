@@ -110,7 +110,8 @@ async function linkedInputs(userId: Types.ObjectId, holdings: FundHoldingDoc[], 
       transactionId: txn.transactionId.toString(),
       txnId: txn._id.toString(),
       on: istDayKey(transaction.occurredAt),
-      amountMinor: transaction.amountMinor,
+      // This fund's part of the payment, when it was split across several.
+      amountMinor: txn.partMinor ?? transaction.amountMinor,
       via: "link",
     });
   }

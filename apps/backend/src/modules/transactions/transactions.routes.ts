@@ -41,7 +41,9 @@ import { DepositPartError, checkDepositParts } from "../deposits/deposits.servic
 import { GoalPartError, checkGoalParts } from "../goals/savingsGoals.service";
 import { setSubscriptionFor } from "../subscriptions/subscriptions.service";
 import { TowardsError, applyCommitmentShares, checkTowards } from "../budget/budget.commitmentShares";
-import { MetalBuyError, metalBuyFor } from "../metals/metals.holdings";
+import { MetalBuyError, metalBuyFor, metalBuysAgain, metalBuysFor } from "../metals/metals.holdings";
+import { INVESTMENT_TAG_KINDS, type MetalBuy } from "../../models";
+import { FundPartError, checkFundParts, checkFundPartsFit, setFundParts } from "../funds/funds.parts";
 import { IST_OFFSET, istDayEnd, istDayKey, istDayStart } from "../../time";
 import { TRANSACTION_TYPES } from "../../types";
 
@@ -309,6 +311,36 @@ const depositPartBody = z.object({
   amountMinor: z.number().int().positive(),
 });
 
+// Money into an investment with no holding to add it to: an IPO, or one
+// the user names.
+const investmentTagBody = z.object({
+  kind: z.enum(INVESTMENT_TAG_KINDS),
+  name: z.string().trim().min(1).max(80),
+  amountMinor: z.number().int().positive(),
+});
+
+/** Investment tags against what the payment will be: no more than it, together. */
+function tagsProblem(tags: { amountMinor: number }[], paymentMinor: number): string | null {
+  const total = tags.reduce((sum, tag) => sum + tag.amountMinor, 0);
+  return total > paymentMinor
+    ? `That's ₹${(total / 100).toFixed(2)} into investments, but the payment is ₹${(paymentMinor / 100).toFixed(2)}.`
+    : null;
+}
+
+// One mutual fund's part of a payment.
+const fundPartBody = z.object({
+  holdingId: z.string().regex(OBJECT_ID),
+  amountMinor: z.number().int().positive(),
+});
+
+// One gold or silver holding's part of a payment: how much of it went in,
+// and the grams when they are known (else worked out from the day's rate).
+const metalBuyPartBody = z.object({
+  holdingId: z.string().regex(OBJECT_ID),
+  amountMinor: z.number().int().positive(),
+  grams: z.number().positive().nullable().optional(),
+});
+
 // One member's part of a group payment, typed by hand.
 const groupShareAmountBody = z.object({
   memberId: z.string().regex(OBJECT_ID),
@@ -374,6 +406,17 @@ const createTransactionSchema = z.object({
     .object({ holdingId: z.string().regex(OBJECT_ID), grams: z.number().positive().nullable().optional() })
     .nullable()
     .optional(),
+  // The holdings it bought into, and how much into each. Replaces metalBuy,
+  // which an app from before splitting still sends; an empty list takes it
+  // out of all of them.
+  metalBuys: z.array(metalBuyPartBody).max(20).optional(),
+  // The mutual funds it bought into, and how much into each - linked the
+  // way the Investments screen links a debit to a fund. An empty list
+  // takes it off every fund.
+  fundParts: z.array(fundPartBody).max(20).optional(),
+  // An IPO it applied for, or another investment by name, and how much
+  // into each. An empty list takes them off.
+  investmentTags: z.array(investmentTagBody).max(20).optional(),
   // The group it goes in, picked in the editor - nothing is put in one by
   // itself any more, bar a Trippin trip's dates. tripId is the old name.
   groupId: z.string().regex(OBJECT_ID).nullable().optional(),
@@ -553,12 +596,30 @@ transactionsRouter.post("/", async (req, res) => {
   }
 
   // Gold or silver bought: only a payment buys any.
-  let metalBuy: Awaited<ReturnType<typeof metalBuyFor>> | null = null;
-  if (parsed.data.type === "DEBIT" && parsed.data.metalBuy) {
+  let metalBuys: MetalBuy[] = [];
+  if (parsed.data.type === "DEBIT" && (parsed.data.metalBuys?.length || parsed.data.metalBuy)) {
     try {
-      metalBuy = await metalBuyFor(currentUserId(req), parsed.data.amountMinor, parsed.data.occurredAt, parsed.data.metalBuy);
+      metalBuys = parsed.data.metalBuys?.length
+        ? await metalBuysFor(currentUserId(req), parsed.data.amountMinor, parsed.data.occurredAt, parsed.data.metalBuys)
+        : [await metalBuyFor(currentUserId(req), parsed.data.amountMinor, parsed.data.occurredAt, parsed.data.metalBuy!)];
     } catch (error) {
       if (error instanceof MetalBuyError) return res.status(400).json({ error: error.message });
+      throw error;
+    }
+  }
+
+  // An IPO or another investment by name: only a payment, no more than it.
+  const investmentTags = parsed.data.type === "DEBIT" ? (parsed.data.investmentTags ?? []) : [];
+  const tagError = tagsProblem(investmentTags, parsed.data.amountMinor);
+  if (tagError) return res.status(400).json({ error: tagError });
+
+  // Mutual funds it bought: checked now, linked once the row exists.
+  let fundParts: Awaited<ReturnType<typeof checkFundParts>> = [];
+  if (parsed.data.type === "DEBIT" && parsed.data.fundParts?.length) {
+    try {
+      fundParts = await checkFundParts(currentUserId(req), parsed.data.amountMinor, parsed.data.fundParts);
+    } catch (error) {
+      if (error instanceof FundPartError) return res.status(400).json({ error: error.message });
       throw error;
     }
   }
@@ -592,7 +653,8 @@ transactionsRouter.post("/", async (req, res) => {
     depositParts,
     goalParts,
     towards,
-    metalBuy,
+    metalBuys,
+    investmentTags,
     paidFor: parsed.data.type === "DEBIT" ? (parsed.data.paidFor ?? false) : false,
     giftForContactId: parsed.data.giftForContactId ?? null,
     source: "MANUAL",
@@ -608,6 +670,8 @@ transactionsRouter.post("/", async (req, res) => {
     const linked = await setSubscriptionFor(created, new Types.ObjectId(parsed.data.subscriptionId));
     if (!linked.ok) return res.status(400).json({ error: linked.error });
   }
+
+  if (fundParts.length > 0) await setFundParts(created.userId, created, fundParts);
 
   // A loan's instalments move as it is linked, so it goes through the
   // same step an edit uses rather than being written as a plain field.
@@ -682,6 +746,17 @@ const updateTransactionSchema = z.object({
     .object({ holdingId: z.string().regex(OBJECT_ID), grams: z.number().positive().nullable().optional() })
     .nullable()
     .optional(),
+  // The holdings it bought into, and how much into each. Replaces metalBuy,
+  // which an app from before splitting still sends; an empty list takes it
+  // out of all of them.
+  metalBuys: z.array(metalBuyPartBody).max(20).optional(),
+  // The mutual funds it bought into, and how much into each - linked the
+  // way the Investments screen links a debit to a fund. An empty list
+  // takes it off every fund.
+  fundParts: z.array(fundPartBody).max(20).optional(),
+  // An IPO it applied for, or another investment by name, and how much
+  // into each. An empty list takes them off.
+  investmentTags: z.array(investmentTagBody).max(20).optional(),
   // Zero is meaningful: someone else's bill paid from the user's card, all
   // of which is owed back. null clears the split entirely.
   split: z
@@ -1092,23 +1167,58 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   }
   if (willBeType !== "DEBIT") data.paidFor = false;
 
+  // An IPO or another investment by name: gone when it stops being a
+  // payment; checked against the amount it will have.
+  let tagFields: Record<string, unknown> = {};
+  if (willBeType !== "DEBIT") {
+    if ((existing.investmentTags?.length ?? 0) > 0) tagFields = { investmentTags: [] };
+  } else {
+    const tags = data.investmentTags ?? existing.investmentTags ?? [];
+    const problem = tagsProblem(tags, willBeAmount);
+    if (problem) return res.status(400).json({ error: problem });
+    if (data.investmentTags !== undefined) tagFields = { investmentTags: data.investmentTags };
+  }
+
+  // Mutual funds it bought: only a payment buys any, and the parts given
+  // are checked against the amount it will have. Written after the row.
+  let fundPartsAfter: Awaited<ReturnType<typeof checkFundParts>> | null = null;
+  if (willBeType !== "DEBIT") {
+    fundPartsAfter = [];
+  } else {
+    try {
+      if (data.fundParts !== undefined) fundPartsAfter = await checkFundParts(userId, willBeAmount, data.fundParts);
+      else if (willBeAmount !== existing.amountMinor) await checkFundPartsFit(userId, existing._id, willBeAmount);
+    } catch (error) {
+      if (error instanceof FundPartError) return res.status(400).json({ error: error.message });
+      throw error;
+    }
+  }
+
   // Gold or silver bought: worked out again when the amount or the day it
   // was bought changes, unless the grams were typed.
   let metalFields: Record<string, unknown> = {};
   const willBeAt = data.occurredAt ?? existing.occurredAt;
   try {
+    const had = existing.metalBuys ?? [];
+    // What an app from before splitting means by its single purchase: one
+    // for the whole payment, or none. A row it can't show - split across
+    // holdings - is left alone rather than collapsed by a form that never
+    // saw the split.
+    const legacy = data.metalBuys === undefined && data.metalBuy !== undefined;
+    const legacyCanSay = had.length === 0 || (had.length === 1 && had[0].amountMinor == null);
     if (willBeType !== "DEBIT") {
-      if (existing.metalBuy) metalFields = { metalBuy: null };
-    } else if (data.metalBuy !== undefined) {
-      metalFields = { metalBuy: data.metalBuy ? await metalBuyFor(userId, willBeAmount, willBeAt, data.metalBuy) : null };
+      if (had.length > 0) metalFields = { metalBuys: [] };
+    } else if (data.metalBuys !== undefined) {
+      metalFields = { metalBuys: await metalBuysFor(userId, willBeAmount, willBeAt, data.metalBuys) };
+    } else if (legacy && legacyCanSay) {
+      metalFields = { metalBuys: data.metalBuy ? [await metalBuyFor(userId, willBeAmount, willBeAt, data.metalBuy)] : [] };
     } else if (
-      existing.metalBuy &&
-      !existing.metalBuy.gramsTyped &&
+      had.length > 0 &&
       (willBeAmount !== existing.amountMinor || willBeAt.getTime() !== existing.occurredAt.getTime())
     ) {
-      metalFields = {
-        metalBuy: await metalBuyFor(userId, willBeAmount, willBeAt, { holdingId: existing.metalBuy.holdingId.toString() }),
-      };
+      // The grams worked out again where they weren't typed; the whole
+      // payment's part follows its new amount.
+      metalFields = { metalBuys: await metalBuysAgain(userId, had, willBeAmount, willBeAt) };
     }
   } catch (error) {
     if (error instanceof MetalBuyError) return res.status(400).json({ error: error.message });
@@ -1123,6 +1233,9 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
     goalParts: _goalsAbove,
     towards: _towardsAbove,
     metalBuy: _metalAbove,
+    metalBuys: _metalsAbove,
+    fundParts: _fundsBelow,
+    investmentTags: _tagsAbove,
     // Which renewal it settles depends on its own date, so it goes
     // through setSubscriptionFor below rather than being written here.
     subscriptionId: _subscriptionBelow,
@@ -1151,6 +1264,7 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
         ...goalFields,
         ...towardsFields,
         ...metalFields,
+        ...tagFields,
         ...(people !== undefined ? { people } : {}),
         editedAt: new Date(),
         ...(kindChanged ? { kindEditedAt: new Date() } : {}),
@@ -1171,6 +1285,8 @@ transactionsRouter.patch("/:id", validObjectIdParam("id"), async (req, res) => {
   // Marked as renewing a subscription, or taken off the one it was on.
   // A row that stopped being a plain payment lets go of it either way:
   // a transfer or a card bill renews nothing.
+  if (fundPartsAfter) await setFundParts(userId, updated, fundPartsAfter);
+
   const stillSpending = !updated.isTransfer && !updated.isSettlement && !updated.cardPaymentFor
     && updated.type === "DEBIT";
   const askedForSub = data.subscriptionId !== undefined;

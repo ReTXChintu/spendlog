@@ -118,7 +118,7 @@ export async function mergeReportedTwice(userId: Types.ObjectId): Promise<number
       (late.loanId && !twin.loanId) ||
       (late.depositParts.length > 0 && twin.depositParts.length === 0) ||
       ((late.goalParts?.length ?? 0) > 0 && (twin.goalParts?.length ?? 0) === 0) ||
-      (late.metalBuy && !twin.metalBuy) ||
+      (late.metalBuys.length > 0 && twin.metalBuys.length === 0) ||
       late.isTransfer !== twin.isTransfer;
     if (tiedApart) continue;
 

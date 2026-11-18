@@ -10,7 +10,7 @@ import '../widgets/state_block.dart';
 /// Small things being saved up for: a PS5 by next October. Each has what is
 /// put aside so far, what it needs a month to get there on time, and the
 /// savings account the money sits in. Money goes in by marking a transfer
-/// into savings "For a goal", or by typing it here.
+/// into savings (Investment > Goals), or by typing it here.
 class SavingsGoalsScreen extends StatefulWidget {
   const SavingsGoalsScreen({super.key});
 
@@ -435,7 +435,7 @@ class _GoalSheetState extends State<_GoalSheet> {
             Text('What went in', style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx)),
             const SizedBox(height: 4),
             Text(
-              'Mark a transfer into savings "For a goal" when you edit it, or add money here.',
+              'Mark a payment into savings as Investment > Goals when you edit it, or add money here.',
               style: TextStyle(fontSize: 12, height: 16 / 12, color: c.tx3),
             ),
             const SizedBox(height: 8),

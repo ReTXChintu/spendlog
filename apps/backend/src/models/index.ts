@@ -852,7 +852,15 @@ export interface TransactionDoc {
   /// A purchase of gold or silver: which holding, how many grams, and the
   /// rate per gram they were worked out at (that day's, with GST) - or
   /// typed by hand, when a jeweller's making charges meant fewer grams.
-  metalBuy?: MetalBuy | null;
+  /// Gold or silver this payment bought, for each holding it bought into.
+  /// One payment can be split across several (see MetalBuy.amountMinor).
+  /// Was a single `metalBuy`; the virtual of that name still reads the
+  /// first, for app versions from before.
+  metalBuys: MetalBuy[];
+  /// Money that went into an investment SpendLog keeps no holding for: an
+  /// IPO application, or anything else the user names (PPF, stocks, ...).
+  /// Only says what it was for and how much; nothing's total moves.
+  investmentTags: InvestmentTag[];
   /// Paid at the counter for somebody, who pays it back: not spending,
   /// and not a loan either, though it is kept the same way (a split with
   /// none of it the user's, the person owing the rest). People shows it
@@ -873,6 +881,10 @@ export interface MetalBuy {
   grams: number;
   rateMinor: number | null;
   gramsTyped: boolean;
+  /// How much of the payment went into this holding. Null is all of it -
+  /// which is what every purchase from before splitting means - and then
+  /// it follows the payment's amount when that is corrected.
+  amountMinor?: number | null;
 }
 
 const metalBuySchema = new Schema<MetalBuy>(
@@ -881,6 +893,7 @@ const metalBuySchema = new Schema<MetalBuy>(
     grams: { type: Number, required: true, min: 0 },
     rateMinor: { type: Number, default: null },
     gramsTyped: { type: Boolean, default: false },
+    amountMinor: { type: Number, default: null, min: 1 },
   },
   { _id: false }
 );
@@ -898,6 +911,25 @@ const towardsEntrySchema = new Schema<TowardsEntry>(
     commitmentId: { type: Schema.Types.ObjectId, ref: "FixedCommitment", required: true },
     contactId: { type: Schema.Types.ObjectId, ref: "Contact", required: true },
     periodKey: { type: String, required: true },
+    amountMinor: { type: Number, required: true, min: 1 },
+  },
+  { _id: false }
+);
+
+export const INVESTMENT_TAG_KINDS = ["IPO", "OTHER"] as const;
+export type InvestmentTagKind = (typeof INVESTMENT_TAG_KINDS)[number];
+
+export interface InvestmentTag {
+  kind: InvestmentTagKind;
+  /// The IPO's name as the calendar gives it, or whatever the user calls it.
+  name: string;
+  amountMinor: number;
+}
+
+const investmentTagSchema = new Schema<InvestmentTag>(
+  {
+    kind: { type: String, enum: INVESTMENT_TAG_KINDS, required: true },
+    name: { type: String, required: true, trim: true, maxlength: 80 },
     amountMinor: { type: Number, required: true, min: 1 },
   },
   { _id: false }
@@ -1111,7 +1143,8 @@ const transactionSchema = new Schema<TransactionDoc>(
     depositParts: { type: [depositPartSchema], default: [] },
     goalParts: { type: [goalPartSchema], default: [] },
     towards: { type: [towardsEntrySchema], default: [] },
-    metalBuy: { type: metalBuySchema, default: null },
+    metalBuys: { type: [metalBuySchema], default: [] },
+    investmentTags: { type: [investmentTagSchema], default: [] },
     timeUnknown: { type: Boolean, default: false },
     paidFor: { type: Boolean, default: false },
     giftForContactId: { type: Schema.Types.ObjectId, ref: "Contact", default: null },
@@ -1252,6 +1285,11 @@ transactionSchema.index(
 // What of a loan repayment is not put down to any loan yet: zero on
 // anything that is not one. Worked out rather than stored, so it can never
 // fall out of step with an amount corrected afterwards.
+// The one purchase an app from before splitting knows how to show.
+transactionSchema.virtual("metalBuy").get(function () {
+  return this.metalBuys?.[0] ?? null;
+});
+
 transactionSchema.virtual("loanUnassignedMinor").get(function () {
   const splits = this.loanSplits ?? [];
   if (splits.length === 0) return 0;
@@ -2931,6 +2969,10 @@ export interface FundTxnDoc {
   /// On LINKED: the debit. Its own date and amount are what count, so an
   /// edit to the transaction flows through.
   transactionId?: Types.ObjectId | null;
+  /// On LINKED: how much of the debit bought this fund, when one payment
+  /// went into several. Null is all of it - every link from before - and
+  /// then the payment's own amount is what counts.
+  partMinor?: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -2944,12 +2986,13 @@ const fundTxnSchema = new Schema<FundTxnDoc>(
     amountMinor: { type: Number, required: true, min: 0 },
     units: { type: Number, default: null },
     transactionId: { type: Schema.Types.ObjectId, ref: "Transaction", default: null },
+    partMinor: { type: Number, default: null, min: 1 },
   },
   { timestamps: true, ...serialization }
 );
-// A debit buys one thing: it can be linked to one holding, once.
+// A debit can be split across funds, but is linked to each one once.
 fundTxnSchema.index(
-  { userId: 1, transactionId: 1 },
+  { userId: 1, transactionId: 1, holdingId: 1 },
   { unique: true, partialFilterExpression: { transactionId: { $type: "objectId" } } }
 );
 

@@ -7,6 +7,7 @@ import { connectDatabase } from "./db";
 import { env } from "./env";
 import { runLendingBackfill } from "./modules/contacts/contacts.backfill";
 import { runGroupsMigration } from "./modules/groups/groups.migration";
+import { runMetalBuysMigration } from "./modules/metals/metals.holdings";
 import { runSpendLimitBackfill } from "./modules/accounts/accounts.backfill";
 import { runNightlyDriftCheck } from "./modules/accounts/accounts.drift";
 import { runAccountUnknownBackfill, runStatedBalanceBackfill } from "./modules/accounts/accounts.statedBackfill";
@@ -89,6 +90,9 @@ async function start() {
   // yet, and every screen that shows one would come up empty. It is one
   // pass, and every later start finds nothing left to do.
   await runGroupsMigration().catch((err) => console.error("Groups migration failed:", err));
+  // Gold and silver purchases became a list. Before listening too: the
+  // holdings are worked out from the list alone.
+  await runMetalBuysMigration().catch((err) => console.error("Metal purchases migration failed:", err));
 
   const { server, scheme } = createServer();
   server.listen(env.port, env.host, () => {

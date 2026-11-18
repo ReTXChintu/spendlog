@@ -133,7 +133,7 @@ describe("gold the user owns", () => {
     assert.equal(ring.metalBuy.gramsTyped, true);
 
     await call(`/transactions/${ring.id}`, user.token, { method: "PATCH", body: { amountMinor: 71_000_00 } });
-    assert.equal((await models.Transaction.findById(ring.id).lean())!.metalBuy!.grams, 4.8);
+    assert.equal((await models.Transaction.findById(ring.id).lean())!.metalBuys[0].grams, 4.8);
   });
 
   it("works grams out again when a computed purchase's amount changes, and drops it off money in", async () => {
@@ -141,10 +141,10 @@ describe("gold the user owns", () => {
     const digital = (await call("/metals/holdings", user.token, { body: { name: "Digital gold", purity: "24K", grams: 0 } })).body;
     const payment = (await buy(user.token, { amountMinor: 500_00, occurredAt: "2026-10-30T12:00:00+05:30", metalBuy: { holdingId: digital.id } })).body;
     await call(`/transactions/${payment.id}`, user.token, { method: "PATCH", body: { amountMinor: 1000_00 } });
-    assert.equal((await models.Transaction.findById(payment.id).lean())!.metalBuy!.grams, 0.0689);
+    assert.equal((await models.Transaction.findById(payment.id).lean())!.metalBuys[0].grams, 0.0689);
 
     await call(`/transactions/${payment.id}`, user.token, { method: "PATCH", body: { type: "CREDIT" } });
-    assert.equal((await models.Transaction.findById(payment.id).lean())!.metalBuy, null);
+    assert.deepEqual((await models.Transaction.findById(payment.id).lean())!.metalBuys, []);
   });
 
   it("puts a payment to the holding's payee down as a purchase as it arrives", async () => {
@@ -162,8 +162,8 @@ describe("gold the user owns", () => {
       receivedAt: new Date(),
     });
     const row = await models.Transaction.findById((result as { transaction: { _id: Types.ObjectId } }).transaction._id).lean();
-    assert.equal(String(row!.metalBuy?.holdingId), digital.id);
-    assert.equal(row!.metalBuy?.grams, 0.0345);
+    assert.equal(String(row!.metalBuys[0]?.holdingId), digital.id);
+    assert.equal(row!.metalBuys[0]?.grams, 0.0345);
   });
 
   it("refuses another user's holding", async () => {
@@ -189,5 +189,145 @@ describe("gold the user owns", () => {
     assert.equal(overview.investedMinor, 66_000_00);
     assert.equal(overview.gainMinor, 2 * 1408910 - 26_000_00);
     assert.equal(overview.partial, true);
+  });
+});
+
+/**
+ * One payment of 1,000 on the 30th: 600 of digital gold, 400 of 22K
+ * coins. Each holding gets its own part, at its own purity's rate.
+ */
+describe("one payment into several holdings", () => {
+  const ON = "2026-10-30T12:00:00+05:30";
+  // The 30th's rates, per gram with GST, as the server works them out.
+  const grams = (minor: number, per10g: number) => Math.round((minor / Math.round(per10g * 10 * 1.03)) * 10_000) / 10_000;
+
+  async function twoHoldings() {
+    const user = await makeUser();
+    const digital = (await call("/metals/holdings", user.token, { body: { name: "Digital gold", purity: "24K", grams: 0 } })).body;
+    const coins = (await call("/metals/holdings", user.token, { body: { name: "Coins", purity: "22K", grams: 0 } })).body;
+    return { user, digital, coins };
+  }
+
+  async function split(token: string, digitalId: string, coinsId: string) {
+    return buy(token, {
+      amountMinor: 1000_00,
+      occurredAt: ON,
+      metalBuys: [
+        { holdingId: digitalId, amountMinor: 600_00 },
+        { holdingId: coinsId, amountMinor: 400_00 },
+      ],
+    });
+  }
+
+  it("gives each holding its own part, in grams at its own rate", async () => {
+    const { user, digital, coins } = await twoHoldings();
+    const payment = await split(user.token, digital.id, coins.id);
+    assert.equal(payment.status, 201, JSON.stringify(payment.body));
+    assert.equal(payment.body.countedAmountMinor, 1000_00, "still spending, all of it");
+    // An app from before splitting still sees a purchase on it.
+    assert.equal(payment.body.metalBuy.holdingId, digital.id);
+
+    const listed = (await call("/metals/holdings", user.token)).body as unknown as Json[];
+    const byName = new Map(listed.map((holding) => [holding.name, holding]));
+    assert.equal(byName.get("Digital gold")!.investedMinor, 600_00);
+    assert.equal(byName.get("Digital gold")!.grams, grams(600_00, 140891));
+    assert.equal(byName.get("Coins")!.investedMinor, 400_00);
+    assert.equal(byName.get("Coins")!.grams, grams(400_00, 129056));
+
+    // Its purchases list the holding's part, not the whole payment.
+    const purchases = (await call(`/metals/holdings/${coins.id}/purchases`, user.token)).body as unknown as Json[];
+    assert.equal(purchases.length, 1);
+    assert.equal(purchases[0].amountMinor, 400_00);
+  });
+
+  it("refuses parts past the payment, or the same holding twice", async () => {
+    const { user, digital, coins } = await twoHoldings();
+    const over = await buy(user.token, {
+      amountMinor: 1000_00,
+      occurredAt: ON,
+      metalBuys: [
+        { holdingId: digital.id, amountMinor: 700_00 },
+        { holdingId: coins.id, amountMinor: 400_00 },
+      ],
+    });
+    assert.equal(over.status, 400);
+    const twice = await buy(user.token, {
+      amountMinor: 1000_00,
+      occurredAt: ON,
+      metalBuys: [
+        { holdingId: digital.id, amountMinor: 300_00 },
+        { holdingId: digital.id, amountMinor: 300_00 },
+      ],
+    });
+    assert.equal(twice.status, 400);
+  });
+
+  it("keeps a split through a smaller amount it still fits, and refuses one it doesn't", async () => {
+    const { user, digital, coins } = await twoHoldings();
+    const payment = (await split(user.token, digital.id, coins.id)).body;
+    const smaller = await call(`/transactions/${payment.id}`, user.token, { method: "PATCH", body: { amountMinor: 900_00 } });
+    assert.equal(smaller.status, 400, "the parts are 1,000");
+    const larger = await call(`/transactions/${payment.id}`, user.token, { method: "PATCH", body: { amountMinor: 1200_00 } });
+    assert.equal(larger.status, 200, JSON.stringify(larger.body));
+    const row = await models.Transaction.findById(payment.id).lean();
+    assert.deepEqual(row!.metalBuys.map((buy) => buy.amountMinor), [600_00, 400_00]);
+  });
+
+  it("isn't collapsed by an app from before splitting, which can still set and clear a whole one", async () => {
+    const { user, digital, coins } = await twoHoldings();
+    const payment = (await split(user.token, digital.id, coins.id)).body;
+    // That app sends its single purchase - null, here - with every save.
+    await call(`/transactions/${payment.id}`, user.token, { method: "PATCH", body: { note: "Diwali", metalBuy: null } });
+    assert.equal((await models.Transaction.findById(payment.id).lean())!.metalBuys.length, 2);
+
+    const plain = (await buy(user.token, { amountMinor: 500_00, occurredAt: ON })).body;
+    await call(`/transactions/${plain.id}`, user.token, { method: "PATCH", body: { metalBuy: { holdingId: digital.id } } });
+    const bought = (await models.Transaction.findById(plain.id).lean())!.metalBuys;
+    assert.equal(bought.length, 1);
+    assert.equal(bought[0].amountMinor, null, "all of the payment");
+    await call(`/transactions/${plain.id}`, user.token, { method: "PATCH", body: { metalBuy: null } });
+    assert.deepEqual((await models.Transaction.findById(plain.id).lean())!.metalBuys, []);
+  });
+
+  it("stores one part that is the whole payment as all of it, so it follows a corrected amount", async () => {
+    const { user, digital } = await twoHoldings();
+    const payment = (await buy(user.token, {
+      amountMinor: 500_00,
+      occurredAt: ON,
+      metalBuys: [{ holdingId: digital.id, amountMinor: 500_00 }],
+    })).body;
+    await call(`/transactions/${payment.id}`, user.token, { method: "PATCH", body: { amountMinor: 1000_00 } });
+    const [bought] = (await models.Transaction.findById(payment.id).lean())!.metalBuys;
+    assert.equal(bought.amountMinor, null);
+    assert.equal(bought.grams, grams(1000_00, 140891));
+  });
+
+  it("moves each payment's single purchase from before into the list", async () => {
+    const { user, digital } = await twoHoldings();
+    // The shape every purchase had before, written past the schema.
+    const { insertedId } = await models.Transaction.collection.insertOne({
+      userId: user.id,
+      type: "DEBIT",
+      amountMinor: 500_00,
+      countedAmountMinor: 500_00,
+      currency: "INR",
+      source: "MANUAL",
+      occurredAt: new Date(ON),
+      metalBuy: { holdingId: new Types.ObjectId(digital.id), grams: 0.0345, rateMinor: 1451177, gramsTyped: false },
+    });
+    const { runMetalBuysMigration } = await import("./metals.holdings");
+    await models.User.updateOne({ _id: user.id }, { $unset: { "backfills.metalBuys": 1 } });
+    await runMetalBuysMigration();
+    // Twice is the same as once.
+    await models.User.updateOne({ _id: user.id }, { $unset: { "backfills.metalBuys": 1 } });
+    await runMetalBuysMigration();
+
+    const raw = await models.Transaction.collection.findOne({ _id: insertedId });
+    assert.equal(raw!.metalBuy, undefined);
+    assert.equal(raw!.metalBuys.length, 1);
+    assert.equal(raw!.metalBuys[0].grams, 0.0345);
+    assert.equal(raw!.metalBuys[0].amountMinor, null);
+    const [listed] = (await call("/metals/holdings", user.token)).body as unknown as Json[];
+    assert.equal(listed.investedMinor, 500_00);
   });
 });

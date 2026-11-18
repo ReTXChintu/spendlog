@@ -1,12 +1,41 @@
 import { Router } from "express";
+import { Types } from "mongoose";
 import { env } from "../../env";
-import { requireAuth } from "../../middleware/auth";
-import { IpoCache, IpoCacheDoc } from "../../models";
+import { currentUserId, requireAuth } from "../../middleware/auth";
+import { IpoCache, IpoCacheDoc, Transaction } from "../../models";
 import { perLot } from "./ipos.estimate";
 import { fetchIpos, IpoError, IpoRow } from "./ipos.guru";
 
 export const ipoRouter = Router();
 ipoRouter.use(requireAuth);
+
+/**
+ * An IPO's name as something to match on: no case, spacing or punctuation,
+ * and none of the words every listing carries - so "Tata Capital Ltd IPO"
+ * from the calendar is the "Tata Capital" a payment was put down to.
+ */
+export function ipoKey(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\b(ipo|limited|ltd)\b/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+/** What the user has put down as applied for each IPO, by ipoKey. */
+async function appliedByIpo(userId: Types.ObjectId): Promise<Map<string, number>> {
+  const rows = await Transaction.aggregate<{ name: string; amountMinor: number }>([
+    { $match: { userId, type: "DEBIT", "investmentTags.kind": "IPO" } },
+    { $unwind: "$investmentTags" },
+    { $match: { "investmentTags.kind": "IPO" } },
+    { $project: { _id: 0, name: "$investmentTags.name", amountMinor: "$investmentTags.amountMinor" } },
+  ]);
+  const applied = new Map<string, number>();
+  for (const row of rows) {
+    const key = ipoKey(row.name);
+    applied.set(key, (applied.get(key) ?? 0) + row.amountMinor);
+  }
+  return applied;
+}
 
 const CACHE_KEY = "guru";
 
@@ -120,8 +149,9 @@ function byDate(field: "openDate" | "closeDate" | "listingDate") {
  * last good rows come back marked stale, or empty lists if there have
  * never been any, with `error` saying why.
  */
-ipoRouter.get("/", async (_req, res) => {
+ipoRouter.get("/", async (req, res) => {
   if (!env.ipoApiKey) return res.json({ available: false });
+  const applied = await appliedByIpo(currentUserId(req));
 
   let doc = await IpoCache.findOne({ key: CACHE_KEY }).lean<IpoCacheDoc>();
   if (!isFresh(doc, Date.now()) && !backingOff(doc, Date.now())) {
@@ -131,7 +161,12 @@ ipoRouter.get("/", async (_req, res) => {
 
   const fresh = isFresh(doc, Date.now());
   const stale = !fresh && !!doc?.fetchedAt;
-  const rows = ((doc?.rows ?? []) as IpoRow[]).map((row) => ({ ...row, perLot: perLot(row) }));
+  // What the user applied for each, from payments marked as that IPO.
+  const rows = ((doc?.rows ?? []) as IpoRow[]).map((row) => ({
+    ...row,
+    perLot: perLot(row),
+    appliedMinor: applied.get(ipoKey(row.name)) ?? 0,
+  }));
 
   res.json({
     available: true,

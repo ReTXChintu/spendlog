@@ -1152,3 +1152,78 @@ describe("access", () => {
     assert.deepEqual((await call("/funds/portfolio", other.token)).body.holdings, []);
   });
 });
+
+/**
+ * One payment of 10,000 marked, from its own editor, as 6,000 into one
+ * fund and 4,000 into another: each fund's ledger has its own part, and
+ * the payment stays spending exactly as it was.
+ */
+describe("a payment split across funds from its own editor", () => {
+  async function twoFunds() {
+    const user = await makeUser();
+    const a = await addHolding(user.token, { schemeCode: 100013 });
+    const b = await addHolding(user.token, { schemeCode: 100012 });
+    return { user, a, b };
+  }
+
+  const linkedOf = async (token: string, holdingId: string) =>
+    ((await call(`/funds/holdings/${holdingId}`, token)).body.txns as any[]).filter((txn) => txn.kind === "LINKED");
+
+  it("links each fund its own part, opens with them, and lets them go when it stops being a payment", async () => {
+    const { user, a, b } = await twoFunds();
+    const created = await call("/transactions", user.token, {
+      method: "POST",
+      body: {
+        type: "DEBIT",
+        amountMinor: 10_000_00,
+        occurredAt: new Date(`${LAST}T10:00:00+05:30`).toISOString(),
+        source: "MANUAL",
+        fundParts: [
+          { holdingId: a.id, amountMinor: 6000_00 },
+          { holdingId: b.id, amountMinor: 4000_00 },
+        ],
+      },
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    assert.equal(created.body.countedAmountMinor, 10_000_00, "still spending");
+
+    assert.deepEqual((await linkedOf(user.token, a.id)).map((txn) => txn.amountMinor), [6000_00]);
+    assert.deepEqual((await linkedOf(user.token, b.id)).map((txn) => txn.amountMinor), [4000_00]);
+    const opened = await call(`/funds/links?transactionId=${created.body.id}`, user.token);
+    assert.deepEqual(opened.body, [
+      { holdingId: a.id, amountMinor: 6000_00 },
+      { holdingId: b.id, amountMinor: 4000_00 },
+    ]);
+
+    // Smaller than its parts: refused.
+    const smaller = await call(`/transactions/${created.body.id}`, user.token, { method: "PATCH", body: { amountMinor: 9000_00 } });
+    assert.equal(smaller.status, 400, JSON.stringify(smaller.body));
+
+    // All of it into one fund: that link follows the amount from then on.
+    await call(`/transactions/${created.body.id}`, user.token, {
+      method: "PATCH",
+      body: { fundParts: [{ holdingId: a.id, amountMinor: 10_000_00 }] },
+    });
+    assert.equal((await linkedOf(user.token, b.id)).length, 0);
+    await call(`/transactions/${created.body.id}`, user.token, { method: "PATCH", body: { amountMinor: 12_000_00 } });
+    assert.deepEqual((await linkedOf(user.token, a.id)).map((txn) => txn.amountMinor), [12_000_00]);
+
+    // Money in buys no fund.
+    await call(`/transactions/${created.body.id}`, user.token, { method: "PATCH", body: { type: "CREDIT" } });
+    assert.equal(await models.FundTxn.countDocuments({ transactionId: new Types.ObjectId(created.body.id) }), 0);
+  });
+
+  it("refuses parts past the payment, the same fund twice, or someone else's fund", async () => {
+    const { user, a, b } = await twoFunds();
+    const stranger = await makeUser();
+    const theirs = await addHolding(stranger.token, { schemeCode: 100015 });
+    const payment = await debit(user.id, LAST, 10_000_00);
+    const parts = (fundParts: unknown) =>
+      call(`/transactions/${payment._id}`, user.token, { method: "PATCH", body: { fundParts } });
+
+    assert.equal((await parts([{ holdingId: a.id, amountMinor: 7000_00 }, { holdingId: b.id, amountMinor: 4000_00 }])).status, 400);
+    assert.equal((await parts([{ holdingId: a.id, amountMinor: 1000_00 }, { holdingId: a.id, amountMinor: 1000_00 }])).status, 400);
+    assert.equal((await parts([{ holdingId: theirs.id, amountMinor: 1000_00 }])).status, 400);
+    assert.equal(await models.FundTxn.countDocuments({ transactionId: payment._id }), 0);
+  });
+});

@@ -177,8 +177,12 @@ void main() {
         ));
         await tester.tap(find.text('Open'));
         await tester.pumpAndSettle();
-        await tester.ensureVisible(find.text('Bought gold'));
-        await tester.tap(find.text('Bought gold'));
+        // Investment, then Gold.
+        await tester.ensureVisible(find.byKey(const ValueKey('investment')));
+        await tester.tap(find.byKey(const ValueKey('investment')));
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.byKey(const ValueKey('invest-gold')));
+        await tester.tap(find.byKey(const ValueKey('invest-gold')));
         await tester.pumpAndSettle();
         await tester.ensureVisible(find.text('Save'));
         await tester.tap(find.text('Save'));
@@ -194,8 +198,11 @@ void main() {
           }));
 
       final patch = jsonDecode(requests.where((r) => r.method == 'PATCH').single.body) as Map<String, dynamic>;
-      // The only holding is picked; no grams typed, so the server works them out.
-      expect(patch['metalBuy'], {'holdingId': 'h1', 'grams': null});
+      // The only holding gets all of it; no grams typed, so the server works
+      // them out.
+      expect(patch['metalBuys'], [
+        {'holdingId': 'h1', 'amountMinor': 50000, 'grams': null},
+      ]);
     });
   });
 

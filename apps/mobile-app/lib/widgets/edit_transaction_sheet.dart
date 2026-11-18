@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/deposit_models.dart';
+import '../models/fund_models.dart' show FundHolding, FundPortfolio;
+import '../models/ipo_models.dart' show IpoList;
 import '../models/metal_models.dart';
 import '../models/subscription_models.dart';
 import '../models/models.dart';
@@ -33,6 +35,25 @@ bool looksLikeRawPayee(String merchant) {
 /// at once would contradict each other. Fixed cost and "keep out of
 /// savings" layer on top of any of these, so they are toggles instead.
 enum _Kind { normal, split, transfer, cardBill, loan, settlement, salary, refund, earmark }
+
+/// What kind of investment a payment was. One kind a payment, split across
+/// as many of that kind as it went into.
+enum _Invest { fund, gold, deposit, goal, ipo, other }
+
+/// One IPO, or one investment the user names, and how much went in.
+class _TagRow {
+  final TextEditingController name;
+  final TextEditingController amount;
+
+  _TagRow({String name = '', int? amountMinor})
+      : name = TextEditingController(text: name),
+        amount = TextEditingController(text: amountMinor == null ? '' : _rupees(amountMinor));
+
+  void dispose() {
+    name.dispose();
+    amount.dispose();
+  }
+}
 
 /// One person on a transaction, with their part as it is being typed.
 class _Person {
@@ -262,29 +283,44 @@ class _EditSheetState extends State<_EditSheet> {
   bool _isSubscription = false;
   String? _subscriptionId;
 
-  /// The RDs and FDs a payment can go into: the open ones, plus any this
-  /// payment is already in.
+  /// Whether this payment was an investment, and which kind - null while
+  /// it is on but not yet said.
+  bool _investing = false;
+  _Invest? _invest;
+
+  /// Whether the kind was changed in this sheet. Until it is, a payment
+  /// opened and saved leaves every other kind's marks as they were.
+  bool _investTouched = false;
+
+  /// The RDs and FDs a payment can go into - the open ones, plus any this
+  /// payment is already in - and how much into each, by deposit id.
   List<Deposit> _deposits = [];
-
-  /// Whether part or all of this payment went into RDs or FDs.
-  bool _intoDeposits = false;
-
-  /// How much into each, by deposit id, as typed.
   final Map<String, TextEditingController> _depositBoxes = {};
 
   /// Savings goals money can be put aside for - the open ones, plus any
-  /// this row is already marked for - whether it is, and how much each.
+  /// this row is already marked for - and how much each. On a payment it
+  /// is Investment > Goals; on money in, the "For a goal" chip.
   List<SavingsGoal> _goals = [];
   bool _forGoals = false;
   final Map<String, TextEditingController> _goalBoxes = {};
 
-  /// Gold or silver the user holds, and whether this payment bought some:
-  /// for which holding, and the grams when typed (else worked out from the
-  /// day's rate on save).
+  /// Gold or silver the user holds, and what of this payment went into
+  /// each: the amount, and the grams when typed (else worked out from the
+  /// day's rate).
   List<MetalHolding> _metalHoldings = [];
-  bool _boughtMetal = false;
-  String? _metalHoldingId;
-  final TextEditingController _metalGrams = TextEditingController();
+  final Map<String, TextEditingController> _metalBoxes = {};
+  final Map<String, TextEditingController> _metalGramBoxes = {};
+
+  /// Mutual funds, and what of this payment bought each.
+  List<FundHolding> _funds = [];
+  final Map<String, TextEditingController> _fundBoxes = {};
+
+  /// An IPO, or another investment by name, one row each.
+  final List<_TagRow> _tagRows = [];
+
+  /// The IPOs on the calendar, to pick a name from - once IPO is picked.
+  List<String> _ipoNames = [];
+  bool _ipoNamesAsked = false;
 
   /// On money paid back: how much of each person's was their part of a
   /// shared fixed cost, by "commitmentId:contactId", as typed - and the
@@ -377,17 +413,34 @@ class _EditSheetState extends State<_EditSheet> {
     _countInMonth = t?.countInMonth;
     _isSubscription = _subscriptionId != null;
     _isFixed = _commitmentId != null;
-    _intoDeposits = t != null && t.type == 'DEBIT' && t.depositParts.isNotEmpty;
-    _forGoals = t != null && t.goalParts.isNotEmpty;
+    _forGoals = t != null && t.type == 'CREDIT' && t.goalParts.isNotEmpty;
     for (final entry in (t?.goalParts ?? const <String, int>{}).entries) {
       _goalBoxes[entry.key] = TextEditingController(text: _rupees(entry.value));
     }
     _paidFor = t?.paidFor ?? false;
     _giftForId = t?.giftForContactId;
-    final bought = t?.type == 'DEBIT' ? t?.metalBuy : null;
-    _boughtMetal = bought != null;
-    _metalHoldingId = bought?.holdingId;
-    if (bought != null && bought.gramsTyped) _metalGrams.text = bought.grams.toString();
+    // What kind of investment it was, from what it carries. Funds are kept
+    // on the funds' side, and come in with _loadFundParts.
+    if (t != null && t.type == 'DEBIT') {
+      for (final buy in t.metalBuys) {
+        _metalBoxes[buy.holdingId] = TextEditingController(text: _rupees(buy.amountMinor ?? t.amountMinor));
+        _metalGramBoxes[buy.holdingId] = TextEditingController(text: buy.gramsTyped ? buy.grams.toString() : '');
+      }
+      for (final tag in t.investmentTags) {
+        _tagRows.add(_TagRow(name: tag.name, amountMinor: tag.amountMinor));
+      }
+      final kind = t.depositParts.isNotEmpty
+          ? _Invest.deposit
+          : t.metalBuys.isNotEmpty
+              ? _Invest.gold
+              : t.investmentTags.isNotEmpty
+                  ? (t.investmentTags.first.kind == 'IPO' ? _Invest.ipo : _Invest.other)
+                  : t.goalParts.isNotEmpty
+                      ? _Invest.goal
+                      : null;
+      _investing = kind != null;
+      _invest = kind;
+    }
     for (final entry in t?.towards ?? const <TowardsEntry>[]) {
       final key = '${entry.commitmentId}:${entry.contactId}';
       _towardsBoxes[key] = TextEditingController(text: _rupees(entry.amountMinor));
@@ -464,6 +517,9 @@ class _EditSheetState extends State<_EditSheet> {
     _loadDeposits();
     _loadGoals();
     _loadMetalHoldings();
+    _loadFunds();
+    _loadFundParts();
+    if (_invest == _Invest.ipo) _loadIpoNames();
     _loadLoans();
     _loadPresets();
     _loadCards();
@@ -488,7 +544,12 @@ class _EditSheetState extends State<_EditSheet> {
     for (final box in _goalBoxes.values) {
       box.dispose();
     }
-    _metalGrams.dispose();
+    for (final box in [..._metalBoxes.values, ..._metalGramBoxes.values, ..._fundBoxes.values]) {
+      box.dispose();
+    }
+    for (final row in _tagRows) {
+      row.dispose();
+    }
     for (final box in _towardsBoxes.values) {
       box.dispose();
     }
@@ -576,9 +637,12 @@ class _EditSheetState extends State<_EditSheet> {
         _metalHoldings = rows
             .whereType<Map<String, dynamic>>()
             .map(MetalHolding.fromJson)
-            .where((h) => h.isActive || h.id == _metalHoldingId)
+            .where((h) => h.isActive || _metalBoxes.containsKey(h.id))
             .toList();
-        if (_metalHoldings.length == 1) _metalHoldingId ??= _metalHoldings.single.id;
+        for (final holding in _metalHoldings) {
+          _metalBoxes.putIfAbsent(holding.id, TextEditingController.new);
+          _metalGramBoxes.putIfAbsent(holding.id, TextEditingController.new);
+        }
       });
     } catch (_) {
       // The chip simply does not appear.
@@ -617,8 +681,229 @@ class _EditSheetState extends State<_EditSheet> {
     }
   }
 
-  /// Whether this row can be put aside for a goal: a transfer, or money in.
-  bool get _goalsAllowed => _kind == _Kind.transfer || !_isDebit;
+  Future<void> _loadFunds() async {
+    try {
+      final json = await ApiClient.instance.get('/funds/portfolio') as Map<String, dynamic>;
+      if (!mounted) return;
+      setState(() {
+        _funds = FundPortfolio.fromJson(json).holdings;
+        for (final fund in _funds) {
+          _fundBoxes.putIfAbsent(fund.id, TextEditingController.new);
+        }
+      });
+    } catch (_) {
+      // Mutual fund says there are none.
+    }
+  }
+
+  /// The funds this payment already bought into. Kept on the funds' side,
+  /// so asked for rather than read off the row.
+  Future<void> _loadFundParts() async {
+    final t = widget.transaction;
+    if (t == null || t.type != 'DEBIT') return;
+    try {
+      final rows = await ApiClient.instance.get('/funds/links?transactionId=${t.id}') as List<dynamic>;
+      if (!mounted || rows.isEmpty) return;
+      setState(() {
+        for (final row in rows.whereType<Map<String, dynamic>>()) {
+          final id = row['holdingId'] as String? ?? '';
+          final minor = (row['amountMinor'] as num?)?.round() ?? 0;
+          _fundBoxes.putIfAbsent(id, TextEditingController.new).text = _rupees(minor);
+        }
+        // Nothing else said what it was: it bought funds.
+        if (!_investing && !_investTouched) {
+          _investing = true;
+          _invest = _Invest.fund;
+        }
+      });
+    } catch (_) {
+      // Opened without them; saving leaves them as they were.
+    }
+  }
+
+  Future<void> _loadIpoNames() async {
+    if (_ipoNamesAsked) return;
+    _ipoNamesAsked = true;
+    try {
+      final list = IpoList.fromJson(await ApiClient.instance.get('/ipos') as Map<String, dynamic>);
+      if (!mounted || !list.available) return;
+      setState(() => _ipoNames = [
+            for (final ipo in [...list.open, ...list.closed, ...list.upcoming]) ipo.name,
+          ]);
+    } catch (_) {
+      // The name is typed instead.
+    }
+  }
+
+  /// Whether this payment can be an investment: money out, and not a card
+  /// bill, a loan's repayment or settling up - each already says what it was.
+  bool get _investAllowed =>
+      _isDebit && _kind != _Kind.cardBill && _kind != _Kind.loan && _kind != _Kind.settlement;
+
+  bool _investOn(_Invest kind) => _investAllowed && _investing && _invest == kind;
+
+  /// The amounts typed into boxes, by id, leaving out the ones with nothing.
+  Map<String, int> _typedParts(Map<String, TextEditingController> boxes, Iterable<String> ids) => {
+        for (final id in ids)
+          if ((parseRupees(boxes[id]?.text ?? '') ?? 0) > 0) id: parseRupees(boxes[id]!.text)!,
+      };
+
+  /// One part that was the whole payment stays the whole of it when the
+  /// amount is corrected here - as the server keeps it when it is corrected
+  /// anywhere else.
+  Map<String, int> _followWhole(Map<String, int> parts) {
+    final was = widget.transaction?.amountMinor;
+    if (parts.length == 1 && was != null && parts.values.single == was && _totalMinor != was) {
+      return {parts.keys.single: _totalMinor};
+    }
+    return parts;
+  }
+
+  Map<String, int> get _metalParts => _followWhole(_typedParts(_metalBoxes, _metalHoldings.map((h) => h.id)));
+  Map<String, int> get _fundParts => _followWhole(_typedParts(_fundBoxes, _funds.map((f) => f.id)));
+
+  void _toggleInvesting() => setState(() {
+        _investing = !_investing;
+        _investTouched = true;
+        _error = null;
+      });
+
+  /// Picks the kind. Goals are money moved into savings rather than spent,
+  /// so the payment becomes a transfer to the user's own account - the only
+  /// kind a goal can be marked on. With one of the kind and nothing typed,
+  /// the whole payment goes into it.
+  void _pickInvest(_Invest kind) {
+    if (kind == _Invest.goal && _kind != _Kind.transfer) _selectKind(_Kind.transfer);
+    setState(() {
+      _invest = kind;
+      _investTouched = true;
+      _error = null;
+      final whole = _totalMinor > 0 ? _rupees(_totalMinor) : '';
+      switch (kind) {
+        case _Invest.deposit when _deposits.length == 1 && _depositParts.isEmpty:
+          _depositBoxes[_deposits.single.id]?.text = whole;
+        case _Invest.goal when _goals.length == 1 && _goalParts.isEmpty:
+          _goalBoxes[_goals.single.id]?.text = whole;
+        case _Invest.gold when _metalHoldings.length == 1 && _metalParts.isEmpty:
+          _metalBoxes[_metalHoldings.single.id]?.text = whole;
+        case _Invest.fund when _funds.length == 1 && _fundParts.isEmpty:
+          _fundBoxes[_funds.single.id]?.text = whole;
+        case _Invest.ipo || _Invest.other when _tagRows.isEmpty:
+          _tagRows.add(_TagRow(amountMinor: _totalMinor > 0 ? _totalMinor : null));
+        default:
+          break;
+      }
+    });
+    if (kind == _Invest.ipo) _loadIpoNames();
+  }
+
+  /// What stops the investment as typed from saving, in a sentence.
+  String? _investProblem() {
+    final kind = _invest;
+    if (kind == null) return 'Pick what kind of investment it was, or turn Investment off.';
+    String? sumProblem(Map<String, int> parts, String one, String many) {
+      final sum = parts.values.fold<int>(0, (total, part) => total + part);
+      if (parts.isEmpty) return 'Type how much went into which $one, or turn Investment off.';
+      if (sum > _totalMinor) {
+        return "That's ${formatMoney(sum)} into $many, ${formatMoney(sum - _totalMinor)} more than the payment.";
+      }
+      return null;
+    }
+
+    switch (kind) {
+      case _Invest.deposit:
+        return sumProblem(_depositParts, 'RD or FD', 'deposits');
+      case _Invest.goal:
+        return sumProblem(_goalParts, 'goal', 'goals');
+      case _Invest.fund:
+        return sumProblem(_fundParts, 'fund', 'funds');
+      case _Invest.gold:
+        final problem = sumProblem(_metalParts, 'gold or silver', 'gold and silver');
+        if (problem != null) return problem;
+        for (final id in _metalParts.keys) {
+          final typed = _metalGramBoxes[id]?.text.trim() ?? '';
+          if (typed.isNotEmpty && !((double.tryParse(typed) ?? 0) > 0)) {
+            return "Type the grams bought, or leave them blank to work them out from the day's rate.";
+          }
+        }
+        return null;
+      case _Invest.ipo:
+      case _Invest.other:
+        final rows = [
+          for (final row in _tagRows)
+            if ((parseRupees(row.amount.text) ?? 0) > 0) row,
+        ];
+        final ipo = kind == _Invest.ipo;
+        if (rows.isEmpty) {
+          return ipo
+              ? 'Type how much went into which IPO, or turn Investment off.'
+              : 'Name the investment and how much went in, or turn Investment off.';
+        }
+        if (rows.any((row) => row.name.text.trim().isEmpty)) {
+          return ipo ? 'Name the IPO each amount went into.' : 'Name what each amount went into.';
+        }
+        final sum = rows.fold<int>(0, (total, row) => total + parseRupees(row.amount.text)!);
+        if (sum > _totalMinor) {
+          return "That's ${formatMoney(sum)} into investments, ${formatMoney(sum - _totalMinor)} more than the payment.";
+        }
+        return null;
+    }
+  }
+
+  /// What the payment says about investments, as the server takes it. The
+  /// kind it is gets its parts. Every other kind is cleared when the kind
+  /// changed in this sheet, or it is new - and otherwise left out, so a
+  /// payment opened and saved keeps whatever else it was marked as.
+  Map<String, dynamic> _investFields() {
+    final clear = widget.transaction == null || _investTouched;
+    final fields = <String, dynamic>{};
+    void put(_Invest kind, String key, List<Map<String, dynamic>> Function() parts) {
+      if (_investOn(kind)) {
+        fields[key] = parts();
+      } else if (clear) {
+        fields[key] = <Map<String, dynamic>>[];
+      }
+    }
+
+    put(_Invest.deposit, 'depositParts', () => [
+          for (final entry in _depositParts.entries) {'depositId': entry.key, 'amountMinor': entry.value},
+        ]);
+    // Grams typed, or left to the day's rate.
+    put(_Invest.gold, 'metalBuys', () => [
+          for (final entry in _metalParts.entries)
+            {
+              'holdingId': entry.key,
+              'amountMinor': entry.value,
+              'grams': double.tryParse(_metalGramBoxes[entry.key]?.text.trim() ?? ''),
+            },
+        ]);
+    put(_Invest.fund, 'fundParts', () => [
+          for (final entry in _fundParts.entries) {'holdingId': entry.key, 'amountMinor': entry.value},
+        ]);
+    if (_investOn(_Invest.ipo) || _investOn(_Invest.other)) {
+      final kind = _invest == _Invest.ipo ? 'IPO' : 'OTHER';
+      fields['investmentTags'] = [
+        for (final row in _tagRows)
+          if ((parseRupees(row.amount.text) ?? 0) > 0)
+            {'kind': kind, 'name': row.name.text.trim(), 'amountMinor': parseRupees(row.amount.text)},
+      ];
+    } else if (clear) {
+      fields['investmentTags'] = <Map<String, dynamic>>[];
+    }
+    // Goals: on a payment, Investment > Goals; on money in, its own chip.
+    if (_isDebit) {
+      put(_Invest.goal, 'goalParts', () => [
+            for (final entry in _goalParts.entries) {'goalId': entry.key, 'amountMinor': entry.value},
+          ]);
+    } else {
+      fields['goalParts'] = _forGoals
+          ? [
+              for (final entry in _goalParts.entries) {'goalId': entry.key, 'amountMinor': entry.value},
+            ]
+          : <Map<String, dynamic>>[];
+    }
+    return fields;
+  }
 
   /// The amounts typed for goals, by goal id, leaving out the ones with nothing.
   Map<String, int> get _goalParts => {
@@ -640,14 +925,6 @@ class _EditSheetState extends State<_EditSheet> {
           if ((parseRupees(_depositBoxes[deposit.id]?.text ?? '') ?? 0) > 0)
             deposit.id: parseRupees(_depositBoxes[deposit.id]!.text)!,
       };
-
-  void _toggleDeposits() => setState(() {
-        _intoDeposits = !_intoDeposits;
-        // With one deposit and nothing typed, the whole payment goes in.
-        if (_intoDeposits && _deposits.length == 1 && _depositParts.isEmpty) {
-          _depositBoxes[_deposits.single.id]?.text = _rupees(_totalMinor);
-        }
-      });
 
   Future<void> _loadCommitments() async {
     try {
@@ -1002,6 +1279,11 @@ class _EditSheetState extends State<_EditSheet> {
       // A transfer, a card bill or a settling-up renews no subscription -
       // and the server refuses that pairing, so it goes here.
       if (kind == _Kind.transfer || kind == _Kind.cardBill || kind == _Kind.settlement) _clearSubscription();
+      // Goals need the transfer; any other kind lets go of them.
+      if (kind != _Kind.transfer && _invest == _Invest.goal) {
+        _invest = null;
+        _investTouched = true;
+      }
       _paidFor = kind == _Kind.split && !includeMe && paidFor;
       if (kind == _Kind.split) _includeMe = includeMe;
       if (kind == _Kind.settlement && _autoSettle) _resplitSettlement();
@@ -1036,8 +1318,8 @@ class _EditSheetState extends State<_EditSheet> {
       _isSpecial = false;
       _isFixed = false;
       _clearSubscription();
-      _intoDeposits = false;
-      _boughtMetal = false;
+      if (_investing) _investTouched = true;
+      _investing = false;
       _autoFillTransfer();
     });
   }
@@ -1234,8 +1516,8 @@ class _EditSheetState extends State<_EditSheet> {
     _isSpecial = false;
     _isFixed = false;
     _clearSubscription();
-    _intoDeposits = false;
-    _boughtMetal = false;
+    if (_investing) _investTouched = true;
+    _investing = false;
     _cardPaymentFor = null;
     bool isOn() => contact != null && _people.any((person) => person.contactId == contact.id);
 
@@ -1563,27 +1845,16 @@ class _EditSheetState extends State<_EditSheet> {
         return _fail("No renewal of that subscription falls anywhere near this payment's date.");
       }
     }
-    if (_isDebit && _boughtMetal) {
-      if (_metalHoldingId == null) return _fail('Pick which gold or silver it bought, or turn Bought gold off.');
-      final typed = _metalGrams.text.trim();
-      if (typed.isNotEmpty && !((double.tryParse(typed) ?? 0) > 0)) {
-        return _fail('Type the grams bought, or leave it blank to work them out from the day\'s rate.');
-      }
+    if (_investAllowed && _investing) {
+      final problem = _investProblem();
+      if (problem != null) return _fail(problem);
     }
-    if (_goalsAllowed && _forGoals) {
+    if (!_isDebit && _forGoals) {
       final parts = _goalParts;
       final sum = parts.values.fold<int>(0, (total, part) => total + part);
       if (parts.isEmpty) return _fail('Type how much is for which goal, or turn For a goal off.');
       if (sum > _totalMinor) {
         return _fail("That's ${formatMoney(sum)} for goals, ${formatMoney(sum - _totalMinor)} more than the amount.");
-      }
-    }
-    if (_isDebit && _intoDeposits) {
-      final parts = _depositParts;
-      final sum = parts.values.fold<int>(0, (total, part) => total + part);
-      if (parts.isEmpty) return _fail('Type how much went into which RD or FD, or turn Into RD/FD off.');
-      if (sum > _totalMinor) {
-        return _fail("That's ${formatMoney(sum)} into deposits, ${formatMoney(sum - _totalMinor)} more than the payment.");
       }
     }
 
@@ -1660,27 +1931,10 @@ class _EditSheetState extends State<_EditSheet> {
       'countInMonth': _countInMonth,
       'paidFor': _isLend && _paidFor,
       'giftForContactId': _isDebit && _isGift ? _giftForId : null,
-      // Gold or silver bought: grams typed, or worked out from the day's rate.
-      'metalBuy': _isDebit && _boughtMetal && _metalHoldingId != null
-          ? {
-              'holdingId': _metalHoldingId,
-              'grams': _metalGrams.text.trim().isEmpty ? null : double.tryParse(_metalGrams.text.trim()),
-            }
-          : null,
       // On money paid back: whose part of which shared fixed cost it was.
       'towards': !_isDebit && _kind == _Kind.settlement ? _towardsBody : <Map<String, dynamic>>[],
-      // Every savings goal it was put aside for; an empty list takes it off them all.
-      'goalParts': _goalsAllowed && _forGoals
-          ? [
-              for (final entry in _goalParts.entries) {'goalId': entry.key, 'amountMinor': entry.value},
-            ]
-          : <Map<String, dynamic>>[],
-      // Every RD and FD it went into; an empty list takes it out of them all.
-      'depositParts': _isDebit && _intoDeposits
-          ? [
-              for (final entry in _depositParts.entries) {'depositId': entry.key, 'amountMinor': entry.value},
-            ]
-          : <Map<String, dynamic>>[],
+      // Deposits, gold, funds, goals, an IPO or another by name.
+      ..._investFields(),
       // Every loan it repays and how much went to each; an empty list takes
       // it off them all. Short of the whole payment is fine - the rest is
       // saved as not put down to any loan yet, and shown as such.
@@ -2285,9 +2539,8 @@ class _EditSheetState extends State<_EditSheet> {
     final hasCommitments = _commitments.isNotEmpty || _commitmentId != null;
     final hasSubscriptions = (_subscriptions.isNotEmpty || _subscriptionId != null) && _subscriptionAllowed;
     final nextMonth = _monthAfterRow;
-    final hasDeposits = _deposits.isNotEmpty || _intoDeposits;
-    final hasMetal = _metalHoldings.isNotEmpty || _boughtMetal;
-    final hasGoals = (_goals.isNotEmpty || _forGoals) && _goalsAllowed;
+    // On a payment, goals are under Investment.
+    final hasGoals = !_isDebit && (_goals.isNotEmpty || _forGoals);
 
     // (label, selected, onTap). Radio-as-chips: the chosen one is
     // ink-filled with a check, like every selected chip.
@@ -2337,7 +2590,7 @@ class _EditSheetState extends State<_EditSheet> {
         // These sit on top of whatever kind it is - rent can be split and
         // a fixed cost. A payment has no one-off toggle: one-offs count
         // against the monthly budget like everything else.
-        if (!_isDebit || hasCommitments || hasSubscriptions || hasDeposits || hasMetal || hasGoals ||
+        if (!_isDebit || hasCommitments || hasSubscriptions || _investAllowed || hasGoals ||
             nextMonth != null) ...[
           const SizedBox(height: 10),
           Wrap(
@@ -2378,21 +2631,14 @@ class _EditSheetState extends State<_EditSheet> {
                     }
                   }),
                 ),
-              if (_isDebit && hasMetal)
+              if (_investAllowed)
                 DsChip(
-                  label: 'Bought gold',
+                  key: const ValueKey('investment'),
+                  label: 'Investment',
                   icon: DsIcons.trendingUp,
-                  selected: _boughtMetal,
+                  selected: _investing,
                   height: 32,
-                  onTap: () => setState(() => _boughtMetal = !_boughtMetal),
-                ),
-              if (_isDebit && hasDeposits)
-                DsChip(
-                  label: 'Into RD/FD',
-                  icon: DsIcons.piggyBank,
-                  selected: _intoDeposits,
-                  height: 32,
-                  onTap: _toggleDeposits,
+                  onTap: _toggleInvesting,
                 ),
               if (hasGoals)
                 DsChip(
@@ -2444,9 +2690,8 @@ class _EditSheetState extends State<_EditSheet> {
       if (_countInMonth != null) _countInMonthNote(),
       if (_isDebit && _isFixed) _fixedPanel(),
       if (_subscriptionAllowed && _isSubscription) _subscriptionPanel(),
-      if (_isDebit && _intoDeposits) _depositPanel(),
-      if (_goalsAllowed && _forGoals) _goalPanel(),
-      if (_isDebit && _boughtMetal) _metalPanel(),
+      if (_investAllowed && _investing) _investPanel(),
+      if (!_isDebit && _forGoals) _goalPanel(),
       if (!_isDebit && _isSpecial)
         const _Hint("Kept out of your savings bucket - it won't be counted towards what you save."),
     ];
@@ -2895,50 +3140,310 @@ class _EditSheetState extends State<_EditSheet> {
   /// Which gold or silver this bought, and the grams: typed for a jeweller's
   /// piece (making charges mean fewer grams for the money), else worked out
   /// from the day's rate with GST when saved.
-  Widget _metalPanel() {
-    final c = context.c;
-    final saved = widget.transaction?.metalBuy;
+  /// Investment: what kind, then which of that kind and how much into each.
+  Widget _investPanel() {
+    const kinds = <(_Invest, String)>[
+      (_Invest.fund, 'Mutual fund'),
+      (_Invest.gold, 'Gold'),
+      (_Invest.deposit, 'Deposit'),
+      (_Invest.goal, 'Goals'),
+      (_Invest.ipo, 'IPO'),
+      (_Invest.other, 'Other'),
+    ];
+    final panel = switch (_invest) {
+      _Invest.deposit => _deposits.isEmpty
+          ? const _Hint('No RDs or FDs yet - add one from Investments, then mark this payment.')
+          : _depositPanel(),
+      _Invest.goal => _goalInvestPanel(),
+      _Invest.gold => _goldPanel(),
+      _Invest.fund => _fundPanel(),
+      _Invest.ipo || _Invest.other => _tagPanel(),
+      null => null,
+    };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        DsField(
-          label: 'Gold or silver bought',
-          child: DropdownButtonFormField<String?>(
-            key: const ValueKey('metal-holding'),
-            initialValue: _metalHoldings.any((h) => h.id == _metalHoldingId) ? _metalHoldingId : null,
-            isExpanded: true,
-            icon: DsIcon(DsIcons.chevronDown, size: 20, color: c.tx2),
-            hint: Text('Which?', style: TextStyle(color: c.tx3)),
-            decoration: _inputDecoration(context),
-            dropdownColor: c.sf,
-            items: [
-              for (final holding in _metalHoldings)
-                DropdownMenuItem<String?>(
-                  value: holding.id,
-                  child: Text('${holding.name} · ${holding.subtitle}', overflow: TextOverflow.ellipsis),
-                ),
-            ],
-            onChanged: (id) => setState(() => _metalHoldingId = id),
-          ),
-        ),
-        const SizedBox(height: 10),
-        DsField(
-          label: 'Grams bought (optional)',
-          child: TextField(
-            key: const ValueKey('metal-grams'),
-            controller: _metalGrams,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: _inputDecoration(context, hint: 'From the day\'s rate').copyWith(suffixText: 'g'),
-          ),
-        ),
+        const DsLabel('What kind of investment?'),
         const SizedBox(height: 6),
-        _Hint(saved != null && !saved.gramsTyped && saved.rateMinor != null
-            ? '${formatGrams(saved.grams)} at ${formatMoney(saved.rateMinor!)}/g with GST, that day\'s rate. Type the grams '
-                "instead if it was a jeweller's piece."
-            : "Left blank, the grams are this amount at that day's IBJA rate with 3% GST. Type them for a jeweller's "
-                'piece - making charges mean fewer grams. Still counts as spending.'),
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          children: [
+            for (final (kind, label) in kinds)
+              DsChip(
+                key: ValueKey('invest-${kind.name}'),
+                label: label,
+                selected: _invest == kind,
+                height: 32,
+                onTap: () => _pickInvest(kind),
+              ),
+          ],
+        ),
+        if (panel != null) ...[const SizedBox(height: 12), panel],
       ],
     );
+  }
+
+  /// One holding a payment can go into: its name, a line under it, the
+  /// amount box, and anything it needs below.
+  Widget _partRow({required String title, required String subtitle, required Widget box, Widget? below}) {
+    final c = context.c;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w500, color: c.tx)),
+                    if (subtitle.isNotEmpty)
+                      Text(subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              SizedBox(width: 132, child: box),
+            ],
+          ),
+          if (below != null) below,
+        ],
+      ),
+    );
+  }
+
+  /// "600 of 1,000 goes into funds", under a list of parts.
+  Widget _partsSum(int sum, String into) {
+    final c = context.c;
+    final over = sum > _totalMinor;
+    return Text(
+      over
+          ? "That's ${formatMoney(sum - _totalMinor)} more than the payment."
+          : sum == _totalMinor
+              ? 'All of it goes into $into.'
+              : '${formatMoney(sum)} of ${formatMoney(_totalMinor)} goes into $into.',
+      style: TextStyle(
+        fontSize: 12,
+        height: 16 / 12,
+        fontWeight: over ? FontWeight.w600 : FontWeight.w400,
+        color: over ? c.crit : c.tx3,
+      ),
+    );
+  }
+
+  /// Goals under Investment: a transfer into savings, said so, then which.
+  Widget _goalInvestPanel() {
+    if (_goals.isEmpty) return const _Hint('No savings goals yet - add one from Investments, then mark this payment.');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _Hint("Marked as moved to your own account - money put towards a goal isn't spending.", info: true),
+        const SizedBox(height: 10),
+        _goalPanel(),
+      ],
+    );
+  }
+
+  /// Which mutual funds it bought, and how much of it into each.
+  Widget _fundPanel() {
+    if (_funds.isEmpty) return const _Hint('No mutual funds yet - add one from Investments, then mark this payment.');
+    final sum = _fundParts.values.fold<int>(0, (total, part) => total + part);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const DsLabel('Into which fund'),
+        const SizedBox(height: 6),
+        for (final fund in _funds)
+          _partRow(
+            title: fund.schemeName,
+            subtitle: [
+              fund.categoryLabel,
+              if (fund.monthlySipMinor > 0) 'SIP ${formatMoney(fund.monthlySipMinor)} a month',
+            ].where((part) => part.isNotEmpty).join(' · '),
+            box: KeyedSubtree(
+              key: ValueKey('fund-part-${fund.id}'),
+              child: _AmountBox(
+                controller: _fundBoxes.putIfAbsent(fund.id, TextEditingController.new),
+                onChanged: () => setState(() {}),
+              ),
+            ),
+          ),
+        _partsSum(sum, 'funds'),
+        const SizedBox(height: 4),
+        const _Hint("Bought at the fund's NAV that day, standing in for that month's SIP instalment. Still counts as "
+            'spending.'),
+      ],
+    );
+  }
+
+  /// Which gold or silver it bought, how much of it into each, and the
+  /// grams when known.
+  Widget _goldPanel() {
+    final c = context.c;
+    if (_metalHoldings.isEmpty) {
+      return const _Hint('No gold or silver yet - add what you hold from Investments, then mark this payment.');
+    }
+    final sum = _metalParts.values.fold<int>(0, (total, part) => total + part);
+    final saved = {for (final buy in widget.transaction?.metalBuys ?? const <MetalBuy>[]) buy.holdingId: buy};
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const DsLabel('Into which gold or silver'),
+        const SizedBox(height: 6),
+        for (final holding in _metalHoldings)
+          _partRow(
+            title: holding.name,
+            subtitle: holding.subtitle,
+            box: KeyedSubtree(
+              key: ValueKey('metal-part-${holding.id}'),
+              child: _AmountBox(
+                controller: _metalBoxes.putIfAbsent(holding.id, TextEditingController.new),
+                onChanged: () => setState(() {}),
+              ),
+            ),
+            // Grams only once some of it went in.
+            below: (parseRupees(_metalBoxes[holding.id]?.text ?? '') ?? 0) > 0
+                ? Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _gramsLine(saved[holding.id]),
+                            style: kNum.copyWith(fontSize: 12, height: 16 / 12, color: c.tx3),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        SizedBox(
+                          width: 132,
+                          child: TextField(
+                            key: ValueKey('metal-grams-${holding.id}'),
+                            controller: _metalGramBoxes.putIfAbsent(holding.id, TextEditingController.new),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            decoration: _inputDecoration(context, hint: 'Day\'s rate').copyWith(suffixText: 'g'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : null,
+          ),
+        _partsSum(sum, 'gold and silver'),
+        const SizedBox(height: 4),
+        const _Hint("Left blank, the grams are each amount at that day's IBJA rate with 3% GST. Type them for a "
+            "jeweller's piece - making charges mean fewer grams. Still counts as spending."),
+      ],
+    );
+  }
+
+  /// Beside a holding's grams box: what the day's rate made of it before,
+  /// or what to type.
+  String _gramsLine(MetalBuy? buy) => buy != null && !buy.gramsTyped && buy.rateMinor != null
+      ? '${formatGrams(buy.grams)} at ${formatMoney(buy.rateMinor!)}/g with GST'
+      : 'Grams, if you know them';
+
+  /// IPOs, or investments the user names: a row each, with its amount.
+  Widget _tagPanel() {
+    final ipo = _invest == _Invest.ipo;
+    final sum = _tagRows.fold<int>(0, (total, row) => total + (parseRupees(row.amount.text) ?? 0));
+    final taken = {for (final row in _tagRows) row.name.text.trim().toLowerCase()};
+    final offered = [
+      for (final name in _ipoNames)
+        if (!taken.contains(name.toLowerCase())) name,
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DsLabel(ipo ? 'Into which IPO' : 'Into what'),
+        const SizedBox(height: 6),
+        if (ipo && offered.isNotEmpty) ...[
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              for (final name in offered.take(8))
+                DsChip(key: ValueKey('ipo-name-$name'), label: name, height: 32, onTap: () => _useIpoName(name)),
+            ],
+          ),
+          const SizedBox(height: 8),
+        ],
+        for (var i = 0; i < _tagRows.length; i++)
+          KeyedSubtree(
+            // By row, not position: taking one off must not hand its
+            // boxes to the row after it.
+            key: ObjectKey(_tagRows[i]),
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      key: ValueKey('tag-name-$i'),
+                      controller: _tagRows[i].name,
+                      textCapitalization: TextCapitalization.words,
+                      decoration: _inputDecoration(context, hint: ipo ? 'IPO name' : 'PPF, stocks, NPS...'),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 112,
+                    child: KeyedSubtree(
+                      key: ValueKey('tag-amount-$i'),
+                      child: _AmountBox(controller: _tagRows[i].amount, onChanged: () => setState(() {})),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Take this off',
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: () => _removeTagRow(_tagRows[i]),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            key: const ValueKey('tag-add'),
+            onPressed: () => setState(() => _tagRows.add(_TagRow())),
+            icon: const DsIcon(DsIcons.plus, size: 16),
+            label: Text(ipo ? 'Another IPO' : 'Another one'),
+          ),
+        ),
+        _partsSum(sum, ipo ? 'IPOs' : 'investments'),
+        const SizedBox(height: 4),
+        _Hint(ipo
+            ? 'Shown against the IPO on the IPOs screen. Still counts as spending.'
+            : 'Says what it went into - nothing in SpendLog keeps its total. Still counts as spending.'),
+      ],
+    );
+  }
+
+  /// A name picked from the calendar fills the first row without one, or
+  /// starts a new row.
+  void _useIpoName(String name) => setState(() {
+        final empty = _tagRows.where((row) => row.name.text.trim().isEmpty).firstOrNull;
+        if (empty != null) {
+          empty.name.text = name;
+        } else {
+          _tagRows.add(_TagRow(name: name));
+        }
+      });
+
+  void _removeTagRow(_TagRow row) {
+    setState(() => _tagRows.remove(row));
+    // Once its boxes are off the screen.
+    WidgetsBinding.instance.addPostFrameCallback((_) => row.dispose());
   }
 
   /// How much of it is put aside for which savings goal: one transfer into

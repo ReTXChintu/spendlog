@@ -139,8 +139,12 @@ void main() {
       final requests = <http.Request>[];
       await http.runWithClient(() async {
         await open(tester, agent());
-        await tester.ensureVisible(find.text('Into RD/FD'));
-        await tester.tap(find.text('Into RD/FD'));
+        // Investment, then which kind.
+        await tester.ensureVisible(find.byKey(const ValueKey('investment')));
+        await tester.tap(find.byKey(const ValueKey('investment')));
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.byKey(const ValueKey('invest-deposit')));
+        await tester.tap(find.byKey(const ValueKey('invest-deposit')));
         await tester.pumpAndSettle();
         // A closed one is not offered.
         expect(find.text('Old FD'), findsNothing);
@@ -162,8 +166,12 @@ void main() {
       final requests = <http.Request>[];
       await http.runWithClient(() async {
         await open(tester, agent());
-        await tester.ensureVisible(find.text('Into RD/FD'));
-        await tester.tap(find.text('Into RD/FD'));
+        // Investment, then which kind.
+        await tester.ensureVisible(find.byKey(const ValueKey('investment')));
+        await tester.tap(find.byKey(const ValueKey('investment')));
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.byKey(const ValueKey('invest-deposit')));
+        await tester.tap(find.byKey(const ValueKey('invest-deposit')));
         await tester.pumpAndSettle();
         await tester.enterText(find.descendant(of: find.byKey(const ValueKey('deposit-part-rd1')), matching: find.byType(TextField)), '3500');
         await tester.pumpAndSettle();
@@ -182,8 +190,9 @@ void main() {
         }));
         await tester.ensureVisible(find.byKey(const ValueKey('deposit-part-rd2')));
         expect(find.text('All of it goes into deposits.'), findsOneWidget);
-        await tester.ensureVisible(find.text('Into RD/FD'));
-        await tester.tap(find.text('Into RD/FD'));
+        // Investment off takes it out of every deposit.
+        await tester.ensureVisible(find.byKey(const ValueKey('investment')));
+        await tester.tap(find.byKey(const ValueKey('investment')));
         await tester.pumpAndSettle();
         await save(tester);
       }, () => _server(requests));

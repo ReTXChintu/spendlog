@@ -222,6 +222,18 @@ void main() {
       expect(find.textContaining('Showing data from'), findsNothing);
     });
 
+    testWidgets('says what was applied on an IPO a payment was put down to', (tester) async {
+      await http.runWithClient(() async {
+        await _pump(tester);
+        await tester.pumpAndSettle();
+      }, () => _server(_list(open: [
+            {..._row(), 'appliedMinor': 1485000},
+            _row(slug: 'other', name: 'Other Co'),
+          ])));
+
+      expect(find.text('Applied ₹14,850'), findsOneWidget);
+    });
+
     testWidgets('gain, loss, zero and no-GMP lines', (tester) async {
       await http.runWithClient(() async {
         await _pump(tester);

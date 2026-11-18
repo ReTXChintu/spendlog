@@ -325,8 +325,14 @@ class Transaction {
   /// On money paid back: whose part of which shared fixed cost it was.
   final List<TowardsEntry> towards;
 
-  /// Gold or silver bought with it, when it was a purchase.
-  final MetalBuy? metalBuy;
+  /// Gold or silver bought with it, for each holding it bought into.
+  final List<MetalBuy> metalBuys;
+
+  /// The first of them: what a single "bought gold" reads.
+  MetalBuy? get metalBuy => metalBuys.isEmpty ? null : metalBuys.first;
+
+  /// An IPO it applied for, or another investment by name.
+  final List<InvestmentTag> investmentTags;
 
   /// On a payment someone else made: which of the user's contacts paid.
   final String? paidByContactId;
@@ -467,7 +473,8 @@ class Transaction {
     this.depositParts = const {},
     this.goalParts = const {},
     this.towards = const [],
-    this.metalBuy,
+    this.metalBuys = const [],
+    this.investmentTags = const [],
     this.paidByContactId,
     this.paidByName,
     this.offLedger = false,
@@ -556,7 +563,19 @@ class Transaction {
             if (part is Map<String, dynamic> && part['goalId'] is String && part['amountMinor'] is int)
               part['goalId'] as String: part['amountMinor'] as int,
         },
-        metalBuy: json['metalBuy'] is Map<String, dynamic> ? MetalBuy.fromJson(json['metalBuy'] as Map<String, dynamic>) : null,
+        // A list from this server; a single one from a server before splitting.
+        metalBuys: json['metalBuys'] is List
+            ? [
+                for (final row in json['metalBuys'] as List)
+                  if (row is Map<String, dynamic>) MetalBuy.fromJson(row),
+              ]
+            : json['metalBuy'] is Map<String, dynamic>
+                ? [MetalBuy.fromJson(json['metalBuy'] as Map<String, dynamic>)]
+                : const [],
+        investmentTags: [
+          for (final row in json['investmentTags'] as List? ?? const [])
+            if (row is Map<String, dynamic>) InvestmentTag.fromJson(row),
+        ],
         towards: (json['towards'] as List<dynamic>? ?? const [])
             .whereType<Map<String, dynamic>>()
             .where((e) => e['commitmentId'] is String && e['contactId'] is String && e['amountMinor'] is int)
@@ -1111,13 +1130,40 @@ class MetalBuy {
   final int? rateMinor;
   final bool gramsTyped;
 
-  const MetalBuy({required this.holdingId, required this.grams, this.rateMinor, this.gramsTyped = false});
+  /// How much of the payment went into this holding; null is all of it.
+  final int? amountMinor;
+
+  const MetalBuy({
+    required this.holdingId,
+    required this.grams,
+    this.rateMinor,
+    this.gramsTyped = false,
+    this.amountMinor,
+  });
 
   factory MetalBuy.fromJson(Map<String, dynamic> json) => MetalBuy(
         holdingId: json['holdingId'] as String? ?? '',
         grams: (json['grams'] as num?)?.toDouble() ?? 0,
         rateMinor: json['rateMinor'] as int?,
         gramsTyped: json['gramsTyped'] == true,
+        amountMinor: (json['amountMinor'] as num?)?.round(),
+      );
+}
+
+/// Money into an investment SpendLog keeps no holding for: an IPO
+/// application, or anything the user names (PPF, stocks, NPS...).
+class InvestmentTag {
+  /// IPO | OTHER
+  final String kind;
+  final String name;
+  final int amountMinor;
+
+  const InvestmentTag({required this.kind, required this.name, required this.amountMinor});
+
+  factory InvestmentTag.fromJson(Map<String, dynamic> json) => InvestmentTag(
+        kind: json['kind'] == 'IPO' ? 'IPO' : 'OTHER',
+        name: json['name'] as String? ?? '',
+        amountMinor: (json['amountMinor'] as num?)?.round() ?? 0,
       );
 }
 

@@ -167,7 +167,7 @@ class MineTabState extends State<MineTab> {
           const SizedBox(height: 16),
           Text(
             'Funds at today\'s NAV, deposits at what they hold, gold and silver at today\'s IBJA rate before GST. To '
-            'add a purchase, open the payment and pick "Bought gold".',
+            'add a purchase, open the payment and pick Investment, then Gold.',
             style: TextStyle(fontSize: 12, height: 17 / 12, color: c.tx3),
           ),
         ],

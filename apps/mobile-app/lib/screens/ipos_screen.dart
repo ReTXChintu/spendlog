@@ -377,6 +377,8 @@ class IpoCard extends StatelessWidget {
                       children: [
                         DsBadge(statusLabel, tone: statusTone),
                         if (ipo.isSme) const DsBadge('SME', outline: true),
+                        if (ipo.appliedMinor > 0)
+                          DsBadge('Applied ${formatMoneyShort(ipo.appliedMinor)}', tone: DsTone.good),
                       ],
                     ),
                   ],

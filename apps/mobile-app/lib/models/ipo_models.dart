@@ -99,6 +99,10 @@ class Ipo {
   final String? webUrl;
   final IpoPerLot? perLot;
 
+  /// What the user put down as applied for it, from payments marked as this
+  /// IPO under Investment. Zero when none.
+  final int appliedMinor;
+
   const Ipo({
     required this.slug,
     required this.name,
@@ -116,6 +120,7 @@ class Ipo {
     this.subscriptionTimes,
     this.webUrl,
     this.perLot,
+    this.appliedMinor = 0,
   });
 
   bool get isSme => type == 'SME';
@@ -141,6 +146,7 @@ class Ipo {
       subscriptionTimes: _numOrNull(json['subscriptionTimes']),
       webUrl: _str(json['webUrl']),
       perLot: IpoPerLot.maybe(json['perLot']),
+      appliedMinor: _intOrNull(json['appliedMinor']) ?? 0,
     );
   }
 }
