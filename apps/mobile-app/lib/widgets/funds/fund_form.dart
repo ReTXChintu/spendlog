@@ -525,40 +525,45 @@ class ToggleSection extends StatelessWidget {
         border: Border.all(color: c.ln),
         borderRadius: BorderRadius.circular(Ds.rXl),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          InkWell(
-            onTap: onChanged == null ? null : () => onChanged!(!on),
-            borderRadius: BorderRadius.circular(Ds.rXl),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 10, 14),
-              child: Row(
-                children: [
-                  if (icon != null) ...[
-                    DsIconTile(icon!, tone: on ? DsTone.ac : DsTone.neutral),
-                    const SizedBox(width: 12),
-                  ],
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(title, style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx)),
-                        const SizedBox(height: 2),
-                        Text(subtitle, style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3)),
-                      ],
+      // Its own Material, so the rows inside - a switch row, an InkWell -
+      // ink on top of the card's fill rather than under it, out of sight.
+      child: Material(
+        type: MaterialType.transparency,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            InkWell(
+              onTap: onChanged == null ? null : () => onChanged!(!on),
+              borderRadius: BorderRadius.circular(Ds.rXl),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 10, 14),
+                child: Row(
+                  children: [
+                    if (icon != null) ...[
+                      DsIconTile(icon!, tone: on ? DsTone.ac : DsTone.neutral),
+                      const SizedBox(width: 12),
+                    ],
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(title, style: TextStyle(fontSize: 15, height: 20 / 15, fontWeight: FontWeight.w600, color: c.tx)),
+                          const SizedBox(height: 2),
+                          Text(subtitle, style: TextStyle(fontSize: 13, height: 18 / 13, color: c.tx3)),
+                        ],
+                      ),
                     ),
-                  ),
-                  if (onChanged != null) ...[const SizedBox(width: 8), Switch(value: on, onChanged: onChanged)],
-                ],
+                    if (onChanged != null) ...[const SizedBox(width: 8), Switch(value: on, onChanged: onChanged)],
+                  ],
+                ),
               ),
             ),
-          ),
-          if (on) ...[
-            Divider(height: 1, color: c.ln),
-            Padding(padding: const EdgeInsets.fromLTRB(16, 16, 16, 16), child: child),
+            if (on) ...[
+              Divider(height: 1, color: c.ln),
+              Padding(padding: const EdgeInsets.fromLTRB(16, 16, 16, 16), child: child),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }

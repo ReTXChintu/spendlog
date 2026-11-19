@@ -1227,3 +1227,39 @@ describe("a payment split across funds from its own editor", () => {
     assert.equal(await models.FundTxn.countDocuments({ transactionId: payment._id }), 0);
   });
 });
+
+describe("a fund's purchase charge", () => {
+  it("takes 50 paise off every instalment, says so on each, and comes off again when cleared", async () => {
+    const user = await makeUser();
+    const holding = await addHolding(user.token, {
+      schemeCode: 100013,
+      sip: { amountMinor: 2000_00, dayOfMonth: 5, startOn: addMonths(TODAY, -4) },
+    });
+    const instalments = holding.txns.filter((txn: any) => txn.kind === "SIP_SCHEDULED").length;
+    assert.ok(instalments > 0);
+
+    const charged = await call(`/funds/holdings/${holding.id}`, user.token, {
+      method: "PATCH",
+      body: { purchaseCharge: { fixedMinor: 50 } },
+    });
+    assert.equal(charged.status, 200, JSON.stringify(charged.body));
+    assert.deepEqual(charged.body.purchaseCharge, { fixedMinor: 50, percent: null });
+    const scheduled = charged.body.txns.filter((txn: any) => txn.kind === "SIP_SCHEDULED");
+    assert.ok(scheduled.every((txn: any) => txn.amountMinor === 1999_50 && txn.chargeMinor === 50));
+    assert.equal(charged.body.investedMinor, holding.investedMinor - 50 * instalments);
+
+    // One or the other, not both.
+    const both = await call(`/funds/holdings/${holding.id}`, user.token, {
+      method: "PATCH",
+      body: { purchaseCharge: { fixedMinor: 50, percent: 0.005 } },
+    });
+    assert.equal(both.status, 400);
+
+    const cleared = await call(`/funds/holdings/${holding.id}`, user.token, {
+      method: "PATCH",
+      body: { purchaseCharge: null },
+    });
+    assert.equal(cleared.body.purchaseCharge, null);
+    assert.equal(cleared.body.investedMinor, holding.investedMinor);
+  });
+});

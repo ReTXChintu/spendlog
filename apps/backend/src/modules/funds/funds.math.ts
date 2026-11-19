@@ -215,7 +215,25 @@ export interface ManualInput {
   units?: number | null;
 }
 
+/** What a purchase loses before it buys units: so much each time, or a percentage. */
+export interface PurchaseCharge {
+  fixedMinor?: number | null;
+  percent?: number | null;
+}
+
+/** The charge on one purchase of `paidMinor` - never more than the purchase itself. */
+export function chargeOn(paidMinor: number, charge?: PurchaseCharge | null): number {
+  if (!charge || paidMinor <= 0) return 0;
+  if (charge.fixedMinor) return Math.min(charge.fixedMinor, paidMinor);
+  if (charge.percent) return Math.min(Math.round((paidMinor * charge.percent) / 100), paidMinor);
+  return 0;
+}
+
 export interface LedgerInput {
+  /// Taken off every purchase before it buys units: SIP instalments,
+  /// linked payments and one-off buys alike. Not off the opening snapshot,
+  /// a redemption, or a buy whose units were given.
+  charge?: PurchaseCharge | null;
   sip?: SipPlan | null;
   opening?: OpeningInput | null;
   linked?: LinkedInput[];
@@ -231,7 +249,10 @@ export interface LedgerEntry {
   /// The NAV it was bought or sold at, and that NAV's own day.
   navDay: string | null;
   nav: number | null;
+  /// What bought units: what was paid, less the purchase charge.
   amountMinor: number;
+  /// The charge that came off it first. What was paid is the two together.
+  chargeMinor: number;
   units: number;
   /// Whether it is in the totals. An entry inside the opening snapshot is
   /// shown, but the snapshot already holds it.
@@ -287,7 +308,9 @@ export function buildLedger(input: LedgerInput): LedgerEntry[] {
   const cutoff = opening?.asOf ?? null;
   const entries: LedgerEntry[] = [];
 
+  const charge = (paidMinor: number) => chargeOn(paidMinor, input.charge);
   const base = {
+    chargeMinor: 0,
     pending: false,
     note: null,
     transactionId: null,
@@ -341,6 +364,8 @@ export function buildLedger(input: LedgerInput): LedgerEntry[] {
     }
 
     const at = navOnOrAfter(series, link.on);
+    const linkCharge = charge(link.amountMinor);
+    const bought = link.amountMinor - linkCharge;
     const inSkippedMonth = !!nearest && nearest.state !== "due";
     const differs = !!nearest && Math.abs(link.amountMinor - nearest.amountMinor) >= 100;
     entries.push({
@@ -349,8 +374,9 @@ export function buildLedger(input: LedgerInput): LedgerEntry[] {
       on: link.on,
       navDay: at?.day ?? null,
       nav: at?.nav ?? null,
-      amountMinor: link.amountMinor,
-      units: at && !covered ? link.amountMinor / 100 / at.nav : 0,
+      amountMinor: bought,
+      chargeMinor: linkCharge,
+      units: at && !covered ? bought / 100 / at.nav : 0,
       counted: !covered,
       pending: !covered && !at,
       note: covered
@@ -373,14 +399,16 @@ export function buildLedger(input: LedgerInput): LedgerEntry[] {
 
   for (const slot of slots) {
     if (slot.replaced || slot.state !== "due" || !slot.at || slot.at.day > today) continue;
+    const slotCharge = charge(slot.amountMinor);
     entries.push({
       ...base,
       kind: "SIP_SCHEDULED",
       on: slot.due,
       navDay: slot.at.day,
       nav: slot.at.nav,
-      amountMinor: slot.amountMinor,
-      units: slot.amountMinor / 100 / slot.at.nav,
+      amountMinor: slot.amountMinor - slotCharge,
+      chargeMinor: slotCharge,
+      units: (slot.amountMinor - slotCharge) / 100 / slot.at.nav,
       counted: true,
       month: slot.month,
       plannedMinor: slot.amountMinor,
@@ -391,8 +419,12 @@ export function buildLedger(input: LedgerInput): LedgerEntry[] {
     const covered = cutoff !== null && manual.on <= cutoff;
     const at = navOnOrAfter(series, manual.on);
     const givenUnits = manual.units != null && manual.units > 0 ? manual.units : null;
-    const units = givenUnits ?? (at ? manual.amountMinor / 100 / at.nav : 0);
-    const amountMinor = manual.amountMinor > 0 ? manual.amountMinor : at ? Math.round(units * at.nav * 100) : 0;
+    // A buy worked out from its amount pays the charge; one whose units
+    // were given is already exactly what was bought.
+    const manualCharge = manual.kind === "MANUAL_BUY" && !givenUnits ? charge(manual.amountMinor) : 0;
+    const bought = manual.amountMinor - manualCharge;
+    const units = givenUnits ?? (at ? bought / 100 / at.nav : 0);
+    const amountMinor = manual.amountMinor > 0 ? bought : at ? Math.round(units * at.nav * 100) : 0;
     const pending = !covered && units === 0;
     entries.push({
       ...base,
@@ -401,6 +433,7 @@ export function buildLedger(input: LedgerInput): LedgerEntry[] {
       navDay: at?.day ?? null,
       nav: at?.nav ?? null,
       amountMinor,
+      chargeMinor: manualCharge,
       units: covered ? 0 : units,
       counted: !covered,
       pending,
@@ -562,7 +595,8 @@ export function summariseHolding(
         flows.push({ day: entry.on, amount: -entry.amountMinor });
       }
     } else {
-      flows.push({ day: entry.on, amount: -entry.amountMinor });
+      // What left the bank, charge and all: the return on the money paid.
+      flows.push({ day: entry.on, amount: -(entry.amountMinor + entry.chargeMinor) });
     }
   }
 

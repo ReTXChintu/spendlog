@@ -579,6 +579,7 @@ class _Header extends StatelessWidget {
               ...schemeTags(isDirect: h.isDirect, isRegular: h.isRegular, isGrowth: h.isGrowth),
               FundTag(assetClassLabel(h.assetClass), tone: TagTone.brand),
               if (h.folio != null) FundTag('Folio ${h.folio}'),
+              if (h.purchaseCharge != null) FundTag('Charges ${h.purchaseCharge!.label}'),
             ],
           ),
           const SizedBox(height: 16),
@@ -939,6 +940,8 @@ class LedgerRow extends StatelessWidget {
       if (!entry.pending && nav != null && entry.units > 0)
         '${entry.units.toStringAsFixed(3)} units at ₹${nav.toStringAsFixed(4)}'
             '${entry.navDay != null && entry.navDay != entry.on ? ' (${formatIsoShortDate(entry.navDay!)})' : ''}',
+      // What was paid, and what came off it before it bought units.
+      if (entry.chargeMinor > 0) '${formatMoney(entry.paidMinor)} less ${formatMoney(entry.chargeMinor)} charges',
     ].join(' · ');
     final amount = entry.kind == FundTxnKind.redeem ? '−${formatMoney(entry.amountMinor)}' : formatMoney(entry.amountMinor);
 
@@ -1024,6 +1027,16 @@ class _EditTermsScreenState extends State<_EditTermsScreen> {
   bool _saving = false;
   String? _error;
 
+  /// What each purchase loses before it buys units: so much, or a percentage.
+  late final TextEditingController _charge = TextEditingController(text: _chargeText(widget.holding.purchaseCharge));
+  late bool _chargeIsPercent = widget.holding.purchaseCharge?.percent != null;
+
+  static String _chargeText(FundCharge? charge) {
+    if (charge == null) return '';
+    if (charge.fixedMinor != null) return (charge.fixedMinor! / 100).toStringAsFixed(2);
+    return charge.percent!.toString();
+  }
+
   bool get _isSip => widget.terms == _Terms.sip;
   bool get _exists => _isSip ? widget.holding.sip != null : widget.holding.opening != null;
 
@@ -1039,7 +1052,21 @@ class _EditTermsScreenState extends State<_EditTermsScreen> {
   @override
   void dispose() {
     _fields.dispose();
+    _charge.dispose();
     super.dispose();
+  }
+
+  /// The charge as the server takes it, null for none - or what's wrong.
+  ({Map<String, dynamic>? body, String? error}) _chargeBody() {
+    final text = _charge.text.trim();
+    if (text.isEmpty) return (body: null, error: null);
+    final value = double.tryParse(text);
+    if (value == null || value <= 0) return (body: null, error: 'Type the charge as a number, or leave it empty.');
+    if (_chargeIsPercent) {
+      if (value > 5) return (body: null, error: 'A charge of more than 5% of each purchase looks like a typo.');
+      return (body: {'percent': value}, error: null);
+    }
+    return (body: {'fixedMinor': (value * 100).round()}, error: null);
   }
 
   Future<void> _send(Map<String, dynamic> body) async {
@@ -1068,9 +1095,15 @@ class _EditTermsScreenState extends State<_EditTermsScreen> {
       return;
     }
     final folioChanged = check.folio != widget.holding.folio;
+    final charge = _chargeBody();
+    if (charge.error != null) {
+      setState(() => _error = charge.error);
+      return;
+    }
     await _send({
       if (_isSip) 'sip': check.sip else 'opening': check.opening,
       if (folioChanged) 'folio': check.folio,
+      'purchaseCharge': charge.body,
     });
   }
 
@@ -1104,6 +1137,41 @@ class _EditTermsScreenState extends State<_EditTermsScreen> {
           ),
           const SizedBox(height: 16),
           LabelledField(label: 'Folio number (optional)', controller: _fields.folio),
+          const SizedBox(height: 16),
+          LabelledField(
+            fieldKey: const ValueKey('purchase-charge'),
+            label: 'Charges on each purchase (optional)',
+            controller: _charge,
+            hint: _chargeIsPercent ? '0.005' : '0.50',
+            prefix: _chargeIsPercent ? null : '₹ ',
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            children: [
+              DsChip(
+                key: const ValueKey('charge-fixed'),
+                label: '₹ a purchase',
+                height: 32,
+                selected: !_chargeIsPercent,
+                onTap: () => setState(() => _chargeIsPercent = false),
+              ),
+              DsChip(
+                key: const ValueKey('charge-percent'),
+                label: '% of it',
+                height: 32,
+                selected: _chargeIsPercent,
+                onTap: () => setState(() => _chargeIsPercent = true),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Taken off every SIP instalment, linked payment and one-off buy before it buys units - '
+            "a ₹2,000 SIP with ₹0.50 charges invests ₹1,999.50. Stamp duty alone is 0.005%.",
+            style: TextStyle(fontSize: 12, height: 17 / 12, color: c.tx3),
+          ),
           if (_error != null) ...[
             const SizedBox(height: 12),
             DsCallout(tone: DsTone.crit, title: _error!),

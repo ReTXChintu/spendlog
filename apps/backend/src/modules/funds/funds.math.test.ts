@@ -4,6 +4,7 @@ import {
   addDays,
   buildLedger,
   cagr,
+  chargeOn,
   categoryStats,
   downsample,
   fundFlags,
@@ -365,5 +366,62 @@ describe("downsample", () => {
     assert.ok(points.length >= 50 && points.length <= 62, `${points.length}`);
     assert.equal(points[0].day >= "2025-10-09", true);
     assert.equal(points.at(-1)!.day, "2026-10-09");
+  });
+});
+
+/**
+ * A 2,000 SIP of which 1,999.50 buys units: the 50 paise a purchase that
+ * the platform or stamp duty takes first.
+ */
+describe("a purchase charge", () => {
+  const nav = series("2025-01-01", "2026-10-09", 100, 0.1, ["2026-03-05"]);
+  const sip = { amountMinor: 2000_00, dayOfMonth: 5, startOn: "2026-01-01" };
+  const today = "2026-10-11";
+
+  it("is so much a purchase, or a percentage, never more than the purchase", () => {
+    assert.equal(chargeOn(2000_00, { fixedMinor: 50 }), 50);
+    assert.equal(chargeOn(2000_00, { percent: 0.005 }), 10);
+    assert.equal(chargeOn(30, { fixedMinor: 50 }), 30);
+    assert.equal(chargeOn(2000_00, null), 0);
+  });
+
+  it("comes off every instalment, linked payment and one-off buy before it buys units", () => {
+    const charge = { fixedMinor: 50 };
+    const entries = buildLedger({
+      sip,
+      series: nav,
+      today,
+      charge,
+      linked: [{ transactionId: "t1", on: "2026-02-04", amountMinor: 2000_00, via: "link" }],
+      manual: [
+        { txnId: "m1", kind: "MANUAL_BUY", on: "2026-06-15", amountMinor: 10_000_00 },
+        { txnId: "m2", kind: "MANUAL_BUY", on: "2026-07-15", amountMinor: 0, units: 10 },
+        { txnId: "m3", kind: "REDEEM", on: "2026-08-14", amountMinor: 0, units: 5 },
+      ],
+    });
+    const scheduled = entries.find((entry) => entry.kind === "SIP_SCHEDULED")!;
+    assert.equal(scheduled.amountMinor, 1999_50);
+    assert.equal(scheduled.chargeMinor, 50);
+    near(scheduled.units, 1999.5 / scheduled.nav!);
+
+    const linked = entries.find((entry) => entry.kind === "LINKED")!;
+    assert.equal(linked.amountMinor, 1999_50);
+    // Paid as planned: the charge doesn't make it read as short.
+    assert.equal(linked.note, null);
+
+    const [bought, given] = entries.filter((entry) => entry.kind === "MANUAL_BUY");
+    assert.equal(bought.amountMinor, 9999_50);
+    assert.equal(given.chargeMinor, 0, "units given are what was bought");
+    assert.equal(entries.find((entry) => entry.kind === "REDEEM")!.chargeMinor, 0);
+  });
+
+  it("counts invested as what bought units, and the return on what was paid", () => {
+    const plain = buildLedger({ sip, series: nav, today });
+    const charged = buildLedger({ sip, series: nav, today, charge: { fixedMinor: 50 } });
+    const before = summariseHolding(plain, nav);
+    const after = summariseHolding(charged, nav);
+    assert.equal(after.investedMinor, before.investedMinor - 50 * plain.length);
+    // Fewer units for the same money: a lower return, not a higher one.
+    assert.ok(after.xirr! < before.xirr!);
   });
 });

@@ -292,6 +292,9 @@ class FundHolding {
   final FundSip? sip;
   final FundOpening? opening;
   final String? commitmentId;
+
+  /// What each purchase loses before it buys units, when set.
+  final FundCharge? purchaseCharge;
   final double units;
 
   /// What the units still held cost.
@@ -340,6 +343,7 @@ class FundHolding {
     this.sip,
     this.opening,
     this.commitmentId,
+    this.purchaseCharge,
     this.units = 0,
     this.investedMinor = 0,
     this.totalInvestedMinor = 0,
@@ -382,6 +386,7 @@ class FundHolding {
       sip: FundSip.maybe(json['sip']),
       opening: FundOpening.maybe(json['opening']),
       commitmentId: _str(json['commitmentId']),
+      purchaseCharge: FundCharge.maybe(json['purchaseCharge']),
       units: _num(json['units']),
       investedMinor: _int(json['investedMinor']),
       totalInvestedMinor: _int(json['totalInvestedMinor'], _int(json['investedMinor'])),
@@ -460,6 +465,12 @@ class FundLedgerEntry {
   /// A debit paid in a month marked skipped or paused, counted anyway.
   final bool inSkippedMonth;
 
+  /// The fund's purchase charge that came off it before it bought units;
+  /// [amountMinor] is what was left. What was paid is the two together.
+  final int chargeMinor;
+
+  int get paidMinor => amountMinor + chargeMinor;
+
   const FundLedgerEntry({
     required this.kind,
     required this.on,
@@ -476,6 +487,7 @@ class FundLedgerEntry {
     this.month,
     this.plannedMinor,
     this.inSkippedMonth = false,
+    this.chargeMinor = 0,
   });
 
   factory FundLedgerEntry.fromJson(Map<String, dynamic> json) => FundLedgerEntry(
@@ -495,12 +507,14 @@ class FundLedgerEntry {
         month: _str(json['month']),
         plannedMinor: _intOrNull(json['plannedMinor']),
         inSkippedMonth: _bool(json['inSkippedMonth']),
+        chargeMinor: _int(json['chargeMinor']),
       );
 
   bool get isManual => kind == FundTxnKind.manualBuy || kind == FundTxnKind.redeem;
 
   /// Paid something other than the SIP said: the server's note says what.
-  bool get differsFromPlan => plannedMinor != null && (plannedMinor! - amountMinor).abs() >= 100;
+  /// What was paid against the plan - the charge is not a shortfall.
+  bool get differsFromPlan => plannedMinor != null && (plannedMinor! - paidMinor).abs() >= 100;
 }
 
 /// What became of a SIP month.
@@ -1250,4 +1264,29 @@ class GoalsResponse {
         ],
         peersAvailable: _bool(json['peersAvailable']),
       );
+}
+
+/// What a fund's every purchase loses before it buys units - stamp duty,
+/// a platform's fee: so much a purchase, or a percentage of it.
+class FundCharge {
+  final int? fixedMinor;
+  final double? percent;
+
+  const FundCharge({this.fixedMinor, this.percent});
+
+  static FundCharge? maybe(Object? value) {
+    if (value is! Map<String, dynamic>) return null;
+    final fixed = _intOrNull(value['fixedMinor']);
+    final percent = _numOrNull(value['percent']);
+    if ((fixed ?? 0) <= 0 && (percent ?? 0) <= 0) return null;
+    return FundCharge(fixedMinor: fixed, percent: percent);
+  }
+
+  /// "₹0.50 a purchase", or "0.005% a purchase".
+  String get label {
+    final fixed = fixedMinor;
+    if (fixed != null && fixed > 0) return '₹${(fixed / 100).toStringAsFixed(2)} a purchase';
+    final text = percent!.toString().replaceFirst(RegExp(r'\.?0+$'), '');
+    return '$text% a purchase';
+  }
 }

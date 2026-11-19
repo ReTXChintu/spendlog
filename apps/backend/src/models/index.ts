@@ -2881,9 +2881,28 @@ export interface FundHoldingDoc {
   /// A fixed commitment of kind SIP whose matched debits count as this
   /// holding's instalments - connected by the user, never guessed.
   commitmentId?: Types.ObjectId | null;
+  /// What each purchase loses before it buys units - stamp duty, a
+  /// platform's fee - as the user sets it: so much a purchase, or a
+  /// percentage of it. Null is nothing.
+  purchaseCharge?: FundCharge | null;
   createdAt: Date;
   updatedAt: Date;
 }
+
+export interface FundCharge {
+  /// So much off every purchase, in paise.
+  fixedMinor?: number | null;
+  /// Or this percentage of it.
+  percent?: number | null;
+}
+
+const fundChargeSchema = new Schema<FundCharge>(
+  {
+    fixedMinor: { type: Number, default: null, min: 1 },
+    percent: { type: Number, default: null, min: 0 },
+  },
+  { _id: false }
+);
 
 const fundSipStepSchema = new Schema<FundSipStep>(
   {
@@ -2941,6 +2960,7 @@ const fundHoldingSchema = new Schema<FundHoldingDoc>(
     sip: { type: fundSipSchema, default: null },
     opening: { type: fundOpeningSchema, default: null },
     commitmentId: { type: Schema.Types.ObjectId, ref: "FixedCommitment", default: null },
+    purchaseCharge: { type: fundChargeSchema, default: null },
   },
   { timestamps: true, ...serialization }
 );

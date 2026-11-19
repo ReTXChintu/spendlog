@@ -152,7 +152,15 @@ export function viewHolding(
   today: string
 ): HoldingView {
   const series: NavSeries = { days: history?.days ?? [], navs: history?.navs ?? [] };
-  const ledger = buildLedger({ sip: holding.sip, opening: holding.opening, linked, manual, series, today });
+  const ledger = buildLedger({
+    sip: holding.sip,
+    opening: holding.opening,
+    linked,
+    manual,
+    series,
+    today,
+    charge: holding.purchaseCharge,
+  });
   const summary = summariseHolding(ledger, series, holding.opening);
 
   // The peer table's category for this scheme when it has one, so the
@@ -275,6 +283,9 @@ export function holdingJson(view: HoldingView, now: Date) {
     folio: holding.folio ?? null,
     sip: holding.sip ? sipJson(holding.sip, istDayKey(now)) : null,
     opening: holding.opening ?? null,
+    purchaseCharge: holding.purchaseCharge?.fixedMinor || holding.purchaseCharge?.percent
+      ? { fixedMinor: holding.purchaseCharge.fixedMinor ?? null, percent: holding.purchaseCharge.percent ?? null }
+      : null,
     commitmentId: holding.commitmentId?.toString() ?? null,
     units: Math.round(summary.units * 1000) / 1000,
     investedMinor: summary.investedMinor,
@@ -364,6 +375,7 @@ export function ledgerJson(entry: LedgerEntry) {
     navDay: entry.navDay,
     nav: entry.nav,
     amountMinor: entry.amountMinor,
+    chargeMinor: entry.chargeMinor,
     units: Math.round(entry.units * 1000) / 1000,
     counted: entry.counted,
     pending: entry.pending,

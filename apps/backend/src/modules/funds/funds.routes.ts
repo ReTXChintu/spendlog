@@ -103,8 +103,20 @@ const createSchema = z.object({
   opening: openingSchema.nullable().optional(),
 });
 
+// What each purchase loses before it buys units: so much a purchase, or a
+// percentage of it - one or the other. null clears it.
+const chargeSchema = z
+  .object({
+    fixedMinor: z.number().int().positive().max(100_000).nullable().optional(),
+    percent: z.number().positive().max(5).nullable().optional(),
+  })
+  .refine((charge) => !!charge.fixedMinor !== !!charge.percent, {
+    message: "Give the charge as an amount or a percentage, not both.",
+  });
+
 const updateSchema = z.object({
   folio: z.string().trim().max(40).nullable().optional(),
+  purchaseCharge: chargeSchema.nullable().optional(),
   sip: sipSchema.nullable().optional(),
   opening: openingSchema.nullable().optional(),
   /// A fixed commitment of kind SIP whose debits count as this holding's instalments.
@@ -304,6 +316,11 @@ fundsRouter.patch("/holdings/:id", validObjectIdParam("id"), async (req, res) =>
   }
   if (parsed.data.opening !== undefined) update.opening = parsed.data.opening;
   if (parsed.data.commitmentId !== undefined) update.commitmentId = parsed.data.commitmentId;
+  if (parsed.data.purchaseCharge !== undefined) {
+    update.purchaseCharge = parsed.data.purchaseCharge
+      ? { fixedMinor: parsed.data.purchaseCharge.fixedMinor ?? null, percent: parsed.data.purchaseCharge.percent ?? null }
+      : null;
+  }
   holding.set(update);
 
   try {

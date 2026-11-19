@@ -1255,6 +1255,47 @@ void main() {
       expect(log.where((request) => request.method != 'GET'), isEmpty);
     });
 
+    testWidgets('a fund with purchase charges says so, on the fund and on each purchase', (tester) async {
+      final detail = historyDetail();
+      detail['purchaseCharge'] = {'fixedMinor': 50, 'percent': null};
+      detail['txns'] = [
+        {
+          'kind': 'SIP_SCHEDULED', 'on': '2026-06-05', 'navDay': '2026-06-05', 'nav': 93.0, 'amountMinor': 199950,
+          'chargeMinor': 50, 'units': 21.5, 'counted': true, 'pending': false, 'month': '2026-06', 'plannedMinor': 200000,
+        },
+      ];
+      await http.runWithClient(() => open(tester), () => _server(routes(detail)));
+
+      expect(find.text('Charges ₹0.50 a purchase'), findsOneWidget);
+      expect(find.textContaining('₹2,000.00 less ₹0.50 charges'), findsOneWidget);
+      // The charge is not a shortfall against the plan.
+      expect(find.textContaining('planned ₹2,000'), findsNothing);
+    });
+
+    testWidgets('sets the charge from the SIP editor, as an amount or a percentage', (tester) async {
+      final log = <http.Request>[];
+      Future<Map<String, dynamic>> saveWith(WidgetTester tester, String typed, {bool percent = false}) async {
+        await tester.ensureVisible(find.text('Edit').first);
+        await tester.tap(find.text('Edit').first);
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.byKey(const ValueKey('purchase-charge')));
+        await tester.enterText(find.byKey(const ValueKey('purchase-charge')), typed);
+        if (percent) await tester.tap(find.byKey(const ValueKey('charge-percent')));
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('Save'));
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+        return jsonDecode(log.where((request) => request.method == 'PATCH').last.body) as Map<String, dynamic>;
+      }
+
+      await http.runWithClient(() async {
+        await open(tester);
+        expect((await saveWith(tester, '0.50'))['purchaseCharge'], {'fixedMinor': 50});
+        expect((await saveWith(tester, '0.005', percent: true))['purchaseCharge'], {'percent': 0.005});
+        expect((await saveWith(tester, ''))['purchaseCharge'], isNull);
+      }, () => _server(routes(historyDetail()), log: log));
+    });
+
     testWidgets('changing the amount, skipping a month and taking a skip back call the right endpoints', (tester) async {
       final log = <http.Request>[];
       final thisMonth = istToday().substring(0, 7);
