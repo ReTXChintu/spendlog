@@ -71,7 +71,17 @@ Transaction _payment({int amountMinor = 100000, Map<String, dynamic> extra = con
       ...extra,
     });
 
-Future<void> _open(WidgetTester tester, Transaction transaction) async {
+/// The user's own categories, as the sheet gets them.
+final _categories = [
+  for (final (id, name, kind) in const [
+    ('inv', 'Investments', 'DEBIT'),
+    ('transfers', 'Transfers', 'BOTH'),
+    ('food', 'Food & Dining', 'DEBIT'),
+  ])
+    Category.fromJson({'id': id, 'name': name, 'color': '#112233', 'kind': kind}),
+];
+
+Future<void> _open(WidgetTester tester, Transaction transaction, {List<Category> categories = const []}) async {
   tester.view.physicalSize = const Size(1440, 3600);
   tester.view.devicePixelRatio = 3;
   addTearDown(tester.view.reset);
@@ -80,7 +90,7 @@ Future<void> _open(WidgetTester tester, Transaction transaction) async {
     home: Scaffold(
       body: Builder(
         builder: (context) => TextButton(
-          onPressed: () => showEditTransactionSheet(context, transaction: transaction, categories: const [], accounts: const []),
+          onPressed: () => showEditTransactionSheet(context, transaction: transaction, categories: categories, accounts: const []),
           child: const Text('Open'),
         ),
       ),
@@ -295,5 +305,58 @@ void main() {
     for (final key in ['investmentTags', 'depositParts', 'metalBuys', 'fundParts', 'goalParts']) {
       expect(patch[key], isEmpty, reason: key);
     }
+  });
+
+  group('an investment names itself', () {
+    String merchant(WidgetTester tester) =>
+        tester.widget<TextField>(find.byKey(const ValueKey('merchant-field'))).controller?.text ?? '';
+
+    testWidgets('by kind, then by the one it went into - over a name typed before', (tester) async {
+      final patches = <Map<String, dynamic>>[];
+      await http.runWithClient(() async {
+        await _open(tester, _payment(), categories: _categories);
+        await tester.enterText(find.byKey(const ValueKey('merchant-field')), 'Something I typed');
+        await tester.pumpAndSettle();
+        await _investIn(tester, 'fund');
+        expect(merchant(tester), 'Mutual funds');
+        await _type(tester, 'fund-part-f1', '1000');
+        expect(merchant(tester), 'Parag Parikh Flexi Cap');
+        await _save(tester);
+      }, () => _server(patches));
+
+      expect(patches.single['merchant'], 'Parag Parikh Flexi Cap');
+      expect(patches.single['categoryId'], 'inv');
+    });
+
+    testWidgets('an IPO picked from the calendar is the name', (tester) async {
+      await http.runWithClient(() async {
+        await _open(tester, _payment(), categories: _categories);
+        await _investIn(tester, 'ipo');
+        await _tap(tester, find.byKey(const ValueKey('ipo-name-Acme')));
+        expect(merchant(tester), 'Acme IPO');
+      }, () => _server([]));
+    });
+
+    testWidgets('goals read as savings, filed under Transfers', (tester) async {
+      final patches = <Map<String, dynamic>>[];
+      await http.runWithClient(() async {
+        await _open(tester, _payment(), categories: _categories);
+        await _investIn(tester, 'goal');
+        expect(merchant(tester), 'Savings for Goa trip');
+        await _save(tester);
+      }, () => _server(patches));
+      expect(patches.single['categoryId'], 'transfers');
+    });
+
+    testWidgets('a name typed after picking the kind stays through the amounts', (tester) async {
+      await http.runWithClient(() async {
+        await _open(tester, _payment(), categories: _categories);
+        await _investIn(tester, 'fund');
+        await tester.enterText(find.byKey(const ValueKey('merchant-field')), 'November SIP');
+        await tester.pumpAndSettle();
+        await _type(tester, 'fund-part-f1', '1000');
+        expect(merchant(tester), 'November SIP');
+      }, () => _server([]));
+    });
   });
 }

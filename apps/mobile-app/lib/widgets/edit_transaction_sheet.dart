@@ -261,6 +261,10 @@ class _EditSheetState extends State<_EditSheet> {
   /// automatic fill (transfer, person) may replace it.
   bool _merchantTyped = false;
 
+  /// The same for a category chosen in this sheet since the last pick, so
+  /// typing an amount doesn't take it back.
+  bool _categoryChosen = false;
+
   /// Whether the user has chosen an account in this sheet. On a row whose
   /// message named no account, only an actual choice - an account, or
   /// "It was cash" - may say the account is now known; saving an edit to
@@ -766,6 +770,7 @@ class _EditSheetState extends State<_EditSheet> {
         _investing = !_investing;
         _investTouched = true;
         _error = null;
+        _autoFillTransfer(picked: true);
       });
 
   /// Picks the kind. Goals are money moved into savings rather than spent,
@@ -793,6 +798,7 @@ class _EditSheetState extends State<_EditSheet> {
         default:
           break;
       }
+      _autoFillTransfer(picked: true);
     });
     if (kind == _Invest.ipo) _loadIpoNames();
   }
@@ -1170,7 +1176,7 @@ class _EditSheetState extends State<_EditSheet> {
         } else {
           _transferAccountId = id;
         }
-        _autoFillTransfer();
+        _autoFillTransfer(picked: _kind == _Kind.transfer);
       });
 
   void _setTo(String? id) => setState(() {
@@ -1179,7 +1185,7 @@ class _EditSheetState extends State<_EditSheet> {
         } else {
           _accountId = id;
         }
-        _autoFillTransfer();
+        _autoFillTransfer(picked: _kind == _Kind.transfer);
       });
 
   /// A transfer is always "Transfers", and a bank's "UPI/9876@ybl" says
@@ -1192,6 +1198,8 @@ class _EditSheetState extends State<_EditSheet> {
   /// Plain spending and a split bill name nothing - the shop is already
   /// the right answer there, and the category is a real choice.
   ({String? merchant, String? category}) _kindNames() {
+    final invested = _investNames();
+    if (invested != null) return invested;
     switch (_kind) {
       case _Kind.transfer:
         final other = _transferAccountId == null ? null : _accountName(_transferAccountId);
@@ -1227,14 +1235,72 @@ class _EditSheetState extends State<_EditSheet> {
     }
   }
 
-  /// Writes those names in. A name the user typed is never touched; one
-  /// that came from a bank message is, which is the point - "NEFT/MB/..."
-  /// is nobody's idea of a card bill.
-  void _autoFillTransfer() {
+  /// What an investment names itself: the one holding it went into, or the
+  /// kind when it went into several - or none is picked yet. Filed under
+  /// Investments; goals are money moved into savings, so Transfers.
+  ({String? merchant, String? category})? _investNames() {
+    final kind = _invest;
+    if (!_investAllowed || !_investing || kind == null) return null;
+    String one(List<String> names, String several) => names.length == 1 ? names.single : several;
+    switch (kind) {
+      case _Invest.fund:
+        final ids = _fundParts.keys.toSet();
+        return (
+          merchant: one([for (final f in _funds) if (ids.contains(f.id)) f.schemeName], 'Mutual funds'),
+          category: 'Investments',
+        );
+      case _Invest.gold:
+        final ids = _metalParts.keys.toSet();
+        return (
+          merchant: one([for (final h in _metalHoldings) if (ids.contains(h.id)) h.name], 'Gold'),
+          category: 'Investments',
+        );
+      case _Invest.deposit:
+        final ids = _depositParts.keys.toSet();
+        return (
+          merchant: one([for (final d in _deposits) if (ids.contains(d.id)) d.name], 'RD/FD'),
+          category: 'Investments',
+        );
+      case _Invest.goal:
+        final ids = _goalParts.keys.toSet();
+        final names = [for (final g in _goals) if (ids.contains(g.id)) g.name];
+        return (
+          merchant: names.length == 1 ? 'Savings for ${names.single}' : 'Savings for goals',
+          category: 'Transfers',
+        );
+      case _Invest.ipo:
+        final names = [
+          for (final row in _tagRows)
+            if (row.name.text.trim().isNotEmpty) row.name.text.trim(),
+        ];
+        final single = names.length == 1
+            ? (names.single.toLowerCase().endsWith('ipo') ? names.single : '${names.single} IPO')
+            : null;
+        return (merchant: single ?? (names.isEmpty ? 'IPO' : 'IPOs'), category: 'Investments');
+      case _Invest.other:
+        final names = [
+          for (final row in _tagRows)
+            if (row.name.text.trim().isNotEmpty) row.name.text.trim(),
+        ];
+        return (merchant: names.isEmpty ? null : names.join(' + '), category: 'Investments');
+    }
+  }
+
+  /// Writes those names in. A pick in this sheet - a kind, a card, a loan,
+  /// an account, an investment - always writes them, over a name or a
+  /// category typed before it: picking is saying what it was. Anything
+  /// else that calls this (an amount typed, a suggestion arriving) keeps
+  /// what was typed or chosen since the last pick. A name from a bank
+  /// message is never kept - "NEFT/MB/..." is nobody's idea of a card bill.
+  void _autoFillTransfer({bool picked = false}) {
+    if (picked) {
+      _merchantTyped = false;
+      _categoryChosen = false;
+    }
     final names = _kindNames();
 
     final category = names.category;
-    if (category != null) {
+    if (category != null && !_categoryChosen) {
       // A category id (a refund's, from the purchase it came back for) or
       // the name of one of the user's own.
       // Either the name of one of the user's categories, or an id - a
@@ -1251,6 +1317,10 @@ class _EditSheetState extends State<_EditSheet> {
     if (merchant == null || _merchantTyped || _merchant.text.trim() == merchant) return;
     _merchant.text = merchant;
   }
+
+  /// An amount or a name typed in the investment panel: the name follows
+  /// what it went into, unless one was typed since the last pick.
+  void _investChanged() => setState(_autoFillTransfer);
 
   /// The card this is going on, when 70% or more of its credit limit is
   /// already used.
@@ -1276,6 +1346,10 @@ class _EditSheetState extends State<_EditSheet> {
     setState(() {
       _error = null;
       _kind = kind;
+      // A pick renames, over anything typed before it - the people kinds
+      // in _fillFromPerson as much as the rest.
+      _merchantTyped = false;
+      _categoryChosen = false;
       // A transfer, a card bill or a settling-up renews no subscription -
       // and the server refuses that pairing, so it goes here.
       if (kind == _Kind.transfer || kind == _Kind.cardBill || kind == _Kind.settlement) _clearSubscription();
@@ -1288,7 +1362,7 @@ class _EditSheetState extends State<_EditSheet> {
       if (kind == _Kind.split) _includeMe = includeMe;
       if (kind == _Kind.settlement && _autoSettle) _resplitSettlement();
       if (_isLend || kind == _Kind.settlement) _fillFromPerson();
-      _autoFillTransfer();
+      _autoFillTransfer(picked: true);
     });
     if (kind == _Kind.loan) _loadLoanSuggestion();
     if (kind == _Kind.refund) _loadRefundSource();
@@ -1546,8 +1620,11 @@ class _EditSheetState extends State<_EditSheet> {
   /// Filing something plain under Lent & borrowed means it was lent or
   /// paid back - the server will save it so - so the kind follows the
   /// category. Called inside setState.
+  /// A category chosen by hand, or with a shortcut. Kept until the next
+  /// pick, over what an investment's amounts would file it under.
   void _setCategory(String? id) {
     _categoryId = id;
+    _categoryChosen = true;
     if (id != null && id == _lentCategoryId && _kind == _Kind.normal) {
       _becomePersonKind(_contactNamed(_merchant.text));
     }
@@ -3006,7 +3083,7 @@ class _EditSheetState extends State<_EditSheet> {
             ],
             onChanged: (value) => setState(() {
               _cardPaymentFor = value;
-              _autoFillTransfer();
+              _autoFillTransfer(picked: true);
             }),
           ),
         ),
@@ -3085,7 +3162,7 @@ class _EditSheetState extends State<_EditSheet> {
             onChanged: (value) => setState(() {
               _error = null;
               part.picked = value ?? false;
-              _autoFillTransfer();
+              _autoFillTransfer(picked: true);
             }),
           ),
           const SizedBox(width: 4),
@@ -3273,7 +3350,7 @@ class _EditSheetState extends State<_EditSheet> {
               key: ValueKey('fund-part-${fund.id}'),
               child: _AmountBox(
                 controller: _fundBoxes.putIfAbsent(fund.id, TextEditingController.new),
-                onChanged: () => setState(() {}),
+                onChanged: _investChanged,
               ),
             ),
           ),
@@ -3307,7 +3384,7 @@ class _EditSheetState extends State<_EditSheet> {
               key: ValueKey('metal-part-${holding.id}'),
               child: _AmountBox(
                 controller: _metalBoxes.putIfAbsent(holding.id, TextEditingController.new),
-                onChanged: () => setState(() {}),
+                onChanged: _investChanged,
               ),
             ),
             // Grams only once some of it went in.
@@ -3391,7 +3468,7 @@ class _EditSheetState extends State<_EditSheet> {
                       controller: _tagRows[i].name,
                       textCapitalization: TextCapitalization.words,
                       decoration: _inputDecoration(context, hint: ipo ? 'IPO name' : 'PPF, stocks, NPS...'),
-                      onChanged: (_) => setState(() {}),
+                      onChanged: (_) => _investChanged(),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -3399,7 +3476,7 @@ class _EditSheetState extends State<_EditSheet> {
                     width: 112,
                     child: KeyedSubtree(
                       key: ValueKey('tag-amount-$i'),
-                      child: _AmountBox(controller: _tagRows[i].amount, onChanged: () => setState(() {})),
+                      child: _AmountBox(controller: _tagRows[i].amount, onChanged: _investChanged),
                     ),
                   ),
                   IconButton(
@@ -3438,6 +3515,7 @@ class _EditSheetState extends State<_EditSheet> {
         } else {
           _tagRows.add(_TagRow(name: name));
         }
+        _autoFillTransfer(picked: true);
       });
 
   void _removeTagRow(_TagRow row) {
@@ -3484,7 +3562,7 @@ class _EditSheetState extends State<_EditSheet> {
                   width: 132,
                   child: KeyedSubtree(
                     key: ValueKey('goal-part-${goal.id}'),
-                    child: _AmountBox(controller: _goalBoxes[goal.id]!, onChanged: () => setState(() {})),
+                    child: _AmountBox(controller: _goalBoxes[goal.id]!, onChanged: _investChanged),
                   ),
                 ),
               ],
@@ -3549,7 +3627,7 @@ class _EditSheetState extends State<_EditSheet> {
                   width: 132,
                   child: KeyedSubtree(
                     key: ValueKey('deposit-part-${deposit.id}'),
-                    child: _AmountBox(controller: _depositBoxes[deposit.id]!, onChanged: () => setState(() {})),
+                    child: _AmountBox(controller: _depositBoxes[deposit.id]!, onChanged: _investChanged),
                   ),
                 ),
               ],

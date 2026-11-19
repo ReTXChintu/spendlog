@@ -177,16 +177,27 @@ void main() {
       }, () => _server([]));
     });
 
-    testWidgets('a name the user typed is left alone', (tester) async {
+    testWidgets('a pick renames, even over a name typed before it', (tester) async {
       await http.runWithClient(() async {
         await _open(tester, _row());
         await tester.enterText(find.byKey(const ValueKey('merchant-field')), 'My own words');
         await tester.pumpAndSettle();
         await _pickKind(tester, 'Loan repayment');
 
-        expect(_merchant(tester), 'My own words');
-        // The category is settled anyway - that is not a name.
+        expect(_merchant(tester), 'Car loan EMI');
         expect(_category(tester), 'EMI & Loans');
+      }, () => _server([]));
+    });
+
+    testWidgets('a name typed after the pick is kept', (tester) async {
+      await http.runWithClient(() async {
+        await _open(tester, _row());
+        await _pickKind(tester, 'Loan repayment');
+        await tester.enterText(find.byKey(const ValueKey('merchant-field')), 'Car EMI, October');
+        await tester.pumpAndSettle();
+        // Ticking the loan again is another pick, so that one renames; this
+        // checks the typed name survived everything short of a pick.
+        expect(_merchant(tester), 'Car EMI, October');
       }, () => _server([]));
     });
 
